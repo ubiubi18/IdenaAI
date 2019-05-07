@@ -9,11 +9,9 @@ import FlipThumbnails from './shared/components/flip-thumbnails'
 import {fetchFlip} from '../../shared/services/api'
 import {fromHexString} from '../../shared/utils/string'
 import Flex from '../../shared/components/flex'
-import {
-  fetchFlipHashes,
-  submitShortAnswers,
-} from './shared/api/__mocks__/validation-api'
+import {fetchFlipHashes, submitShortAnswers} from './shared/api/validation-api'
 import {answered, types as answerTypes} from './shared/utils/answers'
+import {useInterval} from './shared/utils/useInterval'
 
 export default function() {
   const [flips, setFlips] = useState([])
@@ -66,7 +64,11 @@ export default function() {
     let ignore = false
 
     async function fetchData() {
-      const flipHashesResult = await fetchFlipHashes()
+      const flipHashesResult = await fetchFlipHashes('short')
+      if (!flipHashesResult || !flipHashesResult.length) {
+        return
+      }
+
       const mappedFlipHashes = flipHashesResult.map(({hash}) => hash)
 
       const flipsResult = await Promise.all(mappedFlipHashes.map(fetchFlip))
@@ -94,6 +96,34 @@ export default function() {
       ignore = true
     }
   }, [])
+
+  // useInterval(() => {
+  //   async function fetchData() {
+  //     const flipHashesResult = await fetchFlipHashes()
+  //     if (!flipHashesResult || !flipHashesResult.length) {
+  //       return
+  //     }
+
+  //     const mappedFlipHashes = flipHashesResult.map(({hash}) => hash)
+
+  //     const flipsResult = await Promise.all(mappedFlipHashes.map(fetchFlip))
+  //     const flipHexes = flipsResult
+  //       .filter(({result}) => result && result.hex)
+  //       .map(({result}) => result.hex.substr(2))
+
+  //     const decodedFlipHexes = flipHexes.map(hex => decode(fromHexString(hex)))
+  //     const decodedFlips = decodedFlipHexes.map(f => f[0])
+  //     const decodedOrders = decodedFlipHexes.map(f =>
+  //       f[1].map(x => x.map(xx => xx[0] || 0))
+  //     )
+
+  //     setFlips(decodedFlips)
+  //     setFlipHashes(mappedFlipHashes)
+  //     setOrders(decodedOrders)
+  //   }
+
+  //   fetchData()
+  // }, 10000)
 
   return (
     <Layout>
