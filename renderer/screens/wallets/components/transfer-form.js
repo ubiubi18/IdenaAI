@@ -101,8 +101,6 @@ function TransferForm({onSuccess, onFail}) {
                 })
                 setSubmitting(false)
 
-                alert(result)
-
                 if (error) {
                   addError({
                     title: 'Error while sending transaction',
