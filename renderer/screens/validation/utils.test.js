@@ -377,7 +377,7 @@ describe('validation ceremony timing helpers', () => {
     ).toBe((120 - SHORT_SESSION_AUTO_SUBMIT_BUFFER_SECONDS - 45) * 1000)
   })
 
-  it('caps auto-report delay against the remaining long-session window', () => {
+  it('forces immediate auto-report when the remaining window is inside the review buffer', () => {
     expect(
       getValidationAutoReportDelayMs({
         validationStart,
@@ -386,7 +386,7 @@ describe('validation ceremony timing helpers', () => {
         requestedDelayMinutes: 10,
         now: validationStart + (120 + 300 - 40) * 1000,
       })
-    ).toBe(5 * 1000)
+    ).toBe(0)
   })
 
   it('forces immediate auto-report when the remaining window is exhausted', () => {
@@ -1011,6 +1011,105 @@ describe('scoped validation state persistence', () => {
     expect(Array.from(restoredState?.context?.reports || [])).toEqual([
       '0xflip',
     ])
+  })
+
+  it('resumes a restored long-session fetch from hashes when ready flips lost blob images', () => {
+    const scope = buildValidationStateScope({
+      epoch: 0,
+      address: '0xabc',
+      nodeScope: 'external:http://127.0.0.1:22301',
+      validationStart: Date.UTC(2026, 3, 21, 6, 35, 22),
+    })
+
+    validationSessionStoreState = {
+      validationStateMeta: scope,
+      validationStateSnapshot: {
+        value: {
+          longSession: {
+            fetch: {
+              flips: 'fetchFlips',
+              keywords: 'done',
+            },
+            solve: {
+              nav: {
+                firstFlip: 'fetching',
+              },
+              answer: 'flips',
+            },
+          },
+        },
+        context: {
+          epoch: 0,
+          longFlips: [
+            {
+              hash: '0xlong',
+              ready: true,
+              fetched: false,
+              decoded: false,
+              words: [{id: 1, name: 'test'}],
+            },
+          ],
+          reports: [],
+        },
+        done: false,
+      },
+    }
+
+    const restoredState = loadValidationState(scope)
+
+    expect(restoredState?.matches('longSession.fetch.flips.fetchHashes')).toBe(
+      true
+    )
+    expect(restoredState?.matches('longSession.fetch.keywords.done')).toBe(true)
+    expect(restoredState?.matches('longSession.solve.nav.firstFlip.idle')).toBe(
+      true
+    )
+  })
+
+  it('resumes a restored short-session fetch when ready flips lost blob images before submission', () => {
+    const scope = buildValidationStateScope({
+      epoch: 0,
+      address: '0xabc',
+      nodeScope: 'external:http://127.0.0.1:22301',
+      validationStart: Date.UTC(2026, 3, 21, 6, 35, 22),
+    })
+
+    validationSessionStoreState = {
+      validationStateMeta: scope,
+      validationStateSnapshot: {
+        value: {
+          shortSession: {
+            fetch: 'done',
+            solve: {
+              nav: 'firstFlip',
+              answer: 'normal',
+            },
+          },
+        },
+        context: {
+          epoch: 0,
+          shortFlips: [
+            {
+              hash: '0xshort',
+              ready: true,
+              fetched: false,
+              decoded: false,
+            },
+          ],
+          reports: [],
+        },
+        done: false,
+      },
+    }
+
+    const restoredState = loadValidationState(scope)
+
+    expect(
+      restoredState?.matches('shortSession.fetch.polling.fetchHashes.fetching')
+    ).toBe(true)
+    expect(
+      restoredState?.matches('shortSession.fetch.polling.fetchFlips.fetching')
+    ).toBe(true)
   })
 
   it('drops a stale validation snapshot when a different node/session scope is active', () => {

@@ -27,7 +27,7 @@ const LOCAL_AI_STRICT_PROFILE_OVERRIDES = {
 }
 const LONG_SESSION_STRICT_PROFILE_OVERRIDES = {
   deadlineMs: 90 * 1000,
-  requestTimeoutMs: 15 * 1000,
+  requestTimeoutMs: 180 * 1000,
   interFlipDelayMs: 300,
   flipVisionMode: 'frames_two_pass',
 }
@@ -49,6 +49,12 @@ const SHORT_SESSION_OPENAI_FAST_MODELS = [
 ]
 const SHORT_SESSION_OPENAI_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_MAX_PARALLEL_CONCURRENCY = 6
+const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 90 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
+const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
+const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
+const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
+const LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS = 5 * 1000
 const RETRY_BACKOFF_BASE_MS = 700
 const EXPECTED_PASS_RUNTIME_MS = {
   default: 4500,
@@ -89,6 +95,20 @@ function normalizeVisionMode(value, fallback = 'composite') {
     return mode
   }
   return fallback
+}
+
+function resolveSessionProfileInput(aiSolver = {}, sessionType = 'short') {
+  if (sessionType !== 'short') {
+    return aiSolver
+  }
+
+  return {
+    ...aiSolver,
+    flipVisionMode: normalizeVisionMode(
+      aiSolver.shortSessionFlipVisionMode,
+      DEFAULT_PROFILE.flipVisionMode
+    ),
+  }
 }
 
 function getBaseSolvePassCount({flipVisionMode = 'composite'} = {}) {
@@ -421,6 +441,16 @@ function toAnswerOption(answer) {
   if (value === 'left') return AnswerType.Left
   if (value === 'right') return AnswerType.Right
   return AnswerType.None
+}
+
+function chooseDeterministicRandomAnswer(seed = '') {
+  const value = String(seed || '')
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) % 2147483647
+  }
+
+  return hash % 2 === 0 ? 'left' : 'right'
 }
 
 function normalizeTokenUsage(usage = {}) {
@@ -849,6 +879,126 @@ function getSolveConcurrency({
   )
 }
 
+function shouldUseLongSessionOpenAiStaggeredSolving({
+  sessionType = 'long',
+  provider = 'openai',
+} = {}) {
+  return (
+    sessionType === 'long' &&
+    String(provider || '')
+      .trim()
+      .toLowerCase() === 'openai'
+  )
+}
+
+function getLongSessionOpenAiStaggerIntervalMs(aiSolver = {}) {
+  return Math.max(
+    0,
+    toNumberOrFallback(
+      aiSolver.longSessionOpenAiStaggerIntervalMs,
+      LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS
+    )
+  )
+}
+
+function getLongSessionOpenAiStaggerMaxInFlight(aiSolver = {}) {
+  return Math.min(
+    6,
+    Math.max(
+      1,
+      toNumberOrFallback(
+        aiSolver.longSessionOpenAiStaggerMaxInFlight,
+        LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT
+      )
+    )
+  )
+}
+
+function applyShortSessionOpenAiParallelTimeout(
+  profile,
+  {
+    sessionType = 'short',
+    provider = 'openai',
+    aiSolver = {},
+    flipCount = 0,
+  } = {}
+) {
+  const normalizedProvider = String(provider || '')
+    .trim()
+    .toLowerCase()
+
+  if (sessionType !== 'short' || normalizedProvider !== 'openai') {
+    return profile
+  }
+
+  const normalizedFlipCount = Math.max(0, toNumberOrFallback(flipCount, 0))
+  const solveConcurrency = getSolveConcurrency({
+    sessionType,
+    provider: normalizedProvider,
+    aiSolver,
+  })
+
+  if (normalizedFlipCount < 2 || solveConcurrency < normalizedFlipCount) {
+    return profile
+  }
+
+  const requestTimeoutMs = Math.max(
+    toNumberOrFallback(
+      profile.requestTimeoutMs,
+      DEFAULT_PROFILE.requestTimeoutMs
+    ),
+    SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
+  )
+
+  return {
+    ...profile,
+    requestTimeoutMs,
+    deadlineMs: Math.max(
+      toNumberOrFallback(profile.deadlineMs, DEFAULT_PROFILE.deadlineMs),
+      requestTimeoutMs + SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS
+    ),
+  }
+}
+
+function applyLongSessionOpenAiStaggeredTimeout(
+  profile,
+  {sessionType = 'long', provider = 'openai', aiSolver = {}, flipCount = 0} = {}
+) {
+  if (
+    !shouldUseLongSessionOpenAiStaggeredSolving({
+      sessionType,
+      provider,
+    })
+  ) {
+    return profile
+  }
+
+  const normalizedFlipCount = Math.max(1, toNumberOrFallback(flipCount, 1))
+  const staggerIntervalMs = getLongSessionOpenAiStaggerIntervalMs(aiSolver)
+  const requestTimeoutMs = Math.max(
+    toNumberOrFallback(
+      profile.requestTimeoutMs,
+      DEFAULT_PROFILE.requestTimeoutMs
+    ),
+    LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS
+  )
+  const staggeredDeadlineMs =
+    IMAGE_PREP_BASE_MS +
+    normalizedFlipCount * FRAME_REVIEW_PREP_MIN_MS +
+    Math.max(0, normalizedFlipCount - 1) * staggerIntervalMs +
+    requestTimeoutMs +
+    LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS
+
+  return {
+    ...profile,
+    requestTimeoutMs,
+    deadlineMs: Math.max(
+      toNumberOrFallback(profile.deadlineMs, DEFAULT_PROFILE.deadlineMs),
+      staggeredDeadlineMs
+    ),
+  }
+}
+
 function ensureRuntimeRemaining(deadlineAt, minimumMs = 0) {
   if (!Number.isFinite(deadlineAt)) {
     return
@@ -901,11 +1051,12 @@ export function planValidationAiSolve({
   aiSolver = {},
   maxFlips,
 } = {}) {
-  const profile = normalizeProfile(aiSolver)
+  const profile = normalizeProfile(
+    resolveSessionProfileInput(aiSolver, sessionType)
+  )
   const provider = String(aiSolver.provider || 'openai')
     .trim()
     .toLowerCase()
-  const effectiveProfile = buildEffectiveProfile(profile, provider, sessionType)
   const defaultModel = String(aiSolver.model || 'gpt-5.4').trim() || 'gpt-5.4'
   const shortSessionOpenAiFastMode = resolveShortSessionOpenAiFastMode({
     sessionType,
@@ -922,6 +1073,25 @@ export function planValidationAiSolve({
     longFlips,
     maxFlips,
   })
+  const baseEffectiveProfile = buildEffectiveProfile(
+    profile,
+    provider,
+    sessionType
+  )
+  const effectiveProfile = applyLongSessionOpenAiStaggeredTimeout(
+    applyShortSessionOpenAiParallelTimeout(baseEffectiveProfile, {
+      sessionType,
+      provider,
+      aiSolver,
+      flipCount: candidateFlips.length,
+    }),
+    {
+      sessionType,
+      provider,
+      aiSolver,
+      flipCount: candidateFlips.length,
+    }
+  )
 
   return {
     sessionType,
@@ -986,9 +1156,20 @@ export function estimateValidationAiSolveBudget(options = {}) {
     provider,
     aiSolver: options.aiSolver,
   })
+  const usesLongSessionOpenAiStaggeredSolving =
+    shouldUseLongSessionOpenAiStaggeredSolving({
+      sessionType,
+      provider,
+    })
   const solveWaveCount =
-    candidateFlips.length > 0
+    !usesLongSessionOpenAiStaggeredSolving && candidateFlips.length > 0
       ? Math.ceil(candidateFlips.length / solveConcurrency)
+      : 0
+  const staggeredSolveMs =
+    usesLongSessionOpenAiStaggeredSolving && candidateFlips.length > 0
+      ? Math.max(0, candidateFlips.length - 1) *
+          getLongSessionOpenAiStaggerIntervalMs(options.aiSolver) +
+        Math.max(perFlipSolveMs, effectiveProfile.requestTimeoutMs)
       : 0
 
   return {
@@ -1004,6 +1185,7 @@ export function estimateValidationAiSolveBudget(options = {}) {
       IMAGE_PREP_BASE_MS +
       candidateFlips.length * prepPerFlipMs +
       solveWaveCount * perFlipSolveMs +
+      staggeredSolveMs +
       uncertaintyReviewReserveMs +
       retryReserveMs,
   }
@@ -1068,7 +1250,19 @@ export async function solveValidationSessionWithAi({
     provider,
     aiSolver,
   })
+  const useLongSessionOpenAiStaggeredSolving =
+    shouldUseLongSessionOpenAiStaggeredSolving({
+      sessionType,
+      provider,
+    })
+  const longSessionOpenAiStaggerIntervalMs =
+    getLongSessionOpenAiStaggerIntervalMs(aiSolver)
+  const longSessionOpenAiStaggerMaxInFlight =
+    getLongSessionOpenAiStaggerMaxInFlight(aiSolver)
   const pendingPreparedFlips = []
+  const activeStaggeredSolves = []
+  let nextStaggeredSolveTaskId = 0
+  let nextStaggeredSolveLaunchAt = 0
 
   async function emitWaitingDelay(index) {
     const delayMs = Math.max(
@@ -1157,12 +1351,101 @@ export async function solveValidationSessionWithAi({
     }
   }
 
+  function buildPayloadFlipFallback(flip) {
+    return {
+      hash: flip.hash,
+      leftImage: null,
+      rightImage: null,
+      leftFrames: [],
+      rightFrames: [],
+      words: Array.isArray(flip.words) ? flip.words : [],
+      expectedAnswer: flip.expectedAnswer || null,
+      expectedStrength: flip.expectedStrength || null,
+      consensusAnswer: flip.consensusAnswer || null,
+      consensusStrength: flip.consensusStrength || null,
+      consensusVotes: flip.consensusVotes || null,
+      sourceDataset: flip.sourceDataset || null,
+      sourceSplit: flip.sourceSplit || null,
+      sourceStats: flip.sourceStats || null,
+    }
+  }
+
+  function buildForcedRandomSolvedFlip({
+    hash,
+    error,
+    reasoning,
+    forcedDecisionReason = 'session_fallback',
+  }) {
+    const answer = chooseDeterministicRandomAnswer(hash)
+
+    return {
+      hash,
+      answer,
+      confidence: 0,
+      latencyMs: 0,
+      error,
+      reasoning: `${reasoning}; deterministic random fallback ${answer}`,
+      rawAnswerBeforeRemap: 'skip',
+      finalAnswerAfterRemap: answer,
+      sideSwapped: false,
+      tokenUsage: normalizeTokenUsage(),
+      costs: normalizeCostSummary(),
+      uncertaintyRepromptUsed: false,
+      forcedDecision: true,
+      forcedDecisionPolicy: 'random',
+      forcedDecisionReason,
+      ensembleTieBreakApplied: false,
+      ensembleTieBreakCandidates: null,
+      secondPassStrategy: null,
+      frameReasoningUsed: false,
+      firstPass: null,
+    }
+  }
+
+  async function applyForcedRandomFlipDecision({
+    flip,
+    index,
+    error,
+    reasoning,
+    forcedDecisionReason,
+  }) {
+    await applySolvedPayloadFlip({
+      payloadFlip: buildPayloadFlipFallback(flip),
+      index,
+      solved: buildForcedRandomSolvedFlip({
+        hash: flip.hash,
+        error,
+        reasoning,
+        forcedDecisionReason,
+      }),
+    })
+  }
+
   async function solvePreparedPayloadFlip({payloadFlip, index}) {
     const requestTimeoutMs = getClampedRequestTimeoutMs({
       deadlineAt: sessionDeadlineAt,
       guardMs: sessionSolveGuardMs,
       requestTimeoutMs: effectiveProfile.requestTimeoutMs,
     })
+    const remainingSessionMs = getTimeRemainingMs(sessionDeadlineAt)
+    let requestDeadlineMs = effectiveProfile.deadlineMs
+    if (
+      useLongSessionOpenAiStaggeredSolving &&
+      Number.isFinite(remainingSessionMs)
+    ) {
+      requestDeadlineMs = Math.max(
+        1000,
+        Math.min(
+          requestTimeoutMs + LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS,
+          remainingSessionMs
+        )
+      )
+    } else if (Number.isFinite(remainingSessionMs)) {
+      requestDeadlineMs = Math.max(
+        1000,
+        Math.min(effectiveProfile.deadlineMs, remainingSessionMs)
+      )
+    }
 
     if (
       !hasRuntimeRemaining(
@@ -1170,7 +1453,16 @@ export async function solveValidationSessionWithAi({
         sessionSolveGuardMs + MIN_PROVIDER_REQUEST_TIMEOUT_MS
       )
     ) {
-      return null
+      return {
+        payloadFlip,
+        index,
+        solved: buildForcedRandomSolvedFlip({
+          hash: payloadFlip.hash,
+          error: 'deadline_guard',
+          reasoning: 'not enough session time remained for provider request',
+          forcedDecisionReason: 'deadline_guard',
+        }),
+      }
     }
 
     if (onProgress) {
@@ -1196,7 +1488,6 @@ export async function solveValidationSessionWithAi({
       })
     }
 
-    const remainingSessionMs = getTimeRemainingMs(sessionDeadlineAt)
     const batchResult = await bridge.solveFlipBatch({
       provider,
       model,
@@ -1208,18 +1499,13 @@ export async function solveValidationSessionWithAi({
       legacyHeuristicOnly: Boolean(aiSolver.legacyHeuristicOnly),
       consultProviders,
       benchmarkProfile: profile.benchmarkProfile,
-      deadlineMs: Number.isFinite(remainingSessionMs)
-        ? Math.max(
-            1000,
-            Math.min(effectiveProfile.deadlineMs, remainingSessionMs)
-          )
-        : effectiveProfile.deadlineMs,
+      deadlineMs: requestDeadlineMs,
       requestTimeoutMs,
       maxConcurrency: 1,
       maxRetries: effectiveProfile.maxRetries,
       maxOutputTokens: effectiveProfile.maxOutputTokens,
       temperature: effectiveProfile.temperature,
-      forceDecision: effectiveProfile.forceDecision,
+      forceDecision: true,
       uncertaintyRepromptEnabled: effectiveProfile.uncertaintyRepromptEnabled,
       uncertaintyConfidenceThreshold:
         effectiveProfile.uncertaintyConfidenceThreshold,
@@ -1239,17 +1525,27 @@ export async function solveValidationSessionWithAi({
       },
     })
 
-    const solved = (batchResult.results || [])[0] || {
-      hash: payloadFlip.hash,
-      answer: 'skip',
-      confidence: 0,
-      latencyMs: 0,
-      error: 'no_result',
-      reasoning: 'provider returned no result',
-      rawAnswerBeforeRemap: 'skip',
-      finalAnswerAfterRemap: 'skip',
-      sideSwapped: false,
-    }
+    const providerSolved =
+      (batchResult.results || [])[0] ||
+      buildForcedRandomSolvedFlip({
+        hash: payloadFlip.hash,
+        error: 'no_result',
+        reasoning: 'provider returned no result',
+        forcedDecisionReason: 'provider_no_result',
+      })
+    const solved =
+      toAnswerOption(providerSolved.answer) > 0
+        ? providerSolved
+        : buildForcedRandomSolvedFlip({
+            hash: payloadFlip.hash,
+            error: providerSolved.error || 'skip_answer',
+            reasoning:
+              providerSolved.reasoning ||
+              'provider returned skip during answer session',
+            forcedDecisionReason: providerSolved.error
+              ? 'provider_error'
+              : 'provider_skip',
+          })
 
     return {payloadFlip, index, solved}
   }
@@ -1275,8 +1571,105 @@ export async function solveValidationSessionWithAi({
       await onDecision(decision)
     }
 
-    if (solveConcurrency === 1) {
+    if (solveConcurrency === 1 && !useLongSessionOpenAiStaggeredSolving) {
       await emitWaitingDelay(index)
+    }
+  }
+
+  function removeActiveStaggeredSolve(taskId) {
+    const taskIndex = activeStaggeredSolves.findIndex(
+      (item) => item.taskId === taskId
+    )
+    if (taskIndex >= 0) {
+      activeStaggeredSolves.splice(taskIndex, 1)
+    }
+  }
+
+  async function applyCompletedStaggeredSolve(completed) {
+    if (!completed || completed.type === 'timer') {
+      return false
+    }
+
+    removeActiveStaggeredSolve(completed.taskId)
+    await applySolvedPayloadFlip(completed.solvedEntry)
+    return true
+  }
+
+  async function waitForNextStaggeredSolve({untilMs = 0} = {}) {
+    while (activeStaggeredSolves.length) {
+      const waitMs = Math.max(0, untilMs - Date.now())
+      const raceEntries = activeStaggeredSolves.map(({promise}) => promise)
+      if (waitMs > 0) {
+        raceEntries.push(sleep(waitMs).then(() => ({type: 'timer'})))
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const completed = await Promise.race(raceEntries)
+      // eslint-disable-next-line no-await-in-loop
+      const applied = await applyCompletedStaggeredSolve(completed)
+      if (!applied || (untilMs > 0 && Date.now() >= untilMs)) {
+        return
+      }
+    }
+
+    const remainingWaitMs = Math.max(0, untilMs - Date.now())
+    if (remainingWaitMs > 0) {
+      await sleep(remainingWaitMs)
+    }
+  }
+
+  async function waitForStaggeredLaunchSlot() {
+    if (nextStaggeredSolveLaunchAt > Date.now()) {
+      await waitForNextStaggeredSolve({untilMs: nextStaggeredSolveLaunchAt})
+    }
+
+    while (
+      activeStaggeredSolves.length >= longSessionOpenAiStaggerMaxInFlight
+    ) {
+      // eslint-disable-next-line no-await-in-loop
+      await waitForNextStaggeredSolve()
+    }
+  }
+
+  async function launchStaggeredPreparedFlip(preparedFlip) {
+    await waitForStaggeredLaunchSlot()
+
+    if (
+      !hasRuntimeRemaining(
+        sessionDeadlineAt,
+        sessionSolveGuardMs + MIN_PROVIDER_REQUEST_TIMEOUT_MS
+      )
+    ) {
+      await applySolvedPayloadFlip({
+        payloadFlip: preparedFlip.payloadFlip,
+        index: preparedFlip.index,
+        solved: buildForcedRandomSolvedFlip({
+          hash: preparedFlip.payloadFlip.hash,
+          error: 'deadline_guard',
+          reasoning:
+            'not enough session time remained to launch provider request',
+          forcedDecisionReason: 'deadline_guard',
+        }),
+      })
+      return
+    }
+
+    const taskId = nextStaggeredSolveTaskId
+    nextStaggeredSolveTaskId += 1
+    const promise = solvePreparedPayloadFlip(preparedFlip).then(
+      (solvedEntry) => ({
+        taskId,
+        solvedEntry,
+      })
+    )
+    activeStaggeredSolves.push({taskId, promise})
+    nextStaggeredSolveLaunchAt = Date.now() + longSessionOpenAiStaggerIntervalMs
+  }
+
+  async function flushStaggeredSolves() {
+    while (activeStaggeredSolves.length) {
+      // eslint-disable-next-line no-await-in-loop
+      await waitForNextStaggeredSolve()
     }
   }
 
@@ -1298,7 +1691,8 @@ export async function solveValidationSessionWithAi({
     }
   }
 
-  for (let index = 0; index < candidateFlips.length; index += 1) {
+  let candidateIndex = 0
+  for (; candidateIndex < candidateFlips.length; candidateIndex += 1) {
     if (
       !hasRuntimeRemaining(sessionDeadlineAt, sessionSolveGuardMs) ||
       Date.now() >= buildDeadlineAt
@@ -1306,7 +1700,7 @@ export async function solveValidationSessionWithAi({
       break
     }
 
-    const flip = candidateFlips[index]
+    const flip = candidateFlips[candidateIndex]
     if (
       !hasRuntimeRemaining(
         sessionDeadlineAt,
@@ -1367,74 +1761,15 @@ export async function solveValidationSessionWithAi({
         sourceStats: flip.sourceStats || null,
       }
     } catch (error) {
-      const skipped = {
-        hash: flip.hash,
-        answer: 'skip',
-        confidence: 0,
-        latencyMs: 0,
+      await applyForcedRandomFlipDecision({
+        flip,
+        index: candidateIndex,
         error: `image_prepare_failed: ${formatSolveError(error)}`,
         reasoning: 'image payload preparation failed',
-        rawAnswerBeforeRemap: 'skip',
-        finalAnswerAfterRemap: 'skip',
-        sideSwapped: false,
-      }
-      const failedDecision = {
-        sessionType,
-        index: index + 1,
-        total: totalFlips,
-        hash: skipped.hash,
-        answer: skipped.answer,
-        option: AnswerType.None,
-        confidence: skipped.confidence,
-        latencyMs: skipped.latencyMs,
-        error: skipped.error,
-        fastMode: null,
-        modelFallback: null,
-        modelFallbacks: [],
-        leftImage: null,
-        rightImage: null,
-        leftFrames: [],
-        rightFrames: [],
-        words: Array.isArray(flip.words) ? flip.words : [],
-        expectedAnswer: flip.expectedAnswer || null,
-        expectedStrength: flip.expectedStrength || null,
-        consensusAnswer: flip.consensusAnswer || null,
-        consensusStrength: flip.consensusStrength || null,
-        consensusVotes: flip.consensusVotes || null,
-        sourceDataset: flip.sourceDataset || null,
-        sourceSplit: flip.sourceSplit || null,
-        sourceStats: flip.sourceStats || null,
-        rawAnswerBeforeRemap: skipped.rawAnswerBeforeRemap,
-        finalAnswerAfterRemap: skipped.finalAnswerAfterRemap,
-        sideSwapped: skipped.sideSwapped,
-        tokenUsage: normalizeTokenUsage(),
-        costs: normalizeCostSummary(),
-        reasoning: skipped.reasoning,
-        uncertaintyRepromptUsed: false,
-        forcedDecision: false,
-        forcedDecisionPolicy: null,
-        forcedDecisionReason: null,
-        ensembleTieBreakApplied: false,
-        ensembleTieBreakCandidates: null,
-        secondPassStrategy: null,
-        frameReasoningUsed: false,
-        firstPass: null,
-      }
+        forcedDecisionReason: 'image_prepare_failed',
+      })
 
-      results.push(skipped)
-
-      if (onProgress) {
-        onProgress({
-          stage: 'solved',
-          ...failedDecision,
-        })
-      }
-
-      if (onDecision) {
-        await onDecision(failedDecision)
-      }
-
-      // Move on; one broken or expired blob URL must not kill the whole session.
+      // Move on; one broken or expired blob URL must not leave the flip unvoted.
       // eslint-disable-next-line no-continue
       continue
     }
@@ -1443,7 +1778,7 @@ export async function solveValidationSessionWithAi({
       onProgress({
         stage: 'prepared',
         sessionType,
-        index: index + 1,
+        index: candidateIndex + 1,
         total: totalFlips,
         hash: flip.hash,
         leftImage: payloadFlip.leftImage,
@@ -1462,11 +1797,35 @@ export async function solveValidationSessionWithAi({
       })
     }
 
-    pendingPreparedFlips.push({payloadFlip, index})
-    await flushPreparedFlips()
+    if (useLongSessionOpenAiStaggeredSolving) {
+      await launchStaggeredPreparedFlip({payloadFlip, index: candidateIndex})
+    } else {
+      pendingPreparedFlips.push({payloadFlip, index: candidateIndex})
+      await flushPreparedFlips()
+    }
   }
 
-  await flushPreparedFlips({force: true})
+  for (
+    let remainingIndex = candidateIndex;
+    remainingIndex < candidateFlips.length;
+    remainingIndex += 1
+  ) {
+    const flip = candidateFlips[remainingIndex]
+    // eslint-disable-next-line no-await-in-loop
+    await applyForcedRandomFlipDecision({
+      flip,
+      index: remainingIndex,
+      error: 'deadline_guard',
+      reasoning: 'not enough session time remained to request AI solving',
+      forcedDecisionReason: 'deadline_guard',
+    })
+  }
+
+  if (useLongSessionOpenAiStaggeredSolving) {
+    await flushStaggeredSolves()
+  } else {
+    await flushPreparedFlips({force: true})
+  }
 
   if (!results.length) {
     throw new Error('Unable to prepare flip image payload before deadline')

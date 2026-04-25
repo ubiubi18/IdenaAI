@@ -32,9 +32,12 @@ import {
 import {forEachAsync, wait} from '../../shared/utils/fn'
 import {fetchConfirmedKeywordTranslations} from '../flips/utils'
 import {loadKeyword} from '../../shared/utils/utils'
+import {getNodeBridge} from '../../shared/utils/node-bridge'
 import {mergeRehearsalSeedMetaIntoFlips} from './rehearsal-benchmark'
 
 export const SHORT_SESSION_MIN_AI_SOLVE_WINDOW_SECONDS = 45
+const FLIP_GET_TIMEOUT_MS = 10 * 1000
+const REHEARSAL_SEED_FLIP_TIMEOUT_MS = 4 * 1000
 
 export function getShortSessionFinalizeDelaySeconds({
   shortSessionDuration,
@@ -1416,9 +1419,24 @@ function fetchFlips(
 
   global.logger.debug(`Calling flip_get rpc for hashes`, nextHashes)
   return forEachAsync(nextHashes, (hash) =>
-    fetchFlip(hash)
-      .then(({result, error}) => {
+    fetchFlipWithTimeout(hash)
+      .then(async ({result, error}) => {
         global.logger.debug(`Get flip_get response`, hash)
+
+        if (error || !result) {
+          const didRestoreSeedFlip = await emitRehearsalSeedFlip({
+            hash,
+            cb,
+            epoch,
+            sessionType,
+            onDecodedFlip,
+          })
+
+          if (didRestoreSeedFlip) {
+            return
+          }
+        }
+
         const flip = decodeFlip({...result}, ({images, orders}) => {
           if (typeof onDecodedFlip === 'function') {
             onDecodedFlip({
@@ -1441,8 +1459,25 @@ function fetchFlips(
         })
       })
       .then(() => (delay > 0 ? wait(delay) : Promise.resolve()))
-      .catch(() => {
-        global.logger.debug(`Catch flip_get reject`, hash)
+      .catch(async (error) => {
+        global.logger.debug(
+          `Catch flip_get reject`,
+          hash,
+          error && error.message
+        )
+
+        const didRestoreSeedFlip = await emitRehearsalSeedFlip({
+          hash,
+          cb,
+          epoch,
+          sessionType,
+          onDecodedFlip,
+        })
+
+        if (didRestoreSeedFlip) {
+          return
+        }
+
         cb({
           type: 'FLIP',
           flip: {
@@ -1452,6 +1487,136 @@ function fetchFlips(
         })
       })
   )
+}
+
+function withTimeout(promise, timeoutMs, timeoutMessage) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(timeoutMessage))
+    }, Math.max(1, timeoutMs))
+
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timeoutId)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timeoutId)
+        reject(error)
+      }
+    )
+  })
+}
+
+function fetchFlipWithTimeout(hash) {
+  return withTimeout(
+    fetchFlip(hash),
+    FLIP_GET_TIMEOUT_MS,
+    `flip_get timed out for ${hash}`
+  )
+}
+
+function normalizeRehearsalSeedFlipOrder(order) {
+  if (!Array.isArray(order)) {
+    return []
+  }
+
+  return order
+    .map((index) => Number.parseInt(index, 10))
+    .filter((index) => Number.isInteger(index))
+    .slice(0, 4)
+}
+
+function normalizeRehearsalSeedFlipPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null
+  }
+
+  const images = Array.isArray(payload.images)
+    ? payload.images
+        .map((src) => String(src || '').trim())
+        .filter(Boolean)
+        .slice(0, 4)
+    : []
+  const orders = Array.isArray(payload.orders)
+    ? payload.orders
+        .slice(0, 2)
+        .map(normalizeRehearsalSeedFlipOrder)
+        .filter((order) => order.length === 4)
+    : []
+
+  if (images.length !== 4 || orders.length !== 2) {
+    return null
+  }
+
+  return {images, orders}
+}
+
+async function fetchRehearsalSeedFlip(hash) {
+  const nodeBridge = getNodeBridge()
+
+  if (
+    !nodeBridge ||
+    typeof nodeBridge.getValidationDevnetSeedFlip !== 'function'
+  ) {
+    return null
+  }
+
+  try {
+    return normalizeRehearsalSeedFlipPayload(
+      await withTimeout(
+        nodeBridge.getValidationDevnetSeedFlip(hash),
+        REHEARSAL_SEED_FLIP_TIMEOUT_MS,
+        `seed flip lookup timed out for ${hash}`
+      )
+    )
+  } catch {
+    return null
+  }
+}
+
+async function emitRehearsalSeedFlip({
+  hash,
+  cb,
+  epoch,
+  sessionType,
+  onDecodedFlip,
+}) {
+  const seedFlip = await fetchRehearsalSeedFlip(hash)
+
+  if (!seedFlip) {
+    return false
+  }
+
+  if (typeof onDecodedFlip === 'function') {
+    try {
+      onDecodedFlip({
+        flipHash: hash,
+        epoch,
+        sessionType,
+        images: seedFlip.images,
+        orders: seedFlip.orders,
+      })
+    } catch {
+      // Optional local-AI capture must not block validation rendering.
+    }
+  }
+
+  cb({
+    type: 'FLIP',
+    flip: {
+      hash,
+      fetched: true,
+      decoded: true,
+      missing: false,
+      images: seedFlip.images,
+      orders: seedFlip.orders,
+      hex: '',
+      rehearsalSeedFallback: true,
+    },
+  })
+
+  return true
 }
 
 function decodeFlip({hash, hex, publicHex, privateHex}, onDecoded) {

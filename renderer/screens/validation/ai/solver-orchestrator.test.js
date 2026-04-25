@@ -97,6 +97,27 @@ describe('solver-orchestrator planning', () => {
     expect(longPlan.promptOptions).toBeNull()
   })
 
+  it('raises short-session OpenAI parallel request timeout to ninety seconds', () => {
+    const shortFlips = Array.from({length: 6}, (_, index) =>
+      createDecodedFlip(`short-timeout-${index + 1}`)
+    )
+
+    const plan = planValidationAiSolve({
+      sessionType: 'short',
+      shortFlips,
+      aiSolver: {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        benchmarkProfile: 'custom',
+        requestTimeoutMs: 9000,
+        deadlineMs: 60000,
+      },
+    })
+
+    expect(plan.effectiveProfile.requestTimeoutMs).toBe(90000)
+    expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
+  })
+
   it('uses a more deliberate strict profile for long-session OpenAI solving', () => {
     const comparisonFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`comparison-${index + 1}`)
@@ -123,12 +144,32 @@ describe('solver-orchestrator planning', () => {
 
     expect(shortBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(shortBudget.solveConcurrency).toBe(6)
+    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(90000)
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('frames_two_pass')
     expect(longBudget.solveConcurrency).toBe(1)
-    expect(longBudget.effectiveProfile.requestTimeoutMs).toBeGreaterThan(
-      shortBudget.effectiveProfile.requestTimeoutMs
-    )
+    expect(longBudget.effectiveProfile.requestTimeoutMs).toBe(180000)
     expect(longBudget.estimatedMs).toBeGreaterThan(shortBudget.estimatedMs)
+  })
+
+  it('raises custom long-session OpenAI staggered request timeout to three minutes', () => {
+    const longFlips = Array.from({length: 3}, (_, index) =>
+      createDecodedFlip(`long-timeout-${index + 1}`)
+    )
+
+    const plan = planValidationAiSolve({
+      sessionType: 'long',
+      longFlips,
+      maxFlips: 3,
+      aiSolver: {
+        provider: 'openai',
+        benchmarkProfile: 'custom',
+        requestTimeoutMs: 9000,
+        deadlineMs: 60000,
+      },
+    })
+
+    expect(plan.effectiveProfile.requestTimeoutMs).toBe(180000)
+    expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(275000)
   })
 
   it('budgets extra model passes for uncertainty reprompts and two-pass vision', () => {
@@ -170,7 +211,7 @@ describe('solver-orchestrator planning', () => {
         benchmarkProfile: 'custom',
         requestTimeoutMs: 9000,
         interFlipDelayMs: 650,
-        flipVisionMode: 'frames_two_pass',
+        shortSessionFlipVisionMode: 'frames_two_pass',
         uncertaintyRepromptEnabled: true,
       },
     })
@@ -184,6 +225,38 @@ describe('solver-orchestrator planning', () => {
     expect(framesTwoPassBudget.estimatedMs).toBeGreaterThan(
       repromptBudget.estimatedMs
     )
+  })
+
+  it('keeps short-session vision mode independent from the long-session setting', () => {
+    const flips = Array.from({length: 6}, (_, index) =>
+      createDecodedFlip(`short-vision-${index + 1}`)
+    )
+
+    const shortBudget = estimateValidationAiSolveBudget({
+      sessionType: 'short',
+      shortFlips: flips,
+      aiSolver: {
+        provider: 'openai',
+        benchmarkProfile: 'custom',
+        flipVisionMode: 'frames_two_pass',
+        shortSessionFlipVisionMode: 'composite',
+      },
+    })
+
+    const longBudget = estimateValidationAiSolveBudget({
+      sessionType: 'long',
+      longFlips: flips,
+      maxFlips: 6,
+      aiSolver: {
+        provider: 'openai',
+        benchmarkProfile: 'custom',
+        flipVisionMode: 'frames_two_pass',
+        shortSessionFlipVisionMode: 'composite',
+      },
+    })
+
+    expect(shortBudget.effectiveProfile.flipVisionMode).toBe('composite')
+    expect(longBudget.effectiveProfile.flipVisionMode).toBe('frames_two_pass')
   })
 
   it('keeps short-session preflight budgeting on the fast path for most flips', () => {
@@ -243,7 +316,7 @@ describe('solver-orchestrator planning', () => {
     expect(retryBudget.estimatedMs).toBeGreaterThan(noRetryBudget.estimatedMs)
   })
 
-  it('surfaces image load failures as readable errors', async () => {
+  it('uses a forced random answer when image loading fails during a session', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
 
@@ -276,10 +349,15 @@ describe('solver-orchestrator planning', () => {
       })
 
       expect(global.aiSolver.solveFlipBatch).not.toHaveBeenCalled()
-      expect(result.answers).toHaveLength(0)
+      expect(result.answers).toHaveLength(1)
+      expect([AnswerType.Left, AnswerType.Right]).toContain(
+        result.answers[0].option
+      )
       expect(result.results[0]).toMatchObject({
         hash: 'short-broken-1',
-        answer: 'skip',
+        forcedDecision: true,
+        forcedDecisionPolicy: 'random',
+        forcedDecisionReason: 'image_prepare_failed',
         error:
           'image_prepare_failed: Unable to load validation flip image (panel-1)',
       })
@@ -434,7 +512,7 @@ describe('solver-orchestrator planning', () => {
     }
   })
 
-  it('returns already-applied short answers when the safe deadline stops the next flip', async () => {
+  it('fills remaining short-session answers randomly when the safe deadline stops AI calls', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
     const originalCreateElement = document.createElement.bind(document)
@@ -515,12 +593,22 @@ describe('solver-orchestrator planning', () => {
         onDecision,
       })
 
-      expect(result.answers).toHaveLength(1)
+      expect(result.answers).toHaveLength(2)
       expect(result.answers[0]).toMatchObject({
         hash: 'short-deadline-1',
         option: AnswerType.Left,
       })
-      expect(onDecision).toHaveBeenCalledTimes(1)
+      expect(result.answers[1].hash).toBe('short-deadline-2')
+      expect([AnswerType.Left, AnswerType.Right]).toContain(
+        result.answers[1].option
+      )
+      expect(result.results[1]).toMatchObject({
+        hash: 'short-deadline-2',
+        forcedDecision: true,
+        forcedDecisionPolicy: 'random',
+        forcedDecisionReason: 'deadline_guard',
+      })
+      expect(onDecision).toHaveBeenCalledTimes(2)
       expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(1)
     } finally {
       dateNowSpy.mockRestore()
@@ -630,12 +718,14 @@ describe('solver-orchestrator planning', () => {
     }
   })
 
-  it('prepares and solves flips one by one instead of prebuilding the whole batch', async () => {
+  it('starts long-session OpenAI solves on a staggered pipeline', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
     const originalCreateElement = document.createElement.bind(document)
     const createElementSpy = jest.spyOn(document, 'createElement')
     const onProgress = jest.fn()
+    let inFlight = 0
+    let maxInFlight = 0
 
     function ReadyImage() {
       this.width = 100
@@ -654,36 +744,31 @@ describe('solver-orchestrator planning', () => {
 
     global.Image = ReadyImage
     global.aiSolver = {
-      solveFlipBatch: jest
-        .fn()
-        .mockResolvedValueOnce({
-          results: [
-            {
-              hash: 'long-serial-1',
-              answer: 'left',
-              confidence: 0.81,
-              latencyMs: 111,
-              reasoning: 'left is more coherent',
-              rawAnswerBeforeRemap: 'left',
-              finalAnswerAfterRemap: 'left',
-              sideSwapped: false,
-            },
-          ],
+      solveFlipBatch: jest.fn(async ({flips}) => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise((resolve) => {
+          setTimeout(resolve, 5)
         })
-        .mockResolvedValueOnce({
+        inFlight -= 1
+
+        return {
           results: [
             {
-              hash: 'long-serial-2',
-              answer: 'right',
+              hash: flips[0].hash,
+              answer: flips[0].hash === 'long-stagger-1' ? 'left' : 'right',
               confidence: 0.84,
-              latencyMs: 112,
-              reasoning: 'right is more coherent',
-              rawAnswerBeforeRemap: 'right',
-              finalAnswerAfterRemap: 'right',
+              latencyMs: 5,
+              reasoning: 'story is more coherent',
+              rawAnswerBeforeRemap:
+                flips[0].hash === 'long-stagger-1' ? 'left' : 'right',
+              finalAnswerAfterRemap:
+                flips[0].hash === 'long-stagger-1' ? 'left' : 'right',
               sideSwapped: false,
             },
           ],
-        }),
+        }
+      }),
     }
     createElementSpy.mockImplementation((tagName, ...args) => {
       if (tagName === 'canvas') {
@@ -706,8 +791,8 @@ describe('solver-orchestrator planning', () => {
       await solveValidationSessionWithAi({
         sessionType: 'long',
         longFlips: [
-          createDecodedFlip('long-serial-1'),
-          createDecodedFlip('long-serial-2'),
+          createDecodedFlip('long-stagger-1'),
+          createDecodedFlip('long-stagger-2'),
         ],
         maxFlips: 2,
         aiSolver: {
@@ -717,10 +802,23 @@ describe('solver-orchestrator planning', () => {
           flipVisionMode: 'frames_two_pass',
           uncertaintyRepromptEnabled: false,
           interFlipDelayMs: 0,
+          longSessionOpenAiStaggerIntervalMs: 0,
         },
-        hardDeadlineAt: Date.now() + 60 * 1000,
+        hardDeadlineAt: Date.now() + 400 * 1000,
         onProgress,
       })
+
+      expect(
+        global.aiSolver.solveFlipBatch.mock.calls.map(
+          ([payload]) => payload.requestTimeoutMs
+        )
+      ).toEqual([180000, 180000])
+      expect(
+        global.aiSolver.solveFlipBatch.mock.calls.map(
+          ([payload]) => payload.deadlineMs
+        )
+      ).toEqual([185000, 185000])
+      expect(maxInFlight).toBe(2)
 
       const stages = onProgress.mock.calls.map(([event]) => ({
         stage: event.stage,
@@ -728,12 +826,12 @@ describe('solver-orchestrator planning', () => {
       }))
 
       expect(stages).toEqual([
-        {stage: 'prepared', hash: 'long-serial-1'},
-        {stage: 'solving', hash: 'long-serial-1'},
-        {stage: 'solved', hash: 'long-serial-1'},
-        {stage: 'prepared', hash: 'long-serial-2'},
-        {stage: 'solving', hash: 'long-serial-2'},
-        {stage: 'solved', hash: 'long-serial-2'},
+        {stage: 'prepared', hash: 'long-stagger-1'},
+        {stage: 'solving', hash: 'long-stagger-1'},
+        {stage: 'prepared', hash: 'long-stagger-2'},
+        {stage: 'solving', hash: 'long-stagger-2'},
+        {stage: 'solved', hash: 'long-stagger-1'},
+        {stage: 'solved', hash: 'long-stagger-2'},
         {stage: 'completed', hash: null},
       ])
     } finally {
