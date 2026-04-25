@@ -24,6 +24,11 @@ const initialState = {
   nodeCurrentVersion: '0.0.0',
   showExternalUpdateModal: false,
 }
+const fallbackDispatch = {
+  updateClient() {},
+  updateNode() {},
+  hideExternalNodeUpdateModal() {},
+}
 
 function updateReducer(state, action) {
   switch (action.type) {
@@ -257,9 +262,7 @@ export function AutoUpdateProvider({children}) {
 export function useAutoUpdateState() {
   const context = React.useContext(AutoUpdateStateContext)
   if (context === undefined) {
-    throw new Error(
-      'useAutoUpdateState must be used within a AutoUpdateProvider'
-    )
+    return initialState
   }
   return context
 }
@@ -267,9 +270,7 @@ export function useAutoUpdateState() {
 export function useAutoUpdateDispatch() {
   const context = React.useContext(AutoUpdateDispatchContext)
   if (context === undefined) {
-    throw new Error(
-      'useAutoUpdateDispatch must be used within a AutoUpdateProvider'
-    )
+    return fallbackDispatch
   }
   return context
 }

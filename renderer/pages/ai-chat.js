@@ -59,14 +59,14 @@ import {
 } from '../shared/utils/ai-provider-readiness'
 import {
   DEFAULT_LOCAL_AI_SETTINGS,
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
   INTERNVL3_5_1B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   MANAGED_LOCAL_RUNTIME_FAMILIES,
-  MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   buildManagedLocalAiTrustApprovalPatch,
   buildLocalAiRepairPreset,
-  buildMolmo2OResearchPreset,
+  buildManagedLocalRuntimePreset,
   buildLocalAiSettings,
   getManagedLocalRuntimeInstallProfile,
   hasManagedLocalAiTrustApproval,
@@ -1412,6 +1412,7 @@ export default function AiChatPage() {
   const [statusResult, setStatusResult] = React.useState(null)
   const [isCheckingStatus, setIsCheckingStatus] = React.useState(false)
   const [isStartingRuntime, setIsStartingRuntime] = React.useState(false)
+  const [isStoppingRuntime, setIsStoppingRuntime] = React.useState(false)
   const [isSending, setIsSending] = React.useState(false)
   const [isComposerFocused, setIsComposerFocused] = React.useState(false)
   const [lastError, setLastError] = React.useState('')
@@ -1432,7 +1433,8 @@ export default function AiChatPage() {
     [managedRuntimeTrustLocalAi]
   )
   const activeManagedRuntimeFamily =
-    getManagedLocalRuntimeFamily(localAi) || MOLMO2_O_RESEARCH_RUNTIME_FAMILY
+    getManagedLocalRuntimeFamily(localAi) ||
+    DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
   const activeManagedRuntimeProfile = React.useMemo(
     () => getManagedLocalRuntimeInstallProfile(activeManagedRuntimeFamily),
     [activeManagedRuntimeFamily]
@@ -2017,7 +2019,9 @@ export default function AiChatPage() {
         ? {enabled: true}
         : {
             enabled: true,
-            ...buildMolmo2OResearchPreset(),
+            ...buildManagedLocalRuntimePreset(
+              DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
+            ),
           }
     )
   }, [
@@ -2105,7 +2109,9 @@ export default function AiChatPage() {
         ? {enabled: true}
         : {
             enabled: true,
-            ...buildMolmo2OResearchPreset(),
+            ...buildManagedLocalRuntimePreset(
+              DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
+            ),
           }
 
     return startLocalAiRuntime(nextSettingsPatch)
@@ -2114,6 +2120,44 @@ export default function AiChatPage() {
     shouldBootstrapManagedLocalAi,
     startLocalAiRuntime,
   ])
+
+  const handleAbortLocalAiRuntime = React.useCallback(async () => {
+    setIsStoppingRuntime(true)
+    activeRuntimePayloadKeyRef.current = ''
+    setActiveRuntimePayload(null)
+
+    try {
+      const bridge = getLocalAiBridge()
+      const result = await bridge.stop()
+      const idleMessage = t('Local AI runtime is idle.')
+
+      setStatusResult({
+        ...(result || {}),
+        ok: false,
+        enabled: Boolean(localAi.enabled),
+        sidecarReachable: null,
+        runtimeProgress: null,
+        lastError: idleMessage,
+      })
+      setLastError(idleMessage)
+      toast({
+        render: () => (
+          <Toast title={t('Local AI download aborted')}>
+            {t(
+              'The managed runtime setup was stopped. You can switch model choices in AI settings and restart Local AI.'
+            )}
+          </Toast>
+        ),
+      })
+    } catch (error) {
+      const nextError = formatChatError(error, t)
+      setLastError(nextError)
+      appendAssistantErrorToast(nextError)
+    } finally {
+      setIsStartingRuntime(false)
+      setIsStoppingRuntime(false)
+    }
+  }, [appendAssistantErrorToast, localAi.enabled, t, toast])
 
   const handleFixLocalAiAutomatically = React.useCallback(async () => {
     const nextSettingsPatch = {
@@ -2136,13 +2180,16 @@ export default function AiChatPage() {
   const approveManagedRuntimeTrust = React.useCallback(async () => {
     const nextSettingsPatch = {
       ...((managedRuntimeTrustPatch && managedRuntimeTrustPatch) || {}),
-      ...buildManagedLocalAiTrustApprovalPatch(),
+      ...buildManagedLocalAiTrustApprovalPatch({
+        ...localAi,
+        ...((managedRuntimeTrustPatch && managedRuntimeTrustPatch) || {}),
+      }),
     }
 
     setIsManagedRuntimeTrustDialogOpen(false)
     setManagedRuntimeTrustPatch(null)
     await startLocalAiRuntime(nextSettingsPatch)
-  }, [managedRuntimeTrustPatch, startLocalAiRuntime])
+  }, [localAi, managedRuntimeTrustPatch, startLocalAiRuntime])
 
   const handleEnableAndStartLocalAi = React.useCallback(async () => {
     handleEnableLocalAi()
@@ -2307,13 +2354,25 @@ export default function AiChatPage() {
             <HStack spacing={2}>
               <SecondaryButton
                 minW="fit-content"
+                isDisabled={isStoppingRuntime}
                 isLoading={isStartingRuntime}
                 onClick={handleStartLocalAi}
               >
                 {startRuntimeLabel}
               </SecondaryButton>
+              {runtimeProgressDisplay ? (
+                <SecondaryButton
+                  minW="fit-content"
+                  isDisabled={isStoppingRuntime}
+                  isLoading={isStoppingRuntime}
+                  onClick={handleAbortLocalAiRuntime}
+                >
+                  {t('Abort download')}
+                </SecondaryButton>
+              ) : null}
               <SecondaryButton
                 minW="fit-content"
+                isDisabled={isStoppingRuntime}
                 isLoading={isStartingRuntime}
                 onClick={handleFixLocalAiAutomatically}
               >
