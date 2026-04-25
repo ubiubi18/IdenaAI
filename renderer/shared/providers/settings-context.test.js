@@ -1,15 +1,33 @@
 const {
+  DEFAULT_RUN_INTERNAL_NODE,
   buildAiSolverSettings,
   buildEffectiveSettingsState,
   isValidationRehearsalNodeSettings,
+  normalizeNodeModeSettings,
 } = require('./settings-context')
 
 describe('settings-context ai solver normalization', () => {
+  it('keeps the built-in node off by default for fresh installs', () => {
+    expect(DEFAULT_RUN_INTERNAL_NODE).toBe(false)
+  })
+
+  it('keeps persistent external-node mode from also starting the built-in node', () => {
+    expect(
+      normalizeNodeModeSettings({
+        useExternalNode: true,
+        runInternalNode: true,
+      })
+    ).toMatchObject({
+      useExternalNode: true,
+      runInternalNode: false,
+    })
+  })
+
   it('keeps the default system reserve for AI sessions', () => {
     expect(buildAiSolverSettings()).toMatchObject({
       memoryBudgetGiB: 32,
       systemReserveGiB: 6,
-      localAiMemoryReference: 'molmo2-o-7b',
+      localAiMemoryReference: 'molmo2-4b',
     })
   })
 

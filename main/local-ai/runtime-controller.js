@@ -55,7 +55,7 @@ function buildManagedRuntimeConfig({
   }
 }
 
-const DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY = 'molmo2-o'
+const DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY = 'molmo2-4b'
 const MANAGED_MLX_VLM_REQUIREMENTS = [
   {name: 'mlx-vlm', version: '0.4.4'},
   {name: 'pillow', version: '12.2.0'},
@@ -425,6 +425,43 @@ async function stopStaleManagedSnapshotDownloadProcesses(snapshotDir) {
   }
 
   return initialProcesses
+}
+
+function resolveManagedSnapshotDownloadStopDirs(baseDir, payload = {}) {
+  const requestedKind = managedRuntimeKindFromPayload(payload)
+  const requestedConfig = resolveManagedRuntimeConfig(requestedKind)
+  const configs = requestedConfig
+    ? [requestedConfig]
+    : Object.values(MANAGED_LOCAL_RUNTIMES)
+  const dirs = configs
+    .map((runtimeConfig) => {
+      const flavor = resolveManagedLocalRuntimeFlavor(runtimeConfig)
+      const runtimeRoot = path.join(
+        baseDir,
+        runtimeConfig.runtimeRootName,
+        flavor
+      )
+      return managedMolmo2SnapshotPath(runtimeRoot)
+    })
+    .filter(Boolean)
+
+  return [...new Set(dirs)]
+}
+
+async function stopManagedSnapshotDownloads(baseDir, payload = {}) {
+  const stopped = []
+
+  for (const snapshotDir of resolveManagedSnapshotDownloadStopDirs(
+    baseDir,
+    payload
+  )) {
+    const stoppedForDir = await stopStaleManagedSnapshotDownloadProcesses(
+      snapshotDir
+    )
+    stopped.push(...stoppedForDir.map((item) => ({...item, snapshotDir})))
+  }
+
+  return stopped
 }
 
 async function readManagedSnapshotDownloadLock(lockPath) {
@@ -2342,12 +2379,21 @@ function createDefaultRuntimeController({
     },
 
     async stop(payload = {}) {
+      const stoppedDownloaders = await stopManagedSnapshotDownloads(
+        baseDir,
+        payload
+      )
+
       if (
         !managedProcess ||
         managedProcess.exitCode != null ||
         managedProcess.killed
       ) {
-        return {stopped: false, managed: false}
+        return {
+          stopped: stoppedDownloaders.length > 0,
+          managed: stoppedDownloaders.length > 0,
+          stoppedDownloaders: stoppedDownloaders.length,
+        }
       }
 
       const requestedKind = managedRuntimeKindFromPayload(payload)
@@ -2371,6 +2417,7 @@ function createDefaultRuntimeController({
         stopped: true,
         managed: true,
         pid,
+        stoppedDownloaders: stoppedDownloaders.length,
       }
     },
   }

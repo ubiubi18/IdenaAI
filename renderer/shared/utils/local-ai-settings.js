@@ -26,13 +26,14 @@ const INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL = 'OpenGVLab/InternVL3_5-8B-HF'
 const INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL =
   'OpenGVLab/InternVL3_5-8B-HF'
 const MANAGED_MOLMO2_RUNTIME_FAMILIES = [
-  MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
+  MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
 ]
 const MANAGED_LOCAL_RUNTIME_FAMILIES = MANAGED_MOLMO2_RUNTIME_FAMILIES.concat(
   INTERNVL3_5_1B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY
 )
+const DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY = MOLMO2_4B_RESEARCH_RUNTIME_FAMILY
 const MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES = {
   [MOLMO2_O_RESEARCH_RUNTIME_FAMILY]: {
     runtimeFamily: MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
@@ -112,22 +113,22 @@ const DEVELOPER_LOCAL_BENCHMARK_SIZE_OPTIONS = [25, 50, 100, 200, 500]
 const DEVELOPER_LOCAL_TRAINING_PROFILE_CONFIG = {
   safe: {
     modelPath: FALLBACK_LOCAL_AI_TRAINING_MODEL,
-    runtimeModel: MOLMO2_O_RESEARCH_RUNTIME_MODEL,
-    runtimeVisionModel: MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL,
+    runtimeModel: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
+    runtimeVisionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
     runtimeFallbackModel: '',
     runtimeFallbackVisionModel: '',
   },
   balanced: {
     modelPath: STRONG_FALLBACK_LOCAL_AI_TRAINING_MODEL,
-    runtimeModel: MOLMO2_O_RESEARCH_RUNTIME_MODEL,
-    runtimeVisionModel: MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL,
+    runtimeModel: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
+    runtimeVisionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
     runtimeFallbackModel: '',
     runtimeFallbackVisionModel: '',
   },
   strong: {
     modelPath: RECOMMENDED_LOCAL_AI_TRAINING_MODEL,
-    runtimeModel: MOLMO2_O_RESEARCH_RUNTIME_MODEL,
-    runtimeVisionModel: MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL,
+    runtimeModel: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
+    runtimeVisionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
     runtimeFallbackModel: '',
     runtimeFallbackVisionModel: '',
   },
@@ -169,6 +170,9 @@ const DEFAULT_LOCAL_AI_SETTINGS = {
   managedRuntimePythonPath: '',
   ollamaCommandPath: '',
   managedRuntimeTrustVersion: 0,
+  managedRuntimeTrustRuntimeFamily: '',
+  managedRuntimeTrustModelId: '',
+  managedRuntimeTrustRevision: '',
   runtimeType: '',
   runtimeFamily: '',
   model: DEFAULT_LOCAL_AI_OLLAMA_MODEL,
@@ -225,15 +229,28 @@ function normalizeManagedRuntimeTrustVersion(value) {
 }
 
 function hasManagedLocalAiTrustApproval(source = {}) {
+  const runtimeFamily = trimString(source.runtimeFamily).toLowerCase()
+  const profile = getManagedLocalRuntimeInstallProfile(runtimeFamily)
+
   return (
     normalizeManagedRuntimeTrustVersion(source.managedRuntimeTrustVersion) >=
-    MANAGED_LOCAL_RUNTIME_TRUST_VERSION
+      MANAGED_LOCAL_RUNTIME_TRUST_VERSION &&
+    trimString(source.managedRuntimeTrustRuntimeFamily) ===
+      profile.runtimeFamily &&
+    trimString(source.managedRuntimeTrustModelId) === profile.modelId &&
+    trimString(source.managedRuntimeTrustRevision) === profile.revision
   )
 }
 
-function buildManagedLocalAiTrustApprovalPatch() {
+function buildManagedLocalAiTrustApprovalPatch(source = {}) {
+  const runtimeFamily = trimString(source.runtimeFamily).toLowerCase()
+  const profile = getManagedLocalRuntimeInstallProfile(runtimeFamily)
+
   return {
     managedRuntimeTrustVersion: MANAGED_LOCAL_RUNTIME_TRUST_VERSION,
+    managedRuntimeTrustRuntimeFamily: profile.runtimeFamily,
+    managedRuntimeTrustModelId: profile.modelId,
+    managedRuntimeTrustRevision: profile.revision,
   }
 }
 
@@ -592,11 +609,15 @@ function resolveDeveloperLocalTrainingProfileModelPath(_value) {
 }
 
 function resolveDeveloperLocalTrainingProfileRuntimeModel(_value) {
-  return MOLMO2_O_RESEARCH_RUNTIME_MODEL
+  return DEVELOPER_LOCAL_TRAINING_PROFILE_CONFIG[
+    DEFAULT_DEVELOPER_LOCAL_TRAINING_PROFILE
+  ].runtimeModel
 }
 
 function resolveDeveloperLocalTrainingProfileRuntimeVisionModel(_value) {
-  return MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL
+  return DEVELOPER_LOCAL_TRAINING_PROFILE_CONFIG[
+    DEFAULT_DEVELOPER_LOCAL_TRAINING_PROFILE
+  ].runtimeVisionModel
 }
 
 function resolveDeveloperLocalTrainingProfileRuntimeFallbackModel(_value) {
@@ -735,11 +756,11 @@ function buildInternVl358BExperimentalPreset() {
 }
 
 function buildManagedLocalRuntimePreset(runtimeFamily = '') {
-  switch (
-    String(runtimeFamily || '')
-      .trim()
-      .toLowerCase()
-  ) {
+  const normalizedFamily =
+    trimString(runtimeFamily).toLowerCase() ||
+    DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
+
+  switch (normalizedFamily) {
     case MOLMO2_4B_RESEARCH_RUNTIME_FAMILY:
       return buildMolmo24BCompactPreset()
     case INTERNVL3_5_1B_RESEARCH_RUNTIME_FAMILY:
@@ -747,8 +768,9 @@ function buildManagedLocalRuntimePreset(runtimeFamily = '') {
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return buildInternVl358BExperimentalPreset()
     case MOLMO2_O_RESEARCH_RUNTIME_FAMILY:
-    default:
       return buildMolmo2OResearchPreset()
+    default:
+      return buildMolmo24BCompactPreset()
   }
 }
 
@@ -775,7 +797,7 @@ function getManagedLocalRuntimeInstallProfile(runtimeFamily = '') {
   const normalizedFamily = trimString(runtimeFamily).toLowerCase()
   return (
     MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES[normalizedFamily] ||
-    MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES[MOLMO2_O_RESEARCH_RUNTIME_FAMILY]
+    MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES[DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY]
   )
 }
 
@@ -889,6 +911,11 @@ function buildLocalAiSettings(settings = {}) {
     managedRuntimeTrustVersion: normalizeManagedRuntimeTrustVersion(
       source.managedRuntimeTrustVersion
     ),
+    managedRuntimeTrustRuntimeFamily: trimString(
+      source.managedRuntimeTrustRuntimeFamily
+    ),
+    managedRuntimeTrustModelId: trimString(source.managedRuntimeTrustModelId),
+    managedRuntimeTrustRevision: trimString(source.managedRuntimeTrustRevision),
     runtimeType: trimString(source.runtimeType),
     runtimeFamily: normalizeLegacyRuntimeFamily(source),
     model:
@@ -1061,6 +1088,7 @@ module.exports = {
   INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL,
   MANAGED_MOLMO2_RUNTIME_FAMILIES,
   MANAGED_LOCAL_RUNTIME_FAMILIES,
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
   MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES,
   getLocalAiEndpointSafety,
   resolveLocalAiWireRuntimeType,
