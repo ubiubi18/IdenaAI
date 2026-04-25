@@ -91,9 +91,10 @@ This section should stay current and act as a short roadmap of what has already 
   aborted or superseded before switching to another profile.
 - Dependency footprint:
   the desktop app now has a dependency-footprint audit, removes the direct
-  `jimp` image stack and several narrow helper packages, upgrades the Electron
-  runtime to `41.3.0`, and treats new runtime npm dependencies as allowlist
-  changes that require explicit review.
+  `jimp` image stack, removes the root `idena-sdk-js` runtime dependency in
+  favor of small audited internal helpers, upgrades the Electron runtime to
+  `41.3.0`, and treats new runtime npm dependencies as allowlist changes that
+  require explicit review.
 - Safety posture:
   none of the above changes make the project production-safe. The repo remains a
   research fork first.
