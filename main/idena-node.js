@@ -27,6 +27,10 @@ const peerAssistRetryIntervalMs = 30 * 1000
 const peerAssistRetryCooldownMs = 2 * 60 * 1000
 const maxPersistedPeerHints = 32
 const nodeRpcProbeTimeoutMs = 1500
+const peerHintFreshnessMs = 72 * 60 * 60 * 1000
+const peerHintFailureBaseBackoffMs = 5 * 60 * 1000
+const peerHintFailureMaxBackoffMs = 60 * 60 * 1000
+const managedPeerNetwork = 'mainnet'
 
 const execFileAsync = promisify(execFile)
 
@@ -84,6 +88,187 @@ function normalizePeerAddr(value) {
   return text.replace('/p2p/', '/ipfs/')
 }
 
+function normalizeRpcPeerAddr(value) {
+  const rawAddr =
+    value &&
+    (value.addr ||
+      value.RemoteAddr ||
+      value.remoteAddr ||
+      value.address ||
+      value.multiaddr ||
+      value)
+  const addr = normalizePeerAddr(rawAddr)
+  if (!addr || addr.includes('/ipfs/')) return addr
+
+  const peerId = value && (value.id || value.ID || value.peerId || value.peerID)
+  if (typeof peerId !== 'string' || !peerId.trim()) return addr
+
+  return `${addr.replace(/\/$/, '')}/ipfs/${peerId.trim()}`
+}
+
+function parsePeerHintTime(value) {
+  if (typeof value !== 'string') return 0
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function normalizePeerHint(value, defaults = {}) {
+  const addr = normalizeRpcPeerAddr(value)
+  if (!addr.includes('/ipfs/')) return null
+
+  const failures = Number(value && value.failures)
+  const network = value && value.network ? value.network : defaults.network
+
+  return {
+    addr,
+    source: (value && value.source) || defaults.source || 'cache',
+    network: network || managedPeerNetwork,
+    lastSeenAt: (value && value.lastSeenAt) || defaults.lastSeenAt || undefined,
+    lastAttemptAt:
+      (value && value.lastAttemptAt) || defaults.lastAttemptAt || undefined,
+    lastFailedAt:
+      (value && value.lastFailedAt) || defaults.lastFailedAt || undefined,
+    lastSucceededAt:
+      (value && value.lastSucceededAt) || defaults.lastSucceededAt || undefined,
+    failures:
+      Number.isFinite(failures) && failures > 0 ? Math.floor(failures) : 0,
+  }
+}
+
+function mergePeerHints(peers) {
+  const byAddr = new Map()
+
+  toArray(peers).forEach((peer) => {
+    const hint = normalizePeerHint(peer)
+    if (!hint || hint.network !== managedPeerNetwork) return
+
+    const current = byAddr.get(hint.addr)
+    if (!current) {
+      byAddr.set(hint.addr, hint)
+      return
+    }
+
+    const currentEventAt = Math.max(
+      parsePeerHintTime(current.lastSeenAt),
+      parsePeerHintTime(current.lastAttemptAt),
+      parsePeerHintTime(current.lastFailedAt),
+      parsePeerHintTime(current.lastSucceededAt)
+    )
+    const hintEventAt = Math.max(
+      parsePeerHintTime(hint.lastSeenAt),
+      parsePeerHintTime(hint.lastAttemptAt),
+      parsePeerHintTime(hint.lastFailedAt),
+      parsePeerHintTime(hint.lastSucceededAt)
+    )
+
+    byAddr.set(hint.addr, {
+      ...current,
+      ...hint,
+      lastSeenAt:
+        parsePeerHintTime(hint.lastSeenAt) >
+        parsePeerHintTime(current.lastSeenAt)
+          ? hint.lastSeenAt
+          : current.lastSeenAt,
+      lastAttemptAt:
+        parsePeerHintTime(hint.lastAttemptAt) >
+        parsePeerHintTime(current.lastAttemptAt)
+          ? hint.lastAttemptAt
+          : current.lastAttemptAt,
+      lastFailedAt:
+        parsePeerHintTime(hint.lastFailedAt) >
+        parsePeerHintTime(current.lastFailedAt)
+          ? hint.lastFailedAt
+          : current.lastFailedAt,
+      lastSucceededAt:
+        parsePeerHintTime(hint.lastSucceededAt) >
+        parsePeerHintTime(current.lastSucceededAt)
+          ? hint.lastSucceededAt
+          : current.lastSucceededAt,
+      failures:
+        hintEventAt >= currentEventAt
+          ? hint.failures || 0
+          : current.failures || 0,
+      source:
+        current.source === 'runtime' || hint.source !== 'runtime'
+          ? current.source
+          : hint.source,
+    })
+  })
+
+  return [...byAddr.values()]
+}
+
+function getPeerHintSourceRank(source) {
+  if (source === 'runtime') return 0
+  if (source === 'cache') return 1
+  return 3
+}
+
+function getPeerHintFailureBackoffMs(hint) {
+  const failures = Math.max(0, Number(hint && hint.failures) || 0)
+  if (failures < 1) return peerAssistRetryCooldownMs
+
+  return Math.min(
+    peerHintFailureMaxBackoffMs,
+    peerHintFailureBaseBackoffMs * 2 ** Math.min(failures - 1, 6)
+  )
+}
+
+function isPeerHintRetryable(hint, now = Date.now()) {
+  const lastAttemptAt = Math.max(
+    parsePeerHintTime(hint && hint.lastAttemptAt),
+    parsePeerHintTime(hint && hint.lastFailedAt)
+  )
+
+  return (
+    !lastAttemptAt || now - lastAttemptAt >= getPeerHintFailureBackoffMs(hint)
+  )
+}
+
+function getPeerHintSortScore(hint, now = Date.now()) {
+  const lastSeenAt = Math.max(
+    parsePeerHintTime(hint && hint.lastSeenAt),
+    parsePeerHintTime(hint && hint.lastSucceededAt)
+  )
+  const stalePenalty =
+    lastSeenAt > 0 && now - lastSeenAt > peerHintFreshnessMs ? 4 : 0
+  const failurePenalty = Math.min(5, Number(hint && hint.failures) || 0)
+
+  return (
+    getPeerHintSourceRank(hint && hint.source) + stalePenalty + failurePenalty
+  )
+}
+
+function sortPeerHintsForRetry(peers, now = Date.now()) {
+  return mergePeerHints(peers).sort((left, right) => {
+    const scoreDiff =
+      getPeerHintSortScore(left, now) - getPeerHintSortScore(right, now)
+    if (scoreDiff !== 0) return scoreDiff
+
+    const leftSeenAt = Math.max(
+      parsePeerHintTime(left.lastSeenAt),
+      parsePeerHintTime(left.lastSucceededAt)
+    )
+    const rightSeenAt = Math.max(
+      parsePeerHintTime(right.lastSeenAt),
+      parsePeerHintTime(right.lastSucceededAt)
+    )
+
+    return rightSeenAt - leftSeenAt
+  })
+}
+
+function toBootstrapPeerHints(bootstrapNodes) {
+  return toArray(bootstrapNodes)
+    .map((addr) =>
+      normalizePeerHint(
+        {addr},
+        {source: 'bootstrap', network: managedPeerNetwork}
+      )
+    )
+    .filter(Boolean)
+}
+
 function parsePeerHintList(value) {
   if (typeof value !== 'string') return []
   return uniqStrings(
@@ -109,6 +294,18 @@ function getConfiguredBootstrapNodes(existingConfig = {}) {
   ])
 }
 
+async function getEffectiveBootstrapNodes(existingConfig = {}) {
+  const cachedPeerHints = sortPeerHintsForRetry(await readPeerHints())
+    .filter((hint) => hint.source === 'runtime' || hint.source === 'cache')
+    .filter((hint) => isPeerHintRetryable(hint))
+    .map(({addr}) => addr)
+
+  return uniqStrings([
+    ...cachedPeerHints,
+    ...getConfiguredBootstrapNodes(existingConfig),
+  ])
+}
+
 async function ensureNodeConfig() {
   await fs.ensureDir(getNodeDir())
 
@@ -129,7 +326,7 @@ async function ensureNodeConfig() {
     ...currentConfig,
     IpfsConf: {
       ...((currentConfig && currentConfig.IpfsConf) || {}),
-      BootNodes: getConfiguredBootstrapNodes(currentConfig),
+      BootNodes: await getEffectiveBootstrapNodes(currentConfig),
     },
   }
 
@@ -147,12 +344,8 @@ async function readPeerHints() {
 
     const data = (await fs.readJson(peerHintsFile)) || {}
     return toArray(data.peers)
-      .map(({addr, lastSeenAt, source}) => ({
-        addr: normalizePeerAddr(addr),
-        lastSeenAt,
-        source: source || 'cache',
-      }))
-      .filter(({addr}) => addr.includes('/ipfs/'))
+      .map((peer) => normalizePeerHint(peer))
+      .filter((peer) => peer && peer.network === managedPeerNetwork)
   } catch (error) {
     logger.warn('cannot read node peer hints', {error: error.toString()})
     return []
@@ -160,26 +353,17 @@ async function readPeerHints() {
 }
 
 async function writePeerHints(peers) {
-  const dedupedPeers = uniqStrings(
-    peers.map((peer) => normalizePeerAddr(peer && peer.addr))
-  )
+  const dedupedPeers = mergePeerHints(peers)
     .slice(0, maxPersistedPeerHints)
-    .map((addr, index) => ({
-      addr,
-      lastSeenAt:
-        peers.find((peer) => normalizePeerAddr(peer && peer.addr) === addr)
-          ?.lastSeenAt || new Date().toISOString(),
-      source: (() => {
-        const matchedPeer = peers.find(
-          (peer) => normalizePeerAddr(peer && peer.addr) === addr
-        )
-
-        if (matchedPeer && matchedPeer.source) {
-          return matchedPeer.source
-        }
-
-        return index < defaultIpfsBootstrapNodes.length ? 'bootstrap' : 'cache'
-      })(),
+    .map((peer) => ({
+      addr: peer.addr,
+      source: peer.source || 'cache',
+      network: peer.network || managedPeerNetwork,
+      lastSeenAt: peer.lastSeenAt || new Date().toISOString(),
+      ...(peer.lastAttemptAt ? {lastAttemptAt: peer.lastAttemptAt} : {}),
+      ...(peer.lastFailedAt ? {lastFailedAt: peer.lastFailedAt} : {}),
+      ...(peer.lastSucceededAt ? {lastSucceededAt: peer.lastSucceededAt} : {}),
+      failures: Math.max(0, Number(peer.failures) || 0),
     }))
 
   await fs.ensureDir(getNodeDir())
@@ -200,9 +384,12 @@ async function rememberPeers(peers) {
   const nextPeers = [
     ...peers
       .map((peer) => ({
-        addr: normalizePeerAddr(peer && (peer.addr || peer)),
+        addr: normalizeRpcPeerAddr(peer),
         lastSeenAt: now,
+        lastSucceededAt: now,
         source: 'runtime',
+        network: managedPeerNetwork,
+        failures: 0,
       }))
       .filter(({addr}) => addr.includes('/ipfs/')),
     ...persistedPeers,
@@ -490,6 +677,7 @@ function startPeerAssist({port, apiKey, onLog, bootstrapNodes = []}) {
       const peers = toArray(await callNodeRpc(rpcClient, apiKey, 'net_peers'))
 
       if (syncStatus && syncStatus.syncing && peers.length > 0) {
+        await rememberPeers(peers)
         schedule(Math.min(peerAssistRetryIntervalMs, 5000))
         return
       }
@@ -505,16 +693,17 @@ function startPeerAssist({port, apiKey, onLog, bootstrapNodes = []}) {
       }
 
       const persistedPeerHints = await readPeerHints()
-      const candidateHints = uniqStrings([
-        ...persistedPeerHints.map(({addr}) => addr),
-        ...bootstrapNodes,
+      const candidateHints = sortPeerHintsForRetry([
+        ...persistedPeerHints,
+        ...toBootstrapPeerHints(bootstrapNodes),
       ])
 
-      const retryCandidates = candidateHints.filter((addr) => {
-        const lastAttemptAt = attemptTimestamps.get(addr)
+      const retryCandidates = candidateHints.filter((hint) => {
+        const lastAttemptAt = attemptTimestamps.get(hint.addr)
         return (
-          !lastAttemptAt ||
-          Date.now() - lastAttemptAt >= peerAssistRetryCooldownMs
+          isPeerHintRetryable(hint) &&
+          (!lastAttemptAt ||
+            Date.now() - lastAttemptAt >= peerAssistRetryCooldownMs)
         )
       })
 
@@ -523,18 +712,40 @@ function startPeerAssist({port, apiKey, onLog, bootstrapNodes = []}) {
         return
       }
 
-      emitLog(`retrying ${retryCandidates.length} peer hint(s)`)
+      const attemptedHints = retryCandidates.slice(0, 8)
+      const attemptedAt = new Date().toISOString()
+      emitLog(
+        `retrying ${attemptedHints.length}/${candidateHints.length} peer hint(s)`
+      )
 
-      await Promise.all(
-        retryCandidates.slice(0, 8).map(async (addr) => {
-          attemptTimestamps.set(addr, Date.now())
+      const updatedHints = await Promise.all(
+        attemptedHints.map(async (hint) => {
+          attemptTimestamps.set(hint.addr, Date.now())
           try {
-            await callNodeRpc(rpcClient, apiKey, 'net_addPeer', [addr])
+            await callNodeRpc(rpcClient, apiKey, 'net_addPeer', [hint.addr])
+            return {
+              ...hint,
+              lastAttemptAt: attemptedAt,
+              lastSucceededAt: attemptedAt,
+              failures: 0,
+            }
           } catch (error) {
-            emitLog(`peer hint failed: ${addr} (${error.message})`)
+            emitLog(`peer hint failed: ${hint.addr} (${error.message})`)
+            return {
+              ...hint,
+              lastAttemptAt: attemptedAt,
+              lastFailedAt: attemptedAt,
+              failures: (Number(hint.failures) || 0) + 1,
+            }
           }
         })
       )
+
+      await writePeerHints([
+        ...updatedHints,
+        ...persistedPeerHints,
+        ...toBootstrapPeerHints(bootstrapNodes),
+      ])
     } catch (error) {
       emitLog(`peer assist rpc probe failed (${error.message})`)
     } finally {
@@ -1130,4 +1341,12 @@ module.exports = {
   getNodeChainDbFolder,
   getNodeIpfsDir,
   tryStopNode,
+  __test__: {
+    getPeerHintFailureBackoffMs,
+    isPeerHintRetryable,
+    mergePeerHints,
+    normalizePeerHint,
+    sortPeerHintsForRetry,
+    toBootstrapPeerHints,
+  },
 }
