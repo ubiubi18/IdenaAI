@@ -2241,7 +2241,9 @@ export default function AiChatPage() {
                 </Text>
                 {Number.isFinite(runtimeProgressDisplay.progressPercent) ? (
                   <Text color="muted" fontSize="xs" fontWeight={600}>
-                    {runtimeProgressDisplay.progressPercent}%
+                    {t('Setup {{percent}}%', {
+                      percent: runtimeProgressDisplay.progressPercent,
+                    })}
                   </Text>
                 ) : null}
               </Flex>

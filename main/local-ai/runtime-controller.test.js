@@ -7,6 +7,7 @@ const {
   buildManagedRuntimeEnv,
   createDefaultRuntimeController,
   estimateManagedRuntimeInstallBytes,
+  formatSnapshotDownloadDetail,
   resolveManagedLocalRuntimeFlavor,
   resolveManagedMolmo2RuntimeFlavor,
   sha256File,
@@ -165,6 +166,15 @@ describe('managed local runtime flavor selection', () => {
     )
 
     expect(heavyInstallBytes).toBeGreaterThan(lightInstallBytes)
+  })
+
+  it('shows model-download percent separately from setup progress', () => {
+    const detail = formatSnapshotDownloadDetail(
+      900 * 1024 * 1024,
+      29 * 1024 * 1024 * 1024
+    )
+
+    expect(detail).toBe('Model download ~3.0%: ~0.9 GB of ~29 GB so far.')
   })
 
   it('requires explicit trust approval before starting the managed Molmo2 runtime', async () => {

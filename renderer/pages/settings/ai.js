@@ -5474,7 +5474,10 @@ export default function AiSettingsPage() {
                           localAiRuntimeProgressDisplay.progressPercent
                         ) ? (
                           <Text color="muted" fontSize="xs" fontWeight={600}>
-                            {localAiRuntimeProgressDisplay.progressPercent}%
+                            {t('Setup {{percent}}%', {
+                              percent:
+                                localAiRuntimeProgressDisplay.progressPercent,
+                            })}
                           </Text>
                         ) : null}
                       </Flex>
@@ -5935,7 +5938,10 @@ export default function AiSettingsPage() {
                                 fontSize="xs"
                                 fontWeight={600}
                               >
-                                {localAiRuntimeProgressDisplay.progressPercent}%
+                                {t('Setup {{percent}}%', {
+                                  percent:
+                                    localAiRuntimeProgressDisplay.progressPercent,
+                                })}
                               </Text>
                             ) : null}
                           </Flex>
