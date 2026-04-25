@@ -158,6 +158,10 @@ const PYTHON_EXECUTABLE_PATTERN = /^(?:python(?:3(?:\.\d+)?)?|py)(?:\.exe)?$/iu
 const OLLAMA_EXECUTABLE_PATTERN = /^ollama(?:\.exe)?$/iu
 const MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES = 4
 const MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_RETRY_DELAY_MS = 2000
+const MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_LOCK_FILE =
+  '.idenaai-snapshot-download.lock'
+const MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_LOCK_STALE_MS = 30 * 1000
+const MANAGED_RUNTIME_STALE_DOWNLOADER_TERM_WAIT_MS = 1500
 
 function trimString(value) {
   return String(value || '').trim()
@@ -308,6 +312,238 @@ function createRuntimeControllerError(code, message) {
   const error = new Error(message)
   error.code = code
   return error
+}
+
+function createLockOwnerId() {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return crypto.randomBytes(16).toString('hex')
+}
+
+function managedSnapshotDownloadLockPath(snapshotDir) {
+  return path.join(snapshotDir, MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_LOCK_FILE)
+}
+
+function isProcessAlive(pid) {
+  const normalizedPid = Number.parseInt(pid, 10)
+
+  if (!Number.isFinite(normalizedPid) || normalizedPid <= 0) {
+    return false
+  }
+
+  try {
+    process.kill(normalizedPid, 0)
+    return true
+  } catch (error) {
+    return Boolean(error && error.code === 'EPERM')
+  }
+}
+
+function parseManagedSnapshotDownloadProcesses(psOutput, snapshotDir) {
+  const requestedSnapshotDir = trimString(snapshotDir)
+
+  if (!requestedSnapshotDir) {
+    return []
+  }
+
+  const normalizedSnapshotDir = path.resolve(requestedSnapshotDir)
+
+  return String(psOutput || '')
+    .split(/\r?\n/u)
+    .map((line) => {
+      const match = String(line || '').match(/^\s*(\d+)\s+(.+)$/u)
+
+      if (!match) {
+        return null
+      }
+
+      const pid = Number.parseInt(match[1], 10)
+      const command = match[2]
+
+      if (
+        !Number.isFinite(pid) ||
+        pid === process.pid ||
+        !command.includes('snapshot_download') ||
+        !command.includes('huggingface_hub') ||
+        !command.includes(normalizedSnapshotDir)
+      ) {
+        return null
+      }
+
+      return {pid, command}
+    })
+    .filter(Boolean)
+}
+
+function findManagedSnapshotDownloadProcesses(snapshotDir) {
+  if (process.platform === 'win32') {
+    return []
+  }
+
+  const result = spawnSync('ps', ['-axo', 'pid=,command='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+
+  if (result.error || result.status !== 0) {
+    return []
+  }
+
+  return parseManagedSnapshotDownloadProcesses(result.stdout, snapshotDir)
+}
+
+async function stopStaleManagedSnapshotDownloadProcesses(snapshotDir) {
+  const initialProcesses = findManagedSnapshotDownloadProcesses(snapshotDir)
+
+  if (!initialProcesses.length) {
+    return []
+  }
+
+  for (const processInfo of initialProcesses) {
+    try {
+      process.kill(processInfo.pid, 'SIGTERM')
+    } catch {
+      // The stale downloader may have exited after process discovery.
+    }
+  }
+
+  await sleep(MANAGED_RUNTIME_STALE_DOWNLOADER_TERM_WAIT_MS)
+
+  const initialPids = new Set(initialProcesses.map((item) => item.pid))
+  const remainingProcesses = findManagedSnapshotDownloadProcesses(
+    snapshotDir
+  ).filter((item) => initialPids.has(item.pid))
+
+  for (const processInfo of remainingProcesses) {
+    try {
+      process.kill(processInfo.pid, 'SIGKILL')
+    } catch {
+      // Best effort stale downloader cleanup.
+    }
+  }
+
+  return initialProcesses
+}
+
+async function readManagedSnapshotDownloadLock(lockPath) {
+  try {
+    const raw = await fs.readFile(lockPath, 'utf8')
+    const parsed = JSON.parse(raw)
+
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : null
+  } catch {
+    return null
+  }
+}
+
+function isManagedSnapshotDownloadLockAlive(lock = null) {
+  if (!lock || typeof lock !== 'object') {
+    return false
+  }
+
+  const createdAt = Date.parse(lock.createdAt || '')
+  const isFresh =
+    Number.isFinite(createdAt) &&
+    Date.now() - createdAt < MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_LOCK_STALE_MS
+
+  return isFresh || isProcessAlive(lock.pid)
+}
+
+async function removeStaleManagedSnapshotDownloadLock(lockPath) {
+  const lock = await readManagedSnapshotDownloadLock(lockPath)
+
+  if (!lock || !isManagedSnapshotDownloadLockAlive(lock)) {
+    await fs.remove(lockPath)
+    return true
+  }
+
+  return false
+}
+
+async function acquireManagedSnapshotDownloadLock(snapshotDir, metadata = {}) {
+  await ensurePrivateDirectory(snapshotDir)
+
+  const lockPath = managedSnapshotDownloadLockPath(snapshotDir)
+  const ownerId = createLockOwnerId()
+  const lock = {
+    ownerId,
+    pid: process.pid,
+    snapshotDir: path.resolve(snapshotDir),
+    createdAt: new Date().toISOString(),
+    ...metadata,
+  }
+
+  await removeStaleManagedSnapshotDownloadLock(lockPath)
+
+  try {
+    await fs.writeFile(lockPath, JSON.stringify(lock, null, 2), {
+      flag: 'wx',
+      mode: 0o600,
+    })
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      const existingLock = await readManagedSnapshotDownloadLock(lockPath)
+
+      if (isManagedSnapshotDownloadLockAlive(existingLock)) {
+        throw createRuntimeControllerError(
+          'managed_runtime_snapshot_download_busy',
+          'A managed local model download is already running for this runtime. Wait for it to finish or stop the other IdenaAI window before retrying.'
+        )
+      }
+
+      await fs.remove(lockPath)
+      await fs.writeFile(lockPath, JSON.stringify(lock, null, 2), {
+        flag: 'wx',
+        mode: 0o600,
+      })
+      return {lockPath, ownerId}
+    }
+
+    throw error
+  }
+
+  return {lockPath, ownerId}
+}
+
+async function releaseManagedSnapshotDownloadLock(lockHandle = null) {
+  if (!lockHandle || !lockHandle.lockPath || !lockHandle.ownerId) {
+    return
+  }
+
+  const lock = await readManagedSnapshotDownloadLock(lockHandle.lockPath)
+
+  if (!lock || lock.ownerId === lockHandle.ownerId) {
+    await fs.remove(lockHandle.lockPath)
+  }
+}
+
+async function removeStaleHuggingFaceDownloadLocks(snapshotDir) {
+  const downloadCacheDir = path.join(
+    snapshotDir,
+    '.cache',
+    'huggingface',
+    'download'
+  )
+
+  let entries = []
+
+  try {
+    entries = await fs.readdir(downloadCacheDir)
+  } catch {
+    return []
+  }
+
+  const lockFiles = entries.filter((entry) => entry.endsWith('.lock'))
+
+  for (const lockFile of lockFiles) {
+    await fs.remove(path.join(downloadCacheDir, lockFile))
+  }
+
+  return lockFiles
 }
 
 function isRetryableManagedSnapshotDownloadError(error) {
@@ -1410,92 +1646,124 @@ async function downloadManagedMolmo2Snapshot(
   }
 
   try {
-    let downloadAttempt = 0
+    const lockHandle = await acquireManagedSnapshotDownloadLock(snapshotDir, {
+      runtimeFamily: config ? config.runtimeFamily : '',
+      modelId: config ? config.modelId : '',
+      revision: config ? config.revision : '',
+    })
 
-    while (downloadAttempt < MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES) {
-      downloadAttempt += 1
+    try {
+      const stoppedDownloaders =
+        await stopStaleManagedSnapshotDownloadProcesses(snapshotDir)
 
-      try {
-        await runCommand({
-          command: pythonPath,
-          args: [
-            '-c',
-            [
-              'import json',
-              'import sys',
-              'from huggingface_hub import snapshot_download',
-              'repo_id = sys.argv[1]',
-              'revision = sys.argv[2]',
-              'local_dir = sys.argv[3]',
-              'allow_patterns = json.loads(sys.argv[4])',
-              'snapshot_download(',
-              '    repo_id=repo_id,',
-              '    revision=revision,',
-              '    local_dir=local_dir,',
-              '    allow_patterns=allow_patterns,',
-              ')',
-            ].join('\n'),
-            config.modelId,
-            config.revision,
-            snapshotDir,
-            JSON.stringify(config.allowPatterns),
-          ],
-          env,
-          label: 'Managed Local AI model snapshot download',
-          onOutput(chunk) {
-            const detail = String(chunk || '')
-              .split(/\r?\n/u)
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .slice(-1)[0]
-
-            if (!detail) {
-              return
-            }
-
-            emitRuntimeProgress(onProgress, {
-              status: 'installing',
-              stage: 'download_model_snapshot',
-              message: `Downloading the pinned ${displayName} runtime snapshot and model weights. This can take a while on first use.`,
-              detail,
-              progressPercent: 62,
-              stageIndex: 5,
-              stageCount: MANAGED_MOLMO2_PROGRESS_STAGE_COUNT,
-            })
-          },
-        })
-        break
-      } catch (error) {
-        const retryableDownloadError =
-          isRetryableManagedSnapshotDownloadError(error)
-
-        if (
-          downloadAttempt >= MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES ||
-          !retryableDownloadError
-        ) {
-          if (retryableDownloadError) {
-            throw createRuntimeControllerError(
-              'managed_runtime_snapshot_download_interrupted',
-              `The managed ${displayName} model download was interrupted repeatedly by the network. Retry Local AI startup once more. If this keeps happening, set an authenticated Hugging Face token for higher download reliability.`
-            )
-          }
-
-          throw error
-        }
-
+      if (stoppedDownloaders.length) {
         emitRuntimeProgress(onProgress, {
           status: 'installing',
           stage: 'download_model_snapshot',
-          message: `The ${displayName} model download was interrupted. Retrying from the partially downloaded snapshot now.`,
-          detail: `Retry ${
-            downloadAttempt + 1
-          } of ${MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES}…`,
+          message: `Stopped ${
+            stoppedDownloaders.length
+          } stale ${displayName} model download worker${
+            stoppedDownloaders.length === 1 ? '' : 's'
+          } before resuming.`,
+          detail:
+            'Partial model files were kept. Stale cache locks were cleared before the retry.',
           progressPercent: 62,
           stageIndex: 5,
           stageCount: MANAGED_MOLMO2_PROGRESS_STAGE_COUNT,
         })
-        await sleep(MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_RETRY_DELAY_MS)
       }
+
+      await removeStaleHuggingFaceDownloadLocks(snapshotDir)
+
+      let downloadAttempt = 0
+
+      while (downloadAttempt < MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES) {
+        downloadAttempt += 1
+
+        try {
+          await runCommand({
+            command: pythonPath,
+            args: [
+              '-c',
+              [
+                'import json',
+                'import sys',
+                'from huggingface_hub import snapshot_download',
+                'repo_id = sys.argv[1]',
+                'revision = sys.argv[2]',
+                'local_dir = sys.argv[3]',
+                'allow_patterns = json.loads(sys.argv[4])',
+                'snapshot_download(',
+                '    repo_id=repo_id,',
+                '    revision=revision,',
+                '    local_dir=local_dir,',
+                '    allow_patterns=allow_patterns,',
+                ')',
+              ].join('\n'),
+              config.modelId,
+              config.revision,
+              snapshotDir,
+              JSON.stringify(config.allowPatterns),
+            ],
+            env,
+            label: 'Managed Local AI model snapshot download',
+            onOutput(chunk) {
+              const detail = String(chunk || '')
+                .split(/\r?\n/u)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .slice(-1)[0]
+
+              if (!detail) {
+                return
+              }
+
+              emitRuntimeProgress(onProgress, {
+                status: 'installing',
+                stage: 'download_model_snapshot',
+                message: `Downloading the pinned ${displayName} runtime snapshot and model weights. This can take a while on first use.`,
+                detail,
+                progressPercent: 62,
+                stageIndex: 5,
+                stageCount: MANAGED_MOLMO2_PROGRESS_STAGE_COUNT,
+              })
+            },
+          })
+          break
+        } catch (error) {
+          const retryableDownloadError =
+            isRetryableManagedSnapshotDownloadError(error)
+
+          if (
+            downloadAttempt >= MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES ||
+            !retryableDownloadError
+          ) {
+            if (retryableDownloadError) {
+              throw createRuntimeControllerError(
+                'managed_runtime_snapshot_download_interrupted',
+                `The managed ${displayName} model download was interrupted repeatedly by the network. Retry Local AI startup once more. If this keeps happening, set an authenticated Hugging Face token for higher download reliability.`
+              )
+            }
+
+            throw error
+          }
+
+          emitRuntimeProgress(onProgress, {
+            status: 'installing',
+            stage: 'download_model_snapshot',
+            message: `The ${displayName} model download was interrupted. Retrying from the partially downloaded snapshot now.`,
+            detail: `Retry ${
+              downloadAttempt + 1
+            } of ${MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_MAX_RETRIES}…`,
+            progressPercent: 62,
+            stageIndex: 5,
+            stageCount: MANAGED_MOLMO2_PROGRESS_STAGE_COUNT,
+          })
+          await sleep(MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_RETRY_DELAY_MS)
+        }
+      }
+    } finally {
+      await releaseManagedSnapshotDownloadLock(lockHandle)
     }
   } finally {
     if (snapshotProgressTimer) {
@@ -2117,6 +2385,7 @@ module.exports = {
   buildManagedRuntimeEnv,
   createDefaultRuntimeController,
   isManagedLocalHttpRuntime,
+  parseManagedSnapshotDownloadProcesses,
   resolveManagedLocalRuntimeFlavor,
   resolveManagedMolmo2RuntimeFlavor,
   sha256File,
