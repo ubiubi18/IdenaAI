@@ -56,11 +56,11 @@ import {
   DEFAULT_LOCAL_AI_SETTINGS,
   DEFAULT_LOCAL_AI_PUBLIC_MODEL_ID,
   DEFAULT_LOCAL_AI_PUBLIC_VISION_ID,
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
   INTERNVL3_5_1B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_1B_RESEARCH_RUNTIME_MODEL,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL,
-  MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_O_RESEARCH_RUNTIME_MODEL,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
@@ -249,25 +249,25 @@ const DEFAULT_SYSTEM_RESERVE_GIB = 6
 const MIN_SYSTEM_RESERVE_GIB = 0
 const MAX_SYSTEM_RESERVE_GIB = 32
 const EXTERNAL_PROVIDER_SESSION_TARGET_GIB = 8
-const DEFAULT_LOCAL_AI_MEMORY_REFERENCE = 'molmo2-o-7b'
+const DEFAULT_LOCAL_AI_MEMORY_REFERENCE = 'molmo2-4b'
 const LOCAL_AI_MEMORY_REFERENCE_PROFILES = [
   {
-    value: 'molmo2-o-7b',
-    label: `Managed ${MOLMO2_O_RESEARCH_RUNTIME_MODEL} (default target)`,
-    shortLabel: 'Molmo2-O 7B',
-    minimumGiB: 16,
-    comfortableGiB: 32,
-    detail:
-      'Pinned multimodal research runtime. This is the main local-AI target IdenaAI currently aims to support well.',
-  },
-  {
     value: 'molmo2-4b',
-    label: `Managed ${MOLMO2_4B_RESEARCH_RUNTIME_MODEL} (compact target)`,
+    label: `Managed ${MOLMO2_4B_RESEARCH_RUNTIME_MODEL} (default target)`,
     shortLabel: 'Molmo2 4B',
     minimumGiB: 12,
     comfortableGiB: 18,
     detail:
-      'Closest smaller same-family Molmo option. There is no managed 3B Molmo release in this lane right now.',
+      'Default managed runtime for community desktops. It is smaller than Molmo2-O 7B and leaves more RAM for the node and app.',
+  },
+  {
+    value: 'molmo2-o-7b',
+    label: `Managed ${MOLMO2_O_RESEARCH_RUNTIME_MODEL} (research target)`,
+    shortLabel: 'Molmo2-O 7B',
+    minimumGiB: 16,
+    comfortableGiB: 32,
+    detail:
+      'Heavier multimodal research runtime. Use it only when this desktop has enough RAM and the compact runtime is not sufficient.',
   },
   {
     value: 'internvl3.5-1b',
@@ -2042,10 +2042,13 @@ export default function AiSettingsPage() {
       ...pending,
       localAiPatch: {
         ...((pending && pending.localAiPatch) || {}),
-        ...buildManagedLocalAiTrustApprovalPatch(),
+        ...buildManagedLocalAiTrustApprovalPatch({
+          ...localAi,
+          ...((pending && pending.localAiPatch) || {}),
+        }),
       },
     })
-  }, [managedRuntimeTrustRequest, startLocalAiWithSettings])
+  }, [localAi, managedRuntimeTrustRequest, startLocalAiWithSettings])
 
   const resetRuntimePathDraft = useCallback(() => {
     const recommendedPreset = buildRecommendedRuntimePresetForBackend(
@@ -2070,6 +2073,65 @@ export default function AiSettingsPage() {
         ),
       }),
     [localAi, startLocalAiWithSettings, t]
+  )
+
+  const stopLocalAiRuntime = useCallback(
+    async ({abortDownload = false} = {}) => {
+      setIsStoppingLocalAi(true)
+      activeLocalAiRuntimePayloadKeyRef.current = ''
+      setActiveLocalAiRuntimePayload(null)
+
+      try {
+        const result = await ensureLocalAiBridge().stop()
+        setLocalAiStatusResult(
+          normalizeLocalAiStatusResult(
+            {
+              ...(result || {}),
+              enabled: true,
+              status: 'error',
+              runtime:
+                localAi.runtimeBackend ||
+                DEFAULT_LOCAL_AI_SETTINGS.runtimeBackend,
+              runtimeBackend:
+                localAi.runtimeBackend ||
+                DEFAULT_LOCAL_AI_SETTINGS.runtimeBackend,
+              runtimeType: resolveLocalAiWireRuntimeType(localAi),
+              baseUrl: localAiRuntimeUrl,
+              runtimeProgress: null,
+              error: t('Local AI runtime is idle.'),
+              lastError: t('Local AI runtime is idle.'),
+            },
+            localAiRuntimeUrl
+          )
+        )
+
+        notify(
+          abortDownload
+            ? t('Local AI download aborted')
+            : t('Local AI runtime stopped'),
+          abortDownload
+            ? t(
+                'The managed runtime setup was stopped. Partial model files can be resumed later or replaced by another model choice.'
+              )
+            : t(
+                'The optional Local AI bridge is now idle. Existing cloud providers were not changed.'
+              ),
+          'info'
+        )
+      } catch (error) {
+        notify(
+          abortDownload
+            ? t('Unable to abort Local AI download')
+            : t('Unable to stop Local AI'),
+          formatErrorForToast(error),
+          'error'
+        )
+      } finally {
+        setIsStartingLocalAi(false)
+        setIsStoppingLocalAi(false)
+      }
+    },
+    [localAi, localAiRuntimeUrl, notify, t]
   )
 
   const saveRuntimePathDraft = useCallback(
@@ -3342,7 +3404,8 @@ export default function AiSettingsPage() {
     ]
   )
   const activeManagedRuntimeFamily =
-    getManagedLocalRuntimeFamily(localAi) || MOLMO2_O_RESEARCH_RUNTIME_FAMILY
+    getManagedLocalRuntimeFamily(localAi) ||
+    DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
   const selectedMemoryManagedRuntimeFamily =
     getManagedLocalRuntimeFamilyForMemoryReference(
       selectedLocalAiMemoryReference.value
@@ -3350,7 +3413,7 @@ export default function AiSettingsPage() {
   const oneClickManagedRuntimeFamily =
     selectedMemoryManagedRuntimeFamily ||
     activeManagedRuntimeFamily ||
-    MOLMO2_O_RESEARCH_RUNTIME_FAMILY
+    DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
   const selectedMemoryReferenceIsManagedRuntime = Boolean(
     selectedMemoryManagedRuntimeFamily
   )
@@ -5634,16 +5697,16 @@ export default function AiSettingsPage() {
 
               <Stack isInline spacing={2} flexWrap="wrap">
                 <PrimaryButton
-                  onClick={applyMolmo2OResearchSetup}
-                  isLoading={isStartingLocalAi}
-                >
-                  {t('Install recommended on-device AI')}
-                </PrimaryButton>
-                <SecondaryButton
                   onClick={applyMolmo24BCompactSetup}
                   isLoading={isStartingLocalAi}
                 >
-                  {t('Try compact Molmo2-4B')}
+                  {t('Install recommended Molmo2-4B')}
+                </PrimaryButton>
+                <SecondaryButton
+                  onClick={applyMolmo2OResearchSetup}
+                  isLoading={isStartingLocalAi}
+                >
+                  {t('Try stronger Molmo2-O 7B')}
                 </SecondaryButton>
                 <SecondaryButton
                   onClick={applyInternVl351BLightSetup}
@@ -6267,6 +6330,17 @@ export default function AiSettingsPage() {
                     >
                       {localAiStartButtonLabel}
                     </SecondaryButton>
+                    {localAiRuntimeProgress ? (
+                      <SecondaryButton
+                        isDisabled={!localAi.enabled || isStoppingLocalAi}
+                        isLoading={isStoppingLocalAi}
+                        onClick={() =>
+                          stopLocalAiRuntime({abortDownload: true})
+                        }
+                      >
+                        {t('Abort download')}
+                      </SecondaryButton>
+                    ) : null}
                     <SecondaryButton
                       isLoading={isStartingLocalAi}
                       onClick={fixLocalAiAutomatically}
@@ -6278,44 +6352,8 @@ export default function AiSettingsPage() {
                     </SecondaryButton>
                     <SecondaryButton
                       isDisabled={!localAi.enabled || isStoppingLocalAi}
-                      onClick={async () => {
-                        setIsStoppingLocalAi(true)
-
-                        try {
-                          await ensureLocalAiBridge().stop()
-                          setLocalAiStatusResult(
-                            normalizeLocalAiStatusResult(
-                              {
-                                enabled: true,
-                                status: 'error',
-                                runtime:
-                                  localAi.runtimeBackend ||
-                                  DEFAULT_LOCAL_AI_SETTINGS.runtimeBackend,
-                                baseUrl: localAiRuntimeUrl,
-                                error: t('Local AI runtime is idle.'),
-                                lastError: t('Local AI runtime is idle.'),
-                              },
-                              localAiRuntimeUrl
-                            )
-                          )
-
-                          notify(
-                            t('Local AI runtime stopped'),
-                            t(
-                              'The optional Local AI bridge is now idle. Existing cloud providers were not changed.'
-                            ),
-                            'info'
-                          )
-                        } catch (error) {
-                          notify(
-                            t('Unable to stop Local AI'),
-                            formatErrorForToast(error),
-                            'error'
-                          )
-                        } finally {
-                          setIsStoppingLocalAi(false)
-                        }
-                      }}
+                      isLoading={isStoppingLocalAi}
+                      onClick={() => stopLocalAiRuntime()}
                     >
                       {t('Stop local runtime')}
                     </SecondaryButton>
