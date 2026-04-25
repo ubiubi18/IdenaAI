@@ -506,20 +506,15 @@ describe('local-ai sidecar', () => {
         input: 'Hello',
       })
     ).resolves.toMatchObject({
-      ok: true,
-      status: 'ok',
+      ok: false,
+      status: 'config_error',
       provider: 'local-ai',
       runtimeType: 'ollama',
-      model: 'qwen3.5:9b',
-      content: 'Hello from the fixed runtime.',
+      model: '',
+      content: null,
+      error: 'model_required',
     })
-    expect(httpClient.post).toHaveBeenCalledWith(
-      'http://127.0.0.1:11434/api/chat',
-      expect.objectContaining({
-        model: 'qwen3.5:9b',
-      }),
-      expect.any(Object)
-    )
+    expect(httpClient.post).not.toHaveBeenCalled()
   })
 
   it('rejects malformed Ollama model identifiers before sending a request', async () => {

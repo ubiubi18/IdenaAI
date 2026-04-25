@@ -79,7 +79,10 @@ import {viewVotingHref} from '../../screens/oracles/utils'
 import {useHardFork} from '../../screens/hardfork/hooks'
 import {ChevronRightIcon, GithubIcon} from './icons'
 import {AiEnableDialog} from './ai-enable-dialog'
-import {buildMolmo2OResearchPreset} from '../utils/local-ai-settings'
+import {
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
+  buildManagedLocalRuntimePreset,
+} from '../utils/local-ai-settings'
 import {buildLocalAiRuntimePayload} from '../utils/ai-provider-readiness'
 import {
   useAutoStartLottery,
@@ -554,7 +557,9 @@ function BenchmarkResearchBanner() {
           if (provider === 'local-ai') {
             updateLocalAiSettings({
               enabled: true,
-              ...buildMolmo2OResearchPreset(),
+              ...buildManagedLocalRuntimePreset(
+                DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
+              ),
             })
           }
           updateAiSolverSettings({
@@ -951,7 +956,7 @@ function OfflineApp() {
     !nodeFailed &&
     nodeProgress
 
-  const isExternalNodeOffline = useExternalNode || !runInternalNode
+  const isNodeOfflineActionVisible = useExternalNode || !runInternalNode
 
   const isStartingBuiltinNode =
     !useExternalNode &&
@@ -1005,12 +1010,12 @@ function OfflineApp() {
         </Stack>
       )}
 
-      {isExternalNodeOffline && (
+      {isNodeOfflineActionVisible && (
         <Stack spacing={5} w={416}>
           <Heading fontSize="lg" fontWeight={500}>
-            {t('Your {{nodeType}} node is offline', {
-              nodeType: useExternalNode ? 'external' : '',
-            })}
+            {useExternalNode
+              ? t('Your external node is offline')
+              : t('Built-in node is off')}
           </Heading>
           <Stack spacing={4} align="flex-start">
             <PrimaryButton
@@ -1022,13 +1027,23 @@ function OfflineApp() {
                 }
               }}
             >
-              {t('Run the built-in node')}
+              {!runInternalNode
+                ? t('Start the built-in node')
+                : t('Run the built-in node')}
             </PrimaryButton>
             <Text color="xwhite.050" fontSize="mdx">
-              <Trans i18nKey="nodeOfflineCheckSettings" t={t}>
-                If you have already node running, please check your connection{' '}
-                <TextLink href="/settings/node">settings</TextLink>
-              </Trans>
+              {useExternalNode ? (
+                <Trans i18nKey="nodeOfflineCheckSettings" t={t}>
+                  If you have already node running, please check your connection{' '}
+                  <TextLink href="/settings/node">settings</TextLink>
+                </Trans>
+              ) : (
+                <Trans i18nKey="builtInNodeOffCheckSettings" t={t}>
+                  IdenaAI will not start or sync a local node automatically.
+                  Change this in{' '}
+                  <TextLink href="/settings/node">settings</TextLink>.
+                </Trans>
+              )}
             </Text>
           </Stack>
         </Stack>
