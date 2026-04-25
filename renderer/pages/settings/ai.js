@@ -208,6 +208,7 @@ const DEFAULT_AI_SETTINGS = {
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
+  shortSessionFlipVisionMode: 'composite',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -4268,6 +4269,36 @@ export default function AiSettingsPage() {
                     </Stack>
                   </Box>
                 ) : null}
+
+                <SettingsFormControl>
+                  <SettingsFormLabel>
+                    {t('Short-session vision mode')}
+                  </SettingsFormLabel>
+                  <Select
+                    value={aiSolver.shortSessionFlipVisionMode || 'composite'}
+                    onChange={(e) =>
+                      updateAiSolverSettings({
+                        shortSessionFlipVisionMode: e.target.value,
+                      })
+                    }
+                    w="sm"
+                  >
+                    <option value="composite">
+                      {t('Fast composite (all 6 in parallel)')}
+                    </option>
+                    <option value="frames_single_pass">
+                      {t('Frame-by-frame in one pass')}
+                    </option>
+                    <option value="frames_two_pass">
+                      {t('Frame analysis then decision')}
+                    </option>
+                  </Select>
+                  <Text color="muted" fontSize="sm" mt={1}>
+                    {t(
+                      'Short-session AI now solves all regular flips as separate parallel requests. Composite is fastest; frame modes are slower and more expensive but give the model all panels.'
+                    )}
+                  </Text>
+                </SettingsFormControl>
 
                 <Box
                   borderWidth="1px"

@@ -14,7 +14,7 @@ export const VALIDATION_NODE_STABILITY_GRACE_MS = 20 * 1000
 export const SHORT_SESSION_AUTO_SUBMIT_BUFFER_SECONDS = 5
 export const SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS = 15
 export const LONG_SESSION_AUTO_SUBMIT_BUFFER_SECONDS = 15
-export const AUTO_REPORT_REVIEW_RUNTIME_BUFFER_MS = 20 * 1000
+export const AUTO_REPORT_REVIEW_RUNTIME_BUFFER_MS = 3 * 60 * 1000
 export const SHORT_SESSION_RESULT_TELEMETRY_HOLD_MS = 6 * 1000
 
 const VALIDATION_SESSION_STORAGE_KEY = 'idena-validation-session'
@@ -761,6 +761,93 @@ function normalizePersistableValidationFlips(flips) {
     : []
 }
 
+function hasReadyPersistedFlipsWithoutRenderableImages(flips) {
+  return (
+    Array.isArray(flips) &&
+    flips.some((flip) => flip?.ready && String(flip.hash || '').trim()) &&
+    !hasRenderableValidationFlips(flips)
+  )
+}
+
+function normalizeRestorableLongSessionNavValue(navValue) {
+  if (!navValue || typeof navValue !== 'object' || Array.isArray(navValue)) {
+    return navValue
+  }
+
+  return Object.fromEntries(
+    Object.entries(navValue).map(([key, value]) => [
+      key,
+      value === 'fetching' ? 'idle' : value,
+    ])
+  )
+}
+
+function normalizeRestorableValidationStateValue(value, context = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+
+  const normalizedValue = {...value}
+
+  if (
+    normalizedValue.shortSession &&
+    typeof normalizedValue.shortSession === 'object' &&
+    !context.shortSessionSubmittedAt &&
+    hasReadyPersistedFlipsWithoutRenderableImages(context.shortFlips)
+  ) {
+    normalizedValue.shortSession = {
+      ...normalizedValue.shortSession,
+      fetch: {
+        polling: {
+          fetchHashes: 'fetching',
+          fetchFlips: 'fetching',
+        },
+      },
+    }
+  }
+
+  if (
+    normalizedValue.longSession &&
+    typeof normalizedValue.longSession === 'object' &&
+    !context.submitLongAnswersHash &&
+    hasReadyPersistedFlipsWithoutRenderableImages(context.longFlips)
+  ) {
+    const longFetch =
+      normalizedValue.longSession.fetch &&
+      typeof normalizedValue.longSession.fetch === 'object'
+        ? normalizedValue.longSession.fetch
+        : {}
+
+    normalizedValue.longSession = {
+      ...normalizedValue.longSession,
+      fetch: {
+        keywords: longFetch.keywords || 'fetching',
+        ...longFetch,
+        flips: 'fetchHashes',
+      },
+    }
+  }
+
+  if (
+    normalizedValue.longSession &&
+    typeof normalizedValue.longSession === 'object' &&
+    normalizedValue.longSession.solve &&
+    typeof normalizedValue.longSession.solve === 'object'
+  ) {
+    const longSolve = normalizedValue.longSession.solve
+
+    normalizedValue.longSession = {
+      ...normalizedValue.longSession,
+      solve: {
+        ...longSolve,
+        nav: normalizeRestorableLongSessionNavValue(longSolve.nav),
+      },
+    }
+  }
+
+  return normalizedValue
+}
+
 function buildPersistedValidationEvent() {
   return {
     type: PERSISTED_VALIDATION_EVENT_TYPE,
@@ -810,19 +897,20 @@ function normalizeRestorableValidationStateDefinition(stateDef) {
     return null
   }
 
+  const context = {
+    ...stateDef.context,
+    shortFlips: normalizePersistableValidationFlips(
+      stateDef.context?.shortFlips
+    ),
+    longFlips: normalizePersistableValidationFlips(stateDef.context?.longFlips),
+  }
+
   return {
     ...stateDef,
+    value: normalizeRestorableValidationStateValue(stateDef.value, context),
     event: buildPersistedValidationEvent(),
     _event: buildPersistedValidationScxmlEvent(),
-    context: {
-      ...stateDef.context,
-      shortFlips: normalizePersistableValidationFlips(
-        stateDef.context?.shortFlips
-      ),
-      longFlips: normalizePersistableValidationFlips(
-        stateDef.context?.longFlips
-      ),
-    },
+    context,
     children:
       stateDef.children && typeof stateDef.children === 'object'
         ? stateDef.children
