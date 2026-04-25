@@ -75,6 +75,7 @@ import {
   buildMolmo24BCompactPreset,
   buildLocalAiRuntimePreset,
   buildLocalAiSettings,
+  getManagedLocalRuntimeFamilyForMemoryReference,
   getManagedLocalRuntimeInstallProfile,
   getLocalAiEndpointSafety,
   hasManagedLocalAiTrustApproval,
@@ -3340,13 +3341,23 @@ export default function AiSettingsPage() {
       otherProcessesMemoryGiB,
     ]
   )
-  const defaultManagedInstallProfile = useMemo(
-    () =>
-      getManagedLocalRuntimeInstallProfile(MOLMO2_O_RESEARCH_RUNTIME_FAMILY),
-    []
-  )
   const activeManagedRuntimeFamily =
     getManagedLocalRuntimeFamily(localAi) || MOLMO2_O_RESEARCH_RUNTIME_FAMILY
+  const selectedMemoryManagedRuntimeFamily =
+    getManagedLocalRuntimeFamilyForMemoryReference(
+      selectedLocalAiMemoryReference.value
+    )
+  const oneClickManagedRuntimeFamily =
+    selectedMemoryManagedRuntimeFamily ||
+    activeManagedRuntimeFamily ||
+    MOLMO2_O_RESEARCH_RUNTIME_FAMILY
+  const selectedMemoryReferenceIsManagedRuntime = Boolean(
+    selectedMemoryManagedRuntimeFamily
+  )
+  const oneClickManagedInstallProfile = useMemo(
+    () => getManagedLocalRuntimeInstallProfile(oneClickManagedRuntimeFamily),
+    [oneClickManagedRuntimeFamily]
+  )
   const activeManagedInstallProfile = useMemo(
     () => getManagedLocalRuntimeInstallProfile(activeManagedRuntimeFamily),
     [activeManagedRuntimeFamily]
@@ -3355,14 +3366,14 @@ export default function AiSettingsPage() {
     () => getManagedLocalRuntimeInstallProfile(managedRuntimeTrustFamily),
     [managedRuntimeTrustFamily]
   )
-  const defaultManagedInstallRequirement = useMemo(
+  const oneClickManagedInstallRequirement = useMemo(
     () =>
       describeManagedRuntimeSystemRequirement(
-        defaultManagedInstallProfile,
+        oneClickManagedInstallProfile,
         normalizedSystemReserveGiB,
         t
       ),
-    [defaultManagedInstallProfile, normalizedSystemReserveGiB, t]
+    [oneClickManagedInstallProfile, normalizedSystemReserveGiB, t]
   )
   const activeManagedInstallRequirement = useMemo(
     () =>
@@ -3382,20 +3393,20 @@ export default function AiSettingsPage() {
       ),
     [managedRuntimeTrustProfile, normalizedSystemReserveGiB, t]
   )
-  const defaultManagedInstallWarning = useMemo(
+  const oneClickManagedInstallWarning = useMemo(
     () =>
       describeManagedRuntimeSystemWarning({
-        profile: defaultManagedInstallProfile,
+        profile: oneClickManagedInstallProfile,
         totalSystemMemoryGiB: effectiveMemoryTotalGiB,
         liveSessionAvailableNowGiB,
         reserveGiB: normalizedSystemReserveGiB,
         t,
       }),
     [
-      defaultManagedInstallProfile,
       effectiveMemoryTotalGiB,
       liveSessionAvailableNowGiB,
       normalizedSystemReserveGiB,
+      oneClickManagedInstallProfile,
       t,
     ]
   )
@@ -3480,13 +3491,21 @@ export default function AiSettingsPage() {
   const enableLocalAiSetup = useCallback(
     () =>
       startLocalAiWithSettings({
-        localAiPatch: buildMolmo2OResearchPreset(),
+        localAiPatch: buildManagedLocalRuntimeInstallPreset(
+          oneClickManagedRuntimeFamily
+        ),
         enableLocalProvider: true,
         preparingMessage: t(
-          'Preparing the managed on-device runtime now. Progress will appear below.'
+          'Preparing {{runtime}} now. Progress will appear below.',
+          {runtime: oneClickManagedInstallProfile.displayName}
         ),
       }),
-    [startLocalAiWithSettings, t]
+    [
+      oneClickManagedInstallProfile.displayName,
+      oneClickManagedRuntimeFamily,
+      startLocalAiWithSettings,
+      t,
+    ]
   )
   const toggleProviderSetup = useCallback(() => {
     setShowProviderSetup((value) => {
@@ -3666,13 +3685,13 @@ export default function AiSettingsPage() {
                       <Box
                         borderWidth="1px"
                         borderColor={
-                          defaultManagedInstallWarning
+                          oneClickManagedInstallWarning
                             ? 'orange.200'
                             : 'green.100'
                         }
                         borderRadius="md"
                         bg={
-                          defaultManagedInstallWarning
+                          oneClickManagedInstallWarning
                             ? 'orange.012'
                             : 'green.010'
                         }
@@ -3680,20 +3699,27 @@ export default function AiSettingsPage() {
                       >
                         <Stack spacing={1}>
                           <Text fontSize="sm" fontWeight={600}>
-                            {t('Default install target')}
+                            {t('One-click install target')}
                           </Text>
                           <Text color="muted" fontSize="xs">
                             {formatManagedRuntimeInstallTarget(
-                              defaultManagedInstallProfile,
+                              oneClickManagedInstallProfile,
                               t
                             )}
                           </Text>
                           <Text color="muted" fontSize="xs">
-                            {defaultManagedInstallRequirement}
+                            {oneClickManagedInstallRequirement}
                           </Text>
-                          {defaultManagedInstallWarning ? (
+                          {!selectedMemoryReferenceIsManagedRuntime ? (
+                            <Text color="muted" fontSize="xs">
+                              {t(
+                                'The selected RAM reference is only a sizing guide. The managed installer will use the install target shown above.'
+                              )}
+                            </Text>
+                          ) : null}
+                          {oneClickManagedInstallWarning ? (
                             <Text color="orange.600" fontSize="xs">
-                              {defaultManagedInstallWarning}
+                              {oneClickManagedInstallWarning}
                             </Text>
                           ) : null}
                         </Stack>
@@ -5505,9 +5531,12 @@ export default function AiSettingsPage() {
                     }
 
                     startLocalAiWithSettings({
-                      localAiPatch: buildMolmo2OResearchPreset(),
+                      localAiPatch: buildManagedLocalRuntimeInstallPreset(
+                        oneClickManagedRuntimeFamily
+                      ),
                       preparingMessage: t(
-                        'Preparing the managed on-device runtime now. Progress will appear below.'
+                        'Preparing {{runtime}} now. Progress will appear below.',
+                        {runtime: oneClickManagedInstallProfile.displayName}
                       ),
                     })
                   }}
