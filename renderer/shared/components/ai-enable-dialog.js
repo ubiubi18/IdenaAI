@@ -22,7 +22,7 @@ import {PrimaryButton, SecondaryButton} from './button'
 import {EyeIcon, EyeOffIcon} from './icons'
 import {isLocalAiProvider} from '../utils/ai-provider-readiness'
 import {
-  MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
   getManagedLocalRuntimeInstallProfile,
 } from '../utils/local-ai-settings'
 import {getSharedGlobal} from '../utils/shared-global'
@@ -59,7 +59,7 @@ export function AiEnableDialog({
       ? Math.max(1, Math.round(totalSystemMemoryBytes / 1024 ** 3))
       : 0
   const managedInstallProfile = getManagedLocalRuntimeInstallProfile(
-    MOLMO2_O_RESEARCH_RUNTIME_FAMILY
+    DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
   )
   const managedMinimumTotalGiB =
     managedInstallProfile.minimumGiB + LOCAL_AI_DEFAULT_RESERVE_GIB

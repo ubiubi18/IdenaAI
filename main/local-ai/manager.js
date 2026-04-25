@@ -50,7 +50,7 @@ const DEFAULT_RUNTIME_START_RETRY_DELAY_MS = 400
 const ACTIVE_VALIDATION_PERIODS = new Set(['ShortSession', 'LongSession'])
 const MAX_DEVELOPER_COMPARISON_HISTORY = 30
 const EXTERNAL_DEVELOPER_TRAINING_BUNDLE_VERSION = 1
-const EXTERNAL_DEVELOPER_RECOMMENDED_TRAINING_MODEL = 'allenai/Molmo2-O-7B'
+const EXTERNAL_DEVELOPER_RECOMMENDED_TRAINING_MODEL = 'allenai/Molmo2-4B'
 const EXTERNAL_DEVELOPER_RECOMMENDED_BENCHMARK_SIZE = 200
 const DEFAULT_DEVELOPER_LOCAL_BENCHMARK_SIZE = 100
 const MAX_DEVELOPER_LOCAL_BENCHMARK_SIZE = 500
@@ -5718,6 +5718,12 @@ function createLocalAiManager({
     try {
       await localAiRuntimeController.stop({
         runtimeBackend: state.runtimeBackend,
+        runtimeType: state.runtimeType,
+        runtimeFamily: state.runtimeFamily,
+        baseUrl: state.baseUrl,
+        endpoint: state.baseUrl,
+        model: state.model,
+        visionModel: state.visionModel,
       })
     } catch (error) {
       state.lastError = String((error && error.message) || error || '').trim()

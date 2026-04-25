@@ -499,6 +499,14 @@ function NodeSettings() {
             )}
           </Stack>
 
+          {!settings.runInternalNode && (
+            <Text color="muted" fontSize="sm">
+              {t(
+                'Built-in node is off. IdenaAI will not start or sync a local node on launch until you enable it.'
+              )}
+            </Text>
+          )}
+
           <Stack isInline spacing={3} align="center">
             <Box>
               <Switch
