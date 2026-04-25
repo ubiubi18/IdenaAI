@@ -145,6 +145,11 @@ const SESSION_AUTO_SOLVE_ERROR_RETRY_MS = 8 * 1000
 const MIN_AUTO_REPORT_DELAY_MS = 15 * 1000
 const AUTO_REPORT_KEYWORD_WAIT_MS = 20 * 1000
 const AUTO_REPORT_KEYWORD_RETRY_MS = 5 * 1000
+const URGENT_AUTO_REPORT_REMAINING_MS = 3 * 60 * 1000
+const URGENT_AUTO_REPORT_DEADLINE_BUFFER_MS = 5 * 1000
+const URGENT_AUTO_REPORT_REQUEST_TIMEOUT_MS = 25 * 1000
+const URGENT_AUTO_REPORT_MAX_CONCURRENCY = 6
+const URGENT_AUTO_REPORT_MAX_OUTPUT_TOKENS = 384
 const LONG_SESSION_LOADING_GRACE_MS = 15 * 60 * 1000
 const VALIDATION_AI_TOAST_ID = 'validation-ai-status-toast'
 const DEFAULT_AI_SOLVER_SETTINGS = {
@@ -171,6 +176,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
+  shortSessionFlipVisionMode: 'composite',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -2656,6 +2662,16 @@ function ValidationSession({
     setAutoReportDeadlineAt(null)
 
     try {
+      const remainingReportMs = getValidationSessionPhaseRemainingMs({
+        validationStart,
+        shortSessionDuration,
+        longSessionDuration,
+        sessionType: 'long',
+      })
+      const urgentAutoReport =
+        Number.isFinite(remainingReportMs) &&
+        remainingReportMs <= URGENT_AUTO_REPORT_REMAINING_MS
+
       const readiness = await refreshAiProviderStatus()
       if (!readiness.allReady) {
         throw new Error(formatAiProviderReadinessError(readiness, t))
@@ -2671,6 +2687,7 @@ function ValidationSession({
         : 0
 
       if (
+        !urgentAutoReport &&
         shouldWaitForValidationReportKeywords({
           keywordStatus,
           waitedMs: waitedForKeywordsMs,
@@ -2734,13 +2751,70 @@ function ValidationSession({
         return
       }
 
+      const remainingReviewMs = getValidationSessionPhaseRemainingMs({
+        validationStart,
+        shortSessionDuration,
+        longSessionDuration,
+        sessionType: 'long',
+      })
+      const urgentReviewBudgetMs = Number.isFinite(remainingReviewMs)
+        ? Math.max(
+            10 * 1000,
+            remainingReviewMs - URGENT_AUTO_REPORT_DEADLINE_BUFFER_MS
+          )
+        : URGENT_AUTO_REPORT_REQUEST_TIMEOUT_MS
+      const urgentMaxOutputTokens = Number(aiSolverSettings.maxOutputTokens)
+      const reviewSettings = urgentAutoReport
+        ? {
+            ...aiSolverSettings,
+            benchmarkProfile: 'custom',
+            deadlineMs: urgentReviewBudgetMs,
+            requestTimeoutMs: Math.max(
+              1000,
+              Math.min(
+                URGENT_AUTO_REPORT_REQUEST_TIMEOUT_MS,
+                urgentReviewBudgetMs
+              )
+            ),
+            maxConcurrency: URGENT_AUTO_REPORT_MAX_CONCURRENCY,
+            maxRetries: 0,
+            maxOutputTokens:
+              Number.isFinite(urgentMaxOutputTokens) &&
+              urgentMaxOutputTokens > 0
+                ? Math.min(
+                    urgentMaxOutputTokens,
+                    URGENT_AUTO_REPORT_MAX_OUTPUT_TOKENS
+                  )
+                : URGENT_AUTO_REPORT_MAX_OUTPUT_TOKENS,
+            interFlipDelayMs: 0,
+            uncertaintyRepromptEnabled: false,
+          }
+        : aiSolverSettings
+
+      if (urgentAutoReport) {
+        notifyAi(
+          t('Fast AI auto-report active'),
+          t(
+            'Less than 3 minutes remain. Report review will use parallel requests, no keyword wait, and short provider timeouts before submitting.'
+          ),
+          'warning'
+        )
+      }
+
       const reviewResult = await global.aiSolver.reviewValidationReports({
-        ...aiSolverSettings,
-        provider: aiSolverSettings.provider,
-        model: aiSolverSettings.model,
+        ...reviewSettings,
+        provider: reviewSettings.provider,
+        model: reviewSettings.model,
         providerConfig: aiProviderConfig,
         consultProviders: aiConsultProviders,
         flips: candidateFlips,
+        promptOptions: urgentAutoReport
+          ? {
+              fastReportReview: true,
+              openAiServiceTier: 'priority',
+              openAiReasoningEffort: 'none',
+            }
+          : null,
         session: {
           epoch,
           sessionType: 'long-report-review',
@@ -2775,6 +2849,7 @@ function ValidationSession({
           provider: reviewResult?.provider || aiSolverSettings.provider,
           model: reviewResult?.model || aiSolverSettings.model,
           sessionType: 'long-report-review',
+          mode: urgentAutoReport ? 'fast' : 'normal',
           totalFlips:
             reviewResult?.summary?.totalFlips || candidateFlips.length,
           appliedAnswers: candidateSourceFlips.length,
@@ -2835,13 +2910,16 @@ function ValidationSession({
     canRunAutomaticReportReview,
     epoch,
     forceAiPreview,
+    longSessionDuration,
     longFlipsWithReportKeywords,
     notifyAi,
     refreshAiProviderStatus,
     send,
+    shortSessionDuration,
     state,
     submitLongSessionAutomatically,
     t,
+    validationStart,
     validationStateScope,
   ])
 
@@ -3030,13 +3108,18 @@ function ValidationSession({
   }, [currentPeriod, send, shortSessionDuration, state, validationStart])
 
   useEffect(() => {
+    const isShortSessionActiveFetchWithoutRenderableFlips =
+      state.matches('shortSession.fetch.polling') &&
+      state.context.shortFlips.some(readyFlip) &&
+      !hasRenderableValidationFlips(state.context.shortFlips)
     const shouldRecoverShortSessionDecodeState =
       !forceAiPreview &&
       currentPeriod === EpochPeriod.ShortSession &&
-      state.matches('shortSession.fetch.done') &&
       state.matches('shortSession.solve') &&
       state.context.shortFlips.some(readyFlip) &&
-      !hasRenderableValidationFlips(state.context.shortFlips)
+      !hasRenderableValidationFlips(state.context.shortFlips) &&
+      (state.matches('shortSession.fetch.done') ||
+        isShortSessionActiveFetchWithoutRenderableFlips)
 
     if (!shouldRecoverShortSessionDecodeState) {
       if (currentPeriod !== EpochPeriod.ShortSession) {
@@ -3056,15 +3139,26 @@ function ValidationSession({
   }, [clearAutoSolveRetry, currentPeriod, forceAiPreview, send, state])
 
   useEffect(() => {
-    const shouldRecoverLongSessionDecodeState =
-      !forceAiPreview &&
-      (currentPeriod === EpochPeriod.LongSession || isRehearsalNodeSession) &&
+    const isLongSessionActiveFetchWithoutRenderableFlips =
+      (state.matches('longSession.fetch.flips.fetchHashes') ||
+        state.matches('longSession.fetch.flips.fetchFlips') ||
+        state.matches('longSession.fetch.flips.enqueueNextFetch') ||
+        state.matches('longSession.fetch.flips.detectMissing') ||
+        state.matches('longSession.fetch.flips.fetchMissing')) &&
+      state.context.longFlips.some(readyFlip) &&
+      !hasRenderableValidationFlips(state.context.longFlips)
+    const isLongSessionDoneFetchWithoutRenderableFlips =
       (state.matches('longSession.solve.answer.flips') ||
         state.matches('longSession.solve.answer.keywords') ||
         state.matches('longSession.solve.answer.review')) &&
       state.matches('longSession.fetch.flips.done') &&
       state.context.longFlips.some(readyFlip) &&
       !hasRenderableValidationFlips(state.context.longFlips)
+    const shouldRecoverLongSessionDecodeState =
+      !forceAiPreview &&
+      (currentPeriod === EpochPeriod.LongSession || isRehearsalNodeSession) &&
+      (isLongSessionActiveFetchWithoutRenderableFlips ||
+        isLongSessionDoneFetchWithoutRenderableFlips)
 
     if (!shouldRecoverLongSessionDecodeState) {
       if (currentPeriod !== EpochPeriod.LongSession) {

@@ -59,6 +59,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
+  shortSessionFlipVisionMode: 'composite',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -82,6 +83,11 @@ const OPENAI_SHORT_SESSION_FAST_MODELS = [
   'gpt-5.5',
   'gpt-5.4-mini',
   'gpt-5.4',
+]
+const AI_FLIP_VISION_MODES = [
+  'composite',
+  'frames_single_pass',
+  'frames_two_pass',
 ]
 
 function normalizeEphemeralExternalNode(value) {
@@ -197,6 +203,22 @@ function buildAiSolverSettings(settings = {}) {
     )
       ? normalizedShortSessionOpenAiFastModel
       : DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
+  const normalizedShortSessionFlipVisionMode = String(
+    nextSettings.shortSessionFlipVisionMode || ''
+  ).trim()
+  nextSettings.shortSessionFlipVisionMode = AI_FLIP_VISION_MODES.includes(
+    normalizedShortSessionFlipVisionMode
+  )
+    ? normalizedShortSessionFlipVisionMode
+    : DEFAULT_AI_SOLVER_SETTINGS.shortSessionFlipVisionMode
+  const normalizedFlipVisionMode = String(
+    nextSettings.flipVisionMode || ''
+  ).trim()
+  nextSettings.flipVisionMode = AI_FLIP_VISION_MODES.includes(
+    normalizedFlipVisionMode
+  )
+    ? normalizedFlipVisionMode
+    : DEFAULT_AI_SOLVER_SETTINGS.flipVisionMode
 
   const normalizedMemoryBudgetGiB = Number.parseInt(
     nextSettings.memoryBudgetGiB,
