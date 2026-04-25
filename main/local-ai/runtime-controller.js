@@ -162,6 +162,11 @@ const MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_LOCK_FILE =
   '.idenaai-snapshot-download.lock'
 const MANAGED_RUNTIME_SNAPSHOT_DOWNLOAD_LOCK_STALE_MS = 30 * 1000
 const MANAGED_RUNTIME_STALE_DOWNLOADER_TERM_WAIT_MS = 1500
+const MANAGED_RUNTIME_SETUP_COMMAND_GROUP = 'managed-runtime-setup'
+const MANAGED_RUNTIME_CANCEL_KILL_DELAY_MS = 2000
+
+const activeManagedRuntimeCommands = new Map()
+let activeManagedRuntimeCommandSeq = 0
 
 function trimString(value) {
   return String(value || '').trim()
@@ -314,6 +319,141 @@ function createRuntimeControllerError(code, message) {
   return error
 }
 
+function normalizeManagedRuntimePath(value = '') {
+  const normalized = trimString(value)
+  return normalized ? path.resolve(normalized) : ''
+}
+
+function createManagedRuntimeSetupCommandMetadata({
+  runtimeRoot = '',
+  runtimeConfig = null,
+  snapshotDir = '',
+  label = '',
+} = {}) {
+  return {
+    group: MANAGED_RUNTIME_SETUP_COMMAND_GROUP,
+    label: trimString(label),
+    runtimeRoot: normalizeManagedRuntimePath(runtimeRoot),
+    runtimeFamily: runtimeConfig ? trimString(runtimeConfig.runtimeFamily) : '',
+    modelId: runtimeConfig ? trimString(runtimeConfig.modelId) : '',
+    snapshotDir: normalizeManagedRuntimePath(snapshotDir),
+  }
+}
+
+function trackManagedRuntimeCommand(child, metadata = {}) {
+  if (!child || !child.pid) {
+    return null
+  }
+
+  const id = String((activeManagedRuntimeCommandSeq += 1))
+  const entry = {
+    id,
+    child,
+    cancelled: false,
+    metadata: {
+      group: trimString(metadata.group),
+      label: trimString(metadata.label),
+      runtimeRoot: normalizeManagedRuntimePath(metadata.runtimeRoot),
+      runtimeFamily: trimString(metadata.runtimeFamily),
+      modelId: trimString(metadata.modelId),
+      snapshotDir: normalizeManagedRuntimePath(metadata.snapshotDir),
+    },
+  }
+
+  activeManagedRuntimeCommands.set(id, entry)
+
+  function cleanup() {
+    activeManagedRuntimeCommands.delete(id)
+  }
+
+  child.once('exit', cleanup)
+  child.once('error', cleanup)
+
+  return entry
+}
+
+function managedRuntimeCommandMatches(entry, filters = {}) {
+  if (!entry || !entry.metadata) {
+    return false
+  }
+
+  const group = trimString(filters.group)
+  const runtimeFamily = trimString(filters.runtimeFamily)
+  const runtimeRoot = normalizeManagedRuntimePath(filters.runtimeRoot)
+  const snapshotDir = normalizeManagedRuntimePath(filters.snapshotDir)
+  const excludeRuntimeRoot = normalizeManagedRuntimePath(
+    filters.excludeRuntimeRoot
+  )
+
+  if (group && entry.metadata.group !== group) {
+    return false
+  }
+
+  if (runtimeFamily && entry.metadata.runtimeFamily !== runtimeFamily) {
+    return false
+  }
+
+  if (runtimeRoot && entry.metadata.runtimeRoot !== runtimeRoot) {
+    return false
+  }
+
+  if (snapshotDir && entry.metadata.snapshotDir !== snapshotDir) {
+    return false
+  }
+
+  if (excludeRuntimeRoot && entry.metadata.runtimeRoot === excludeRuntimeRoot) {
+    return false
+  }
+
+  return true
+}
+
+function stopActiveManagedRuntimeCommands(filters = {}) {
+  const stopped = []
+
+  for (const entry of activeManagedRuntimeCommands.values()) {
+    if (managedRuntimeCommandMatches(entry, filters)) {
+      const {child, metadata} = entry
+
+      if (child && child.exitCode == null && !child.killed) {
+        entry.cancelled = true
+        stopped.push({
+          pid: child.pid,
+          command: metadata.label || 'managed runtime setup command',
+          runtimeRoot: metadata.runtimeRoot,
+          runtimeFamily: metadata.runtimeFamily,
+          snapshotDir: metadata.snapshotDir,
+          activeCommand: true,
+        })
+
+        try {
+          child.kill('SIGTERM')
+        } catch {
+          // Best effort cancellation; the process may have exited after discovery.
+        }
+
+        const forceKillId = setTimeout(() => {
+          if (child.exitCode != null || child.killed) {
+            return
+          }
+
+          try {
+            child.kill('SIGKILL')
+          } catch {
+            // Best effort cancellation.
+          }
+        }, MANAGED_RUNTIME_CANCEL_KILL_DELAY_MS)
+
+        if (typeof forceKillId.unref === 'function') {
+          forceKillId.unref()
+        }
+      }
+    }
+  }
+
+  return stopped
+}
+
 function createLockOwnerId() {
   if (typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -455,6 +595,15 @@ async function stopManagedSnapshotDownloads(baseDir, payload = {}) {
     baseDir,
     payload
   )) {
+    const stoppedActiveCommands = stopActiveManagedRuntimeCommands({
+      group: MANAGED_RUNTIME_SETUP_COMMAND_GROUP,
+      snapshotDir,
+    })
+
+    stopped.push(
+      ...stoppedActiveCommands.map((item) => ({...item, snapshotDir}))
+    )
+
     const stoppedForDir = await stopStaleManagedSnapshotDownloadProcesses(
       snapshotDir
     )
@@ -462,6 +611,28 @@ async function stopManagedSnapshotDownloads(baseDir, payload = {}) {
   }
 
   return stopped
+}
+
+function dedupeStoppedManagedDownloaders(items = []) {
+  const seen = new Set()
+
+  return items.filter((item) => {
+    const key =
+      item && item.pid
+        ? `pid:${item.pid}`
+        : [
+            item && item.snapshotDir ? item.snapshotDir : '',
+            item && item.runtimeRoot ? item.runtimeRoot : '',
+            item && item.command ? item.command : '',
+          ].join('|')
+
+    if (seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  })
 }
 
 async function readManagedSnapshotDownloadLock(lockPath) {
@@ -913,6 +1084,7 @@ function runCommand({
   timeoutMs = MANAGED_RUNTIME_INSTALL_TIMEOUT_MS,
   label = 'Managed Local AI command',
   onOutput = null,
+  cancelMetadata = null,
 }) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -920,11 +1092,23 @@ function runCommand({
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    const activeCommand = cancelMetadata
+      ? trackManagedRuntimeCommand(child, {
+          ...cancelMetadata,
+          label,
+        })
+      : null
     const stdout = createOutputCollector()
     const stderr = createOutputCollector()
     let settled = false
     let timeoutId = null
     let forceKillId = null
+
+    function cleanupActiveCommand() {
+      if (activeCommand) {
+        activeManagedRuntimeCommands.delete(activeCommand.id)
+      }
+    }
 
     function finalize(result) {
       if (settled) {
@@ -932,6 +1116,7 @@ function runCommand({
       }
 
       settled = true
+      cleanupActiveCommand()
 
       if (timeoutId) {
         clearTimeout(timeoutId)
@@ -950,6 +1135,7 @@ function runCommand({
       }
 
       settled = true
+      cleanupActiveCommand()
 
       if (timeoutId) {
         clearTimeout(timeoutId)
@@ -999,6 +1185,16 @@ function runCommand({
     })
 
     child.once('exit', (code, signal) => {
+      if (activeCommand && activeCommand.cancelled) {
+        fail(
+          createRuntimeControllerError(
+            'managed_runtime_command_cancelled',
+            `${label} was cancelled.`
+          )
+        )
+        return
+      }
+
       if (code === 0) {
         finalize({
           ok: true,
@@ -1410,7 +1606,7 @@ async function ensureManagedRuntimeAuthToken(runtimeRoot) {
 async function ensureManagedPythonVenv(
   runtimeRoot,
   preferArm64 = false,
-  {onProgress, pythonPath = ''} = {}
+  {onProgress, pythonPath = '', runtimeConfig = null} = {}
 ) {
   const venvDir = path.join(runtimeRoot, 'venv')
   const venvPython = getVenvPythonPath(venvDir)
@@ -1446,6 +1642,11 @@ async function ensureManagedPythonVenv(
     command: variant.command,
     args: variant.prefixArgs.concat(['-m', 'venv', venvDir]),
     label: 'Managed Local AI runtime bootstrap',
+    cancelMetadata: createManagedRuntimeSetupCommandMetadata({
+      runtimeRoot,
+      runtimeConfig,
+      label: 'Managed Local AI runtime bootstrap',
+    }),
   })
 
   return venvPython
@@ -1460,6 +1661,7 @@ async function ensureManagedMolmo2RuntimeInstalled(
   const venvPython = await ensureManagedPythonVenv(runtimeRoot, preferArm64, {
     onProgress,
     pythonPath,
+    runtimeConfig,
   })
   const env = buildManagedRuntimeEnv(runtimeRoot)
   const config =
@@ -1498,6 +1700,14 @@ async function ensureManagedMolmo2RuntimeInstalled(
       flavor === 'mlx-vlm'
         ? 'Managed Local AI MLX runtime install'
         : 'Managed Local AI transformers runtime install',
+    cancelMetadata: createManagedRuntimeSetupCommandMetadata({
+      runtimeRoot,
+      runtimeConfig: config,
+      label:
+        flavor === 'mlx-vlm'
+          ? 'Managed Local AI MLX runtime install'
+          : 'Managed Local AI transformers runtime install',
+    }),
     onOutput(chunk) {
       const detail = String(chunk || '')
         .split(/\r?\n/u)
@@ -1744,6 +1954,12 @@ async function downloadManagedMolmo2Snapshot(
             ],
             env,
             label: 'Managed Local AI model snapshot download',
+            cancelMetadata: createManagedRuntimeSetupCommandMetadata({
+              runtimeRoot,
+              runtimeConfig: config,
+              snapshotDir,
+              label: 'Managed Local AI model snapshot download',
+            }),
             onOutput(chunk) {
               const detail = String(chunk || '')
                 .split(/\r?\n/u)
@@ -1999,6 +2215,7 @@ function createDefaultRuntimeController({
   let managedSpec = null
   let managedStartPromise = null
   let managedStartSpecKey = ''
+  let managedStartGeneration = 0
 
   function rememberManagedProcess(child, spec) {
     managedProcess = child
@@ -2010,6 +2227,26 @@ function createDefaultRuntimeController({
         managedSpec = null
       }
     })
+  }
+
+  function cancelManagedRuntimeSetup(filters = {}) {
+    managedStartGeneration += 1
+    const stoppedCommands = stopActiveManagedRuntimeCommands({
+      group: MANAGED_RUNTIME_SETUP_COMMAND_GROUP,
+      ...filters,
+    })
+    managedStartPromise = null
+    managedStartSpecKey = ''
+    return stoppedCommands
+  }
+
+  function assertManagedRuntimeSetupCurrent(generation) {
+    if (generation !== managedStartGeneration) {
+      throw createRuntimeControllerError(
+        'managed_runtime_setup_cancelled',
+        'Managed local runtime setup was cancelled.'
+      )
+    }
   }
 
   async function startManagedMolmoRuntime(payload = {}) {
@@ -2103,13 +2340,32 @@ function createDefaultRuntimeController({
         return managedStartPromise
       }
 
-      throw createRuntimeControllerError(
-        'managed_runtime_setup_busy',
-        'Another managed local runtime setup is already running. Wait for it to finish before starting a different managed model.'
-      )
+      const stoppedCommands = cancelManagedRuntimeSetup({
+        excludeRuntimeRoot: runtimeRoot,
+      })
+
+      emitRuntimeProgress(onProgress, {
+        status: 'installing',
+        stage: 'cancel_previous_runtime_setup',
+        message:
+          stoppedCommands.length > 0
+            ? `Stopped ${
+                stoppedCommands.length
+              } previous managed local runtime setup command${
+                stoppedCommands.length === 1 ? '' : 's'
+              } before switching models.`
+            : 'Marked the previous managed local runtime setup for cancellation before switching models.',
+        progressPercent: 8,
+        stageIndex: 1,
+        stageCount: MANAGED_MOLMO2_PROGRESS_STAGE_COUNT,
+      })
     }
 
+    const startGeneration = managedStartGeneration + 1
+    managedStartGeneration = startGeneration
     const startPromise = (async () => {
+      assertManagedRuntimeSetupCurrent(startGeneration)
+
       if (
         managedProcess &&
         managedProcess.exitCode == null &&
@@ -2133,11 +2389,15 @@ function createDefaultRuntimeController({
         flavor,
         runtimeConfig
       )
+      assertManagedRuntimeSetupCurrent(startGeneration)
+
       const install = await ensureManagedMolmo2RuntimeInstalled(
         runtimeRoot,
         flavor,
         {onProgress, pythonPath, runtimeConfig}
       )
+      assertManagedRuntimeSetupCurrent(startGeneration)
+
       const snapshotPath = await downloadManagedMolmo2Snapshot(
         install.pythonPath,
         runtimeRoot,
@@ -2147,6 +2407,8 @@ function createDefaultRuntimeController({
           existingVerification: diskSpace.snapshotVerification,
         }
       )
+      assertManagedRuntimeSetupCurrent(startGeneration)
+
       emitRuntimeProgress(onProgress, {
         status: 'starting',
         stage: 'start_runtime_service',
@@ -2379,10 +2641,20 @@ function createDefaultRuntimeController({
     },
 
     async stop(payload = {}) {
-      const stoppedDownloaders = await stopManagedSnapshotDownloads(
-        baseDir,
-        payload
+      const requestedKind = managedRuntimeKindFromPayload(payload)
+      const stoppedSetupCommands = managedStartPromise
+        ? cancelManagedRuntimeSetup(
+            requestedKind ? {runtimeFamily: requestedKind} : {}
+          )
+        : []
+      const stoppedDownloaders = stoppedSetupCommands.concat(
+        await stopManagedSnapshotDownloads(baseDir, payload)
       )
+
+      const uniqueStoppedDownloaders =
+        dedupeStoppedManagedDownloaders(stoppedDownloaders)
+
+      const stoppedDownloadersCount = uniqueStoppedDownloaders.length
 
       if (
         !managedProcess ||
@@ -2390,16 +2662,18 @@ function createDefaultRuntimeController({
         managedProcess.killed
       ) {
         return {
-          stopped: stoppedDownloaders.length > 0,
-          managed: stoppedDownloaders.length > 0,
-          stoppedDownloaders: stoppedDownloaders.length,
+          stopped: stoppedDownloadersCount > 0,
+          managed: stoppedDownloadersCount > 0,
+          stoppedDownloaders: stoppedDownloadersCount,
         }
       }
 
-      const requestedKind = managedRuntimeKindFromPayload(payload)
-
       if (requestedKind && managedSpec && requestedKind !== managedSpec.kind) {
-        return {stopped: false, managed: false}
+        return {
+          stopped: stoppedDownloadersCount > 0,
+          managed: stoppedDownloadersCount > 0,
+          stoppedDownloaders: stoppedDownloadersCount,
+        }
       }
 
       const {pid} = managedProcess
@@ -2417,7 +2691,7 @@ function createDefaultRuntimeController({
         stopped: true,
         managed: true,
         pid,
-        stoppedDownloaders: stoppedDownloaders.length,
+        stoppedDownloaders: stoppedDownloadersCount,
       }
     },
   }
