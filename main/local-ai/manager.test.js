@@ -1988,7 +1988,7 @@ describe('local-ai manager', () => {
       annotatedCount: 5,
       pendingCount: 5,
       trainedCount: 0,
-      recommendedTrainingModel: 'allenai/Molmo2-O-7B',
+      recommendedTrainingModel: 'allenai/Molmo2-4B',
       recommendedBenchmarkFlips: 200,
     })
     expect(normalizedRows).toHaveLength(5)
@@ -2003,7 +2003,7 @@ describe('local-ai manager', () => {
         visionModel: 'vision-lab:latest',
       }),
       training: expect.objectContaining({
-        recommendedModel: 'allenai/Molmo2-O-7B',
+        recommendedModel: 'allenai/Molmo2-4B',
       }),
       files: expect.objectContaining({
         annotations: expect.objectContaining({

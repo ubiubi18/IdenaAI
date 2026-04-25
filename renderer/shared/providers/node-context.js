@@ -106,11 +106,20 @@ function hasNodeBridge() {
   return !getNodeBridge().__idenaFallback
 }
 
+export function shouldRunBuiltInNode(settings = {}) {
+  const persistentExternalNode =
+    settings.useExternalNode === true &&
+    settings.externalNodeMode !== 'ephemeral'
+
+  return settings.runInternalNode === true && !persistentExternalNode
+}
+
 // eslint-disable-next-line react/prop-types
 export function NodeProvider({children}) {
   const settings = useSettingsState()
   const initRequestedRef = React.useRef(false)
   const startRequestedRef = React.useRef(false)
+  const runBuiltInNode = shouldRunBuiltInNode(settings)
 
   const [state, dispatch] = useLogger(
     React.useReducer(nodeReducer, initialState)
@@ -189,7 +198,7 @@ export function NodeProvider({children}) {
     initRequestedRef.current = false
     startRequestedRef.current = false
     dispatch({type: NODE_REINIT})
-  }, [settings.runInternalNode, dispatch])
+  }, [runBuiltInNode, dispatch])
 
   useEffect(() => {
     if (!hasNodeBridge()) {
@@ -200,24 +209,32 @@ export function NodeProvider({children}) {
       state.nodeReady &&
       !state.nodeFailed &&
       !state.nodeStarted &&
-      settings.runInternalNode
+      runBuiltInNode &&
+      !startRequestedRef.current
     ) {
-      getNodeBridge().startLocalNode({
-        rpcPort: settings.internalPort,
-        tcpPort: settings.tcpPort,
-        ipfsPort: settings.ipfsPort,
-        autoActivateMining: settings.autoActivateMining,
-      })
+      startRequestedRef.current = true
+      try {
+        getNodeBridge().startLocalNode({
+          rpcPort: settings.internalPort,
+          tcpPort: settings.tcpPort,
+          ipfsPort: settings.ipfsPort,
+          autoActivateMining: settings.autoActivateMining,
+        })
+      } catch {
+        startRequestedRef.current = false
+        dispatch({type: NODE_FAILED})
+      }
     }
   }, [
     settings.internalPort,
     state.nodeReady,
     state.nodeStarted,
-    settings.runInternalNode,
+    runBuiltInNode,
     settings.tcpPort,
     settings.ipfsPort,
     state.nodeFailed,
     settings.autoActivateMining,
+    dispatch,
   ])
 
   useEffect(() => {
@@ -229,23 +246,28 @@ export function NodeProvider({children}) {
       return
     }
 
-    if (!hasNodeBridge()) {
-      return
-    }
-
-    if (settings.runInternalNode) {
-      if (!state.nodeStarted) {
-        getNodeBridge().initLocalNode()
+    if (runBuiltInNode) {
+      if (!state.nodeStarted && !initRequestedRef.current) {
+        initRequestedRef.current = true
+        try {
+          getNodeBridge().initLocalNode()
+        } catch {
+          initRequestedRef.current = false
+          dispatch({type: NODE_FAILED})
+        }
       }
     } else if (state.nodeStarted) {
+      initRequestedRef.current = false
+      startRequestedRef.current = false
       getNodeBridge().stopLocalNode()
     }
   }, [
-    settings.runInternalNode,
+    runBuiltInNode,
     state.nodeStarted,
     state.nodeReady,
     state.nodeFailed,
     state.runningTroubleshooter,
+    dispatch,
   ])
 
   const tryRestartNode = useCallback(() => {

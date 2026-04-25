@@ -7,9 +7,11 @@ import useLogger from '../hooks/use-logger'
 import {AVAILABLE_LANGS} from '../../i18n'
 import {emitRpcConnectionChanged} from '../utils/rpc-connection-events'
 import {
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
   DEFAULT_LOCAL_AI_OLLAMA_MODEL,
   buildLocalAiSettings,
   mergeLocalAiSettings,
+  resolveManagedLocalRuntimeMemoryReference,
 } from '../utils/local-ai-settings'
 
 const SETTINGS_INITIALIZE = 'SETTINGS_INITIALIZE'
@@ -23,6 +25,7 @@ const UPDATE_AI_SOLVER_SETTINGS = 'UPDATE_AI_SOLVER_SETTINGS'
 const UPDATE_LOCAL_AI_SETTINGS = 'UPDATE_LOCAL_AI_SETTINGS'
 const EPHEMERAL_EXTERNAL_NODE_STORAGE_KEY =
   'idena-ephemeral-external-node-connection'
+const DEFAULT_RUN_INTERNAL_NODE = false
 
 const randomKey = () =>
   Math.random().toString(36).substring(2, 13) +
@@ -39,7 +42,9 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   shortSessionOpenAiFastModel: 'gpt-5.4-mini',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
-  localAiMemoryReference: 'molmo2-o-7b',
+  localAiMemoryReference: resolveManagedLocalRuntimeMemoryReference(
+    DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
+  ),
   mode: 'manual',
   onchainAutoSubmitConsentAt: '',
   autoReportEnabled: false,
@@ -259,6 +264,16 @@ function buildAiSolverSettings(settings = {}) {
   return nextSettings
 }
 
+function normalizeNodeModeSettings(settings = {}) {
+  const nextSettings = {...settings}
+
+  if (nextSettings.useExternalNode) {
+    nextSettings.runInternalNode = false
+  }
+
+  return nextSettings
+}
+
 const initialState = {
   url: BASE_API_URL,
   internalPort: BASE_INTERNAL_API_PORT,
@@ -266,7 +281,7 @@ const initialState = {
   ipfsPort: 50506,
   uiVersion: global.appVersion,
   useExternalNode: false,
-  runInternalNode: true,
+  runInternalNode: DEFAULT_RUN_INTERNAL_NODE,
   internalApiKey: randomKey(),
   externalApiKey: '',
   lng: AVAILABLE_LANGS[0],
@@ -284,7 +299,7 @@ if (global.env && global.env.NODE_ENV === 'e2e') {
 function settingsReducer(state, action) {
   switch (action.type) {
     case TOGGLE_USE_EXTERNAL_NODE: {
-      return {...state, useExternalNode: action.data}
+      return normalizeNodeModeSettings({...state, useExternalNode: action.data})
     }
     case TOGGLE_RUN_INTERNAL_NODE: {
       const newState = {...state, runInternalNode: action.data}
@@ -293,14 +308,17 @@ function settingsReducer(state, action) {
       }
       return newState
     }
-    case SETTINGS_INITIALIZE:
-      return {
+    case SETTINGS_INITIALIZE: {
+      const nextState = {
         ...initialState,
         ...state,
         aiSolver: buildAiSolverSettings(state.aiSolver),
         localAi: buildLocalAiSettings(state.localAi),
         initialized: true,
       }
+
+      return normalizeNodeModeSettings(nextState)
+    }
     case UPDATE_UI_VERSION: {
       return {
         ...state,
@@ -539,7 +557,11 @@ export function SettingsProvider({children}) {
   )
 }
 
-export {buildAiSolverSettings}
+export {
+  buildAiSolverSettings,
+  DEFAULT_RUN_INTERNAL_NODE,
+  normalizeNodeModeSettings,
+}
 
 export function useSettingsState() {
   const context = React.useContext(SettingsStateContext)
