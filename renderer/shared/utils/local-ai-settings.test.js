@@ -26,6 +26,7 @@ const {
   DEFAULT_HUMAN_TEACHER_SYSTEM_PROMPT,
   DEFAULT_LOCAL_AI_PUBLIC_MODEL_ID,
   DEFAULT_LOCAL_AI_PUBLIC_VISION_ID,
+  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
   MOLMO2_O_RESEARCH_BASE_URL,
   MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_O_RESEARCH_RUNTIME_MODEL,
@@ -48,6 +49,7 @@ const {
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
   buildManagedLocalAiTrustApprovalPatch,
+  buildManagedLocalRuntimePreset,
   buildLocalAiRepairPreset,
   buildRecommendedLocalAiMacPreset,
   buildLocalAiRuntimePreset,
@@ -255,13 +257,21 @@ describe('local-ai settings schema', () => {
     const approved = buildLocalAiSettings({
       runtimeBackend: 'local-runtime-service',
       runtimeFamily: 'molmo2-o',
-      ...buildManagedLocalAiTrustApprovalPatch(),
+      ...buildManagedLocalAiTrustApprovalPatch({
+        runtimeFamily: 'molmo2-o',
+      }),
     })
 
     expect(approved.managedRuntimeTrustVersion).toBe(
       MANAGED_LOCAL_RUNTIME_TRUST_VERSION
     )
     expect(hasManagedLocalAiTrustApproval(approved)).toBe(true)
+    expect(
+      hasManagedLocalAiTrustApproval({
+        ...approved,
+        runtimeFamily: MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
+      })
+    ).toBe(false)
   })
 
   it('describes managed runtime install targets for the setup UI', () => {
@@ -275,8 +285,8 @@ describe('local-ai settings schema', () => {
     })
 
     expect(getManagedLocalRuntimeInstallProfile('unknown')).toMatchObject({
-      runtimeFamily: MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
-      modelId: MOLMO2_O_RESEARCH_RUNTIME_MODEL,
+      runtimeFamily: DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
+      modelId: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
     })
 
     expect(getManagedLocalRuntimeFamilyForMemoryReference('molmo2-4b')).toBe(
@@ -320,6 +330,15 @@ describe('local-ai settings schema', () => {
       baseUrl: MOLMO2_4B_RESEARCH_BASE_URL,
       endpoint: MOLMO2_4B_RESEARCH_BASE_URL,
       runtimeType: 'sidecar',
+      runtimeFamily: MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
+      model: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
+      visionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
+    })
+  })
+
+  it('uses compact Molmo2-4B as the managed local runtime default', () => {
+    expect(buildManagedLocalRuntimePreset()).toMatchObject({
+      runtimeBackend: 'local-runtime-service',
       runtimeFamily: MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
       model: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
       visionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
@@ -517,10 +536,10 @@ describe('local-ai settings schema', () => {
       DEFAULT_DEVELOPER_LOCAL_TRAINING_PROFILE
     )
     expect(resolveDeveloperLocalTrainingProfileRuntimeModel('safe')).toBe(
-      MOLMO2_O_RESEARCH_RUNTIME_MODEL
+      MOLMO2_4B_RESEARCH_RUNTIME_MODEL
     )
     expect(resolveDeveloperLocalTrainingProfileRuntimeVisionModel('safe')).toBe(
-      MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL
+      MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL
     )
     expect(
       resolveDeveloperLocalTrainingProfileRuntimeFallbackModel('safe')
@@ -532,11 +551,11 @@ describe('local-ai settings schema', () => {
       RECOMMENDED_LOCAL_AI_TRAINING_MODEL
     )
     expect(resolveDeveloperLocalTrainingProfileRuntimeModel('strong')).toBe(
-      MOLMO2_O_RESEARCH_RUNTIME_MODEL
+      MOLMO2_4B_RESEARCH_RUNTIME_MODEL
     )
     expect(
       resolveDeveloperLocalTrainingProfileRuntimeVisionModel('strong')
-    ).toBe(MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL)
+    ).toBe(MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL)
     expect(
       resolveDeveloperLocalTrainingProfileRuntimeFallbackModel('strong')
     ).toBe('')
@@ -548,8 +567,8 @@ describe('local-ai settings schema', () => {
     )
     expect(DEVELOPER_LOCAL_TRAINING_PROFILE_CONFIG.strong).toMatchObject({
       modelPath: RECOMMENDED_LOCAL_AI_TRAINING_MODEL,
-      runtimeModel: MOLMO2_O_RESEARCH_RUNTIME_MODEL,
-      runtimeVisionModel: MOLMO2_O_RESEARCH_RUNTIME_VISION_MODEL,
+      runtimeModel: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
+      runtimeVisionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
     })
   })
 

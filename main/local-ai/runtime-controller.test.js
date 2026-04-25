@@ -62,7 +62,7 @@ describe('managed local runtime environment', () => {
 describe('managed local runtime snapshot download process discovery', () => {
   it('matches only Hugging Face snapshot download workers for the same target path', () => {
     const snapshotDir =
-      '/Users/jz/Library/Application Support/IdenaAI/local-ai/managed-runtime/molmo2-o/mlx-vlm/model-snapshot'
+      '/tmp/idena-test/local-ai/managed-runtime/molmo2-o/mlx-vlm/model-snapshot'
     const psOutput = `
       111 /opt/homebrew/bin/python -c from huggingface_hub import snapshot_download ${snapshotDir}
       222 /opt/homebrew/bin/python -c from huggingface_hub import snapshot_download /tmp/other-model
