@@ -174,7 +174,7 @@ describe('managed local runtime flavor selection', () => {
       29 * 1024 * 1024 * 1024
     )
 
-    expect(detail).toBe('Model download ~3.0%: ~0.9 GB of ~29 GB so far.')
+    expect(detail).toBe('Model download ~3.0%: ~0.9 GiB of ~29 GiB so far.')
   })
 
   it('requires explicit trust approval before starting the managed Molmo2 runtime', async () => {
