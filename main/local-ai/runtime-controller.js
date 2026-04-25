@@ -184,6 +184,40 @@ function formatApproxGiB(bytes) {
   )} GB`
 }
 
+function formatSnapshotDownloadPercent(downloadedBytes, totalBytes) {
+  const downloaded = Number(downloadedBytes)
+  const total = Number(totalBytes)
+
+  if (
+    !Number.isFinite(downloaded) ||
+    !Number.isFinite(total) ||
+    downloaded < 0 ||
+    total <= 0
+  ) {
+    return null
+  }
+
+  const percent = Math.max(0, Math.min((downloaded / total) * 100, 99.9))
+  const precision = percent > 0 && percent < 10 ? 1 : 0
+
+  return `~${percent.toFixed(precision)}%`
+}
+
+function formatSnapshotDownloadDetail(downloadedBytes, totalBytes) {
+  const downloadPercent = formatSnapshotDownloadPercent(
+    downloadedBytes,
+    totalBytes
+  )
+
+  if (downloadPercent) {
+    return `Model download ${downloadPercent}: ${formatApproxGiB(
+      downloadedBytes
+    )} of ${formatApproxGiB(totalBytes)} so far.`
+  }
+
+  return `Downloaded about ${formatApproxGiB(downloadedBytes)} so far.`
+}
+
 async function calculateDirectorySizeBytes(targetPath) {
   const normalizedPath = trimString(targetPath)
 
@@ -1354,10 +1388,8 @@ async function downloadManagedMolmo2Snapshot(
             ? Math.max(62, Math.min(72, 62 + Math.round(progressFraction * 10)))
             : 62
         const detail = hasExpectedTotal
-          ? `Downloaded about ${formatApproxGiB(
-              downloadedBytes
-            )} of ${formatApproxGiB(totalSnapshotBytes)} so far.`
-          : `Downloaded about ${formatApproxGiB(downloadedBytes)} so far.`
+          ? formatSnapshotDownloadDetail(downloadedBytes, totalSnapshotBytes)
+          : formatSnapshotDownloadDetail(downloadedBytes, 0)
 
         emitRuntimeProgress(onProgress, {
           status: 'installing',
@@ -2035,6 +2067,7 @@ function createDefaultRuntimeController({
 
 module.exports = {
   estimateManagedRuntimeInstallBytes,
+  formatSnapshotDownloadDetail,
   MANAGED_MOLMO2_RUNTIME_FAMILY,
   MANAGED_MOLMO2_RUNTIME_START_TIMEOUT_MS,
   buildManagedLocalAiServerArgs,
