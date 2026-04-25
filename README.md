@@ -86,11 +86,14 @@ This section should stay current and act as a short roadmap of what has already 
   and pinned manifest verification now cover the active research lanes for
   `Molmo2-O`, `Molmo2-4B`, `InternVL3.5-1B`, and `InternVL3.5-8B`, with the
   lighter `InternVL3.5-1B` lane now validated as a realistic same-provider
-  managed-runtime candidate.
+  managed-runtime candidate. The default managed install path targets the
+  compact `Molmo2-4B` profile, and active managed setup/download jobs can be
+  aborted or superseded before switching to another profile.
 - Dependency footprint:
   the desktop app now has a dependency-footprint audit, removes the direct
-  `jimp` image stack and several narrow helper packages, and treats new runtime
-  npm dependencies as allowlist changes that require explicit review.
+  `jimp` image stack and several narrow helper packages, upgrades the Electron
+  runtime to `41.3.0`, and treats new runtime npm dependencies as allowlist
+  changes that require explicit review.
 - Safety posture:
   none of the above changes make the project production-safe. The repo remains a
   research fork first.
@@ -294,9 +297,10 @@ Dependency policy:
   helpers before adding runtime npm packages
 - keep heavier migrations, such as storage or UI framework replacement, as
   separate reviewed work
-- keep Electron upgrades as a separate modernization branch. This dependency
-  diet keeps the current Electron runtime pinned; the current Electron build
-  toolchain already warns that newer rebuild tooling expects Node 22.12+
+- keep future Electron upgrades as separate modernization work. This dependency
+  diet branch pins Electron to `41.3.0`; `npm install` and dev startup were
+  smoke-tested on Node 20.20.2, but the current Electron build toolchain vendors
+  rebuild tooling that declares Node 22.12+ as its clean packaging target
 - use `npm run audit:deps` to inspect root runtime deps, production transitive
   package count, largest installed packages, production audit summary, and
   packaged-file risk
@@ -309,7 +313,7 @@ Dependency policy:
 Prerequisites:
 
 - `git`
-- `node` 20.x
+- `node` 20.20+ for development, or Node 22.12+ for clean Electron 41 packaging
 - `npm`
 - `python3`
 
@@ -317,8 +321,8 @@ On macOS:
 
 ```bash
 xcode-select --install
-brew install git node@20 python@3
-brew link --overwrite --force node@20
+brew install git node@22 python@3
+brew link --overwrite --force node@22
 ```
 
 Clone and start:
