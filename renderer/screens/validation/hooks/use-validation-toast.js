@@ -30,6 +30,17 @@ import {
 
 const REHEARSAL_CONNECTED_TOAST_ID = 'rehearsal-node-connected'
 
+function shouldAutoConnectRehearsalDevnetStatus(status) {
+  return Boolean(
+    status &&
+      status.active &&
+      String(status.stage || '')
+        .trim()
+        .toLowerCase() === 'running' &&
+      String(status.primaryRpcUrl || '').trim()
+  )
+}
+
 function hasMatchingRehearsalConnection(settings, payload) {
   if (!settings.ephemeralExternalNodeConnected) {
     return false
@@ -63,6 +74,7 @@ export function useValidationToast() {
   const currentPeriod = epoch?.currentPeriod
   const isRehearsalNodeSession = isValidationRehearsalNodeSettings(settings)
   const lastHandledRehearsalConnectionRef = React.useRef('')
+  const lastRequestedRehearsalConnectionRef = React.useRef('')
   const [rehearsalDevnetStatus, setRehearsalDevnetStatus] = React.useState(
     REHEARSAL_DEVNET_STATUS_INITIAL
   )
@@ -104,6 +116,14 @@ export function useValidationToast() {
 
   React.useEffect(() => {
     if (getNodeBridge().__idenaFallback) {
+      return
+    }
+
+    getNodeBridge().getValidationDevnetStatus()
+  }, [])
+
+  React.useEffect(() => {
+    if (getNodeBridge().__idenaFallback) {
       return undefined
     }
 
@@ -111,6 +131,25 @@ export function useValidationToast() {
 
     return bridge.onEvent((event, data) => {
       if (event !== 'validation-devnet-connect-payload') {
+        if (
+          event === 'validation-devnet-status' &&
+          !isRehearsalNodeSession &&
+          shouldAutoConnectRehearsalDevnetStatus(data)
+        ) {
+          const reconnectRequestKey = JSON.stringify({
+            url: data.primaryRpcUrl,
+            epoch: data.epoch,
+            firstCeremonyAt: data.firstCeremonyAt,
+          })
+
+          if (
+            lastRequestedRehearsalConnectionRef.current !== reconnectRequestKey
+          ) {
+            lastRequestedRehearsalConnectionRef.current = reconnectRequestKey
+            bridge.connectValidationDevnet()
+          }
+        }
+
         return
       }
 
@@ -154,7 +193,14 @@ export function useValidationToast() {
 
       openValidationLottery(router, {isRehearsalNodeSession: true})
     })
-  }, [connectEphemeralExternalNode, router, settings, t, toast])
+  }, [
+    connectEphemeralExternalNode,
+    isRehearsalNodeSession,
+    router,
+    settings,
+    t,
+    toast,
+  ])
 
   React.useEffect(() => {
     if (!isRehearsalNodeSession || getNodeBridge().__idenaFallback) {

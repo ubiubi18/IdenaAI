@@ -9737,11 +9737,25 @@ Flip hash: ${hash}
         const invokeConsultantOnce = async (consultant, promptOptions) =>
           withRetries(profile.maxRetries, async (attempt) => {
             try {
+              const remainingDeadlineMs = deadlineAt - now()
+              if (remainingDeadlineMs <= 750) {
+                throw new Error('deadline_exceeded')
+              }
+              const requestProfile = {
+                ...profile,
+                requestTimeoutMs: Math.max(
+                  750,
+                  Math.min(
+                    Number(profile.requestTimeoutMs) || 0,
+                    remainingDeadlineMs - 250
+                  )
+                ),
+              }
               return await invokeProvider({
                 provider: consultant.provider,
                 model: consultant.model,
                 flip: passFlip,
-                profile,
+                profile: requestProfile,
                 apiKey: consultant.apiKey,
                 providerConfig: consultant.providerConfig || providerConfig,
                 promptOptions,
@@ -9989,9 +10003,13 @@ Flip hash: ${hash}
         createEmptyCostSummary(),
         firstPassResult.costs
       )
+      const firstPassProviderFailed = Boolean(
+        firstPassResult && String(firstPassResult.error || '').trim()
+      )
 
       const shouldReprompt =
         profile.uncertaintyRepromptEnabled &&
+        !firstPassProviderFailed &&
         deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs &&
         (firstPassResult.answer === 'skip' ||
           firstPassResult.confidence < profile.uncertaintyConfidenceThreshold)
@@ -10241,8 +10259,19 @@ Flip hash: ${hash}
     }
 
     const profile = sanitizeBenchmarkProfile(payload)
+    const basePromptOptions =
+      payload &&
+      payload.promptOptions &&
+      typeof payload.promptOptions === 'object'
+        ? payload.promptOptions
+        : {}
     const startedAt = now()
+    const deadlineAt = startedAt + profile.deadlineMs
     const interFlipDelayMs = Math.max(0, Number(profile.interFlipDelayMs) || 0)
+    const reviewConcurrency = Math.max(
+      1,
+      Math.min(flips.length, Number(profile.maxConcurrency) || 1)
+    )
 
     async function reviewSingleFlip(flip) {
       const flipStartedAt = now()
@@ -10274,6 +10303,20 @@ Flip hash: ${hash}
               profile.maxRetries,
               async (attempt) => {
                 try {
+                  const remainingDeadlineMs = deadlineAt - now()
+                  if (remainingDeadlineMs <= 750) {
+                    throw new Error('deadline_exceeded')
+                  }
+                  const requestProfile = {
+                    ...profile,
+                    requestTimeoutMs: Math.max(
+                      750,
+                      Math.min(
+                        Number(profile.requestTimeoutMs) || 0,
+                        remainingDeadlineMs - 250
+                      )
+                    ),
+                  }
                   return await invokeProvider({
                     provider: consultant.provider,
                     model: consultant.model,
@@ -10281,11 +10324,12 @@ Flip hash: ${hash}
                       hash: flip.hash,
                       images: sequenceImages,
                     },
-                    profile,
+                    profile: requestProfile,
                     apiKey: consultant.apiKey,
                     providerConfig: consultant.providerConfig || providerConfig,
                     promptText,
                     promptOptions: {
+                      ...basePromptOptions,
                       promptPhase: 'report_review',
                     },
                   })
@@ -10393,16 +10437,24 @@ Flip hash: ${hash}
       }
     }
 
-    const results = []
-    for (let flipIndex = 0; flipIndex < flips.length; flipIndex += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      const result = await reviewSingleFlip(flips[flipIndex])
-      results.push(result)
-
-      if (interFlipDelayMs > 0 && flipIndex < flips.length - 1) {
+    let results = []
+    if (reviewConcurrency <= 1) {
+      for (let flipIndex = 0; flipIndex < flips.length; flipIndex += 1) {
         // eslint-disable-next-line no-await-in-loop
-        await sleep(interFlipDelayMs)
+        const result = await reviewSingleFlip(flips[flipIndex])
+        results.push(result)
+
+        if (interFlipDelayMs > 0 && flipIndex < flips.length - 1) {
+          // eslint-disable-next-line no-await-in-loop
+          await sleep(interFlipDelayMs)
+        }
       }
+    } else {
+      results = await mapWithConcurrency(
+        flips,
+        reviewConcurrency,
+        reviewSingleFlip
+      )
     }
 
     const tokenUsageSummary = summarizeTokenUsage(results)
@@ -10423,6 +10475,7 @@ Flip hash: ${hash}
       costs: costSummary,
       diagnostics: {
         providerErrors: results.filter((item) => Boolean(item.error)).length,
+        maxConcurrency: reviewConcurrency,
       },
     }
 
