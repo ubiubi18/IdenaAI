@@ -1,6 +1,7 @@
 const {
   __test__: {
     isPeerHintRetryable,
+    isRpcMethodUnavailableError,
     mergePeerHints,
     normalizePeerHint,
     sortPeerHintsForRetry,
@@ -10,6 +11,20 @@ const {
 
 describe('idena node peer hints', () => {
   const now = Date.parse('2026-04-25T10:00:00.000Z')
+
+  it('detects initial RPC method-unavailable responses', () => {
+    expect(
+      isRpcMethodUnavailableError(
+        new Error('The method net_peers does not exist/is not available')
+      )
+    ).toBe(true)
+    expect(isRpcMethodUnavailableError(new Error('method is not found'))).toBe(
+      true
+    )
+    expect(isRpcMethodUnavailableError(new Error('connection refused'))).toBe(
+      false
+    )
+  })
 
   it('normalizes p2p multiaddrs into ipfs peer hints', () => {
     expect(
