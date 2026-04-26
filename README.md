@@ -1,4 +1,4 @@
-# IdenaAI
+# IdenaAI v0.0.2
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,18 +8,23 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This repository is the main app-integration line. It is research software, not a
-hardened wallet release.
+This repository is the main app-integration line. Version `0.0.2` is a
+development snapshot of the recent dependency, runtime, local AI, rehearsal, and
+autosolver work. It is research software, not a hardened wallet release.
 
 ## Experimental Warning
 
-Read this part first.
+Read this part first. `v0.0.2` is not production ready.
 
 - no warranties
 - not audited
+- not externally security-reviewed
+- developed through broad, fast-moving, AI-assisted / vibe-coding iterations
 - work in progress
 - experimental software with breaking changes, wrong behavior, and rough edges
+- contains large cross-cutting changes that still need slower human review
 - not suitable for valuable identities, funds, unattended automation, or blind trust
+- not suitable for unattended on-chain validation or reporting
 - do not install or run this if you do not understand what it is doing
 - use throwaway or low-value Idena addresses only
 - do not attach valuable identities to this fork
@@ -34,6 +39,23 @@ Hosted API providers are included for user-controlled benchmarking and
 small-scale experimentation with the user's own API key. They are not a
 reliability guarantee for synchronized live validation windows. For serious use,
 prefer local models so capacity scales with your own hardware.
+
+## v0.0.2 Repo Status
+
+`v0.0.2` marks the first cleaner-runtime development snapshot after the Node 24
+LTS and Electron 41 migration, dependency-footprint reduction, managed local AI
+hardening, rehearsal devnet fixes, and autosolver/reporting telemetry work.
+
+It should be treated as an auditable checkpoint, not a production release:
+
+- production dependency audit is currently clean, but dev tooling and the full
+  app surface still need deeper review
+- local AI, validation rehearsal, autosolver, and benchmark telemetry paths have
+  changed quickly and need more independent testing
+- the codebase was advanced through extensive AI-assisted iteration, so reviewers
+  should assume mistakes can exist even where tests pass
+- no guarantee is made that on-chain validation, reporting, wallet, node,
+  identity, or model-runtime flows behave safely under real user stakes
 
 ## Latest Changes
 
