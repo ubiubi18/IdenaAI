@@ -6250,6 +6250,7 @@ Flip hash: ${hash}
         hash: flip.hash,
         forceDecision: Boolean(promptOptions.forceDecision),
         secondPass: Boolean(promptOptions.secondPass),
+        finalAdjudication: Boolean(promptOptions.finalAdjudication),
         promptTemplateOverride: profile.promptTemplateOverride,
         uncertaintyRepromptInstruction: profile.uncertaintyRepromptInstruction,
         flipVisionMode: promptOptions.flipVisionMode || profile.flipVisionMode,
@@ -9725,6 +9726,7 @@ Flip hash: ${hash}
         secondPass = false,
         allowSkip = true,
         deepFrameReview = false,
+        finalAdjudication = false,
       } = {}) => {
         const useFrameReasoning =
           vision.applied === 'frames_two_pass' ||
@@ -9812,6 +9814,7 @@ Flip hash: ${hash}
                 {
                   ...basePromptOptions,
                   secondPass,
+                  finalAdjudication,
                   forceDecision: false,
                   flipVisionMode: 'frames_two_pass',
                   promptPhase: 'frame_reasoning',
@@ -9829,6 +9832,7 @@ Flip hash: ${hash}
               decisionResponse = await invokeConsultantOnce(consultant, {
                 ...basePromptOptions,
                 secondPass,
+                finalAdjudication,
                 forceDecision: !allowSkip,
                 flipVisionMode: 'frames_two_pass',
                 promptPhase: 'decision_from_frame_reasoning',
@@ -9838,6 +9842,7 @@ Flip hash: ${hash}
               decisionResponse = await invokeConsultantOnce(consultant, {
                 ...basePromptOptions,
                 secondPass,
+                finalAdjudication,
                 forceDecision: !allowSkip,
                 flipVisionMode: passFlipVisionMode,
                 promptPhase: 'decision',
@@ -9966,6 +9971,7 @@ Flip hash: ${hash}
           tokenUsage: consultantTokenUsage,
           costs: consultantCosts,
           secondPass,
+          finalAdjudication,
           secondPassStrategy: resolveSecondPassStrategy({
             useFrameReasoning,
             secondPass,
@@ -10039,20 +10045,69 @@ Flip hash: ${hash}
         }
       }
 
+      const shouldRunFinalAdjudication =
+        profile.forceDecision &&
+        finalResult.answer === 'skip' &&
+        !finalResult.error &&
+        deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs
+
+      if (shouldRunFinalAdjudication) {
+        const finalAdjudicationResult = await callProviderPass({
+          secondPass: true,
+          allowSkip: false,
+          deepFrameReview: true,
+          finalAdjudication: true,
+        })
+        mergedTokenUsage = addTokenUsage(
+          mergedTokenUsage,
+          finalAdjudicationResult.tokenUsage
+        )
+        mergedCosts = addCostSummary(mergedCosts, finalAdjudicationResult.costs)
+        finalResult = {
+          ...finalAdjudicationResult,
+          uncertaintyRepromptUsed: true,
+          finalAdjudicationUsed: true,
+          firstPass: finalResult.firstPass || {
+            answer: firstPassResult.answer,
+            confidence: firstPassResult.confidence,
+            error: firstPassResult.error,
+            reasoning: firstPassResult.reasoning,
+            rawAnswerBeforeRemap: firstPassResult.rawAnswerBeforeRemap,
+            strategy: firstPassResult.secondPassStrategy,
+          },
+        }
+      }
+
       if (profile.forceDecision && finalResult.answer === 'skip') {
-        const forcedAnswer = chooseDeterministicRandomSide(flip.hash)
+        const firstPassLean = normalizeAnswer(firstPassResult.answer)
+        const hasFirstPassLean =
+          firstPassLean === 'left' || firstPassLean === 'right'
+        const forcedAnswer = hasFirstPassLean
+          ? firstPassLean
+          : chooseDeterministicRandomSide(flip.hash)
+        const forcedDecisionPolicy = hasFirstPassLean
+          ? 'low_confidence_lean'
+          : 'random'
+        let forcedDecisionReason = 'uncertain_or_skip'
+        if (finalResult.error) {
+          forcedDecisionReason = 'provider_error'
+        } else if (hasFirstPassLean) {
+          forcedDecisionReason = 'low_confidence_lean'
+        }
+        const fallbackReasoning = hasFirstPassLean
+          ? `low-confidence first-pass lean ${forcedAnswer}`
+          : `deterministic random fallback ${forcedAnswer}`
+
         finalResult = {
           ...finalResult,
           answer: forcedAnswer,
           finalAnswerAfterRemap: forcedAnswer,
           forcedDecision: true,
-          forcedDecisionPolicy: 'random',
-          forcedDecisionReason: finalResult.error
-            ? 'provider_error'
-            : 'uncertain_or_skip',
+          forcedDecisionPolicy,
+          forcedDecisionReason,
           reasoning: finalResult.reasoning
-            ? `${finalResult.reasoning}; deterministic random fallback ${forcedAnswer}`
-            : `deterministic random fallback ${forcedAnswer}`,
+            ? `${finalResult.reasoning}; ${fallbackReasoning}`
+            : fallbackReasoning,
         }
       }
 
@@ -10171,6 +10226,7 @@ Flip hash: ${hash}
           finalAnswerAfterRemap,
           tokenUsage,
           uncertaintyRepromptUsed,
+          finalAdjudicationUsed,
           forcedDecision,
           forcedDecisionPolicy,
           forcedDecisionReason,
@@ -10197,6 +10253,7 @@ Flip hash: ${hash}
           finalAnswerAfterRemap,
           tokenUsage,
           uncertaintyRepromptUsed,
+          finalAdjudicationUsed,
           forcedDecision,
           forcedDecisionPolicy,
           forcedDecisionReason,
