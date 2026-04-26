@@ -1,4 +1,4 @@
-# IdenaAI Benchmarker NOT PRODUCTION READY, DONT USE!
+# IdenaAI
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,7 +8,8 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This is research software, not a hardened wallet release.
+This repository is the main app-integration line. It is research software, not a
+hardened wallet release.
 
 ## Experimental Warning
 
@@ -63,10 +64,11 @@ This section should stay current and act as a short roadmap of what has already 
   staggered queue so completed answers are applied immediately and slow provider
   calls do not block the rest of the run.
 - Validation AI fallback and telemetry:
-  uncertain flips now escalate into an annotated frame-review second pass before
-  the solver gives up, and unresolved flips are forced into an explicit random
-  fallback vote that is surfaced in AI benchmark telemetry together with first-
-  pass traces, reasoning, token usage, and price estimates where available.
+  uncertain flips now escalate into annotated frame-review and final
+  adjudication passes before the solver gives up. If no usable directional lean
+  remains, or a provider fails, the app records the forced fallback decision in
+  AI benchmark telemetry together with first-pass traces, reasoning, token
+  usage, and price estimates where available.
 - Rehearsal result review:
   rehearsal runs now expose end-of-session benchmark stats, optional audit/review
   flows, persistent human annotations by flip hash, and validation AI cost
@@ -88,7 +90,9 @@ This section should stay current and act as a short roadmap of what has already 
   lighter `InternVL3.5-1B` lane now validated as a realistic same-provider
   managed-runtime candidate. The default managed install path targets the
   compact `Molmo2-4B` profile, and active managed setup/download jobs can be
-  aborted or superseded before switching to another profile.
+  aborted or superseded before switching to another profile. The install flow
+  now shows the exact model family, download size, RAM fit, and Hugging Face
+  trust warning before users start a managed download.
 - Dependency footprint:
   the desktop app now has a dependency-footprint audit, removes the direct
   `jimp` image stack, removes the root `idena-sdk-js` runtime dependency in
@@ -145,10 +149,17 @@ The app keeps local benchmark and validation-related metrics so experiments are 
 - local audits are written under `userData/ai-benchmark/audits/`
 - test-unit queue and run artifacts also live under the same local directory
 
-On macOS, this typically resolves under:
+For source runs from the standard workspace layout, `npm start` resolves
+`userData` under the workspace-local runtime directory:
 
 ```text
-~/Library/Application Support/Idena/ai-benchmark/
+../IdenaAI-runtime/IdenaAI/ai-benchmark/
+```
+
+For a packaged macOS app, the same metrics path resolves under:
+
+```text
+~/Library/Application Support/IdenaAI/ai-benchmark/
 ```
 
 Treat these files as experimental diagnostics:
@@ -156,6 +167,50 @@ Treat these files as experimental diagnostics:
 - schemas may still change
 - entries may be incomplete during crashes or interrupted runs
 - do not build production assumptions on top of them yet
+
+## Runtime and Data Paths
+
+The app separates packaged data from source-run data.
+
+Source runs started with `npm start` use `scripts/start-electron-dev.js`, which
+defaults to a workspace-local runtime root next to the checked-out repository:
+
+```text
+../IdenaAI-runtime/IdenaAI/
+```
+
+For example, if the repository is checked out at:
+
+```text
+~/src/IdenaAI/
+```
+
+the default source-run `userData` path is:
+
+```text
+~/src/IdenaAI-runtime/IdenaAI/
+```
+
+Packaged builds default to the OS app-data directory with storage name
+`IdenaAI`; on macOS that is usually:
+
+```text
+~/Library/Application Support/IdenaAI/
+```
+
+You can override the runtime directory explicitly:
+
+```bash
+IDENA_DESKTOP_USER_DATA_DIR=/absolute/path/to/idenaai-runtime npm start
+```
+
+Important subdirectories inside `userData`:
+
+- `node/datadir/`: built-in node database, key material, and node API key
+- `logs/`: Electron and app logs
+- `ai-benchmark/`: validation and AI benchmark telemetry
+- `validation-devnet/`: local rehearsal-network nodes and logs
+- `local-ai/`: local AI configuration, captures, and managed-runtime state
 
 ## Validation Rehearsal Devnet
 
@@ -242,11 +297,12 @@ Current intended behavior:
 - optionally use an OpenAI-only short-session fast lane with Priority
   processing and reduced reasoning effort, while automatically degrading to the
   normal OpenAI plan if the API shape changes or fast-lane handling is rejected
-- refuse late AI runs when too little short- or long-session time remains
-- escalate uncertain flips into an annotated frame-review second pass instead of
-  silently leaving them as skips
-- if a flip still cannot be resolved after that second pass, apply a random
-  fallback vote and record that fact in telemetry rather than hiding the outcome
+- refuse late AI runs when too little short- or long-session time remains, with
+  short-session automation targeting submission before the final safety buffer
+- escalate uncertain flips into annotated frame-review and final adjudication
+  passes instead of silently leaving them as skips
+- if a flip still cannot be resolved after those passes, apply a forced fallback
+  vote and record that fact in telemetry rather than hiding the outcome
 - submit long-session answers automatically even when delayed AI report review is
   disabled, unsupported, or fails
 - start automatic report review early enough to keep a 3-minute safety window;
@@ -298,8 +354,8 @@ Dependency policy:
   helpers before adding runtime npm packages
 - keep heavier migrations, such as storage or UI framework replacement, as
   separate reviewed work
-- keep future Electron upgrades as separate modernization work. This dependency
-  diet branch pins Electron to `41.3.0`; `npm install` and dev startup were
+- keep future Electron upgrades as separate modernization work. The current
+  desktop line pins Electron to `41.3.0`; `npm install` and dev startup were
   smoke-tested on Node 20.20.2, but the current Electron build toolchain vendors
   rebuild tooling that declares Node 22.12+ as its clean packaging target
 - use `npm run audit:deps` to inspect root runtime deps, production transitive
@@ -314,7 +370,8 @@ Dependency policy:
 Prerequisites:
 
 - `git`
-- `node` 20.20+ for development, or Node 22.12+ for clean Electron 41 packaging
+- `node` 20.20+ for source-run development
+- Node 22.12+ for clean Electron 41 packaging and rebuild tooling
 - `npm`
 - `python3`
 
@@ -405,6 +462,15 @@ Very short overview:
 - `Phase 3`: provider benchmarking, solving, and generation were separated from local-model-training semantics
 - `Phase 4`: the old local base-model direction was reset and the project returned to embryo stage for local AI while `Molmo2-O` and alternative managed lanes are evaluated
 - `Phase 5`: local rehearsal devnet controls, live metrics, and explicit managed-runtime preparation lanes were added to tighten the research loop inside the app
+- `Phase 6`: dependency footprint work removed the old direct `jimp` and
+  `idena-sdk-js` runtime paths, added dependency audits, and upgraded the
+  Electron runtime to `41.3.0`
+- `Phase 7`: session-auto validation was hardened with short-session parallel
+  solving, long-session staggered solving, AI cost telemetry, report-review
+  deadlines, local rehearsal audit, and explicit fallback traces
+- `Phase 8`: local AI setup was hardened with a compact 4B default, RAM-fit
+  warnings, Hugging Face trust dialogs, abort/switch controls, and
+  workspace-local dev data paths
 
 ## Related Repo
 
