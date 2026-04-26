@@ -30,6 +30,11 @@ Read this part first.
 If you are not comfortable reviewing diffs, debugging broken flows, reading logs,
 and accepting the possibility of incorrect results, do not use this build.
 
+Hosted API providers are included for user-controlled benchmarking and
+small-scale experimentation with the user's own API key. They are not a
+reliability guarantee for synchronized live validation windows. For serious use,
+prefer local models so capacity scales with your own hardware.
+
 ## Latest Changes
 
 This section should stay current and act as a short roadmap of what has already landed.
