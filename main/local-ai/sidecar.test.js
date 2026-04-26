@@ -166,6 +166,43 @@ describe('local-ai sidecar', () => {
     )
   })
 
+  it('includes Local AI runtime error detail in chat failures', async () => {
+    const runtimeError = new Error('Request failed with status code 500')
+    runtimeError.response = {
+      status: 500,
+      data: {
+        error: {
+          message: 'runtime_error',
+          type: 'server_error',
+          detail: 'There is no Stream(gpu, 0) in current thread.',
+        },
+      },
+    }
+
+    const httpClient = {
+      post: jest.fn(async () => {
+        throw runtimeError
+      }),
+    }
+    const sidecar = createLocalAiSidecar({httpClient})
+
+    await expect(
+      sidecar.chat({
+        runtimeBackend: 'local-runtime-service',
+        runtimeType: 'sidecar',
+        baseUrl: 'http://127.0.0.1:8080',
+        runtimeAuthToken: 'managed-token',
+        model: 'allenai/Molmo2-4B',
+        input: 'Say hello.',
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      status: 'unavailable',
+      lastError:
+        'runtime_error: There is no Stream(gpu, 0) in current thread. (HTTP 500)',
+    })
+  })
+
   it('returns explicit not_implemented for optional sidecar endpoints', async () => {
     const notFound = new Error('missing')
     notFound.response = {status: 404}
