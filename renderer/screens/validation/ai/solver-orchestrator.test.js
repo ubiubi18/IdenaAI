@@ -635,13 +635,14 @@ describe('solver-orchestrator planning', () => {
     }
   })
 
-  it('keeps all six short-session OpenAI solves parallel even when the custom profile uses serial batch concurrency', async () => {
+  it('staggers short-session OpenAI launches while keeping solves parallel', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
     const originalCreateElement = document.createElement.bind(document)
     const createElementSpy = jest.spyOn(document, 'createElement')
     let inFlight = 0
     let maxInFlight = 0
+    const startTimes = []
 
     function ReadyImage() {
       this.width = 100
@@ -662,10 +663,11 @@ describe('solver-orchestrator planning', () => {
     global.aiSolver = {
       solveFlipBatch: jest.fn(async ({flips}) => {
         expect(flips).toHaveLength(1)
+        startTimes.push(Date.now())
         inFlight += 1
         maxInFlight = Math.max(maxInFlight, inFlight)
         await new Promise((resolve) => {
-          setTimeout(resolve, 5)
+          setTimeout(resolve, 50)
         })
         inFlight -= 1
 
@@ -721,6 +723,7 @@ describe('solver-orchestrator planning', () => {
           uncertaintyRepromptEnabled: false,
           interFlipDelayMs: 0,
           maxRetries: 0,
+          shortSessionOpenAiParallelLaunchDelayMs: 5,
         },
         hardDeadlineAt: Date.now() + 60 * 1000,
       })
@@ -728,6 +731,10 @@ describe('solver-orchestrator planning', () => {
       expect(result.answers).toHaveLength(6)
       expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(6)
       expect(maxInFlight).toBe(6)
+      expect(startTimes).toHaveLength(6)
+      expect(
+        startTimes[startTimes.length - 1] - startTimes[0]
+      ).toBeGreaterThanOrEqual(20)
     } finally {
       createElementSpy.mockRestore()
       global.Image = originalImage
