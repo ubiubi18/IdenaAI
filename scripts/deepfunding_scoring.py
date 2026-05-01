@@ -6,7 +6,7 @@ Source inspiration:
 - https://github.com/ubiubi18/scoring
 - https://github.com/deepfunding/scoring
 
-Kept local so the benchmarker can use the mechanism deterministically without
+Kept local so IdenaAI can use the mechanism deterministically without
 requiring a separate checkout at runtime.
 """
 

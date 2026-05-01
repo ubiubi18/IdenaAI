@@ -21,10 +21,7 @@ const DEV_SERVER_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const STARTUP_TIMEOUT_MS = 120000
 const POLL_INTERVAL_MS = 1000
 const APP_USER_DATA_NAME =
-  process.env.IDENA_DESKTOP_APP_USER_DATA_NAME ||
-  (path.basename(ROOT) === 'IdenaAI_Benchmarker'
-    ? 'IdenaAI_Benchmarker'
-    : 'IdenaAI')
+  process.env.IDENA_DESKTOP_APP_USER_DATA_NAME || 'IdenaAI'
 const WORKSPACE_RUNTIME_DIR =
   process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
   path.join(path.dirname(ROOT), 'IdenaAI-runtime')
@@ -68,7 +65,7 @@ function assertRendererPortFree() {
       reject(
         new Error(
           error.code === 'EADDRINUSE'
-            ? `Renderer dev port ${DEV_PORT} is already in use. Stop the old IdenaAI/Benchmarker dev runtime before starting this one.`
+            ? `Renderer dev port ${DEV_PORT} is already in use. Stop the existing IdenaAI dev runtime before starting this one.`
             : `Unable to check renderer dev port ${DEV_PORT}: ${error.message}`
         )
       )

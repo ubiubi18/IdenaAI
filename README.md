@@ -555,12 +555,6 @@ Very short overview:
   through `.nvmrc`, `.node-version`, package `engines`, preinstall checks, and
   GitHub Actions
 
-## Related Repo
-
-If you mainly want the off-chain benchmark and training fork, use:
-
-- [IdenaAI_Benchmarker](https://github.com/ubiubi18/IdenaAI_Benchmarker)
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
