@@ -273,17 +273,9 @@ function resolveCommandParts() {
     'bin',
     'python'
   )
-  const benchmarkerPython = path.join(
-    path.resolve(repoRoot, '..', 'IdenaAI_Benchmarker'),
-    '.tmp',
-    'flip-train-venv',
-    'bin',
-    'python'
-  )
   const candidates = PYTHON_COMMAND_CANDIDATES.concat([
     fs.existsSync(repoPython311) ? repoPython311 : null,
     fs.existsSync(repoPython) ? repoPython : null,
-    fs.existsSync(benchmarkerPython) ? benchmarkerPython : null,
     process.platform === 'win32' ? 'py -3.11' : 'python3.11',
     process.platform === 'win32' ? 'py -3' : 'python3',
   ])

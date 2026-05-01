@@ -6,7 +6,7 @@ This backlog is derived from the local PDF review of:
 
 - External prompt/pipeline optimization PDF review provided by the user
 
-It is written for the real `IdenaAI` repo, not the benchmarker. The main diagnosis from that document matches the current code findings:
+It is written for the current `IdenaAI` repo. The main diagnosis from that document matches the current code findings:
 
 - the system is not failing mainly because "vision is impossible"
 - the system is still vulnerable to candidate-slot shortcuts
