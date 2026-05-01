@@ -181,6 +181,8 @@ const BASE_EXTERNAL_API_URL = 'http://localhost:9009'
 const RPC_MAX_METHOD_LENGTH = 128
 const SOCIAL_RPC_MAX_REQUEST_ID_LENGTH = 128
 const SOCIAL_RPC_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+const DEFAULT_NODE_RPC_TIMEOUT_MS = 15000
+const VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 4000
 const SOCIAL_ALLOWED_RPC_METHODS = new Set([
   'bcn_block',
   'bcn_blockAt',
@@ -583,6 +585,12 @@ function maybeEmitRequestedValidationDevnetConnectPayload(status) {
   return emitValidationDevnetConnectPayloadOnce()
 }
 
+function getNodeRpcTimeoutMs(method) {
+  return /^flip_submit(?:Short|Long)Answers$/.test(String(method || ''))
+    ? VALIDATION_SUBMIT_RPC_TIMEOUT_MS
+    : DEFAULT_NODE_RPC_TIMEOUT_MS
+}
+
 async function performNodeRpc(payload = {}) {
   const validationError = validateNodeRpcPayload(payload)
 
@@ -608,7 +616,7 @@ async function performNodeRpc(payload = {}) {
   try {
     const response = await httpClient.post(url, requestBody, {
       headers: {'Content-Type': 'application/json'},
-      timeout: 15000,
+      timeout: getNodeRpcTimeoutMs(requestBody.method),
     })
 
     return response && response.data ? response.data : {}
@@ -780,6 +788,27 @@ function getMainLocalAiSettings(payload = {}) {
     {...localAi, ...nextPayload},
     localAi
   )
+  const activeAdapterEpoch = pickTrimmedString(
+    [nextPayload.activeAdapterEpoch, localAi.activeAdapterEpoch],
+    ''
+  )
+  const activeAdapterSha256 = pickTrimmedString(
+    [nextPayload.activeAdapterSha256, localAi.activeAdapterSha256],
+    ''
+  )
+  const activeAdapterFormat = pickTrimmedString(
+    [nextPayload.activeAdapterFormat, localAi.activeAdapterFormat],
+    ''
+  )
+  const activeAdapterLabel = pickTrimmedString(
+    [nextPayload.activeAdapterLabel, localAi.activeAdapterLabel],
+    ''
+  )
+  const activeAdapterEnabled =
+    (nextPayload.activeAdapterEnabled === true ||
+      (typeof nextPayload.activeAdapterEnabled === 'undefined' &&
+        localAi.activeAdapterEnabled === true)) &&
+    Boolean(activeAdapterEpoch || activeAdapterSha256)
 
   return {
     enabled:
@@ -848,6 +877,11 @@ function getMainLocalAiSettings(payload = {}) {
       [nextPayload.runtimeType, localAi.runtimeType],
       runtimeAdapter.runtimeType
     ),
+    activeAdapterEnabled,
+    activeAdapterEpoch,
+    activeAdapterSha256,
+    activeAdapterFormat,
+    activeAdapterLabel,
     adapterStrategy: pickTrimmedString(
       [nextPayload.adapterStrategy, localAi.adapterStrategy],
       LOCAL_AI_ADAPTER_STRATEGY
@@ -882,6 +916,11 @@ function buildLocalAiAdapterState(localAi = {}) {
     publicModelId: localAi.publicModelId,
     publicVisionId: localAi.publicVisionId,
     contractVersion: localAi.contractVersion,
+    activeAdapterEnabled: localAi.activeAdapterEnabled === true,
+    activeAdapterEpoch: localAi.activeAdapterEpoch || '',
+    activeAdapterSha256: localAi.activeAdapterSha256 || '',
+    activeAdapterFormat: localAi.activeAdapterFormat || '',
+    activeAdapterLabel: localAi.activeAdapterLabel || '',
   }
 }
 
@@ -1172,6 +1211,11 @@ function buildDisabledLocalAiInfoResponse(payload = {}) {
     runtimeFamily: localAi.runtimeFamily,
     adapterStrategy: localAi.adapterStrategy,
     trainingPolicy: localAi.trainingPolicy,
+    activeAdapterEnabled: localAi.activeAdapterEnabled,
+    activeAdapterEpoch: localAi.activeAdapterEpoch,
+    activeAdapterSha256: localAi.activeAdapterSha256,
+    activeAdapterFormat: localAi.activeAdapterFormat,
+    activeAdapterLabel: localAi.activeAdapterLabel,
     model: localAi.model,
     visionModel: localAi.visionModel,
     models: [],
@@ -1201,6 +1245,11 @@ function buildLocalAiChatPayload(payload = {}) {
     runtimeFamily: localAi.runtimeFamily,
     adapterStrategy: localAi.adapterStrategy,
     trainingPolicy: localAi.trainingPolicy,
+    activeAdapterEnabled: localAi.activeAdapterEnabled,
+    activeAdapterEpoch: localAi.activeAdapterEpoch,
+    activeAdapterSha256: localAi.activeAdapterSha256,
+    activeAdapterFormat: localAi.activeAdapterFormat,
+    activeAdapterLabel: localAi.activeAdapterLabel,
   }
 }
 
@@ -1225,6 +1274,11 @@ function buildLocalAiInfoPayload(payload = {}) {
     runtimeFamily: localAi.runtimeFamily,
     adapterStrategy: localAi.adapterStrategy,
     trainingPolicy: localAi.trainingPolicy,
+    activeAdapterEnabled: localAi.activeAdapterEnabled,
+    activeAdapterEpoch: localAi.activeAdapterEpoch,
+    activeAdapterSha256: localAi.activeAdapterSha256,
+    activeAdapterFormat: localAi.activeAdapterFormat,
+    activeAdapterLabel: localAi.activeAdapterLabel,
     developerHumanTeacherSystemPrompt:
       localAi.developerHumanTeacherSystemPrompt,
     rankingPolicy: localAi.rankingPolicy,
@@ -1252,6 +1306,11 @@ function buildLocalAiFlipJudgePayload(payload = {}) {
     runtimeFamily: localAi.runtimeFamily,
     adapterStrategy: localAi.adapterStrategy,
     trainingPolicy: localAi.trainingPolicy,
+    activeAdapterEnabled: localAi.activeAdapterEnabled,
+    activeAdapterEpoch: localAi.activeAdapterEpoch,
+    activeAdapterSha256: localAi.activeAdapterSha256,
+    activeAdapterFormat: localAi.activeAdapterFormat,
+    activeAdapterLabel: localAi.activeAdapterLabel,
     input: pickLocalAiInput(nextPayload),
   }
 }
@@ -2372,6 +2431,22 @@ onTrusted(NODE_COMMAND, async (_event, command, data) => {
         .catch((e) => {
           logger.error(
             'error while getting validation devnet logs',
+            e.toString()
+          )
+        })
+      break
+    }
+    case 'run-validation-devnet-solver-lanes': {
+      validationDevnet
+        .runSolverLanes(data || {}, {
+          solveFlipBatch: (payload) => aiProviderBridge.solveFlipBatch(payload),
+        })
+        .then((status) => {
+          sendMainWindowMsg(NODE_EVENT, 'validation-devnet-status', status)
+        })
+        .catch((e) => {
+          logger.error(
+            'error while running validation devnet solver lanes',
             e.toString()
           )
         })

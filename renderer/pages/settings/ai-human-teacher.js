@@ -89,6 +89,9 @@ import {useEpochState} from '../../shared/providers/epoch-context'
 const HUMAN_TEACHER_SET_LIMIT = 30
 const AUTO_SAVE_DELAY_MS = 2500
 const PANEL_REFERENCE_CODES = ['A', 'B', 'C']
+const AI_ANNOTATION_MEMORY_EXAMPLE_LIMIT = 3
+const AI_ANNOTATION_MEMORY_TEXT_LIMIT = 180
+const AI_ANNOTATION_MEMORY_REASON_LIMIT = 260
 const BENCHMARK_EXAMPLE_FILTER_OPTIONS = [
   'all',
   'failures',
@@ -1366,7 +1369,8 @@ function buildAiAnnotationSystemPrompt(basePrompt = '') {
 
   return [
     prefix || DEFAULT_HUMAN_TEACHER_SYSTEM_PROMPT,
-    'You are generating a developer-only draft annotation for human review.',
+    'You are generating a local AI draft annotation for human review and correction.',
+    'Your draft is not ground truth; the human reviewer will decide what becomes training data.',
     'Use explicit structured observations instead of hidden reasoning.',
     'Inspect every ordered panel before choosing a side.',
     'Do not collapse into a left-only or right-only habit.',
@@ -1376,11 +1380,200 @@ function buildAiAnnotationSystemPrompt(basePrompt = '') {
     .join(' ')
 }
 
-function buildAiAnnotationUserPrompt() {
+function clipAiAnnotationMemoryText(
+  value,
+  limit = AI_ANNOTATION_MEMORY_TEXT_LIMIT
+) {
+  const normalized = String(value || '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+
+  if (!normalized) {
+    return ''
+  }
+
+  return normalized.length > limit
+    ? `${normalized.slice(0, Math.max(0, limit - 3))}...`
+    : normalized
+}
+
+function normalizeAiAnnotationMemoryDecision(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+
+  return ['left', 'right', 'skip'].includes(normalized) ? normalized : ''
+}
+
+function formatAiAnnotationMemoryBool(value) {
+  if (value === true) {
+    return 'yes'
+  }
+
+  if (value === false) {
+    return 'no'
+  }
+
+  return 'unknown'
+}
+
+function extractKeywordItemMemoryText(value) {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (value && typeof value === 'object') {
+    return value.name || value.label || value.word || value.value || ''
+  }
+
+  return ''
+}
+
+function extractTaskKeywordMemoryLabel(task = {}) {
+  const source = task && typeof task === 'object' ? task : {}
+  const keywordSources = [
+    source.keywordPair,
+    source.keyword_pair,
+    source.keywords,
+    source.keyword,
+    source.words,
+  ]
+
+  if (source.keywordA || source.keywordB) {
+    keywordSources.unshift([source.keywordA, source.keywordB])
+  }
+
+  if (source.leftKeyword || source.rightKeyword) {
+    keywordSources.unshift([source.leftKeyword, source.rightKeyword])
+  }
+
+  for (const candidate of keywordSources) {
+    if (Array.isArray(candidate)) {
+      const candidateLabel = candidate
+        .map((item) => extractKeywordItemMemoryText(item))
+        .map((item) => clipAiAnnotationMemoryText(item, 48))
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(' / ')
+
+      if (candidateLabel) {
+        return candidateLabel
+      }
+    }
+
+    if (candidate && typeof candidate === 'object') {
+      const objectLabel = Object.entries(candidate)
+        .map(([key, value]) => {
+          const nextValue = extractKeywordItemMemoryText(value)
+
+          return nextValue
+            ? `${clipAiAnnotationMemoryText(
+                key,
+                24
+              )}=${clipAiAnnotationMemoryText(nextValue, 48)}`
+            : ''
+        })
+        .filter(Boolean)
+        .slice(0, 4)
+        .join('; ')
+
+      if (objectLabel) {
+        return objectLabel
+      }
+    }
+
+    const fallbackLabel = clipAiAnnotationMemoryText(candidate, 96)
+
+    if (fallbackLabel) {
+      return fallbackLabel
+    }
+  }
+
+  return ''
+}
+
+function buildAiAnnotationMemoryExample(task = {}, annotation = {}) {
+  const normalized = normalizeAnnotationDraft(annotation)
+  const finalAnswer = normalizeAiAnnotationMemoryDecision(
+    normalized.final_answer
+  )
+  const taskId = String(
+    task?.taskId || task?.task_id || normalized?.ai_annotation?.task_id || ''
+  ).trim()
+  const whyAnswer = clipAiAnnotationMemoryText(
+    normalized.why_answer,
+    AI_ANNOTATION_MEMORY_REASON_LIMIT
+  )
+
+  if (!taskId || !finalAnswer || !whyAnswer) {
+    return null
+  }
+
+  return {
+    taskId,
+    savedAt: new Date().toISOString(),
+    keywords: extractTaskKeywordMemoryLabel(task),
+    finalAnswer,
+    confidence: clipAiAnnotationMemoryText(normalized.confidence, 24),
+    optionASummary: clipAiAnnotationMemoryText(normalized.option_a_summary),
+    optionBSummary: clipAiAnnotationMemoryText(normalized.option_b_summary),
+    textRequired: formatAiAnnotationMemoryBool(normalized.text_required),
+    sequenceMarkersPresent: formatAiAnnotationMemoryBool(
+      normalized.sequence_markers_present
+    ),
+    reportRequired: formatAiAnnotationMemoryBool(normalized.report_required),
+    reportReason: clipAiAnnotationMemoryText(
+      normalized.report_reason,
+      AI_ANNOTATION_MEMORY_REASON_LIMIT
+    ),
+    whyAnswer,
+  }
+}
+
+function buildAiAnnotationMemoryPrompt(memoryExamples = []) {
+  const examples = (Array.isArray(memoryExamples) ? memoryExamples : [])
+    .filter(Boolean)
+    .slice(0, AI_ANNOTATION_MEMORY_EXAMPLE_LIMIT)
+
+  if (!examples.length) {
+    return ''
+  }
+
+  const lines = [
+    'Local human-corrected examples from this annotation session follow. Use them only as annotation style guidance.',
+    'Do not copy their left/right/skip distribution. Do not infer that one side is generally more common.',
+    'Solve the current flip independently from its own panels.',
+  ]
+
+  examples.forEach((example, index) => {
+    const parts = [
+      `Example ${index + 1}`,
+      example.keywords ? `keywords=${example.keywords}` : '',
+      `human_answer=${example.finalAnswer}`,
+      example.confidence ? `confidence=${example.confidence}` : '',
+      example.optionASummary ? `left_summary=${example.optionASummary}` : '',
+      example.optionBSummary ? `right_summary=${example.optionBSummary}` : '',
+      `text_required=${example.textRequired}`,
+      `sequence_markers=${example.sequenceMarkersPresent}`,
+      `report_required=${example.reportRequired}`,
+      example.reportReason ? `report_reason=${example.reportReason}` : '',
+      `human_reason=${example.whyAnswer}`,
+    ].filter(Boolean)
+
+    lines.push(parts.join(' | '))
+  })
+
+  return lines.join('\n')
+}
+
+function buildAiAnnotationUserPrompt(memoryExamples = []) {
+  const memoryPrompt = buildAiAnnotationMemoryPrompt(memoryExamples)
+
   return [
     'Draft a human-teacher annotation for this Idena FLIP.',
     'Images 1-4 show the LEFT candidate in temporal order.',
     'Images 5-8 show the RIGHT candidate in temporal order.',
+    memoryPrompt,
     'Describe each ordered panel concretely before you decide.',
     'Extract only readable visible text. If no text is readable, use an empty string for that panel.',
     'Then compare the LEFT and RIGHT stories and decide which side forms the better chronology.',
@@ -1554,6 +1747,14 @@ function buildAnnotationDraftKey({
   }
 
   return `epoch:${String(epoch || '').trim()}:${taskId}`
+}
+
+function canUseAiAnnotationDraftSourceMode(annotationSourceMode = '') {
+  return ['developer', 'demo', 'epoch'].includes(
+    String(annotationSourceMode || '')
+      .trim()
+      .toLowerCase()
+  )
 }
 
 const DEMO_SAMPLE_OPTIONS = [
@@ -6537,6 +6738,8 @@ export default function AiHumanTeacherPage() {
     DEFAULT_HUMAN_TEACHER_SYSTEM_PROMPT
   )
   const [aiReplyDraftByTaskId, setAiReplyDraftByTaskId] = React.useState({})
+  const [aiAnnotationMemoryByTaskId, setAiAnnotationMemoryByTaskId] =
+    React.useState({})
   const [_developerActionResult, setDeveloperActionResult] =
     React.useState(null)
   const [chunkDecisionDialog, setChunkDecisionDialog] = React.useState({
@@ -6602,6 +6805,10 @@ export default function AiHumanTeacherPage() {
     )
   }, [isDeveloperMode, queryDemoSample])
 
+  React.useEffect(() => {
+    setAiAnnotationMemoryByTaskId({})
+  }, [annotationSourceMode, demoOffset, demoSampleName, developerOffset, epoch])
+
   const hasInteractiveLocalAiBridge = Boolean(
     global.localAi &&
       ['electron', 'browser_dev_api'].includes(global.localAi.bridgeMode)
@@ -6617,6 +6824,19 @@ export default function AiHumanTeacherPage() {
     }
 
     return global.localAi
+  }, [])
+
+  const rememberAiAnnotationMemory = React.useCallback((task, annotation) => {
+    const memoryExample = buildAiAnnotationMemoryExample(task, annotation)
+
+    if (!memoryExample) {
+      return
+    }
+
+    setAiAnnotationMemoryByTaskId((current) => ({
+      ...current,
+      [memoryExample.taskId]: memoryExample,
+    }))
   }, [])
 
   const refreshDeveloperTelemetry = React.useCallback(async () => {
@@ -7063,6 +7283,24 @@ export default function AiHumanTeacherPage() {
     localAi?.shareHumanTeacherAnnotationsWithNetwork
   )
   const autoTriggerAiDraft = developerAiDraftTriggerMode === 'automatic'
+  const canUseAiDraftInCurrentSourceMode =
+    canUseAiAnnotationDraftSourceMode(annotationSourceMode)
+  const currentAiAnnotationMemoryExamples = React.useMemo(
+    () =>
+      Object.values(aiAnnotationMemoryByTaskId)
+        .filter(
+          (example) =>
+            example &&
+            String(example.taskId || '').trim() &&
+            String(example.taskId || '').trim() !==
+              String(selectedTaskId || '').trim()
+        )
+        .sort((left, right) =>
+          String(right.savedAt || '').localeCompare(String(left.savedAt || ''))
+        )
+        .slice(0, AI_ANNOTATION_MEMORY_EXAMPLE_LIMIT),
+    [aiAnnotationMemoryByTaskId, selectedTaskId]
+  )
   const developerAiDraftWindowTone = React.useMemo(
     () =>
       describeDeveloperAiDraftWindowTone({
@@ -8227,6 +8465,9 @@ export default function AiHumanTeacherPage() {
         })
         setShowAdvancedFields(false)
         setShowReferenceTool(false)
+        if (isCompleteDraft(nextDraft)) {
+          rememberAiAnnotationMemory(nextTask, nextDraft)
+        }
       } catch (nextError) {
         setTaskDetail(null)
         setAnnotationDraft(createEmptyAnnotationDraft())
@@ -8250,6 +8491,7 @@ export default function AiHumanTeacherPage() {
       developerOffset,
       ensureBridge,
       epoch,
+      rememberAiAnnotationMemory,
     ]
   )
 
@@ -8678,7 +8920,18 @@ export default function AiHumanTeacherPage() {
         .trim()
         .slice(0, developerAiDraftQuestionWindowChars)
 
-      if (annotationSourceMode !== 'developer') {
+      if (!canUseAiDraftInCurrentSourceMode) {
+        if (!isAutomaticTrigger) {
+          toast({
+            render: () => (
+              <Toast title={t('AI draft unavailable here')}>
+                {t(
+                  'This annotation source does not expose the ordered flip panels needed for a local AI draft.'
+                )}
+              </Toast>
+            ),
+          })
+        }
         return false
       }
 
@@ -8831,7 +9084,9 @@ export default function AiHumanTeacherPage() {
           },
           {
             role: 'user',
-            content: buildAiAnnotationUserPrompt(),
+            content: buildAiAnnotationUserPrompt(
+              currentAiAnnotationMemoryExamples
+            ),
             images: orderedImages,
           },
         ]
@@ -8990,7 +9245,8 @@ export default function AiHumanTeacherPage() {
       }
     },
     [
-      annotationSourceMode,
+      canUseAiDraftInCurrentSourceMode,
+      currentAiAnnotationMemoryExamples,
       effectiveDeveloperPrompt,
       ensureBridge,
       aiDraftRuntimeResolution.fallbackReason,
@@ -9138,7 +9394,7 @@ export default function AiHumanTeacherPage() {
     )
 
     if (
-      !isDeveloperMode ||
+      !canUseAiDraftInCurrentSourceMode ||
       !autoTriggerAiDraft ||
       !activeTaskId ||
       activeTaskId !== selectedId ||
@@ -9156,7 +9412,7 @@ export default function AiHumanTeacherPage() {
   }, [
     annotationDraft,
     autoTriggerAiDraft,
-    isDeveloperMode,
+    canUseAiDraftInCurrentSourceMode,
     isGeneratingAiDraft,
     isTaskLoading,
     requestAiAnnotationDraft,
@@ -9453,6 +9709,15 @@ export default function AiHumanTeacherPage() {
           savedAt: new Date().toISOString(),
           error: '',
         })
+        if (draftCompletion.isComplete) {
+          rememberAiAnnotationMemory(
+            {
+              ...(taskDetail || {}),
+              taskId: selectedTaskId,
+            },
+            nextNormalizedDraft
+          )
+        }
         const shouldVerifyChunkCompletion =
           promptOnChunkComplete &&
           !nextTaskId &&
@@ -9673,8 +9938,10 @@ export default function AiHumanTeacherPage() {
       epoch,
       nextTaskId,
       openChunkDecisionDialog,
+      rememberAiAnnotationMemory,
       selectedTaskId,
       t,
+      taskDetail,
       toast,
       workspace,
       highlightMissingFields,
@@ -13639,7 +13906,7 @@ export default function AiHumanTeacherPage() {
                           </SimpleGrid>
 
                           <Stack spacing={3}>
-                            {isDeveloperSourceMode ? (
+                            {canUseAiDraftInCurrentSourceMode ? (
                               <Box
                                 borderWidth="1px"
                                 borderColor="gray.100"
@@ -13650,16 +13917,16 @@ export default function AiHumanTeacherPage() {
                                 <Stack spacing={4}>
                                   <Box>
                                     <Text fontWeight={600}>
-                                      {t('AI draft chat')}
+                                      {t('Local AI first-pass annotation')}
                                     </Text>
                                     <Text color="muted" fontSize="sm">
                                       {t(
-                                        'Use the local AI to prefill this flip, then keep refining it in the same place like a normal chat.'
+                                        'Let the local AI try this flip first. Review its answer, correct the fields, and rate what it got right or wrong before saving.'
                                       )}
                                     </Text>
                                     <Text color="muted" fontSize="xs" mt={1}>
                                       {t(
-                                        'This draft chat stays on the same currently selected local runtime and training slot. Runtime: {{draftModel}}. Local training base: {{trainingModel}}.',
+                                        'The AI draft is stored locally as ai_annotation next to your human correction. Runtime: {{draftModel}}. Local training base: {{trainingModel}}.',
                                         {
                                           draftModel:
                                             localDraftRequestedRuntimeModelLabel,
@@ -13667,6 +13934,20 @@ export default function AiHumanTeacherPage() {
                                             developerLocalTrainingBaseLabel,
                                         }
                                       )}
+                                    </Text>
+                                    <Text color="muted" fontSize="xs" mt={1}>
+                                      {currentAiAnnotationMemoryExamples.length >
+                                      0
+                                        ? t(
+                                            'Instant local memory: {{count}} corrected examples are included as style guidance for the next draft. They are not used as left/right priors.',
+                                            {
+                                              count:
+                                                currentAiAnnotationMemoryExamples.length,
+                                            }
+                                          )
+                                        : t(
+                                            'Instant local memory starts after you save at least one corrected annotation in this local session.'
+                                          )}
                                     </Text>
                                   </Box>
 
@@ -13699,10 +13980,10 @@ export default function AiHumanTeacherPage() {
                                     <Text color="muted" fontSize="xs" mt={1}>
                                       {autoTriggerAiDraft
                                         ? t(
-                                            'Each fresh empty flip will clear first, then request a new AI draft automatically.'
+                                            'Each fresh empty flip requests a new local AI draft automatically. You still approve or correct the saved annotation.'
                                           )
                                         : t(
-                                            'Each new flip starts empty. Use the chat composer only when you want a fresh AI draft or revision.'
+                                            'Each new flip starts empty. Use the chat composer when you want a first AI draft or a revision.'
                                           )}
                                     </Text>
                                   </Box>

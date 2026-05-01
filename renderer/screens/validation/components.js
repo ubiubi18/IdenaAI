@@ -964,7 +964,7 @@ export function TimerClock({duration, color}) {
   )
 }
 
-export function SubmitFailedDialog({onSubmit, ...props}) {
+export function SubmitFailedDialog({errorMessage, onSubmit, ...props}) {
   const {t} = useTranslation()
 
   const [sec, setSec] = React.useState(5)
@@ -986,6 +986,11 @@ export function SubmitFailedDialog({onSubmit, ...props}) {
     >
       <DialogBody>
         <Text>{t('An error occured while submitting your answers.')}</Text>
+        {errorMessage && (
+          <Text color="muted" fontSize="sm" mt={2}>
+            {t('Last node error')}: {errorMessage}
+          </Text>
+        )}
       </DialogBody>
     </ValidationDialog>
   )
