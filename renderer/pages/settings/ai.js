@@ -2908,6 +2908,111 @@ export default function AiSettingsPage() {
     }
   }, [localAiPackageEpoch, localAiRuntimePayload, t])
 
+  const applyLoadedLocalAiAdapterArtifact = useCallback(
+    (result, fallbackEpoch = '') => {
+      const adapterArtifact =
+        result &&
+        result.adapterArtifact &&
+        typeof result.adapterArtifact === 'object'
+          ? result.adapterArtifact
+          : null
+      const adapterEpoch = String(
+        (result && result.epoch) || fallbackEpoch || ''
+      ).trim()
+      const adapterSha256 = String(
+        (result && result.adapterSha256) || ''
+      ).trim()
+      const adapterFormat = String(
+        (result && result.adapterFormat) || ''
+      ).trim()
+      const adapterFileName = String(
+        (adapterArtifact && adapterArtifact.file) || ''
+      ).trim()
+
+      setLocalAiAdapterManifest(result)
+      setLocalAiImportedAdapterArtifact(
+        adapterArtifact
+          ? {
+              artifactToken: adapterArtifact.artifactToken || null,
+              artifactFileName: adapterFileName || null,
+              sizeBytes: adapterArtifact.sizeBytes || null,
+              artifactSha256: adapterSha256 || null,
+              importedAt: null,
+            }
+          : null
+      )
+
+      updateLocalAiSettings({
+        activeAdapterEnabled: true,
+        activeAdapterEpoch: adapterEpoch,
+        activeAdapterSha256: adapterSha256,
+        activeAdapterFormat: adapterFormat,
+        activeAdapterLabel:
+          adapterFileName ||
+          (adapterEpoch
+            ? t('Epoch {{epoch}} adapter', {epoch: adapterEpoch})
+            : t('Registered adapter')),
+      })
+    },
+    [t, updateLocalAiSettings]
+  )
+
+  const runLocalAiActivateAdapterArtifact = useCallback(async () => {
+    const epoch = String(localAiPackageEpoch || '').trim()
+
+    if (!epoch) {
+      setLocalAiAdapterError(
+        t('Enter an epoch before loading a registered adapter artifact.')
+      )
+      return
+    }
+
+    setIsLoadingLocalAiAdapter(true)
+    setLocalAiAdapterError('')
+
+    try {
+      const result = await ensureLocalAiBridge().loadAdapterArtifact({
+        ...localAiRuntimePayload,
+        epoch,
+      })
+
+      applyLoadedLocalAiAdapterArtifact(result, epoch)
+      notify(
+        t('Local adapter selected'),
+        t(
+          'Restart the local runtime after changing adapters. Live adapter use requires a compatible local backend.'
+        ),
+        'info'
+      )
+    } catch (error) {
+      setLocalAiAdapterManifest(null)
+      setLocalAiAdapterError(formatErrorForToast(error))
+    } finally {
+      setIsLoadingLocalAiAdapter(false)
+    }
+  }, [
+    applyLoadedLocalAiAdapterArtifact,
+    localAiPackageEpoch,
+    localAiRuntimePayload,
+    notify,
+    t,
+  ])
+
+  const disableActiveLocalAiAdapter = useCallback(() => {
+    updateLocalAiSettings({
+      activeAdapterEnabled: false,
+      activeAdapterEpoch: '',
+      activeAdapterSha256: '',
+      activeAdapterFormat: '',
+      activeAdapterLabel: '',
+    })
+    notify(
+      t('Local adapter disabled'),
+      t('The base local runtime will be used after restart.'),
+      'info'
+    )
+  }, [notify, t, updateLocalAiSettings])
+
   const runLocalAiBuildBundle = useCallback(async () => {
     const epoch = String(localAiPackageEpoch || '').trim()
 
@@ -4561,7 +4666,7 @@ export default function AiSettingsPage() {
                     w="sm"
                   >
                     <option value="composite">
-                      {t('Fast composite (all 6 in parallel)')}
+                      {t('Fast composite (available short flips in parallel)')}
                     </option>
                     <option value="frames_single_pass">
                       {t('Frame-by-frame in one pass')}
@@ -5800,6 +5905,108 @@ export default function AiSettingsPage() {
                   'Only if automatic repair fails: use the custom path dialog in the runtime box below.'
                 )}
               </Text>
+
+              <Box
+                borderWidth="1px"
+                borderColor={
+                  localAi.activeAdapterEnabled ? 'green.100' : 'gray.100'
+                }
+                borderRadius="md"
+                p={3}
+              >
+                <Stack spacing={3}>
+                  <Flex align="flex-start" justify="space-between" gap={3}>
+                    <Stack spacing={1}>
+                      <Text fontWeight={600}>{t('Active local adapter')}</Text>
+                      <Text color="muted" fontSize="sm">
+                        {t(
+                          'Optional: select a registered LoRA adapter artifact for local experiments and future runtime support.'
+                        )}
+                      </Text>
+                    </Stack>
+                    <Text
+                      color={
+                        localAi.activeAdapterEnabled ? 'green.500' : 'muted'
+                      }
+                      fontSize="sm"
+                      fontWeight={600}
+                    >
+                      {localAi.activeAdapterEnabled
+                        ? t('Adapter selected')
+                        : t('Base model')}
+                    </Text>
+                  </Flex>
+                  <SettingsFormControl>
+                    <SettingsFormLabel>{t('Adapter epoch')}</SettingsFormLabel>
+                    <Input
+                      value={localAiPackageEpoch}
+                      onChange={(e) => setLocalAiPackageEpoch(e.target.value)}
+                      placeholder={localAi.activeAdapterEpoch || '12'}
+                      w="xs"
+                    />
+                    <Text color="muted" fontSize="sm" mt={1}>
+                      {t(
+                        'Use an epoch with a registered adapter artifact. Import and register adapter files in the package review section below.'
+                      )}
+                    </Text>
+                  </SettingsFormControl>
+                  <Stack isInline spacing={2} flexWrap="wrap">
+                    <SecondaryButton
+                      isLoading={isLoadingLocalAiAdapter}
+                      onClick={runLocalAiActivateAdapterArtifact}
+                    >
+                      {t('Load adapter for runtime')}
+                    </SecondaryButton>
+                    {localAi.activeAdapterEnabled ? (
+                      <SecondaryButton onClick={disableActiveLocalAiAdapter}>
+                        {t('Disable adapter')}
+                      </SecondaryButton>
+                    ) : null}
+                  </Stack>
+                  {localAi.activeAdapterEnabled ? (
+                    <Box
+                      borderWidth="1px"
+                      borderColor="gray.100"
+                      borderRadius="md"
+                      p={3}
+                    >
+                      <Stack spacing={1}>
+                        <Text fontWeight={500}>
+                          {localAi.activeAdapterLabel ||
+                            t('Registered adapter')}
+                        </Text>
+                        <Text color="muted" fontSize="sm">
+                          {t('Epoch')}:{' '}
+                          {localAi.activeAdapterEpoch || t('unknown')}
+                        </Text>
+                        <Text color="muted" fontSize="sm">
+                          {t('Format')}:{' '}
+                          {localAi.activeAdapterFormat || t('unknown')}
+                        </Text>
+                        <Text color="muted" fontSize="sm">
+                          {t('SHA-256')}:{' '}
+                          {localAi.activeAdapterSha256
+                            ? `${localAi.activeAdapterSha256.slice(
+                                0,
+                                12
+                              )}...${localAi.activeAdapterSha256.slice(-8)}`
+                            : t('unknown')}
+                        </Text>
+                      </Stack>
+                    </Box>
+                  ) : null}
+                  {localAiAdapterError ? (
+                    <Text color="orange.500" fontSize="sm">
+                      {localAiAdapterError}
+                    </Text>
+                  ) : null}
+                  <Text color="orange.600" fontSize="sm">
+                    {t(
+                      'This currently selects adapter metadata for the app. Live LoRA use still requires a compatible local backend and usually a runtime restart after changing adapters.'
+                    )}
+                  </Text>
+                </Stack>
+              </Box>
 
               <Stack spacing={2} align="flex-start">
                 <SecondaryButton

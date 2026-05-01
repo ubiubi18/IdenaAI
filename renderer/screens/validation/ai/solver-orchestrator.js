@@ -49,12 +49,17 @@ const SHORT_SESSION_OPENAI_FAST_MODELS = [
 ]
 const SHORT_SESSION_OPENAI_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_MAX_PARALLEL_CONCURRENCY = 6
-const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 90 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 30 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 95 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.68
+const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
 const LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS = 5 * 1000
+const IMAGE_PAYLOAD_PREP_RETRY_WAIT_MS = 2500
+const IMAGE_PAYLOAD_PREP_MAX_ATTEMPTS = 3
 const RETRY_BACKOFF_BASE_MS = 700
 const EXPECTED_PASS_RUNTIME_MS = {
   default: 4500,
@@ -682,9 +687,9 @@ function pickCandidateFlips({
     return list.slice(0, Math.max(1, safeMaxLong))
   }
 
-  const shortList = rearrangeFlips(filterRegularFlips(shortFlips))
-    .filter(isSolvableFlip)
-    .slice(0, 6)
+  const shortList = rearrangeFlips(filterRegularFlips(shortFlips)).filter(
+    isSolvableFlip
+  )
   const safeMax = Number.isFinite(maxFlips) ? maxFlips : shortList.length
   return shortList.slice(0, Math.max(1, safeMax))
 }
@@ -942,22 +947,42 @@ function applyShortSessionOpenAiParallelTimeout(
     return profile
   }
 
-  const requestTimeoutMs = Math.max(
-    toNumberOrFallback(
-      profile.requestTimeoutMs,
-      DEFAULT_PROFILE.requestTimeoutMs
+  const requestTimeoutMs = SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
+  const uncertaintyConfidenceThreshold = Math.max(
+    toFloatOrFallback(
+      profile.uncertaintyConfidenceThreshold,
+      DEFAULT_PROFILE.uncertaintyConfidenceThreshold
     ),
-    SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
+    SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD
   )
 
   return {
     ...profile,
+    uncertaintyRepromptEnabled: true,
+    uncertaintyConfidenceThreshold,
+    uncertaintyRepromptMinRemainingMs: Math.max(
+      toNumberOrFallback(
+        profile.uncertaintyRepromptMinRemainingMs,
+        DEFAULT_PROFILE.uncertaintyRepromptMinRemainingMs
+      ),
+      SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS
+    ),
     requestTimeoutMs,
     deadlineMs: Math.max(
       toNumberOrFallback(profile.deadlineMs, DEFAULT_PROFILE.deadlineMs),
-      requestTimeoutMs + SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS
+      SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS,
+      requestTimeoutMs * 3 + SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS
     ),
   }
+}
+
+function getImagePayloadPrepRetryWaitMs() {
+  const configuredWaitMs = Number(
+    global.env?.VALIDATION_AI_IMAGE_PAYLOAD_PREP_RETRY_WAIT_MS
+  )
+  return Number.isFinite(configuredWaitMs) && configuredWaitMs >= 0
+    ? configuredWaitMs
+    : IMAGE_PAYLOAD_PREP_RETRY_WAIT_MS
 }
 
 function applyLongSessionOpenAiStaggeredTimeout(
@@ -1692,6 +1717,109 @@ export async function solveValidationSessionWithAi({
     }
   }
 
+  async function buildPayloadFlip(flip) {
+    const leftImage =
+      effectiveProfile.flipVisionMode === 'composite'
+        ? await composeFlipVariant({
+            flip,
+            variant: AnswerType.Left,
+            ...frameRenderSize,
+          })
+        : null
+    const rightImage =
+      effectiveProfile.flipVisionMode === 'composite'
+        ? await composeFlipVariant({
+            flip,
+            variant: AnswerType.Right,
+            ...frameRenderSize,
+          })
+        : null
+    const leftFrames = prepareFramePayloads
+      ? await composeFlipFrames({
+          flip,
+          variant: AnswerType.Left,
+          ...frameRenderSize,
+        })
+      : []
+    const rightFrames = prepareFramePayloads
+      ? await composeFlipFrames({
+          flip,
+          variant: AnswerType.Right,
+          ...frameRenderSize,
+        })
+      : []
+
+    return {
+      hash: flip.hash,
+      leftImage,
+      rightImage,
+      leftFrames,
+      rightFrames,
+      words: Array.isArray(flip.words) ? flip.words : [],
+      expectedAnswer: flip.expectedAnswer || null,
+      expectedStrength: flip.expectedStrength || null,
+      consensusAnswer: flip.consensusAnswer || null,
+      consensusStrength: flip.consensusStrength || null,
+      consensusVotes: flip.consensusVotes || null,
+      sourceDataset: flip.sourceDataset || null,
+      sourceSplit: flip.sourceSplit || null,
+      sourceStats: flip.sourceStats || null,
+    }
+  }
+
+  function hasCompletePreparedImages(payloadFlip) {
+    const needsComposite = effectiveProfile.flipVisionMode === 'composite'
+    const hasComposite =
+      !needsComposite || (payloadFlip.leftImage && payloadFlip.rightImage)
+    const hasFrames =
+      !prepareFramePayloads ||
+      (Array.isArray(payloadFlip.leftFrames) &&
+        payloadFlip.leftFrames.length > 0 &&
+        Array.isArray(payloadFlip.rightFrames) &&
+        payloadFlip.rightFrames.length > 0)
+
+    return Boolean(hasComposite && hasFrames)
+  }
+
+  async function buildPayloadFlipWithImageWait({flip}) {
+    let lastError = null
+    const imageRetryWaitMs = getImagePayloadPrepRetryWaitMs()
+
+    for (
+      let attempt = 1;
+      attempt <= IMAGE_PAYLOAD_PREP_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const payloadFlip = await buildPayloadFlip(flip)
+        if (!hasCompletePreparedImages(payloadFlip)) {
+          throw new Error(`Flip ${flip.hash} has incomplete decoded images`)
+        }
+        return payloadFlip
+      } catch (error) {
+        lastError = error
+
+        if (
+          attempt >= IMAGE_PAYLOAD_PREP_MAX_ATTEMPTS ||
+          !hasRuntimeRemaining(
+            sessionDeadlineAt,
+            sessionSolveGuardMs +
+              MIN_PROVIDER_REQUEST_TIMEOUT_MS +
+              imageRetryWaitMs
+          )
+        ) {
+          break
+        }
+
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(imageRetryWaitMs)
+      }
+    }
+
+    throw lastError || new Error(`Flip ${flip.hash} image payload unavailable`)
+  }
+
   let candidateIndex = 0
   for (; candidateIndex < candidateFlips.length; candidateIndex += 1) {
     if (
@@ -1714,53 +1842,7 @@ export async function solveValidationSessionWithAi({
     let payloadFlip
 
     try {
-      const leftImage =
-        effectiveProfile.flipVisionMode === 'composite'
-          ? await composeFlipVariant({
-              flip,
-              variant: AnswerType.Left,
-              ...frameRenderSize,
-            })
-          : null
-      const rightImage =
-        effectiveProfile.flipVisionMode === 'composite'
-          ? await composeFlipVariant({
-              flip,
-              variant: AnswerType.Right,
-              ...frameRenderSize,
-            })
-          : null
-      const leftFrames = prepareFramePayloads
-        ? await composeFlipFrames({
-            flip,
-            variant: AnswerType.Left,
-            ...frameRenderSize,
-          })
-        : []
-      const rightFrames = prepareFramePayloads
-        ? await composeFlipFrames({
-            flip,
-            variant: AnswerType.Right,
-            ...frameRenderSize,
-          })
-        : []
-
-      payloadFlip = {
-        hash: flip.hash,
-        leftImage,
-        rightImage,
-        leftFrames,
-        rightFrames,
-        words: Array.isArray(flip.words) ? flip.words : [],
-        expectedAnswer: flip.expectedAnswer || null,
-        expectedStrength: flip.expectedStrength || null,
-        consensusAnswer: flip.consensusAnswer || null,
-        consensusStrength: flip.consensusStrength || null,
-        consensusVotes: flip.consensusVotes || null,
-        sourceDataset: flip.sourceDataset || null,
-        sourceSplit: flip.sourceSplit || null,
-        sourceStats: flip.sourceStats || null,
-      }
+      payloadFlip = await buildPayloadFlipWithImageWait({flip})
     } catch (error) {
       await applyForcedRandomFlipDecision({
         flip,
@@ -1885,6 +1967,5 @@ export async function solveShortSessionWithAi({
     sessionMeta,
     onProgress,
     onDecision,
-    maxFlips: 6,
   })
 }

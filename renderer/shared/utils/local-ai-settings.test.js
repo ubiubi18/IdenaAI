@@ -99,6 +99,11 @@ describe('local-ai settings schema', () => {
     expect(settings.managedRuntimeTrustVersion).toBe(0)
     expect(settings.model).toBe(DEFAULT_LOCAL_AI_OLLAMA_MODEL)
     expect(settings.visionModel).toBe(DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL)
+    expect(settings.activeAdapterEnabled).toBe(false)
+    expect(settings.activeAdapterEpoch).toBe('')
+    expect(settings.activeAdapterSha256).toBe('')
+    expect(settings.activeAdapterFormat).toBe('')
+    expect(settings.activeAdapterLabel).toBe('')
     expect(settings.runtimeType).toBe('ollama')
     expect(settings.developerHumanTeacherSystemPrompt).toBe('')
     expect(settings.developerLocalTrainingProfile).toBe(
@@ -172,6 +177,37 @@ describe('local-ai settings schema', () => {
 
     expect(settings.publicModelId).toBe(DEFAULT_LOCAL_AI_PUBLIC_MODEL_ID)
     expect(settings.publicVisionId).toBe(DEFAULT_LOCAL_AI_PUBLIC_VISION_ID)
+  })
+
+  it('keeps active adapter metadata for runtime selection', () => {
+    const settings = buildLocalAiSettings({
+      activeAdapterEnabled: true,
+      activeAdapterEpoch: ' 42 ',
+      activeAdapterSha256:
+        'ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789',
+      activeAdapterFormat: ' mlx-lora ',
+      activeAdapterLabel: '  human-reviewed adapter  ',
+    })
+
+    expect(settings.activeAdapterEnabled).toBe(true)
+    expect(settings.activeAdapterEpoch).toBe('42')
+    expect(settings.activeAdapterSha256).toBe(
+      'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789'
+    )
+    expect(settings.activeAdapterFormat).toBe('mlx-lora')
+    expect(settings.activeAdapterLabel).toBe('human-reviewed adapter')
+  })
+
+  it('does not enable an active adapter without epoch or checksum metadata', () => {
+    const settings = buildLocalAiSettings({
+      activeAdapterEnabled: true,
+      activeAdapterEpoch: 'not-an-epoch',
+      activeAdapterSha256: 'not-a-sha',
+    })
+
+    expect(settings.activeAdapterEnabled).toBe(false)
+    expect(settings.activeAdapterEpoch).toBe('')
+    expect(settings.activeAdapterSha256).toBe('')
   })
 
   it('keeps explicit neutral fields and nested preferences when merging', () => {

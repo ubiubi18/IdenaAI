@@ -1,5 +1,9 @@
 import {interpret} from 'xstate'
 import {createValidationMachine} from './machine'
+import {
+  submitLongAnswers,
+  submitShortAnswers,
+} from '../../shared/api/validation'
 
 jest.mock('../../shared/api/validation', () => ({
   fetchFlipHashes: jest.fn(() => new Promise(() => {})),
@@ -20,6 +24,69 @@ jest.mock('../../shared/utils/utils', () => ({
 }))
 
 describe('validation machine', () => {
+  beforeEach(() => {
+    submitShortAnswers.mockReset()
+    submitShortAnswers.mockResolvedValue('0xtx')
+    submitLongAnswers.mockReset()
+    submitLongAnswers.mockResolvedValue('0xtx')
+  })
+
+  it('auto-retries short-answer submit failures without waiting for the dialog', async () => {
+    const originalEnv = global.env
+    global.env = {
+      ...originalEnv,
+      VALIDATION_SUBMIT_RETRY_MS: 10,
+    }
+
+    submitShortAnswers
+      .mockRejectedValueOnce(new Error('request failed with status code 503'))
+      .mockResolvedValueOnce('0xtx')
+
+    try {
+      const machine = createValidationMachine({
+        epoch: 1,
+        validationStart: Date.now() + 60 * 1000,
+        shortSessionDuration: 120,
+        longSessionDuration: 300,
+        validationSessionId: '',
+        locale: 'en',
+        initialShortFlips: [
+          {
+            hash: '0xshort-retry',
+            decoded: true,
+            option: 1,
+          },
+        ],
+      })
+
+      const service = interpret(machine).start()
+      service.send('SUBMIT')
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timed out waiting for short submit retry'))
+        }, 1000)
+
+        service.onTransition((state) => {
+          if (
+            state.matches(
+              'shortSession.solve.answer.submitShortSession.submitted'
+            )
+          ) {
+            clearTimeout(timeout)
+            resolve()
+          }
+        })
+      })
+
+      expect(submitShortAnswers).toHaveBeenCalledTimes(2)
+
+      service.stop()
+    } finally {
+      global.env = originalEnv
+    }
+  })
+
   it('waits for the real long-session start after short answers submit', async () => {
     const machine = createValidationMachine({
       epoch: 1,
@@ -154,6 +221,113 @@ describe('validation machine', () => {
     }
   })
 
+  it('fills every regular short flip with a deterministic fallback before submit', async () => {
+    const machine = createValidationMachine({
+      epoch: 1,
+      validationStart: Date.now() + 60 * 1000,
+      shortSessionDuration: 120,
+      longSessionDuration: 300,
+      validationSessionId: '',
+      locale: 'en',
+      initialShortFlips: [
+        {
+          hash: '0xshort-answered',
+          decoded: true,
+          option: 1,
+        },
+        {
+          hash: '0xshort-unanswered-a',
+          decoded: true,
+          option: null,
+        },
+        {
+          hash: '0xshort-unanswered-b',
+          decoded: true,
+          option: undefined,
+        },
+      ],
+    })
+
+    const service = interpret(machine).start()
+    service.send('SUBMIT')
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out waiting for short fallback submit'))
+      }, 1000)
+
+      service.onTransition((state) => {
+        if (
+          state.matches(
+            'shortSession.solve.answer.submitShortSession.submitted'
+          )
+        ) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+    })
+
+    const submittedAnswers = submitShortAnswers.mock.calls[0][0]
+    expect(submittedAnswers).toHaveLength(3)
+    expect(submittedAnswers.every(({answer}) => answer > 0)).toBe(true)
+    expect(
+      service.state.context.shortFlips.every(({option}) => option > 0)
+    ).toBe(true)
+
+    service.stop()
+  })
+
+  it('treats duplicate short-answer tx errors as already submitted', async () => {
+    submitShortAnswers.mockRejectedValueOnce(
+      new Error('tx with same hash already exists')
+    )
+
+    const machine = createValidationMachine({
+      epoch: 1,
+      validationStart: Date.now() + 60 * 1000,
+      shortSessionDuration: 120,
+      longSessionDuration: 300,
+      validationSessionId: '',
+      locale: 'en',
+      initialShortFlips: [
+        {
+          hash: '0xshort-duplicate',
+          decoded: true,
+          option: 1,
+        },
+      ],
+    })
+
+    const service = interpret(machine).start()
+    service.send('SUBMIT')
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out waiting for duplicate short submit'))
+      }, 1000)
+
+      service.onTransition((state) => {
+        if (
+          state.matches(
+            'shortSession.solve.answer.submitShortSession.submitted'
+          )
+        ) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+    })
+
+    expect(
+      service.state.matches(
+        'shortSession.solve.answer.submitShortSession.submitted'
+      )
+    ).toBe(true)
+
+    service.stop()
+  })
+
   it('merges rehearsal benchmark metadata into matching flips', () => {
     const machine = createValidationMachine({
       epoch: 1,
@@ -281,6 +455,161 @@ describe('validation machine', () => {
       service.stop()
     } finally {
       URL.revokeObjectURL = originalRevokeObjectUrl
+    }
+  })
+
+  it('submits long answers directly from the finished-flips stage', async () => {
+    const originalRevokeObjectUrl = URL.revokeObjectURL
+    URL.revokeObjectURL = jest.fn()
+
+    try {
+      const machine = createValidationMachine({
+        epoch: 1,
+        validationStart: Date.now() + 60 * 1000,
+        shortSessionDuration: 120,
+        longSessionDuration: 300,
+        validationSessionId: '',
+        locale: 'en',
+        initialValidationPeriod: 'long',
+        initialLongFlips: [
+          {
+            hash: '0xlong-finish-submit-now',
+            decoded: true,
+            option: 1,
+            images: ['blob:long-finish-submit-now'],
+          },
+        ],
+      })
+
+      const service = interpret(machine).start()
+
+      service.send('START_LONG_SESSION')
+      service.send('FINISH_FLIPS')
+      expect(
+        service.state.matches('longSession.solve.answer.finishFlips')
+      ).toBe(true)
+
+      service.send('SUBMIT_NOW')
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(
+            new Error('Timed out waiting for finished-flips submit success')
+          )
+        }, 1000)
+
+        service.onTransition((state) => {
+          if (state.matches('validationSucceeded')) {
+            clearTimeout(timeout)
+            resolve()
+          }
+        })
+      })
+
+      expect(service.state.matches('validationSucceeded')).toBe(true)
+      expect(service.state.context.submitLongAnswersHash).toBe('0xtx')
+
+      service.stop()
+    } finally {
+      URL.revokeObjectURL = originalRevokeObjectUrl
+    }
+  })
+
+  it('treats duplicate long-answer tx errors as validation success', async () => {
+    submitLongAnswers.mockRejectedValueOnce(
+      new Error('tx with same hash already exists')
+    )
+
+    const machine = createValidationMachine({
+      epoch: 1,
+      validationStart: Date.now() + 60 * 1000,
+      shortSessionDuration: 120,
+      longSessionDuration: 300,
+      validationSessionId: '',
+      locale: 'en',
+      initialValidationPeriod: 'long',
+      initialLongFlips: [
+        {
+          hash: '0xlong-duplicate',
+          decoded: true,
+          option: 1,
+        },
+      ],
+    })
+
+    const service = interpret(machine).start()
+    service.send('START_LONG_SESSION')
+    service.send('SUBMIT_NOW')
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out waiting for duplicate long submit'))
+      }, 1000)
+
+      service.onTransition((state) => {
+        if (state.matches('validationSucceeded')) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+    })
+
+    expect(service.state.matches('validationSucceeded')).toBe(true)
+
+    service.stop()
+  })
+
+  it('auto-retries long-answer submit failures without waiting for the dialog', async () => {
+    const originalEnv = global.env
+    global.env = {
+      ...originalEnv,
+      VALIDATION_SUBMIT_RETRY_MS: 10,
+    }
+
+    submitLongAnswers
+      .mockRejectedValueOnce(new Error('request failed with status code 503'))
+      .mockResolvedValueOnce('0xtx')
+
+    try {
+      const machine = createValidationMachine({
+        epoch: 1,
+        validationStart: Date.now() + 60 * 1000,
+        shortSessionDuration: 120,
+        longSessionDuration: 300,
+        validationSessionId: '',
+        locale: 'en',
+        initialValidationPeriod: 'long',
+        initialLongFlips: [
+          {
+            hash: '0xlong-retry',
+            decoded: true,
+            option: 1,
+          },
+        ],
+      })
+
+      const service = interpret(machine).start()
+      service.send('START_LONG_SESSION')
+      service.send('SUBMIT_NOW')
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timed out waiting for long submit retry'))
+        }, 1000)
+
+        service.onTransition((state) => {
+          if (state.matches('validationSucceeded')) {
+            clearTimeout(timeout)
+            resolve()
+          }
+        })
+      })
+
+      expect(submitLongAnswers).toHaveBeenCalledTimes(2)
+
+      service.stop()
+    } finally {
+      global.env = originalEnv
     }
   })
 

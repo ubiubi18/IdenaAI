@@ -34,7 +34,10 @@ import {
 import SettingsLayout from '../../screens/settings/layout'
 import {EyeIcon, EyeOffIcon} from '../../shared/components/icons'
 import {getNodeBridge} from '../../shared/utils/node-bridge'
-import {buildRehearsalNetworkPayload} from '../../shared/utils/rehearsal-devnet'
+import {
+  buildRehearsalNetworkPayload,
+  REHEARSAL_NETWORK_VALIDATOR_COUNT,
+} from '../../shared/utils/rehearsal-devnet'
 import {
   canOpenRehearsalValidation,
   getRehearsalValidationEntryPath,
@@ -63,6 +66,101 @@ function normalizeLogs(value) {
   return []
 }
 
+function formatRehearsalHashReadiness(count, readyCount) {
+  if (typeof count !== 'number') {
+    return '-'
+  }
+
+  if (typeof readyCount !== 'number') {
+    return String(count)
+  }
+
+  return `${readyCount}/${count}`
+}
+
+function formatRehearsalNodeAssignment(node) {
+  return `${node.name} ${node.role || 'node'}: S ${formatRehearsalHashReadiness(
+    node.shortHashCount,
+    node.shortHashReadyCount
+  )}, L ${formatRehearsalHashReadiness(
+    node.longHashCount,
+    node.longHashReadyCount
+  )}`
+}
+
+function formatRehearsalSolverTokenCount(value) {
+  const count = Number(value)
+
+  if (!Number.isFinite(count) || count <= 0) {
+    return '0'
+  }
+
+  return Math.round(count).toLocaleString()
+}
+
+function formatRehearsalSolverUsd(value) {
+  const amount = Number(value)
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    return '-'
+  }
+
+  return `$${amount.toFixed(amount >= 1 ? 2 : 4)}`
+}
+
+function buildRehearsalLaneProviderConfig(aiSolver = {}) {
+  if (aiSolver.provider !== 'openai-compatible') {
+    return null
+  }
+
+  return {
+    name: aiSolver.customProviderName,
+    baseUrl: aiSolver.customProviderBaseUrl,
+    chatPath: aiSolver.customProviderChatPath,
+  }
+}
+
+function buildRehearsalSolverLanePayload(aiSolver = {}) {
+  const provider = aiSolver.provider || 'openai'
+
+  return {
+    laneCount: REHEARSAL_NETWORK_VALIDATOR_COUNT,
+    provider,
+    model: aiSolver.model || 'gpt-5.4',
+    providerConfig: buildRehearsalLaneProviderConfig(aiSolver),
+    ensembleEnabled: Boolean(aiSolver.ensembleEnabled),
+    ensemblePrimaryWeight: aiSolver.ensemblePrimaryWeight,
+    legacyHeuristicEnabled: Boolean(aiSolver.legacyHeuristicEnabled),
+    legacyHeuristicWeight: aiSolver.legacyHeuristicWeight,
+    legacyHeuristicOnly: Boolean(aiSolver.legacyHeuristicOnly),
+    ensembleProvider2Enabled: Boolean(aiSolver.ensembleProvider2Enabled),
+    ensembleProvider2: aiSolver.ensembleProvider2,
+    ensembleModel2: aiSolver.ensembleModel2,
+    ensembleProvider2Weight: aiSolver.ensembleProvider2Weight,
+    ensembleProvider3Enabled: Boolean(aiSolver.ensembleProvider3Enabled),
+    ensembleProvider3: aiSolver.ensembleProvider3,
+    ensembleModel3: aiSolver.ensembleModel3,
+    ensembleProvider3Weight: aiSolver.ensembleProvider3Weight,
+    benchmarkProfile: 'custom',
+    deadlineMs: 180 * 1000,
+    requestTimeoutMs: Math.max(
+      90 * 1000,
+      Number(aiSolver.requestTimeoutMs) || 0
+    ),
+    maxConcurrency: 1,
+    maxRetries: Number(aiSolver.maxRetries) || 1,
+    maxOutputTokens: Number(aiSolver.maxOutputTokens) || 0,
+    interFlipDelayMs: 0,
+    temperature: Number(aiSolver.temperature) || 0,
+    forceDecision: true,
+    uncertaintyRepromptEnabled: true,
+    uncertaintyConfidenceThreshold:
+      Number(aiSolver.uncertaintyConfidenceThreshold) || 0.45,
+    uncertaintyRepromptMinRemainingMs: 3000,
+    flipVisionMode: 'frames_two_pass',
+  }
+}
+
 function normalizeDevnetStatus(value) {
   if (!value || typeof value !== 'object') {
     return {
@@ -84,6 +182,7 @@ function normalizeDevnetStatus(value) {
       primaryShortHashReadyCount: null,
       primaryLongHashCount: null,
       primaryLongHashReadyCount: null,
+      parallelSolverLanes: null,
     }
   }
 
@@ -133,6 +232,12 @@ function normalizeDevnetStatus(value) {
     primaryLongHashReadyCount:
       typeof value.primaryLongHashReadyCount === 'number'
         ? value.primaryLongHashReadyCount
+        : null,
+    parallelSolverLanes:
+      value.parallelSolverLanes &&
+      typeof value.parallelSolverLanes === 'object' &&
+      !Array.isArray(value.parallelSolverLanes)
+        ? value.parallelSolverLanes
         : null,
   }
 }
@@ -353,6 +458,15 @@ function NodeSettings() {
     devnetStatus.nodes.find(({rpcPort}) => rpcPort === primaryRpcPort) ||
     devnetStatus.nodes[0] ||
     null
+  const assignedDevnetNodeCount = devnetStatus.nodes.filter(
+    ({validationAssigned}) => validationAssigned
+  ).length
+  const canShowDevnetAssignmentSummary = devnetStatus.nodes.some(
+    ({validationAssigned, shortHashCount, longHashCount}) =>
+      validationAssigned ||
+      typeof shortHashCount === 'number' ||
+      typeof longHashCount === 'number'
+  )
   const rehearsalCurrentPeriod = primaryDevnetNode?.currentPeriod || null
   const rehearsalNodeConnected =
     settings.ephemeralExternalNodeConnected &&
@@ -457,6 +571,11 @@ function NodeSettings() {
     : t(
         'The validation rehearsal network is unavailable because the desktop bridge is not ready.'
       )
+  const rehearsalSolverLanes = devnetStatus.parallelSolverLanes
+  const rehearsalSolverLaneRunning = rehearsalSolverLanes?.running === true
+  const rehearsalSolverLaneSummary = rehearsalSolverLanes?.summary || null
+  const canRunRehearsalSolverLanes =
+    devnetStatus.active && devnetStatus.stage === 'running'
 
   const startRehearsalNetwork = ({connectApp = false} = {}) =>
     getNodeBridge().startValidationDevnet(
@@ -466,6 +585,11 @@ function NodeSettings() {
   const restartRehearsalNetwork = ({connectApp = true} = {}) =>
     getNodeBridge().restartValidationDevnet(
       buildRehearsalNetworkPayload({connectApp})
+    )
+
+  const runRehearsalSolverLanes = () =>
+    getNodeBridge().runValidationDevnetSolverLanes(
+      buildRehearsalSolverLanePayload(settings.aiSolver || {})
     )
 
   return (
@@ -640,6 +764,12 @@ function NodeSettings() {
                   'Start an isolated local Idena network for validation rehearsals without touching mainnet. The rehearsal network seeds FLIP-Challenge flips locally and lets the node run the normal encryption and later validation decryption flow.'
                 )}
               </Text>
+              <Text color="muted" mt={2}>
+                {t(
+                  'Current rehearsal topology: 1 bootstrap node plus {{count}} validator identities. IdenaAI connects one primary validator for the live rehearsal session; any parallel lane work must stay rehearsal-only and must not be wired to mainnet identities.',
+                  {count: REHEARSAL_NETWORK_VALIDATOR_COUNT}
+                )}
+              </Text>
             </Box>
 
             <Stack
@@ -759,6 +889,29 @@ function NodeSettings() {
                       }{' '}
                       / {devnetStatus.nodeCount}
                     </Text>
+                  )}
+                  {devnetStatus.nodes.length > 0 && (
+                    <Text color="muted">
+                      {t('Rehearsal validator identities')}:{' '}
+                      {
+                        devnetStatus.nodes.filter(
+                          ({role}) => role === 'validator'
+                        ).length
+                      }
+                    </Text>
+                  )}
+                  {canShowDevnetAssignmentSummary && (
+                    <Stack spacing={1}>
+                      <Text color="muted">
+                        {t('Nodes with assigned validation hashes')}:{' '}
+                        {assignedDevnetNodeCount} / {devnetStatus.nodeCount}
+                      </Text>
+                      <Text color="muted" fontSize="sm">
+                        {devnetStatus.nodes
+                          .map(formatRehearsalNodeAssignment)
+                          .join(' | ')}
+                      </Text>
+                    </Stack>
                   )}
                   {rehearsalNodeConnected && !rehearsalNodeRpcUnavailable && (
                     <Stack spacing={1}>
@@ -916,6 +1069,19 @@ function NodeSettings() {
                     </SecondaryButton>
 
                     <SecondaryButton
+                      onClick={runRehearsalSolverLanes}
+                      isDisabled={
+                        !canUseIpcRenderer ||
+                        !canRunRehearsalSolverLanes ||
+                        rehearsalSolverLaneRunning
+                      }
+                    >
+                      {rehearsalSolverLaneRunning
+                        ? t('Running rehearsal solver lanes')
+                        : t('Run 8 rehearsal solver lanes')}
+                    </SecondaryButton>
+
+                    <SecondaryButton
                       onClick={() => getNodeBridge().stopValidationDevnet()}
                       isDisabled={!canUseIpcRenderer || !devnetStatus.active}
                     >
@@ -924,6 +1090,119 @@ function NodeSettings() {
                   </>
                 )}
               </Stack>
+
+              {rehearsalSolverLanes && (
+                <Stack
+                  spacing={3}
+                  borderWidth="1px"
+                  borderColor="muted"
+                  borderRadius="md"
+                  px={3}
+                  py={3}
+                >
+                  <Stack spacing={1}>
+                    <Text fontWeight={500}>
+                      {t('Parallel rehearsal solver lanes')}
+                    </Text>
+                    <Text color="muted" fontSize="sm">
+                      {t(
+                        'Rehearsal-only dry run. It uses the current AI provider key in the main process, records compact telemetry, and does not submit answers or touch mainnet identities.'
+                      )}
+                    </Text>
+                    <Text color="muted" fontSize="sm">
+                      {t('Provider')}: {rehearsalSolverLanes.provider || '-'}{' '}
+                      {t('Model')}: {rehearsalSolverLanes.model || '-'}
+                    </Text>
+                  </Stack>
+
+                  {rehearsalSolverLaneSummary && (
+                    <Flex flexWrap="wrap" gridGap={3}>
+                      <Box>
+                        <Text color="muted" fontSize="sm">
+                          {t('Solved')}
+                        </Text>
+                        <Text fontWeight={500}>
+                          {rehearsalSolverLaneSummary.solved || 0}
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text color="muted" fontSize="sm">
+                          {t('Skipped')}
+                        </Text>
+                        <Text fontWeight={500}>
+                          {rehearsalSolverLaneSummary.skipped || 0}
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text color="muted" fontSize="sm">
+                          {t('Errors')}
+                        </Text>
+                        <Text fontWeight={500}>
+                          {rehearsalSolverLaneSummary.errors || 0}
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text color="muted" fontSize="sm">
+                          {t('Left / right')}
+                        </Text>
+                        <Text fontWeight={500}>
+                          {rehearsalSolverLaneSummary.left || 0} /{' '}
+                          {rehearsalSolverLaneSummary.right || 0}
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text color="muted" fontSize="sm">
+                          {t('Tokens')}
+                        </Text>
+                        <Text fontWeight={500}>
+                          {formatRehearsalSolverTokenCount(
+                            rehearsalSolverLaneSummary.tokens?.totalTokens
+                          )}
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text color="muted" fontSize="sm">
+                          {t('Cost')}
+                        </Text>
+                        <Text fontWeight={500}>
+                          {formatRehearsalSolverUsd(
+                            rehearsalSolverLaneSummary.costs?.actualUsd ??
+                              rehearsalSolverLaneSummary.costs?.estimatedUsd
+                          )}
+                        </Text>
+                      </Box>
+                    </Flex>
+                  )}
+
+                  {Array.isArray(rehearsalSolverLanes.lanes) &&
+                    rehearsalSolverLanes.lanes.length > 0 && (
+                      <Stack spacing={1}>
+                        {rehearsalSolverLanes.lanes
+                          .slice(0, REHEARSAL_NETWORK_VALIDATOR_COUNT)
+                          .map((lane) => (
+                            <Text
+                              key={lane.nodeName || lane.lane}
+                              color={lane.error ? 'red.500' : 'muted'}
+                              fontSize="sm"
+                            >
+                              {lane.nodeName || `lane-${lane.lane}`}:{' '}
+                              {lane.status}
+                              {lane.session ? `, ${lane.session}` : ''}
+                              {typeof lane.flipCount === 'number'
+                                ? `, ${lane.flipCount} flips`
+                                : ''}
+                              {lane.summary
+                                ? `, solved ${
+                                    lane.summary.solved || 0
+                                  }, errors ${lane.summary.errors || 0}`
+                                : ''}
+                              {lane.error ? `, ${lane.error}` : ''}
+                            </Text>
+                          ))}
+                      </Stack>
+                    )}
+                </Stack>
+              )}
             </Stack>
 
             <Box>

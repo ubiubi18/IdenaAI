@@ -143,13 +143,14 @@ const SESSION_AUTO_PROVIDER_RETRY_MS = 5 * 1000
 const SESSION_AUTO_SOLVE_RETRY_MS = 4 * 1000
 const SESSION_AUTO_SOLVE_ERROR_RETRY_MS = 8 * 1000
 const MIN_AUTO_REPORT_DELAY_MS = 15 * 1000
-const AUTO_REPORT_KEYWORD_WAIT_MS = 20 * 1000
-const AUTO_REPORT_KEYWORD_RETRY_MS = 5 * 1000
+const AUTO_REPORT_KEYWORD_WAIT_MS = 8 * 1000
+const AUTO_REPORT_KEYWORD_RETRY_MS = 2 * 1000
 const URGENT_AUTO_REPORT_REMAINING_MS = 3 * 60 * 1000
 const URGENT_AUTO_REPORT_DEADLINE_BUFFER_MS = 5 * 1000
 const URGENT_AUTO_REPORT_REQUEST_TIMEOUT_MS = 25 * 1000
 const URGENT_AUTO_REPORT_MAX_CONCURRENCY = 6
 const URGENT_AUTO_REPORT_MAX_OUTPUT_TOKENS = 384
+const LONG_SESSION_DEADLINE_AUTOSUBMIT_BUFFER_SECONDS = 5 * 60
 const LONG_SESSION_LOADING_GRACE_MS = 15 * 60 * 1000
 const VALIDATION_AI_TOAST_ID = 'validation-ai-status-toast'
 const DEFAULT_AI_SOLVER_SETTINGS = {
@@ -1000,6 +1001,7 @@ function ValidationSession({
   const autoSolveRetryTimerRef = useRef({short: null, long: null})
   const missingOnchainAutoSubmitConsentNotifiedRef = useRef(false)
   const reliableShortSubmitTriggeredRef = useRef(false)
+  const longSessionDeadlineAutoSubmitRef = useRef('')
   const emptyLongReviewRecoveryNotifiedRef = useRef(false)
   const shortSessionDecodeRecoveryAttemptedRef = useRef(false)
   const longSessionDecodeRecoveryAttemptedRef = useRef(false)
@@ -1145,6 +1147,13 @@ function ValidationSession({
   } = state.context
   const canOpenLocalResultsShortcut =
     canOpenValidationCeremonyLocalResults(state)
+  const isValidationSucceeded = state.matches('validationSucceeded')
+
+  useEffect(() => {
+    if (isValidationSucceeded && !forceAiPreview) {
+      router.replace('/validation/after')
+    }
+  }, [forceAiPreview, isValidationSucceeded, router])
 
   useEffect(() => {
     if (validationSessionId) {
@@ -3379,6 +3388,100 @@ function ValidationSession({
   }, [send, state])
 
   useEffect(() => {
+    const isLongAnswerFlow = [
+      'longSession.solve.answer.flips',
+      'longSession.solve.answer.finishFlips',
+      'longSession.solve.answer.keywords',
+      'longSession.solve.answer.review',
+    ].some((substate) => state.matches(substate))
+
+    if (
+      !isSessionAutoMode ||
+      forceAiPreview ||
+      !isLongAnswerFlow ||
+      isSubmitting(state) ||
+      !hasLongSessionAnswers
+    ) {
+      if (!state.matches('longSession')) {
+        longSessionDeadlineAutoSubmitRef.current = ''
+      }
+      return undefined
+    }
+
+    const deadlineSubmitAt = getValidationSessionPhaseDeadlineAt({
+      validationStart,
+      shortSessionDuration,
+      longSessionDuration,
+      sessionType: 'long',
+      longSessionSubmitBufferSeconds:
+        LONG_SESSION_DEADLINE_AUTOSUBMIT_BUFFER_SECONDS,
+    })
+
+    if (!Number.isFinite(deadlineSubmitAt)) {
+      return undefined
+    }
+
+    const signature = [
+      epoch,
+      validationStart,
+      longSessionAnswerStats.answered,
+      longSessionAnswerStats.total,
+    ].join(':')
+    const submitBeforeDeadline = () => {
+      if (longSessionDeadlineAutoSubmitRef.current === signature) {
+        return
+      }
+
+      longSessionDeadlineAutoSubmitRef.current = signature
+      manualReportingStartedRef.current = false
+      autoReportSubmitPendingRef.current = false
+      setAwaitingHumanReporting(false)
+      setAutoReportDeadlineAt(null)
+      clearAutoSolveRetry('long')
+
+      notifyAi(
+        t('Long session deadline auto-submit'),
+        t(
+          'Five minutes remain in the long session. The app is submitting the current answers now to avoid a late real-session transaction.'
+        ),
+        'warning'
+      )
+
+      if (state.matches('longSession.solve.answer.finishFlips')) {
+        send('START_KEYWORDS_QUALIFICATION')
+      }
+      send('SUBMIT_NOW')
+    }
+    const remainingMs = deadlineSubmitAt - Date.now()
+
+    if (remainingMs <= 0) {
+      submitBeforeDeadline()
+      return undefined
+    }
+
+    const timeoutId = setTimeout(submitBeforeDeadline, remainingMs)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [
+    clearAutoSolveRetry,
+    epoch,
+    forceAiPreview,
+    hasLongSessionAnswers,
+    isSessionAutoMode,
+    longSessionAnswerStats.answered,
+    longSessionAnswerStats.total,
+    longSessionDuration,
+    notifyAi,
+    send,
+    shortSessionDuration,
+    state,
+    t,
+    validationStart,
+  ])
+
+  useEffect(() => {
     if (!state.matches('longSession.solve.answer.keywords')) {
       setAutoReportDeadlineAt(null)
       return undefined
@@ -3553,6 +3656,28 @@ function ValidationSession({
     manualAiActionLabel = t('Retry AI now')
   } else if (isShortSession(state)) {
     manualAiActionLabel = t('AI solve short session')
+  }
+
+  if (isValidationSucceeded && !forceAiPreview) {
+    return (
+      <ValidationScene bg="white">
+        <Flex minH="100vh" align="center" justify="center" px={6}>
+          <Stack spacing={4} align="center" textAlign="center">
+            <Heading fontSize="2xl">
+              {t('Validation answers submitted')}
+            </Heading>
+            <Text color="muted">
+              {t(
+                'Opening local stats and audit. If this screen stays visible, use the button below.'
+              )}
+            </Text>
+            <PrimaryButton onClick={() => router.replace('/validation/after')}>
+              {t('Open local stats & audit')}
+            </PrimaryButton>
+          </Stack>
+        </Flex>
+      </ValidationScene>
+    )
   }
 
   return (
@@ -4048,7 +4173,11 @@ function ValidationSession({
           />
         )}
       {isSubmitFailed(state) && (
-        <SubmitFailedDialog isOpen onSubmit={() => send('RETRY_SUBMIT')} />
+        <SubmitFailedDialog
+          errorMessage={state.context.errorMessage}
+          isOpen
+          onSubmit={() => send('RETRY_SUBMIT')}
+        />
       )}
 
       {state.matches('longSession.solve.answer.welcomeQualification') && (

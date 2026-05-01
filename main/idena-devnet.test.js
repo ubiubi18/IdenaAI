@@ -162,6 +162,11 @@ describe('validation devnet helpers', () => {
       identityState: 'Verified',
       currentPeriod: 'FlipLottery',
       nextValidation: '2026-04-21T12:03:00.000Z',
+      validationAssigned: false,
+      shortHashCount: null,
+      shortHashReadyCount: null,
+      longHashCount: null,
+      longHashReadyCount: null,
     })
     expect(summary.apiKey).toBeUndefined()
   })

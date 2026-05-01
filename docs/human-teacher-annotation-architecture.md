@@ -17,6 +17,12 @@ Use small post-consensus batches of real session flips as a decentralized human 
 
 The model should learn from these richer explanations instead of learning only `left/right/skip` shortcuts.
 
+Local chat history can support this flow, but only as local evidence. The
+trusted label remains the explicit human-teacher annotation saved for a bound
+task. See
+[local-ai-chat-human-annotation-integration.md](./local-ai-chat-human-annotation-integration.md)
+for the chat evidence and AI-draft integration contract.
+
 ## Privacy model
 
 The existing Local AI capture index remains metadata-only by default.

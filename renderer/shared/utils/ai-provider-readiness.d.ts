@@ -11,6 +11,11 @@ export type LocalAiSettingsLike = {
   publicModelId?: string
   publicVisionId?: string
   contractVersion?: string
+  activeAdapterEnabled?: boolean
+  activeAdapterEpoch?: string
+  activeAdapterSha256?: string
+  activeAdapterFormat?: string
+  activeAdapterLabel?: string
   adapterStrategy?: string
   trainingPolicy?: string
   rankingPolicy?: any
@@ -41,6 +46,11 @@ export type LocalAiRuntimePayload = {
   publicModelId: string
   publicVisionId: string
   contractVersion: string
+  activeAdapterEnabled: boolean
+  activeAdapterEpoch: string
+  activeAdapterSha256: string
+  activeAdapterFormat: string
+  activeAdapterLabel: string
   adapterStrategy: string
   trainingPolicy: string
   rankingPolicy: any
