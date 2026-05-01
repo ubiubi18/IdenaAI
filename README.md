@@ -1,4 +1,4 @@
-# IdenaAI v0.0.2
+# IdenaAI v0.0.3
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,13 +8,13 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This repository is the main app-integration line. Version `0.0.2` is a
+This repository is the main app-integration line. Version `0.0.3` is a
 development snapshot of the recent dependency, runtime, local AI, rehearsal, and
 autosolver work. It is research software, not a hardened wallet release.
 
 ## Experimental Warning
 
-Read this part first. `v0.0.2` is not production ready.
+Read this part first. `v0.0.3` is not production ready.
 
 - no warranties
 - not audited
@@ -40,11 +40,12 @@ small-scale experimentation with the user's own API key. They are not a
 reliability guarantee for synchronized live validation windows. For serious use,
 prefer local models so capacity scales with your own hardware.
 
-## v0.0.2 Repo Status
+## v0.0.3 Repo Status
 
-`v0.0.2` marks the first cleaner-runtime development snapshot after the Node 24
-LTS and Electron 41 migration, dependency-footprint reduction, managed local AI
-hardening, rehearsal devnet fixes, and autosolver/reporting telemetry work.
+`v0.0.3` extends the cleaner-runtime development snapshot after the Node 24 LTS
+and Electron 41 migration. It adds another hardening pass for managed local AI,
+validation rehearsal, submit/retry handling, real-session transition timing, and
+autosolver/reporting telemetry.
 
 It should be treated as an auditable checkpoint, not a production release:
 
@@ -66,8 +67,11 @@ This section should stay current and act as a short roadmap of what has already 
   including `session-metrics.jsonl` and local audit output files.
 - Validation rehearsal devnet:
   the app now exposes a private multi-node rehearsal network in `Settings -> Node`
-  with seeded FLIP-Challenge flips, background start, restart/stop controls,
-  and app-only rehearsal switching.
+  with one bootstrap node plus eight local validator identities, seeded
+  FLIP-Challenge flips, background start, restart/stop controls, and app-only
+  rehearsal switching. Parallel lane benchmarking is documented as
+  rehearsal-only work in `docs/rehearsal-parallel-lane-benchmark.md` and is not
+  a mainnet multi-identity automation feature.
 - Rehearsal validation gating:
   the app now waits until the primary rehearsal node has actually been assigned
   validation hashes before allowing the handoff into validation, and the node

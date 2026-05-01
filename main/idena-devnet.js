@@ -47,6 +47,9 @@ const VALIDATION_DEVNET_VALIDATOR_ONLINE_TIMEOUT_MS = 3 * 60 * 1000
 const VALIDATION_DEVNET_SEED_CONFIRM_TIMEOUT_MS = 2 * 60 * 1000
 const VALIDATION_DEVNET_PRIMARY_SEED_VISIBILITY_TIMEOUT_MS = 2 * 60 * 1000
 const VALIDATION_DEVNET_MIN_PRIMARY_PEERS = 3
+const VALIDATION_DEVNET_SOLVER_LANE_LIMIT = 8
+const VALIDATION_DEVNET_SOLVER_LANE_DEADLINE_MS = 180 * 1000
+const VALIDATION_DEVNET_SOLVER_LANE_REQUEST_TIMEOUT_MS = 90 * 1000
 const REHEARSAL_BENCHMARK_REVIEW_STORAGE_SUFFIX = 'rehearsal-benchmark-review'
 const REHEARSAL_BENCHMARK_ANNOTATION_DATASET_STORAGE_KEY =
   'rehearsal-benchmark-annotations'
@@ -1286,6 +1289,19 @@ function summarizeValidationDevnetNode(node) {
     identityState: node.identityState || null,
     currentPeriod: node.currentPeriod || null,
     nextValidation: node.nextValidation || null,
+    validationAssigned: node.validationAssigned === true,
+    shortHashCount:
+      typeof node.shortHashCount === 'number' ? node.shortHashCount : null,
+    shortHashReadyCount:
+      typeof node.shortHashReadyCount === 'number'
+        ? node.shortHashReadyCount
+        : null,
+    longHashCount:
+      typeof node.longHashCount === 'number' ? node.longHashCount : null,
+    longHashReadyCount:
+      typeof node.longHashReadyCount === 'number'
+        ? node.longHashReadyCount
+        : null,
   }
 }
 
@@ -1303,6 +1319,173 @@ function countReadyValidationHashItems(result) {
   return normalizeValidationHashItems(result).filter(
     ({ready}) => ready === true
   ).length
+}
+
+function normalizeValidationDevnetSolverLaneCount(value, fallback) {
+  const parsed = Number.parseInt(value, 10)
+  const normalizedFallback = Math.max(1, Number.parseInt(fallback, 10) || 1)
+
+  return Math.max(
+    1,
+    Math.min(
+      VALIDATION_DEVNET_SOLVER_LANE_LIMIT,
+      Number.isInteger(parsed) && parsed > 0 ? parsed : normalizedFallback
+    )
+  )
+}
+
+function normalizeValidationDevnetSolverProvider(value, fallback = 'openai') {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+
+  return normalized || fallback
+}
+
+function normalizeValidationDevnetSolverModel(value, fallback = 'gpt-5.4') {
+  const normalized = String(value || '').trim()
+
+  return normalized || fallback
+}
+
+function normalizeValidationDevnetSolverFlipHash(value) {
+  return String(value && value.hash ? value.hash : value || '').trim()
+}
+
+function normalizeValidationDevnetSolverTokenSummary(value = {}) {
+  const promptTokens = Number(value.promptTokens)
+  const completionTokens = Number(value.completionTokens)
+  const totalTokens = Number(value.totalTokens)
+
+  return {
+    promptTokens:
+      Number.isFinite(promptTokens) && promptTokens > 0 ? promptTokens : 0,
+    completionTokens:
+      Number.isFinite(completionTokens) && completionTokens > 0
+        ? completionTokens
+        : 0,
+    totalTokens:
+      Number.isFinite(totalTokens) && totalTokens > 0
+        ? totalTokens
+        : Math.max(0, promptTokens || 0) + Math.max(0, completionTokens || 0),
+  }
+}
+
+function normalizeValidationDevnetSolverCostSummary(value = {}) {
+  const estimatedUsd = Number(value.estimatedUsd)
+  const actualUsd = Number(value.actualUsd)
+
+  return {
+    estimatedUsd:
+      Number.isFinite(estimatedUsd) && estimatedUsd >= 0 ? estimatedUsd : null,
+    actualUsd: Number.isFinite(actualUsd) && actualUsd >= 0 ? actualUsd : null,
+  }
+}
+
+function addValidationDevnetSolverTokenSummary(left = {}, right = {}) {
+  const a = normalizeValidationDevnetSolverTokenSummary(left)
+  const b = normalizeValidationDevnetSolverTokenSummary(right)
+
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  }
+}
+
+function addValidationDevnetSolverCostSummary(left = {}, right = {}) {
+  const a = normalizeValidationDevnetSolverCostSummary(left)
+  const b = normalizeValidationDevnetSolverCostSummary(right)
+
+  return {
+    estimatedUsd:
+      a.estimatedUsd == null && b.estimatedUsd == null
+        ? null
+        : (a.estimatedUsd || 0) + (b.estimatedUsd || 0),
+    actualUsd:
+      a.actualUsd == null && b.actualUsd == null
+        ? null
+        : (a.actualUsd || 0) + (b.actualUsd || 0),
+  }
+}
+
+function summarizeValidationDevnetSolverLanes(lanes = []) {
+  const normalizedLanes = Array.isArray(lanes) ? lanes : []
+  const summary = normalizedLanes.reduce(
+    (result, lane) => {
+      const laneSummary =
+        lane && lane.summary && typeof lane.summary === 'object'
+          ? lane.summary
+          : {}
+      const tokens = normalizeValidationDevnetSolverTokenSummary(
+        laneSummary.tokens
+      )
+      const costs = normalizeValidationDevnetSolverCostSummary(
+        laneSummary.costs
+      )
+
+      return {
+        laneCount: result.laneCount + 1,
+        solved: result.solved + (Number(laneSummary.solved) || 0),
+        skipped: result.skipped + (Number(laneSummary.skipped) || 0),
+        left: result.left + (Number(laneSummary.left) || 0),
+        right: result.right + (Number(laneSummary.right) || 0),
+        errors:
+          result.errors +
+          (lane && lane.error ? 1 : 0) +
+          (Number(laneSummary.errors) || 0),
+        tokens: addValidationDevnetSolverTokenSummary(result.tokens, tokens),
+        costs: addValidationDevnetSolverCostSummary(result.costs, costs),
+      }
+    },
+    {
+      laneCount: 0,
+      solved: 0,
+      skipped: 0,
+      left: 0,
+      right: 0,
+      errors: 0,
+      tokens: {promptTokens: 0, completionTokens: 0, totalTokens: 0},
+      costs: {estimatedUsd: null, actualUsd: null},
+    }
+  )
+
+  return summary
+}
+
+function buildValidationDevnetSolverFlip({hash, seedPayload, meta = {}} = {}) {
+  const normalizedHash = normalizeValidationDevnetSeedHash(hash)
+  const images = Array.isArray(seedPayload && seedPayload.images)
+    ? seedPayload.images.slice(0, 4)
+    : []
+  const orders = Array.isArray(seedPayload && seedPayload.orders)
+    ? seedPayload.orders.slice(0, 2)
+    : []
+
+  if (!normalizedHash || images.length !== 4 || orders.length !== 2) {
+    return null
+  }
+
+  const leftFrames = orders[0].map((index) => images[index]).filter(Boolean)
+  const rightFrames = orders[1].map((index) => images[index]).filter(Boolean)
+
+  if (leftFrames.length !== 4 || rightFrames.length !== 4) {
+    return null
+  }
+
+  return {
+    hash: normalizedHash,
+    leftImage: leftFrames[0],
+    rightImage: rightFrames[0],
+    leftFrames,
+    rightFrames,
+    keywords: Array.isArray(meta.words) ? meta.words : [],
+    expectedAnswer: meta.expectedAnswer || null,
+    expectedStrength: meta.expectedStrength || null,
+    consensusAnswer: meta.consensusAnswer || null,
+    consensusStrength: meta.consensusStrength || null,
+    consensusVotes: meta.consensusVotes || null,
+  }
 }
 
 function getValidationHashQueryCapabilities(currentPeriod) {
@@ -1708,6 +1891,14 @@ function createValidationDevnetController({
           : null) ||
         (run && run.seed && run.seed.flipMetaByHash) ||
         {},
+      parallelSolverLanes:
+        (overrides.parallelSolverLanes &&
+        typeof overrides.parallelSolverLanes === 'object' &&
+        !Array.isArray(overrides.parallelSolverLanes)
+          ? overrides.parallelSolverLanes
+          : null) ||
+        (run && run.parallelSolverLanes) ||
+        null,
       nodes:
         run && run.nodes ? run.nodes.map(summarizeValidationDevnetNode) : [],
       logsAvailable: state.logs.length > 0,
@@ -1787,6 +1978,121 @@ function createValidationDevnetController({
     }
 
     return data ? data.result : undefined
+  }
+
+  async function getNodeValidationHashItems(node) {
+    if (!node || !node.rpcReady || node.syncing) {
+      return {
+        session: null,
+        currentPeriod: node?.currentPeriod || null,
+        hashItems: [],
+      }
+    }
+
+    const currentPeriod = String(node.currentPeriod || '').trim()
+    const {short: canQueryShortHashes, long: canQueryLongHashes} =
+      getValidationHashQueryCapabilities(currentPeriod)
+
+    if (!canQueryShortHashes && !canQueryLongHashes) {
+      return {
+        session: null,
+        currentPeriod,
+        hashItems: [],
+      }
+    }
+
+    const rpcMethod = canQueryLongHashes
+      ? 'flip_longHashes'
+      : 'flip_shortHashes'
+    const hashItems = normalizeValidationHashItems(
+      await callNodeRpc(node, rpcMethod).catch(() => [])
+    ).filter(({ready}) => ready === true)
+
+    return {
+      session: canQueryLongHashes ? 'long' : 'short',
+      currentPeriod,
+      hashItems,
+    }
+  }
+
+  function buildValidationDevnetSolverFlips(hashItems = []) {
+    const reviewPayloadByHash =
+      state.run &&
+      state.run.seed &&
+      state.run.seed.flipReviewPayloadByHash &&
+      typeof state.run.seed.flipReviewPayloadByHash === 'object'
+        ? state.run.seed.flipReviewPayloadByHash
+        : {}
+    const metaByHash =
+      state.run &&
+      state.run.seed &&
+      state.run.seed.flipMetaByHash &&
+      typeof state.run.seed.flipMetaByHash === 'object'
+        ? state.run.seed.flipMetaByHash
+        : {}
+
+    return (Array.isArray(hashItems) ? hashItems : [])
+      .map((item) => normalizeValidationDevnetSolverFlipHash(item))
+      .filter(Boolean)
+      .map((hash) =>
+        buildValidationDevnetSolverFlip({
+          hash,
+          seedPayload: reviewPayloadByHash[hash],
+          meta: metaByHash[hash] || {},
+        })
+      )
+      .filter(Boolean)
+  }
+
+  function normalizeValidationDevnetSolverResult(result = {}) {
+    const tokenUsage = normalizeValidationDevnetSolverTokenSummary(
+      result.tokenUsage
+    )
+    const costs = normalizeValidationDevnetSolverCostSummary(result.costs)
+
+    return {
+      hash: normalizeValidationDevnetSolverFlipHash(result.hash),
+      answer: ['left', 'right', 'skip'].includes(result.answer)
+        ? result.answer
+        : 'skip',
+      confidence: Number.isFinite(Number(result.confidence))
+        ? Number(result.confidence)
+        : null,
+      latencyMs: Number.isFinite(Number(result.latencyMs))
+        ? Number(result.latencyMs)
+        : null,
+      error: String(result.error || '').trim() || null,
+      forcedDecision: result.forcedDecision === true,
+      forcedDecisionPolicy: String(result.forcedDecisionPolicy || '').trim(),
+      forcedDecisionReason: String(result.forcedDecisionReason || '').trim(),
+      tokenUsage,
+      costs,
+    }
+  }
+
+  function updateValidationDevnetSolverLane(nodeName, patch = {}) {
+    if (!state.run || !state.run.parallelSolverLanes) {
+      return
+    }
+
+    const current = state.run.parallelSolverLanes
+    const lanes = (Array.isArray(current.lanes) ? current.lanes : []).map(
+      (lane) =>
+        lane.nodeName === nodeName
+          ? {
+              ...lane,
+              ...patch,
+            }
+          : lane
+    )
+
+    state.run.parallelSolverLanes = {
+      ...current,
+      lanes,
+      summary: summarizeValidationDevnetSolverLanes(lanes),
+    }
+
+    publishStatus()
   }
 
   async function ensureRunDirectories(run) {
@@ -1980,31 +2286,27 @@ function createValidationDevnetController({
     return summarizeValidationDevnetNode(node)
   }
 
-  async function refreshPrimaryValidationAssignment(run) {
-    const primaryNode = run.nodes.find(
-      ({name}) => name === run.plan.primaryNodeName
-    )
-
-    if (!primaryNode) {
+  async function refreshNodeValidationAssignment(node) {
+    if (!node) {
       return
     }
 
-    primaryNode.shortHashCount = null
-    primaryNode.shortHashReadyCount = null
-    primaryNode.longHashCount = null
-    primaryNode.longHashReadyCount = null
-    primaryNode.validationAssigned = false
+    node.shortHashCount = null
+    node.shortHashReadyCount = null
+    node.longHashCount = null
+    node.longHashReadyCount = null
+    node.validationAssigned = false
 
     if (
-      !primaryNode.process ||
-      primaryNode.process.exitCode != null ||
-      !primaryNode.rpcReady ||
-      primaryNode.syncing
+      !node.process ||
+      node.process.exitCode != null ||
+      !node.rpcReady ||
+      node.syncing
     ) {
       return
     }
 
-    const currentPeriod = String(primaryNode.currentPeriod || '').trim()
+    const currentPeriod = String(node.currentPeriod || '').trim()
     const {short: canQueryShortHashes, long: canQueryLongHashes} =
       getValidationHashQueryCapabilities(currentPeriod)
 
@@ -2018,7 +2320,7 @@ function createValidationDevnetController({
     if (canQueryShortHashes) {
       try {
         shortHashes = normalizeValidationHashItems(
-          await callNodeRpc(primaryNode, 'flip_shortHashes')
+          await callNodeRpc(node, 'flip_shortHashes')
         )
       } catch {
         shortHashes = []
@@ -2028,24 +2330,33 @@ function createValidationDevnetController({
     if (canQueryLongHashes) {
       try {
         longHashes = normalizeValidationHashItems(
-          await callNodeRpc(primaryNode, 'flip_longHashes')
+          await callNodeRpc(node, 'flip_longHashes')
         )
       } catch {
         longHashes = []
       }
     }
 
-    primaryNode.shortHashCount = canQueryShortHashes ? shortHashes.length : null
-    primaryNode.shortHashReadyCount = canQueryShortHashes
+    node.shortHashCount = canQueryShortHashes ? shortHashes.length : null
+    node.shortHashReadyCount = canQueryShortHashes
       ? countReadyValidationHashItems(shortHashes)
       : null
-    primaryNode.longHashCount = canQueryLongHashes ? longHashes.length : null
-    primaryNode.longHashReadyCount = canQueryLongHashes
+    node.longHashCount = canQueryLongHashes ? longHashes.length : null
+    node.longHashReadyCount = canQueryLongHashes
       ? countReadyValidationHashItems(longHashes)
       : null
-    primaryNode.validationAssigned =
-      (primaryNode.shortHashCount || 0) > 0 ||
-      (primaryNode.longHashCount || 0) > 0
+    node.validationAssigned =
+      (node.shortHashCount || 0) > 0 || (node.longHashCount || 0) > 0
+  }
+
+  async function refreshValidationAssignments(run) {
+    if (!run || !Array.isArray(run.nodes)) {
+      return
+    }
+
+    await Promise.all(
+      run.nodes.map((node) => refreshNodeValidationAssignment(node))
+    )
   }
 
   async function refreshRunRuntime() {
@@ -2058,7 +2369,7 @@ function createValidationDevnetController({
     }
 
     await Promise.all(state.run.nodes.map((node) => refreshNodeRuntime(node)))
-    await refreshPrimaryValidationAssignment(state.run)
+    await refreshValidationAssignments(state.run)
 
     const primaryNode = state.run.nodes.find(
       ({name}) => name === state.run.plan.primaryNodeName
@@ -2709,6 +3020,7 @@ function createValidationDevnetController({
         nodes: plan.nodes.map((node) => ({...node})),
         startedAt: new Date(now()).toISOString(),
         seed: null,
+        parallelSolverLanes: null,
       }
 
       state.logs = []
@@ -2877,6 +3189,288 @@ function createValidationDevnetController({
     return [...state.logs]
   }
 
+  async function solveValidationDevnetLane({
+    node,
+    laneIndex,
+    solveFlipBatch,
+    providerPayload,
+  }) {
+    updateValidationDevnetSolverLane(node.name, {
+      status: 'collecting-hashes',
+      startedAt: new Date(now()).toISOString(),
+    })
+
+    const {session, currentPeriod, hashItems} =
+      await getNodeValidationHashItems(node)
+    const flips = buildValidationDevnetSolverFlips(hashItems)
+
+    if (!session || flips.length === 0) {
+      const emptyLaneSummary = {
+        totalFlips: 0,
+        solved: 0,
+        skipped: 0,
+        left: 0,
+        right: 0,
+        errors: 0,
+        tokens: {promptTokens: 0, completionTokens: 0, totalTokens: 0},
+        costs: {estimatedUsd: null, actualUsd: null},
+      }
+
+      updateValidationDevnetSolverLane(node.name, {
+        status: 'done',
+        currentPeriod,
+        session,
+        flipCount: 0,
+        summary: emptyLaneSummary,
+        results: [],
+        completedAt: new Date(now()).toISOString(),
+      })
+
+      return {
+        nodeName: node.name,
+        status: 'done',
+        currentPeriod,
+        session,
+        flipCount: 0,
+        summary: emptyLaneSummary,
+        results: [],
+      }
+    }
+
+    appendLog(
+      `[devnet] rehearsal solver lane ${laneIndex + 1}: ${node.name} solving ${
+        flips.length
+      } ${session}-session flips`
+    )
+    updateValidationDevnetSolverLane(node.name, {
+      status: 'running',
+      currentPeriod,
+      session,
+      flipCount: flips.length,
+    })
+
+    const result = await solveFlipBatch({
+      ...providerPayload,
+      benchmarkProfile: 'custom',
+      deadlineMs: VALIDATION_DEVNET_SOLVER_LANE_DEADLINE_MS,
+      requestTimeoutMs: Math.max(
+        VALIDATION_DEVNET_SOLVER_LANE_REQUEST_TIMEOUT_MS,
+        Number(providerPayload.requestTimeoutMs) || 0
+      ),
+      maxConcurrency: 1,
+      interFlipDelayMs: 0,
+      forceDecision: true,
+      uncertaintyRepromptEnabled: true,
+      uncertaintyRepromptMinRemainingMs: 3000,
+      flipVisionMode: providerPayload.flipVisionMode || 'frames_two_pass',
+      session: {
+        type: 'rehearsal-solver-lane',
+        lane: laneIndex + 1,
+        nodeName: node.name,
+        validationSession: session,
+        networkId:
+          state.run && state.run.plan ? state.run.plan.networkId : null,
+      },
+      flips,
+      onFlipStart(event) {
+        appendLog(
+          `[devnet] rehearsal solver lane ${laneIndex + 1}: ${
+            node.name
+          } started ${normalizeValidationDevnetSolverFlipHash(event.hash)}`
+        )
+      },
+      onFlipResult(event) {
+        const answer = ['left', 'right', 'skip'].includes(event.answer)
+          ? event.answer
+          : 'skip'
+        appendLog(
+          `[devnet] rehearsal solver lane ${laneIndex + 1}: ${
+            node.name
+          } ${normalizeValidationDevnetSolverFlipHash(event.hash)} -> ${answer}`
+        )
+      },
+    })
+    const rawSummary =
+      result && result.summary && typeof result.summary === 'object'
+        ? result.summary
+        : {}
+    const tokens = normalizeValidationDevnetSolverTokenSummary(
+      rawSummary.tokens
+    )
+    const costs = normalizeValidationDevnetSolverCostSummary(rawSummary.costs)
+    const laneSummary = {
+      totalFlips: Number(rawSummary.totalFlips) || flips.length,
+      solved: (Number(rawSummary.left) || 0) + (Number(rawSummary.right) || 0),
+      skipped: Number(rawSummary.skipped) || 0,
+      left: Number(rawSummary.left) || 0,
+      right: Number(rawSummary.right) || 0,
+      errors:
+        rawSummary.diagnostics &&
+        Number.isFinite(Number(rawSummary.diagnostics.providerErrors))
+          ? Number(rawSummary.diagnostics.providerErrors)
+          : 0,
+      tokens,
+      costs,
+    }
+    const laneResult = {
+      nodeName: node.name,
+      status: 'done',
+      currentPeriod,
+      session,
+      flipCount: flips.length,
+      provider: result.provider || providerPayload.provider,
+      model: result.model || providerPayload.model,
+      summary: laneSummary,
+      results: (Array.isArray(result.results) ? result.results : [])
+        .map(normalizeValidationDevnetSolverResult)
+        .filter(({hash}) => hash),
+      completedAt: new Date(now()).toISOString(),
+    }
+
+    updateValidationDevnetSolverLane(node.name, laneResult)
+    return laneResult
+  }
+
+  async function runSolverLanes(payload = {}, dependencies = {}) {
+    setEmitters(payload)
+
+    if (!state.run) {
+      throw new Error(
+        'Rehearsal solver lanes require an active local rehearsal network.'
+      )
+    }
+
+    if (typeof dependencies.solveFlipBatch !== 'function') {
+      throw new Error('AI solver bridge is not available for rehearsal lanes.')
+    }
+
+    await refreshRunRuntimeSerialized()
+
+    const availableValidators = state.run.nodes.filter(
+      (node) =>
+        node &&
+        node.role === 'validator' &&
+        node.rpcReady &&
+        node.process &&
+        node.process.exitCode == null
+    )
+    const laneCount = normalizeValidationDevnetSolverLaneCount(
+      payload.laneCount,
+      Math.min(VALIDATION_DEVNET_SOLVER_LANE_LIMIT, availableValidators.length)
+    )
+    const validators = availableValidators.slice(0, laneCount)
+
+    if (!validators.length) {
+      throw new Error('No RPC-ready rehearsal validator lanes are available.')
+    }
+
+    const providerPayload = {
+      ...payload,
+      provider: normalizeValidationDevnetSolverProvider(payload.provider),
+      model: normalizeValidationDevnetSolverModel(payload.model),
+      maxRetries: Math.max(0, Number.parseInt(payload.maxRetries, 10) || 1),
+      maxOutputTokens: Math.max(
+        0,
+        Number.parseInt(payload.maxOutputTokens, 10) || 0
+      ),
+      temperature: Number.isFinite(Number(payload.temperature))
+        ? Number(payload.temperature)
+        : 0,
+      uncertaintyConfidenceThreshold: Number.isFinite(
+        Number(payload.uncertaintyConfidenceThreshold)
+      )
+        ? Number(payload.uncertaintyConfidenceThreshold)
+        : 0.45,
+    }
+    const startedAt = new Date(now()).toISOString()
+    const queuedLanes = validators.map((node, index) => ({
+      lane: index + 1,
+      nodeName: node.name,
+      role: node.role,
+      address: node.address,
+      rpcPort: node.rpcPort,
+      status: 'queued',
+      session: null,
+      flipCount: 0,
+      summary: {
+        totalFlips: 0,
+        solved: 0,
+        skipped: 0,
+        left: 0,
+        right: 0,
+        errors: 0,
+        tokens: {promptTokens: 0, completionTokens: 0, totalTokens: 0},
+        costs: {estimatedUsd: null, actualUsd: null},
+      },
+      results: [],
+    }))
+
+    state.run.parallelSolverLanes = {
+      running: true,
+      startedAt,
+      completedAt: null,
+      laneLimit: laneCount,
+      provider: providerPayload.provider,
+      model: providerPayload.model,
+      note: 'Rehearsal-only dry run. It solves assigned local validator hashes and never submits answers.',
+      lanes: queuedLanes,
+      summary: summarizeValidationDevnetSolverLanes(queuedLanes),
+    }
+    appendLog(
+      `[devnet] starting ${validators.length} rehearsal-only solver lanes with ${providerPayload.provider} ${providerPayload.model}`
+    )
+    publishStatus()
+
+    const settled = await Promise.allSettled(
+      validators.map((node, laneIndex) =>
+        solveValidationDevnetLane({
+          node,
+          laneIndex,
+          solveFlipBatch: dependencies.solveFlipBatch,
+          providerPayload,
+        })
+      )
+    )
+
+    settled.forEach((entry, index) => {
+      if (entry.status === 'fulfilled') {
+        return
+      }
+
+      const node = validators[index]
+      const message =
+        entry.reason && entry.reason.message
+          ? entry.reason.message
+          : String(entry.reason || 'unknown solver lane error')
+      appendLog(
+        `[devnet] rehearsal solver lane ${index + 1}: ${
+          node.name
+        } failed: ${message}`
+      )
+      updateValidationDevnetSolverLane(node.name, {
+        status: 'failed',
+        error: message,
+        completedAt: new Date(now()).toISOString(),
+      })
+    })
+
+    if (!state.run || !state.run.parallelSolverLanes) {
+      return buildStatus()
+    }
+
+    const finalLanes = state.run.parallelSolverLanes.lanes
+    state.run.parallelSolverLanes = {
+      ...state.run.parallelSolverLanes,
+      running: false,
+      completedAt: new Date(now()).toISOString(),
+      lanes: finalLanes,
+      summary: summarizeValidationDevnetSolverLanes(finalLanes),
+    }
+
+    appendLog('[devnet] rehearsal solver lanes finished')
+    return publishStatus()
+  }
+
   return {
     start,
     stop,
@@ -2884,6 +3478,7 @@ function createValidationDevnetController({
     getLogs,
     getSeedFlip,
     getConnectionDetails,
+    runSolverLanes,
   }
 }
 

@@ -921,7 +921,7 @@ describe('local-ai sidecar', () => {
     expect(httpClient.post).not.toHaveBeenCalled()
   })
 
-  it('rejects chat requests above 80000 total characters', async () => {
+  it('rejects chat requests above 120000 total characters', async () => {
     const httpClient = {
       post: jest.fn(),
     }
@@ -932,7 +932,7 @@ describe('local-ai sidecar', () => {
         runtimeType: 'ollama',
         baseUrl: 'http://127.0.0.1:11434',
         model: 'llama3.1:8b',
-        messages: Array.from({length: 9}, (_, index) => ({
+        messages: Array.from({length: 13}, (_, index) => ({
           role: 'user',
           content: `${index}:${'A'.repeat(9997)}`,
         })),
@@ -941,7 +941,7 @@ describe('local-ai sidecar', () => {
       ok: false,
       status: 'validation_error',
       error: 'conversation_too_large',
-      lastError: 'Local AI chat accepts at most 80000 characters per request.',
+      lastError: 'Local AI chat accepts at most 120000 characters per request.',
     })
 
     expect(httpClient.post).not.toHaveBeenCalled()

@@ -19,7 +19,7 @@ function createDecodedFlip(hash) {
 }
 
 describe('solver-orchestrator planning', () => {
-  it('limits short-session plans to six regular solvable flips', () => {
+  it('plans all regular solvable short-session flips assigned by the node', () => {
     const shortFlips = Array.from({length: 8}, (_, index) => {
       const flip = createDecodedFlip(`short-${index + 1}`)
       if (index === 1) {
@@ -37,7 +37,7 @@ describe('solver-orchestrator planning', () => {
       },
     })
 
-    expect(plan.candidateFlips).toHaveLength(6)
+    expect(plan.candidateFlips).toHaveLength(7)
     expect(plan.provider).toBe('openai')
     expect(plan.model).toBe('gpt-5.4')
     expect(plan.candidateFlips.some((flip) => flip.hash === 'short-2')).toBe(
@@ -97,7 +97,7 @@ describe('solver-orchestrator planning', () => {
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('raises short-session OpenAI parallel request timeout to ninety seconds', () => {
+  it('reserves short-session OpenAI parallel budget for uncertainty reprompts', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-timeout-${index + 1}`)
     )
@@ -114,8 +114,15 @@ describe('solver-orchestrator planning', () => {
       },
     })
 
-    expect(plan.effectiveProfile.requestTimeoutMs).toBe(90000)
+    expect(plan.effectiveProfile.requestTimeoutMs).toBe(30000)
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
+    expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
+    expect(
+      plan.effectiveProfile.uncertaintyConfidenceThreshold
+    ).toBeGreaterThanOrEqual(0.68)
+    expect(
+      plan.effectiveProfile.uncertaintyRepromptMinRemainingMs
+    ).toBeGreaterThanOrEqual(35000)
   })
 
   it('uses a more deliberate strict profile for long-session OpenAI solving', () => {
@@ -144,7 +151,11 @@ describe('solver-orchestrator planning', () => {
 
     expect(shortBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(shortBudget.solveConcurrency).toBe(6)
-    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(90000)
+    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(30000)
+    expect(shortBudget.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
+    expect(
+      shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
+    ).toBeGreaterThanOrEqual(0.68)
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('frames_two_pass')
     expect(longBudget.solveConcurrency).toBe(1)
     expect(longBudget.effectiveProfile.requestTimeoutMs).toBe(180000)
@@ -216,7 +227,7 @@ describe('solver-orchestrator planning', () => {
       },
     })
 
-    expect(repromptBudget.estimatedMs).toBeGreaterThan(
+    expect(repromptBudget.estimatedMs).toBeGreaterThanOrEqual(
       singlePassBudget.estimatedMs
     )
     expect(repromptBudget.uncertaintyReviewFlipCount).toBeLessThan(
@@ -319,6 +330,7 @@ describe('solver-orchestrator planning', () => {
   it('uses a forced random answer when image loading fails during a session', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
+    const originalEnv = global.env
 
     class BrokenImage {
       set src(value) {
@@ -335,6 +347,10 @@ describe('solver-orchestrator planning', () => {
     global.Image = BrokenImage
     global.aiSolver = {
       solveFlipBatch: jest.fn(),
+    }
+    global.env = {
+      ...originalEnv,
+      VALIDATION_AI_IMAGE_PAYLOAD_PREP_RETRY_WAIT_MS: 1,
     }
 
     try {
@@ -364,6 +380,7 @@ describe('solver-orchestrator planning', () => {
     } finally {
       global.Image = originalImage
       global.aiSolver = originalAiSolver
+      global.env = originalEnv
     }
   })
 

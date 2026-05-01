@@ -177,6 +177,11 @@ const DEFAULT_LOCAL_AI_SETTINGS = {
   runtimeFamily: '',
   model: DEFAULT_LOCAL_AI_OLLAMA_MODEL,
   visionModel: DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL,
+  activeAdapterEnabled: false,
+  activeAdapterEpoch: '',
+  activeAdapterSha256: '',
+  activeAdapterFormat: '',
+  activeAdapterLabel: '',
   adapterStrategy: 'lora-first',
   trainingPolicy: 'approved-post-consensus-only',
   developerHumanTeacherSystemPrompt: '',
@@ -260,6 +265,31 @@ function trimString(value) {
 
 function normalizeOptionalCommandPath(value) {
   return trimString(value).slice(0, 4096)
+}
+
+function normalizeActiveAdapterEpoch(value) {
+  const text = trimString(value)
+  const parsed = Number.parseInt(text, 10)
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return ''
+  }
+
+  return String(parsed)
+}
+
+function normalizeActiveAdapterSha256(value) {
+  const text = trimString(value).toLowerCase()
+
+  return /^[a-f0-9]{64}$/.test(text) ? text : ''
+}
+
+function normalizeActiveAdapterFormat(value) {
+  return trimString(value).slice(0, 64)
+}
+
+function normalizeActiveAdapterLabel(value) {
+  return trimString(value).slice(0, 160)
 }
 
 function trimTrailingSlash(value) {
@@ -888,6 +918,12 @@ function buildLocalAiSettings(settings = {}) {
   const normalizedRuntimeBackend = normalizeRuntimeBackend(source)
   const normalizedModel = trimString(source.model)
   const normalizedVisionModel = trimString(source.visionModel)
+  const activeAdapterEpoch = normalizeActiveAdapterEpoch(
+    source.activeAdapterEpoch
+  )
+  const activeAdapterSha256 = normalizeActiveAdapterSha256(
+    source.activeAdapterSha256
+  )
 
   const normalizedSettings = {
     ...DEFAULT_LOCAL_AI_SETTINGS,
@@ -928,6 +964,15 @@ function buildLocalAiSettings(settings = {}) {
       (normalizedRuntimeBackend === 'ollama-direct'
         ? DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL
         : ''),
+    activeAdapterEnabled:
+      source.activeAdapterEnabled === true &&
+      Boolean(activeAdapterEpoch || activeAdapterSha256),
+    activeAdapterEpoch,
+    activeAdapterSha256,
+    activeAdapterFormat: normalizeActiveAdapterFormat(
+      source.activeAdapterFormat
+    ),
+    activeAdapterLabel: normalizeActiveAdapterLabel(source.activeAdapterLabel),
     adapterStrategy:
       trimString(source.adapterStrategy) ||
       DEFAULT_LOCAL_AI_SETTINGS.adapterStrategy,
@@ -1118,6 +1163,10 @@ module.exports = {
   normalizeDeveloperAiDraftQuestionWindowChars,
   normalizeDeveloperAiDraftAnswerWindowTokens,
   normalizeDeveloperBenchmarkReviewRequiredFields,
+  normalizeActiveAdapterEpoch,
+  normalizeActiveAdapterSha256,
+  normalizeActiveAdapterFormat,
+  normalizeActiveAdapterLabel,
   resolveDeveloperLocalTrainingProfileModelPath,
   resolveDeveloperLocalTrainingProfileRuntimeModel,
   resolveDeveloperLocalTrainingProfileRuntimeVisionModel,
