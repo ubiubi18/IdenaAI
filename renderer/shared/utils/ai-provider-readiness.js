@@ -13,6 +13,11 @@
  * @property {string} publicModelId
  * @property {string} publicVisionId
  * @property {string} contractVersion
+ * @property {boolean} activeAdapterEnabled
+ * @property {string} activeAdapterEpoch
+ * @property {string} activeAdapterSha256
+ * @property {string} activeAdapterFormat
+ * @property {string} activeAdapterLabel
  * @property {string} adapterStrategy
  * @property {string} trainingPolicy
  * @property {any} rankingPolicy
@@ -37,6 +42,11 @@
  * @property {string=} publicModelId
  * @property {string=} publicVisionId
  * @property {string=} contractVersion
+ * @property {boolean=} activeAdapterEnabled
+ * @property {string=} activeAdapterEpoch
+ * @property {string=} activeAdapterSha256
+ * @property {string=} activeAdapterFormat
+ * @property {string=} activeAdapterLabel
  * @property {string=} adapterStrategy
  * @property {string=} trainingPolicy
  * @property {any=} rankingPolicy
@@ -174,6 +184,8 @@ function buildLocalAiRuntimePayload(localAi = {}) {
   const baseUrl = String(
     source.endpoint || source.baseUrl || DEFAULT_LOCAL_AI_SETTINGS.endpoint
   ).trim()
+  const activeAdapterEpoch = String(source.activeAdapterEpoch || '').trim()
+  const activeAdapterSha256 = String(source.activeAdapterSha256 || '').trim()
 
   return {
     enabled: Boolean(source.enabled),
@@ -195,6 +207,13 @@ function buildLocalAiRuntimePayload(localAi = {}) {
       source.publicVisionId || DEFAULT_LOCAL_AI_SETTINGS.publicVisionId,
     contractVersion:
       source.contractVersion || DEFAULT_LOCAL_AI_SETTINGS.contractVersion,
+    activeAdapterEnabled:
+      source.activeAdapterEnabled === true &&
+      Boolean(activeAdapterEpoch || activeAdapterSha256),
+    activeAdapterEpoch,
+    activeAdapterSha256,
+    activeAdapterFormat: String(source.activeAdapterFormat || '').trim(),
+    activeAdapterLabel: String(source.activeAdapterLabel || '').trim(),
     adapterStrategy: String(source.adapterStrategy || '').trim(),
     trainingPolicy: String(source.trainingPolicy || '').trim(),
     rankingPolicy:

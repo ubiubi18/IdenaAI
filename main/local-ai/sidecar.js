@@ -19,9 +19,9 @@ const MAX_FLIP_IMAGES = 8
 const MIN_TIMEOUT_MS = 1000
 const MAX_TIMEOUT_MS = 90 * 1000
 const MAX_MODEL_NAME_LENGTH = 160
-const MAX_CHAT_MESSAGES = 24
+const MAX_CHAT_MESSAGES = 48
 const MAX_CHAT_MESSAGE_CHARS = 10 * 1000
-const MAX_TOTAL_CHAT_CHARS = 80 * 1000
+const MAX_TOTAL_CHAT_CHARS = 120 * 1000
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_TRAIN_STRING_CHARS = 8000
@@ -504,6 +504,16 @@ function sanitizeTrainEndpointPayload(payload = {}) {
   const reasonerBackend = sanitizeTrainString(source.reasonerBackend, 64)
   const visionBackend = sanitizeTrainString(source.visionBackend, 64)
   const contractVersion = sanitizeTrainString(source.contractVersion, 64)
+  const activeAdapterEpoch = sanitizeTrainString(source.activeAdapterEpoch, 64)
+  const activeAdapterSha256 = sanitizeTrainString(
+    source.activeAdapterSha256,
+    128
+  )
+  const activeAdapterFormat = sanitizeTrainString(
+    source.activeAdapterFormat,
+    64
+  )
+  const activeAdapterLabel = sanitizeTrainString(source.activeAdapterLabel, 160)
   const adapterStrategy = sanitizeTrainString(source.adapterStrategy, 64)
   const trainingPolicy = sanitizeTrainString(source.trainingPolicy, 64)
   const publicModelId = sanitizeTrainString(source.publicModelId, 256)
@@ -537,6 +547,29 @@ function sanitizeTrainEndpointPayload(payload = {}) {
 
   if (contractVersion) {
     runtime.contractVersion = contractVersion
+  }
+
+  if (
+    source.activeAdapterEnabled === true &&
+    (activeAdapterEpoch || activeAdapterSha256)
+  ) {
+    runtime.activeAdapterEnabled = true
+  }
+
+  if (activeAdapterEpoch) {
+    runtime.activeAdapterEpoch = activeAdapterEpoch
+  }
+
+  if (activeAdapterSha256) {
+    runtime.activeAdapterSha256 = activeAdapterSha256
+  }
+
+  if (activeAdapterFormat) {
+    runtime.activeAdapterFormat = activeAdapterFormat
+  }
+
+  if (activeAdapterLabel) {
+    runtime.activeAdapterLabel = activeAdapterLabel
   }
 
   if (adapterStrategy) {

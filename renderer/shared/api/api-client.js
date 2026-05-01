@@ -67,11 +67,15 @@ export default function createApiClient() {
 
   const params = getRpcFallbackParams()
   return {
-    async post(path, body = {}) {
-      return postJson(new URL(path, params.url).toString(), {
-        ...body,
-        key: params.key,
-      })
+    async post(path, body = {}, options = {}) {
+      return postJson(
+        new URL(path, params.url).toString(),
+        {
+          ...body,
+          key: params.key,
+        },
+        options
+      )
     },
   }
 }

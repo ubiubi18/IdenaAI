@@ -68,6 +68,11 @@ Suggested order:
 5. run held-out evaluation with deterministic settings
 6. scale to larger slices only if the pilot is healthy
 
+For the chat-backed annotation contract, see
+[local-ai-chat-human-annotation-integration.md](./local-ai-chat-human-annotation-integration.md).
+Chat turns are treated as local evidence and context, while explicit
+human-teacher annotations remain the trusted training labels.
+
 ## Training environment
 
 Run these commands from the repository root:

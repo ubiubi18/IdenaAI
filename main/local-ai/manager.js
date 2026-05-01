@@ -171,6 +171,102 @@ function runBestEffortCommand(command, args = [], timeoutMs = 1200) {
   }
 }
 
+function parseVmStatOutput(stdout) {
+  const raw = String(stdout || '').trim()
+
+  if (!raw) {
+    return {
+      available: false,
+      pageSizeBytes: null,
+      compressedGiB: null,
+      compressorGiB: null,
+      raw: '',
+    }
+  }
+
+  const pageSizeMatch = raw.match(/page size of (\d+) bytes/i)
+  const pageSizeBytes = pageSizeMatch
+    ? Number.parseInt(pageSizeMatch[1], 10)
+    : null
+  const readPageCount = (label) => {
+    const match = raw.match(new RegExp(`${label}:\\s+([\\d.]+)\\.`, 'i'))
+
+    if (!match) {
+      return null
+    }
+
+    const parsed = Number.parseInt(
+      String(match[1] || '').replace(/\./gu, ''),
+      10
+    )
+
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  const compressedPages = readPageCount('Pages compressed')
+  const compressorPages = readPageCount('Pages occupied by compressor')
+  const toGiB = (pages) =>
+    Number.isFinite(pages) && Number.isFinite(pageSizeBytes)
+      ? bytesToGiB(pages * pageSizeBytes)
+      : null
+
+  return {
+    available: Number.isFinite(pageSizeBytes),
+    pageSizeBytes,
+    compressedGiB: toGiB(compressedPages),
+    compressorGiB: toGiB(compressorPages),
+    raw,
+  }
+}
+
+function parseSysctlSwapUsageOutput(stdout) {
+  const raw = String(stdout || '').trim()
+
+  if (!raw) {
+    return {
+      available: false,
+      totalGiB: null,
+      usedGiB: null,
+      freeGiB: null,
+      raw: '',
+    }
+  }
+
+  const readValue = (label) => {
+    const match = raw.match(
+      new RegExp(`${label}\\s*=\\s*([\\d.]+)([MGT])`, 'i')
+    )
+
+    if (!match) {
+      return null
+    }
+
+    const value = Number.parseFloat(match[1])
+    const unit = String(match[2] || '').toUpperCase()
+
+    if (!Number.isFinite(value)) {
+      return null
+    }
+
+    if (unit === 'T') {
+      return roundTelemetryValue(value * 1024, 2)
+    }
+
+    if (unit === 'M') {
+      return roundTelemetryValue(value / 1024, 2)
+    }
+
+    return roundTelemetryValue(value, 2)
+  }
+
+  return {
+    available: /vm\.swapusage/i.test(raw),
+    totalGiB: readValue('total'),
+    usedGiB: readValue('used'),
+    freeGiB: readValue('free'),
+    raw,
+  }
+}
+
 function parseBatteryTimeRemainingMinutes(text) {
   const match = String(text || '').match(/(\d+):(\d+)\s+remaining/i)
 
@@ -389,6 +485,15 @@ function createDefaultSystemTelemetryProvider() {
       tilerUtilizationPercent: null,
       raw: '',
     }
+    let macMemory = {
+      available: false,
+      pageSizeBytes: null,
+      compressedGiB: null,
+      compressorGiB: null,
+      swapUsedGiB: null,
+      swapTotalGiB: null,
+      raw: '',
+    }
 
     if (process.platform === 'darwin') {
       const batteryCommand = runBestEffortCommand('pmset', ['-g', 'batt'])
@@ -412,6 +517,25 @@ function createDefaultSystemTelemetryProvider() {
       ])
       if (gpuCommand.ok) {
         gpu = parseIoregGpuOutput(gpuCommand.stdout)
+      }
+
+      const vmStatCommand = runBestEffortCommand('vm_stat')
+      const swapCommand = runBestEffortCommand('sysctl', ['vm.swapusage'])
+      const vmStat = vmStatCommand.ok
+        ? parseVmStatOutput(vmStatCommand.stdout)
+        : parseVmStatOutput('')
+      const swap = swapCommand.ok
+        ? parseSysctlSwapUsageOutput(swapCommand.stdout)
+        : parseSysctlSwapUsageOutput('')
+
+      macMemory = {
+        available: Boolean(vmStat.available || swap.available),
+        pageSizeBytes: vmStat.pageSizeBytes,
+        compressedGiB: vmStat.compressedGiB,
+        compressorGiB: vmStat.compressorGiB,
+        swapUsedGiB: swap.usedGiB,
+        swapTotalGiB: swap.totalGiB,
+        raw: [vmStat.raw, swap.raw].filter(Boolean).join('\n'),
       }
     }
 
@@ -440,6 +564,11 @@ function createDefaultSystemTelemetryProvider() {
           process.memoryUsage().rss / 1024 / 1024,
           0
         ),
+        memoryCompressedGiB: macMemory.compressorGiB,
+        memoryLogicalCompressedGiB: macMemory.compressedGiB,
+        swapUsedGiB: macMemory.swapUsedGiB,
+        swapTotalGiB: macMemory.swapTotalGiB,
+        macMemory,
         gpuUsagePercent: roundTelemetryValue(gpu.deviceUtilizationPercent, 1),
         gpu,
         battery,
@@ -621,6 +750,76 @@ function getTelemetryTrainingReadiness(telemetry) {
       'No hard heat or battery stop condition is visible right now. This does not guarantee a fast run, but the machine looks safe enough to start a small local pilot.',
     requiresExplicitOverride: false,
     canStartWithoutOverride: true,
+  }
+}
+
+function getTelemetryManagedRuntimeReadiness(telemetry) {
+  const system = getTelemetrySystem(telemetry)
+  const memoryUsagePercent = Number(system.memoryUsagePercent)
+  const memoryFreeGiB = Number(system.memoryFreeGiB)
+  const memoryCompressedGiB = Number(system.memoryCompressedGiB)
+  const swapUsedGiB = Number(system.swapUsedGiB)
+  const memoryPercentLabel = Number.isFinite(memoryUsagePercent)
+    ? `${memoryUsagePercent}%`
+    : 'an unknown percentage'
+  const memoryFreeLabel = Number.isFinite(memoryFreeGiB)
+    ? `${memoryFreeGiB} GiB free`
+    : 'free memory unavailable'
+  const compressedLabel = Number.isFinite(memoryCompressedGiB)
+    ? `${memoryCompressedGiB} GiB compressed`
+    : 'compressed memory unavailable'
+  const swapLabel = Number.isFinite(swapUsedGiB)
+    ? `${swapUsedGiB} GiB swap used`
+    : 'swap usage unavailable'
+
+  if (!Object.keys(system).length) {
+    return {
+      status: 'unknown',
+      tone: 'gray',
+      label: 'Telemetry unavailable',
+      message:
+        'No local system telemetry is available right now, so the app cannot verify memory pressure before starting the managed local AI runtime.',
+      canStart: true,
+    }
+  }
+
+  if (
+    (Number.isFinite(memoryUsagePercent) && memoryUsagePercent >= 94) ||
+    (Number.isFinite(memoryFreeGiB) && memoryFreeGiB <= 2.5) ||
+    (Number.isFinite(swapUsedGiB) && swapUsedGiB >= 4) ||
+    (Number.isFinite(memoryCompressedGiB) && memoryCompressedGiB >= 12)
+  ) {
+    return {
+      status: 'blocked',
+      tone: 'red',
+      label: 'Blocked by memory pressure',
+      message: `macOS memory is already under pressure (${memoryPercentLabel} used, ${memoryFreeLabel}, ${compressedLabel}, ${swapLabel}). Close heavy apps, leave rehearsal devnet sessions, or abort the current local AI setup before starting the managed model runtime.`,
+      canStart: false,
+    }
+  }
+
+  if (
+    (Number.isFinite(memoryUsagePercent) && memoryUsagePercent >= 90) ||
+    (Number.isFinite(memoryFreeGiB) && memoryFreeGiB <= 4) ||
+    (Number.isFinite(swapUsedGiB) && swapUsedGiB >= 1) ||
+    (Number.isFinite(memoryCompressedGiB) && memoryCompressedGiB >= 8)
+  ) {
+    return {
+      status: 'caution',
+      tone: 'orange',
+      label: 'Memory already tight',
+      message: `macOS memory is tight (${memoryPercentLabel} used, ${memoryFreeLabel}, ${compressedLabel}, ${swapLabel}). The managed local AI runtime can start, but it may be slow or force more swap.`,
+      canStart: true,
+    }
+  }
+
+  return {
+    status: 'ready',
+    tone: 'green',
+    label: 'Ready',
+    message:
+      'System memory telemetry looks acceptable for starting the managed local AI runtime.',
+    canStart: true,
   }
 }
 
@@ -5595,6 +5794,42 @@ function createLocalAiManager({
       }
     }
 
+    let runtimeReadiness = getTelemetryManagedRuntimeReadiness(null)
+    try {
+      runtimeReadiness = getTelemetryManagedRuntimeReadiness(
+        await localSystemTelemetryProvider()
+      )
+    } catch (error) {
+      runtimeReadiness = getTelemetryManagedRuntimeReadiness(null)
+    }
+
+    if (runtimeReadiness.status === 'blocked') {
+      state.running = false
+      state.runtimeManaged = false
+      state.lastError = runtimeReadiness.message
+      state.sidecarReachable = false
+      state.sidecarCheckedAt = new Date().toISOString()
+      state.sidecarModels = []
+      setRuntimeProgress({
+        active: false,
+        status: 'error',
+        stage: 'runtime_memory_pressure',
+        message: 'Local AI runtime start blocked by memory pressure.',
+        detail: runtimeReadiness.message,
+        progressPercent: 0,
+        updatedAt: new Date().toISOString(),
+      })
+
+      return {
+        ok: false,
+        status: 'error',
+        error: 'runtime_memory_pressure',
+        lastError: runtimeReadiness.message,
+        runtimeStartReadiness: runtimeReadiness,
+        ...currentStatus(),
+      }
+    }
+
     try {
       const runtimeStart = await localAiRuntimeController.start({
         ...next,
@@ -8666,7 +8901,10 @@ function createLocalAiManager({
 module.exports = {
   createLocalAiManager,
   defaultCaptureIndex,
+  getTelemetryManagedRuntimeReadiness,
   getTelemetryTrainingReadiness,
   parseIoregGpuOutput,
   parsePmsetBatteryOutput,
+  parseSysctlSwapUsageOutput,
+  parseVmStatOutput,
 }

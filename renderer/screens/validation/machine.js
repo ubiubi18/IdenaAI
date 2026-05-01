@@ -7,7 +7,12 @@ import {
   submitShortAnswers,
   submitLongAnswers,
 } from '../../shared/api/validation'
-import {FlipGrade, RelevanceType, SessionType} from '../../shared/types'
+import {
+  AnswerType,
+  FlipGrade,
+  RelevanceType,
+  SessionType,
+} from '../../shared/types'
 import {fetchFlip} from '../../shared/api/dna'
 import apiClient from '../../shared/api/api-client'
 import {
@@ -38,6 +43,69 @@ import {mergeRehearsalSeedMetaIntoFlips} from './rehearsal-benchmark'
 export const SHORT_SESSION_MIN_AI_SOLVE_WINDOW_SECONDS = 45
 const FLIP_GET_TIMEOUT_MS = 10 * 1000
 const REHEARSAL_SEED_FLIP_TIMEOUT_MS = 4 * 1000
+const VALIDATION_SUBMIT_MACHINE_RETRY_MS = 5000
+
+function getSubmitErrorMessage(error) {
+  return String(
+    (error && (error.message || error.code || error.statusText)) || error || ''
+  )
+}
+
+function isSameHashSubmitError(_, {data}) {
+  return getSubmitErrorMessage(data)
+    .toLowerCase()
+    .includes('tx with same hash already exists')
+}
+
+function deterministicAnswerFallback(hash) {
+  const normalizedHash = String(hash || '').trim()
+
+  if (!normalizedHash) {
+    return AnswerType.Left
+  }
+
+  const lastHex = normalizedHash.match(/[0-9a-f]$/i)?.[0]
+
+  if (!lastHex) {
+    return normalizedHash.length % 2 ? AnswerType.Left : AnswerType.Right
+  }
+
+  return parseInt(lastHex, 16) % 2 ? AnswerType.Right : AnswerType.Left
+}
+
+function ensureRegularFlipSubmitOption(flip) {
+  if (!flip || flip.extra || !flip.hash || Number(flip.option) > 0) {
+    return flip
+  }
+
+  return {
+    ...flip,
+    option: deterministicAnswerFallback(flip.hash),
+    aiForcedFallback: true,
+  }
+}
+
+function ensureShortSubmitOptions(shortFlips = []) {
+  return Array.isArray(shortFlips)
+    ? shortFlips.map(ensureRegularFlipSubmitOption)
+    : []
+}
+
+function getLongSubmitAnswer({hash, option, relevance}) {
+  if (relevance === RelevanceType.Relevant) {
+    return FlipGrade.GradeC
+  }
+
+  if (relevance === RelevanceType.Irrelevant) {
+    return FlipGrade.Reported
+  }
+
+  if (Number(option) > 0) {
+    return option
+  }
+
+  return deterministicAnswerFallback(hash)
+}
 
 export function getShortSessionFinalizeDelaySeconds({
   shortSessionDuration,
@@ -473,16 +541,19 @@ export const createValidationMachine = ({
                     submitShortSession: {
                       states: {
                         submitting: {
+                          entry: assign({
+                            errorMessage: () => null,
+                            shortFlips: ({shortFlips}) =>
+                              ensureShortSubmitOptions(shortFlips),
+                          }),
                           invoke: {
                             // eslint-disable-next-line no-shadow
                             src: ({shortFlips, epoch, validationSessionId}) =>
                               submitShortAnswers(
-                                shortFlips.map(
-                                  ({option: answer = 0, hash}) => ({
-                                    answer,
-                                    hash,
-                                  })
-                                ),
+                                shortFlips.map(({option: answer, hash}) => ({
+                                  answer,
+                                  hash,
+                                })),
                                 0,
                                 epoch,
                                 validationSessionId
@@ -499,8 +570,7 @@ export const createValidationMachine = ({
                             onError: [
                               {
                                 target: 'submitted',
-                                cond: (_, {data}) =>
-                                  data === 'tx with same hash already exists',
+                                cond: isSameHashSubmitError,
                                 actions: assign({
                                   shortSessionSubmittedAt: () => Date.now(),
                                 }),
@@ -509,7 +579,8 @@ export const createValidationMachine = ({
                                 target: 'fail',
                                 actions: [
                                   assign({
-                                    errorMessage: (_, {data}) => data,
+                                    errorMessage: (_, {data}) =>
+                                      getSubmitErrorMessage(data),
                                   }),
                                   log(
                                     (context, event) => ({context, event}),
@@ -532,6 +603,11 @@ export const createValidationMachine = ({
                           },
                         },
                         fail: {
+                          after: {
+                            VALIDATION_SUBMIT_RETRY: {
+                              target: 'submitting',
+                            },
+                          },
                           on: {
                             RETRY_SUBMIT: {
                               target: 'submitting',
@@ -966,6 +1042,10 @@ export const createValidationMachine = ({
                           target: 'keywords',
                           actions: log(),
                         },
+                        SUBMIT_NOW: {
+                          target: 'submitLongSession',
+                          actions: log(),
+                        },
                       },
                     },
                     keywords: {
@@ -1036,13 +1116,20 @@ export const createValidationMachine = ({
                       entry: log(),
                       states: {
                         submitting: {
+                          entry: assign({
+                            errorMessage: () => null,
+                          }),
                           invoke: {
                             // eslint-disable-next-line no-shadow
                             src: ({longFlips, bestFlipHashes, epoch}) =>
                               submitLongAnswers(
                                 longFlips.map(
                                   ({option: answer = 0, relevance, hash}) => ({
-                                    answer,
+                                    answer: getLongSubmitAnswer({
+                                      hash,
+                                      option: answer,
+                                      relevance,
+                                    }),
                                     grade:
                                       // eslint-disable-next-line no-nested-ternary
                                       relevance === RelevanceType.Relevant
@@ -1069,14 +1156,14 @@ export const createValidationMachine = ({
                             onError: [
                               {
                                 target: '#validation.validationSucceeded',
-                                cond: (_, {data}) =>
-                                  data === 'tx with same hash already exists',
+                                cond: isSameHashSubmitError,
                               },
                               {
                                 target: 'fail',
                                 actions: [
                                   assign({
-                                    errorMessage: (_, {data}) => data,
+                                    errorMessage: (_, {data}) =>
+                                      getSubmitErrorMessage(data),
                                   }),
                                   log(
                                     (context, event) => ({context, event}),
@@ -1088,6 +1175,11 @@ export const createValidationMachine = ({
                           },
                         },
                         fail: {
+                          after: {
+                            VALIDATION_SUBMIT_RETRY: {
+                              target: 'submitting',
+                            },
+                          },
                           on: {
                             RETRY_SUBMIT: {
                               target: 'submitting',
@@ -1250,6 +1342,14 @@ export const createValidationMachine = ({
             ),
             5
           ) * 1000,
+        VALIDATION_SUBMIT_RETRY: () => {
+          const configuredRetryMs = Number(
+            global.env?.VALIDATION_SUBMIT_RETRY_MS
+          )
+          return Number.isFinite(configuredRetryMs) && configuredRetryMs >= 0
+            ? configuredRetryMs
+            : VALIDATION_SUBMIT_MACHINE_RETRY_MS
+        },
       },
       actions: {
         approveFlip: assign({

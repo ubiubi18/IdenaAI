@@ -88,16 +88,26 @@ const bundledSampleFlipSet = require('../../samples/flips/flip-challenge-test-5-
 const CHAT_HISTORY_STORAGE_KEY = 'idenaLocalAiChatHistoryV1'
 const CHAT_DRAFT_STORAGE_KEY = 'idenaLocalAiChatDraftV1'
 const CHAT_PREFERENCES_STORAGE_KEY = 'idenaLocalAiChatPreferencesV1'
-const CHAT_HISTORY_LIMIT = 40
+const CHAT_HISTORY_LIMIT = 48
 const CHAT_ATTACHMENT_LIMIT = 8
 const CHAT_COMPOSER_COLLAPSED_HEIGHT = 58
 const MANAGED_RUNTIME_DEFAULT_RESERVE_GIB = 6
 const CHAT_COMPOSER_EXPANDED_MIN_HEIGHT = 96
 const CHAT_COMPOSER_EXPANDED_MAX_HEIGHT = 240
+const LOCAL_CHAT_CONTEXT_WINDOW_TOKENS = 4096
+const LOCAL_CHAT_TEXT_RESPONSE_TOKENS = 96
+const LOCAL_CHAT_IMAGE_RESPONSE_TOKENS = 384
+const LOCAL_CHAT_TEXT_HISTORY_LIMIT = 12
+const LOCAL_CHAT_IMAGE_HISTORY_LIMIT = 8
+const LOCAL_CHAT_TEXT_TIMEOUT_MS = 120 * 1000
+const LOCAL_CHAT_IMAGE_TIMEOUT_MS = 120 * 1000
+const LOCAL_CHAT_TEACHING_NOTE_LIMIT = 4
+const LOCAL_CHAT_TEACHING_NOTE_MAX_CHARS = 900
+const LOCAL_CHAT_TEACHING_CONTEXT_MAX_CHARS = 3200
 const SYSTEM_CHAT_MESSAGE = {
   role: 'system',
   content:
-    'You are a concise, practical assistant inside the Idena desktop app. Keep answers short and actionable.',
+    'You are a concise, practical assistant inside the Idena desktop app. Answer with the final answer only. Do not write hidden chain-of-thought. Keep normal text replies under 120 words unless the user explicitly asks for detail. For flip annotation, explain the next concrete action instead of pretending live model training happens instantly.',
 }
 const OCR_IMAGE_CHAT_SYSTEM_MESSAGE = {
   role: 'system',
@@ -114,6 +124,10 @@ const QUICK_PROMPTS = [
 
 const FLIP_REQUEST_PATTERN =
   /\b(test ?flip|flip|sequence|panels?|solve|coherent|order|caption)\b/i
+const CORRECTION_PROMPT_PATTERN =
+  /\b(no|wrong|incorrect|not correct|actually|i mean|it shows|it does show|you missed|you ignored|correction|correct context|should be|does not show|doesn't show)\b/i
+const RETAINED_CONTEXT_REFERENCE_PATTERN =
+  /\b(this|that|it|image|screenshot|picture|visible|shown|shows|speicher|memory|available|ram|swap|storage|context|correction|correct)\b/i
 const SAMPLE_FLIP_PATTERN = /\b(sample|test)\s*flip(s)?\b/i
 const SAMPLE_FLIP_ACTION_PATTERN =
   /\b(show|load|display|open|give|send|solve|analy[sz]e|explain|caption|order)\b/i
@@ -197,6 +211,10 @@ function createChatMessage(role, content, options = {}) {
       typeof options.flipContext === 'string' && options.flipContext.trim()
         ? options.flipContext.trim()
         : null,
+    teachingNote:
+      typeof options.teachingNote === 'string' && options.teachingNote.trim()
+        ? options.teachingNote.trim()
+        : null,
   }
 }
 
@@ -222,6 +240,7 @@ function normalizeStoredChatHistory(value) {
         createdAt,
         persistLocally: item?.persistLocally !== false,
         flipContext: String(item?.flipContext || '').trim() || null,
+        teachingNote: String(item?.teachingNote || '').trim() || null,
       }
     })
     .filter(Boolean)
@@ -263,7 +282,15 @@ function persistStoredChatHistory(messages) {
     CHAT_HISTORY_STORAGE_KEY,
     JSON.stringify(
       normalizedMessages.map(
-        ({id, role, content, createdAt, flipContext, persistLocally}) => ({
+        ({
+          id,
+          role,
+          content,
+          createdAt,
+          flipContext,
+          teachingNote,
+          persistLocally,
+        }) => ({
           id,
           role,
           content,
@@ -272,6 +299,10 @@ function persistStoredChatHistory(messages) {
           flipContext:
             typeof flipContext === 'string' && flipContext.trim()
               ? flipContext.trim()
+              : null,
+          teachingNote:
+            typeof teachingNote === 'string' && teachingNote.trim()
+              ? teachingNote.trim()
               : null,
         })
       )
@@ -443,6 +474,11 @@ function formatChatError(error, t) {
   if (/unsupported_managed_model/i.test(message)) {
     return t(
       'The managed on-device runtime is locked to its pinned model family. Use a custom local runtime if you need a different base model.'
+    )
+  }
+  if (/timeout of \d+ms exceeded/i.test(message)) {
+    return t(
+      'The local model did not finish in time. Try again after the runtime has warmed up, or use shorter prompts and fewer images.'
     )
   }
   return message || t('Local AI chat request failed.')
@@ -744,6 +780,48 @@ function shouldUseBundledSampleFlip(prompt, attachments) {
   )
 }
 
+function buildLocalChatQuickReply(prompt, attachments, t) {
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    return ''
+  }
+
+  const text = String(prompt || '')
+    .trim()
+    .toLowerCase()
+
+  if (!text) {
+    return ''
+  }
+
+  if (
+    /\b(hello|hi|hey)\b/.test(text) ||
+    /\b(can you hear me|do you read me|are you there)\b/.test(text)
+  ) {
+    return t(
+      'Yes. The local chat UI is responding. Attach a flip or open the human-teacher flow when you want me to draft annotations for you to correct.'
+    )
+  }
+
+  if (
+    /\b(ready|start|begin)\b.*\b(annotate|annotation|teacher|teach|train)\b/.test(
+      text
+    ) ||
+    /\b(annotate|annotation|teacher|teach|train)\b.*\b(flip|flips)\b/.test(text)
+  ) {
+    return t(
+      'Yes. Open "Train your AI on flips" to let Molmo draft a decision and observations; your correction is stored locally as the trusted label for later training or evaluation.'
+    )
+  }
+
+  if (/\b(context window|widen.*context|larger context)\b/.test(text)) {
+    return t(
+      'A prompt cannot widen the local model context window. IdenaAI can keep compact flip context and short summaries, but larger context requires changing the runtime/model settings.'
+    )
+  }
+
+  return ''
+}
+
 function getBundledSampleFlip(index = 0) {
   const flips = Array.isArray(bundledSampleFlipSet?.flips)
     ? bundledSampleFlipSet.flips
@@ -856,6 +934,89 @@ function findLatestFlipContext(messages = []) {
         typeof message.flipContext === 'string' &&
         message.flipContext.trim()
     ) || null
+  )
+}
+
+function truncateChatTeachingText(
+  value,
+  maxLength = LOCAL_CHAT_TEACHING_NOTE_MAX_CHARS
+) {
+  const text = String(value || '').trim()
+
+  if (!text || text.length <= maxLength) {
+    return text
+  }
+
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`
+}
+
+function findLatestAssistantMessage(messages = []) {
+  const reversed = Array.isArray(messages) ? [...messages].reverse() : []
+
+  return (
+    reversed.find(
+      (message) =>
+        message &&
+        message.role === 'assistant' &&
+        typeof message.content === 'string' &&
+        message.content.trim()
+    ) || null
+  )
+}
+
+function isLikelyCorrectionPrompt(prompt) {
+  return CORRECTION_PROMPT_PATTERN.test(String(prompt || '').trim())
+}
+
+function shouldUseRetainedContextForPrompt(prompt, teachingNote) {
+  const text = String(prompt || '').trim()
+
+  return (
+    Boolean(teachingNote) ||
+    FLIP_REQUEST_PATTERN.test(text) ||
+    RETAINED_CONTEXT_REFERENCE_PATTERN.test(text)
+  )
+}
+
+function buildTeachingNoteFromCorrection(prompt, previousAssistantMessage) {
+  const text = String(prompt || '').trim()
+
+  if (!text || !isLikelyCorrectionPrompt(text)) {
+    return ''
+  }
+
+  const lines = [
+    `User correction or challenge: ${truncateChatTeachingText(text)}`,
+    'Use this as new context to verify against the retained image, flip, or chat context. Do not treat it as automatic ground truth, but do not repeat the old answer unless it still fits the available context.',
+  ]
+
+  if (previousAssistantMessage?.content) {
+    lines.push(
+      `Previous assistant answer being challenged: ${truncateChatTeachingText(
+        previousAssistantMessage.content,
+        360
+      )}`
+    )
+  }
+
+  return lines.join('\n')
+}
+
+function buildRecentTeachingNotesContext(messages = []) {
+  const notes = (Array.isArray(messages) ? messages : [])
+    .map((message) => String(message?.teachingNote || '').trim())
+    .filter(Boolean)
+    .slice(-LOCAL_CHAT_TEACHING_NOTE_LIMIT)
+
+  if (notes.length === 0) {
+    return ''
+  }
+
+  return truncateChatTeachingText(
+    notes
+      .map((note, index) => `Correction ${index + 1}:\n${note}`)
+      .join('\n\n'),
+    LOCAL_CHAT_TEACHING_CONTEXT_MAX_CHARS
   )
 }
 
@@ -1597,8 +1758,11 @@ export default function AiChatPage() {
   const willUseRetainedFlipContext = React.useMemo(
     () =>
       attachments.length === 0 &&
-      FLIP_REQUEST_PATTERN.test(draftText) &&
-      Boolean(latestFlipContextMessage?.flipContext),
+      Boolean(latestFlipContextMessage?.flipContext) &&
+      shouldUseRetainedContextForPrompt(
+        draftText,
+        isLikelyCorrectionPrompt(draftText) ? 'draft-correction' : ''
+      ),
     [attachments.length, draftText, latestFlipContextMessage]
   )
   const retainedFlipContextSource = React.useMemo(
@@ -1800,9 +1964,15 @@ export default function AiChatPage() {
       return
     }
 
+    const previousAssistantMessage = findLatestAssistantMessage(messages)
+    const correctionTeachingNote = buildTeachingNoteFromCorrection(
+      effectivePrompt,
+      previousAssistantMessage
+    )
     const userMessage = createChatMessage('user', effectivePrompt, {
       attachments: outgoingAttachments,
       persistLocally: storeChatLocally && outgoingAttachments.length === 0,
+      teachingNote: correctionTeachingNote,
     })
     const nextHistory = [...messages, userMessage].slice(-CHAT_HISTORY_LIMIT)
 
@@ -1811,6 +1981,23 @@ export default function AiChatPage() {
     setAttachments([])
     composerRef.current?.blur()
     setLastError('')
+
+    const quickReply = correctionTeachingNote
+      ? ''
+      : buildLocalChatQuickReply(effectivePrompt, outgoingAttachments, t)
+
+    if (quickReply) {
+      setMessages((current) =>
+        [
+          ...current,
+          createChatMessage('assistant', quickReply, {
+            persistLocally: storeChatLocally,
+          }),
+        ].slice(-CHAT_HISTORY_LIMIT)
+      )
+      return
+    }
+
     setIsSending(true)
 
     try {
@@ -1842,10 +2029,14 @@ export default function AiChatPage() {
       }
 
       const analysisContext = formatFlipAnalysisForPrompt(flipAnalysis)
+      const teachingContext = buildRecentTeachingNotesContext(nextHistory)
       const followUpFlipContext =
         outgoingAttachments.length === 0 &&
-        FLIP_REQUEST_PATTERN.test(effectivePrompt) &&
-        latestFlipContextMessage?.flipContext
+        latestFlipContextMessage?.flipContext &&
+        shouldUseRetainedContextForPrompt(
+          effectivePrompt,
+          correctionTeachingNote
+        )
           ? latestFlipContextMessage.flipContext
           : ''
       const currentFlipContext = buildFlipContextSummary({
@@ -1854,7 +2045,12 @@ export default function AiChatPage() {
         bundledSampleMeta: bundledSampleFlip?.meta,
         flipAnalysis,
       })
-      const bridgeMessages = nextHistory.map((entry) =>
+      const bridgeHistory = nextHistory.slice(
+        outgoingAttachments.length > 0
+          ? -LOCAL_CHAT_IMAGE_HISTORY_LIMIT
+          : -LOCAL_CHAT_TEXT_HISTORY_LIMIT
+      )
+      const bridgeMessages = bridgeHistory.map((entry) =>
         toBridgeMessage(entry, {
           // Keep raw image payloads only for the current turn. Older image
           // attachments stay visible in the UI but are represented by their
@@ -1868,6 +2064,16 @@ export default function AiChatPage() {
         ...runtimePayload,
         messages: [
           SYSTEM_CHAT_MESSAGE,
+          ...(teachingContext
+            ? [
+                {
+                  role: 'system',
+                  content:
+                    `User correction notes for this local conversation are challenges/new context to evaluate. ` +
+                    `Compare them with retained image, flip, or chat context. If they contradict an earlier assistant answer, do not repeat the old answer unless it still fits the available context; explain uncertainty briefly if verification is not possible.\n${teachingContext}`,
+                },
+              ]
+            : []),
           ...(followUpFlipContext
             ? [
                 {
@@ -1895,10 +2101,17 @@ export default function AiChatPage() {
           outgoingAttachments.length > 0
             ? {
                 temperature: 0,
-                num_predict: 256,
+                num_predict: LOCAL_CHAT_IMAGE_RESPONSE_TOKENS,
               }
-            : null,
-        timeoutMs: outgoingAttachments.length > 0 ? 90 * 1000 : 60 * 1000,
+            : {
+                temperature: 0,
+                num_ctx: LOCAL_CHAT_CONTEXT_WINDOW_TOKENS,
+                num_predict: LOCAL_CHAT_TEXT_RESPONSE_TOKENS,
+              },
+        timeoutMs:
+          outgoingAttachments.length > 0
+            ? LOCAL_CHAT_IMAGE_TIMEOUT_MS
+            : LOCAL_CHAT_TEXT_TIMEOUT_MS,
       })
       const assistantContent = extractChatContent(result)
 

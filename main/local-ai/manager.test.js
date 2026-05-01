@@ -6,9 +6,12 @@ const {encode} = require('rlp')
 const {createLocalAiStorage} = require('./storage')
 const {
   createLocalAiManager,
+  getTelemetryManagedRuntimeReadiness,
   getTelemetryTrainingReadiness,
   parseIoregGpuOutput,
   parsePmsetBatteryOutput,
+  parseSysctlSwapUsageOutput,
+  parseVmStatOutput,
 } = require('./manager')
 const {
   LOCAL_AI_BASE_MODEL_ID,
@@ -92,6 +95,99 @@ describe('local-ai manager', () => {
     await fs.remove(tempDir)
   })
 
+  it('parses macOS compressed memory and swap telemetry', () => {
+    expect(
+      parseVmStatOutput(`Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               12345.
+Pages occupied by compressor:          1048576.
+Pages compressed:                       2097152.`)
+    ).toMatchObject({
+      available: true,
+      pageSizeBytes: 16384,
+      compressorGiB: 16,
+      compressedGiB: 32,
+    })
+
+    expect(
+      parseSysctlSwapUsageOutput(
+        'vm.swapusage: total = 10240.00M  used = 6080.25M  free = 4159.75M  (encrypted)'
+      )
+    ).toMatchObject({
+      available: true,
+      totalGiB: 10,
+      usedGiB: 5.94,
+      freeGiB: 4.06,
+    })
+  })
+
+  it('blocks managed runtime startup when macOS is already swapping heavily', async () => {
+    const sidecar = {
+      getHealth: jest.fn(async () => ({
+        ok: false,
+        status: 'down',
+        reachable: false,
+        runtimeBackend: 'local-runtime-service',
+        runtimeType: 'sidecar',
+        lastError: 'connect ECONNREFUSED 127.0.0.1:8080',
+      })),
+      listModels: jest.fn(),
+    }
+    const runtimeController = {
+      start: jest.fn(),
+      stop: jest.fn(),
+    }
+    const manager = createLocalAiManager({
+      logger: mockLogger(),
+      storage,
+      sidecar,
+      runtimeController,
+      systemTelemetryProvider: async () => ({
+        collectedAt: '2026-04-26T10:00:00.000Z',
+        system: {
+          memoryUsagePercent: 83.9,
+          memoryFreeGiB: 5.1,
+          memoryCompressedGiB: 16.02,
+          swapUsedGiB: 5.93,
+        },
+      }),
+    })
+
+    await expect(
+      manager.start({
+        runtimeBackend: 'local-runtime-service',
+        runtimeType: 'sidecar',
+        runtimeFamily: 'molmo2-o',
+        baseUrl: 'http://127.0.0.1:8080',
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      status: 'error',
+      error: 'runtime_memory_pressure',
+      running: false,
+      runtimeManaged: false,
+      runtimeStartReadiness: expect.objectContaining({
+        status: 'blocked',
+      }),
+    })
+    expect(runtimeController.start).not.toHaveBeenCalled()
+  })
+
+  it('marks managed runtime memory pressure as a startup blocker', () => {
+    expect(
+      getTelemetryManagedRuntimeReadiness({
+        system: {
+          memoryUsagePercent: 84,
+          memoryFreeGiB: 5,
+          memoryCompressedGiB: 14,
+          swapUsedGiB: 0.5,
+        },
+      })
+    ).toMatchObject({
+      status: 'blocked',
+      canStart: false,
+    })
+  })
+
   it('preserves managed runtime trust errors from the runtime controller', async () => {
     const logger = mockLogger()
     const runtimeController = {
@@ -122,6 +218,7 @@ describe('local-ai manager', () => {
       storage,
       runtimeController,
       sidecar,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     const result = await manager.start({
@@ -4827,6 +4924,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
@@ -4894,6 +4992,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
@@ -4955,6 +5054,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
@@ -5045,6 +5145,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
@@ -5151,6 +5252,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await manager.start({
@@ -5241,6 +5343,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     const startPromise = manager.start({
@@ -5399,6 +5502,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
@@ -5493,6 +5597,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
@@ -5588,6 +5693,7 @@ describe('local-ai manager', () => {
       storage,
       sidecar,
       runtimeController,
+      systemTelemetryProvider: createReadySystemTelemetryProvider(),
     })
 
     await expect(
