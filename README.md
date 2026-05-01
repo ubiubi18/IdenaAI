@@ -91,7 +91,9 @@ This section should stay current and act as a short roadmap of what has already 
   extra keyword waiting, runs report-review requests in parallel, uses short
   provider timeouts, and still falls back to answer submission if review fails.
 - Short/long autosolver timing:
-  short session can solve all six flips in parallel, while long session keeps a
+  short session can solve all six flips with parallel in-flight provider calls,
+  but OpenAI request launches are now paced with a small default delay instead
+  of firing every request in the same tick. Long session keeps its slower
   staggered queue so completed answers are applied immediately and slow provider
   calls do not block the rest of the run.
 - Validation AI fallback and telemetry:
@@ -114,6 +116,8 @@ This section should stay current and act as a short roadmap of what has already 
   `service_tier=priority` and `reasoning_effort=none`, with a visible fallback
   notice if the API shape is rejected or Priority is not actually applied. That
   fallback only affects short session; long session stays on the normal plan.
+  OpenAI short-session launches default to a 500 ms request-start gap while
+  still keeping the six solves mostly parallel.
 - Local AI preparations:
   managed runtime trust gating, loopback-only runtime auth, RAM estimation work,
   and pinned manifest verification now cover the active research lanes for
@@ -151,6 +155,8 @@ What works today:
 - optional short-session-only OpenAI fast mode with a visible fallback back to
   the normal OpenAI plan if the provider API no longer accepts the fast-lane
   request shape
+- short-session OpenAI request launch pacing, so six parallel solves are not
+  burst-started against the provider API at exactly the same moment
 - in-app human-teacher annotation flows and demo/test paths
 - local benchmark/session logging for traceability
 - managed on-device runtime preparation for current research candidates
@@ -257,6 +263,7 @@ What you can do from `Settings -> Node`:
 
 - start and use the rehearsal network immediately
 - start it in the background without switching the app over yet
+- run eight rehearsal-only solver lanes against the current local devnet status
 - restart a fresh rehearsal network
 - stop the rehearsal network
 
@@ -286,6 +293,9 @@ Behavior notes:
   post-session wait has ended
 - those local results and annotation screens now refresh live from persisted
   validation state while the countdown is still running
+- parallel rehearsal solver lanes use the current AI provider/model for a local
+  dry run only; they record compact telemetry and do not submit answers or touch
+  mainnet identities
 - this is still experimental and can still break in edge cases
 
 ## Local AI Preparations
@@ -328,6 +338,9 @@ Current intended behavior:
 - optionally use an OpenAI-only short-session fast lane with Priority
   processing and reduced reasoning effort, while automatically degrading to the
   normal OpenAI plan if the API shape changes or fast-lane handling is rejected
+- keep short-session OpenAI solving parallel, but stagger provider request
+  launches by default so the API does not receive every flip request in one
+  burst
 - refuse late AI runs when too little short- or long-session time remains, with
   short-session automation targeting submission before the final safety buffer
 - escalate uncertain flips into annotated frame-review and final adjudication
@@ -427,7 +440,7 @@ Clone and start:
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
-npm install
+npm ci
 npm start
 ```
 
@@ -453,6 +466,34 @@ npm run audit:electron
 npm run audit:deps
 npm test
 ```
+
+## Quick Rehearsal and GPT-5.5 API Smoke Test
+
+After `npm start`, use the desktop app for a quick controlled check.
+
+For an OpenAI API provider test:
+
+1. Open `Settings -> AI`.
+2. Turn on AI, then choose `Use external API provider`.
+3. Set `Main AI provider` to `OpenAI`.
+4. Paste your OpenAI API key and click `Set key`.
+5. Set `Model preset` to `gpt-5.5`, or choose `Custom model id` and type
+   `gpt-5.5`.
+6. Click `Test connection`.
+
+For a local rehearsal run:
+
+1. Open `Settings -> Node`.
+2. In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
+3. Wait for the private network to run and for the app to switch to the
+   rehearsal node.
+4. Use `Open countdown` or `Open validation` when those buttons become
+   available.
+5. Click `Run 8 rehearsal solver lanes` to dry-run the current AI
+   provider/model against local rehearsal validators.
+
+The rehearsal path is local-devnet only. It is meant for benchmark and protocol
+flow testing, not for multi-identity mainnet automation.
 
 ## Training Workflow
 

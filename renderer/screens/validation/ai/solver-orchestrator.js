@@ -49,6 +49,7 @@ const SHORT_SESSION_OPENAI_FAST_MODELS = [
 ]
 const SHORT_SESSION_OPENAI_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_MAX_PARALLEL_CONCURRENCY = 6
+const SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS = 500
 const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 30 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 95 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
@@ -884,6 +885,27 @@ function getSolveConcurrency({
   )
 }
 
+function getShortSessionOpenAiParallelLaunchDelayMs({
+  sessionType = 'short',
+  provider = 'openai',
+  aiSolver = {},
+} = {}) {
+  if (sessionType !== 'short' || provider !== 'openai') {
+    return 0
+  }
+
+  const configuredDelay =
+    aiSolver.shortSessionOpenAiParallelLaunchDelayMs != null
+      ? aiSolver.shortSessionOpenAiParallelLaunchDelayMs
+      : aiSolver.shortSessionOpenAiLaunchDelayMs
+  const requested = toNumberOrFallback(
+    configuredDelay,
+    SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS
+  )
+
+  return Math.min(2000, Math.max(0, requested))
+}
+
 function shouldUseLongSessionOpenAiStaggeredSolving({
   sessionType = 'long',
   provider = 'openai',
@@ -917,6 +939,29 @@ function getLongSessionOpenAiStaggerMaxInFlight(aiSolver = {}) {
       )
     )
   )
+}
+
+function estimateParallelLaunchDelayBudgetMs({
+  flipCount = 0,
+  concurrency = 1,
+  launchDelayMs = 0,
+} = {}) {
+  const normalizedFlipCount = Math.max(0, toNumberOrFallback(flipCount, 0))
+  const normalizedConcurrency = Math.max(1, toNumberOrFallback(concurrency, 1))
+  const normalizedLaunchDelayMs = Math.max(
+    0,
+    toNumberOrFallback(launchDelayMs, 0)
+  )
+  let remaining = normalizedFlipCount
+  let totalMs = 0
+
+  while (remaining > 0) {
+    const batchSize = Math.min(normalizedConcurrency, remaining)
+    totalMs += Math.max(0, batchSize - 1) * normalizedLaunchDelayMs
+    remaining -= batchSize
+  }
+
+  return totalMs
 }
 
 function applyShortSessionOpenAiParallelTimeout(
@@ -1181,6 +1226,11 @@ export function estimateValidationAiSolveBudget(options = {}) {
     provider,
     aiSolver: options.aiSolver,
   })
+  const parallelLaunchDelayMs = getShortSessionOpenAiParallelLaunchDelayMs({
+    sessionType,
+    provider,
+    aiSolver: options.aiSolver,
+  })
   const usesLongSessionOpenAiStaggeredSolving =
     shouldUseLongSessionOpenAiStaggeredSolving({
       sessionType,
@@ -1196,6 +1246,14 @@ export function estimateValidationAiSolveBudget(options = {}) {
           getLongSessionOpenAiStaggerIntervalMs(options.aiSolver) +
         Math.max(perFlipSolveMs, effectiveProfile.requestTimeoutMs)
       : 0
+  const parallelLaunchDelayBudgetMs =
+    !usesLongSessionOpenAiStaggeredSolving && solveConcurrency > 1
+      ? estimateParallelLaunchDelayBudgetMs({
+          flipCount: candidateFlips.length,
+          concurrency: solveConcurrency,
+          launchDelayMs: parallelLaunchDelayMs,
+        })
+      : 0
 
   return {
     ...solvePlan,
@@ -1203,6 +1261,8 @@ export function estimateValidationAiSolveBudget(options = {}) {
     solveConcurrency,
     prepPerFlipMs,
     perFlipSolveMs,
+    parallelLaunchDelayMs,
+    parallelLaunchDelayBudgetMs,
     uncertaintyReviewFlipCount,
     uncertaintyReviewReserveMs,
     retryReserveMs,
@@ -1210,6 +1270,7 @@ export function estimateValidationAiSolveBudget(options = {}) {
       IMAGE_PREP_BASE_MS +
       candidateFlips.length * prepPerFlipMs +
       solveWaveCount * perFlipSolveMs +
+      parallelLaunchDelayBudgetMs +
       staggeredSolveMs +
       uncertaintyReviewReserveMs +
       retryReserveMs,
@@ -1275,6 +1336,12 @@ export async function solveValidationSessionWithAi({
     provider,
     aiSolver,
   })
+  const shortSessionOpenAiParallelLaunchDelayMs =
+    getShortSessionOpenAiParallelLaunchDelayMs({
+      sessionType,
+      provider,
+      aiSolver,
+    })
   const useLongSessionOpenAiStaggeredSolving =
     shouldUseLongSessionOpenAiStaggeredSolving({
       sessionType,
@@ -1602,6 +1669,45 @@ export async function solveValidationSessionWithAi({
     }
   }
 
+  async function waitForParallelLaunchDelay(launchIndex) {
+    const launchDelayMs = Math.max(
+      0,
+      shortSessionOpenAiParallelLaunchDelayMs * Math.max(0, launchIndex)
+    )
+
+    if (launchDelayMs <= 0) {
+      return
+    }
+
+    const remainingBeforeDelayMs = getTimeRemainingMs(sessionDeadlineAt)
+    const waitMs = Number.isFinite(remainingBeforeDelayMs)
+      ? Math.min(
+          launchDelayMs,
+          Math.max(
+            0,
+            remainingBeforeDelayMs -
+              sessionSolveGuardMs -
+              MIN_PROVIDER_REQUEST_TIMEOUT_MS
+          )
+        )
+      : launchDelayMs
+
+    if (waitMs > 0) {
+      await sleep(waitMs)
+    }
+  }
+
+  async function solvePreparedPayloadFlipWithLaunchDelay(
+    preparedFlip,
+    launchIndex
+  ) {
+    if (solveConcurrency > 1 && !useLongSessionOpenAiStaggeredSolving) {
+      await waitForParallelLaunchDelay(launchIndex)
+    }
+
+    return solvePreparedPayloadFlip(preparedFlip)
+  }
+
   function removeActiveStaggeredSolve(taskId) {
     const taskIndex = activeStaggeredSolves.findIndex(
       (item) => item.taskId === taskId
@@ -1710,7 +1816,11 @@ export async function solveValidationSessionWithAi({
 
     const batchSize = force ? pendingPreparedFlips.length : solveConcurrency
     const batch = pendingPreparedFlips.splice(0, batchSize)
-    const solvedEntries = await Promise.all(batch.map(solvePreparedPayloadFlip))
+    const solvedEntries = await Promise.all(
+      batch.map((preparedFlip, launchIndex) =>
+        solvePreparedPayloadFlipWithLaunchDelay(preparedFlip, launchIndex)
+      )
+    )
 
     for (const solvedEntry of solvedEntries) {
       await applySolvedPayloadFlip(solvedEntry)
