@@ -468,8 +468,10 @@ is your own responsibility.
 
 Required startup for a real identity:
 
-- use the packaged or installed `IdenaAI` app, not `npm start`
-- use a real mainnet identity in that packaged app profile
+- recommended path: use the packaged or installed `IdenaAI` app, not `npm start`
+- advanced no-package path: use source Electron only with the deliberate
+  `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` override documented below
+- use a real mainnet identity in the profile you actually start
 - keep the node online, synced, and eligible for the next ceremony
 - keep the app open, the computer awake, and the internet connection stable
 - stay nearby and watch the ceremony; this is not unattended production software
@@ -479,6 +481,71 @@ workspace-local development profile under `../IdenaAI-runtime/IdenaAI/`.
 Packaged macOS runs use `~/Library/Application Support/IdenaAI/`. Real
 on-chain `session-auto` is intentionally blocked in dev builds so users do not
 accidentally arm automation in the wrong profile with no real identity.
+
+### Advanced: Real Session From Source Electron Without Packaging
+
+Use this only if you deliberately want to run the real autosolver from the
+source Electron runtime without first building a packaged app. This is not the
+recommended path. It disables the dev-runtime safety guard, so make sure you
+know which `userData` profile contains the real identity, node data, settings,
+and API key.
+
+Before starting:
+
+- close every other IdenaAI app/window
+- back up the identity/private key yourself
+- confirm the selected profile is mainnet, not the rehearsal node
+- confirm the identity is eligible for the next validation
+- confirm `Settings -> AI -> Test connection` works before the ceremony
+- keep API spending limits low
+
+For a separate source-runtime profile, start from the repo and import/configure
+the real identity inside that source profile:
+
+```bash
+nvm use
+npm ci
+IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 npm start
+```
+
+That uses the default source profile:
+
+```text
+../IdenaAI-runtime/IdenaAI/
+```
+
+To run source Electron against the same profile an installed app would use,
+point `IDENA_DESKTOP_USER_DATA_DIR` explicitly.
+
+macOS:
+
+```bash
+nvm use
+IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI" \
+IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
+npm start
+```
+
+Windows PowerShell:
+
+```powershell
+$env:IDENA_DESKTOP_USER_DATA_DIR="$env:APPDATA\IdenaAI"
+$env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
+npm start
+```
+
+Linux:
+
+```bash
+IDENA_DESKTOP_USER_DATA_DIR="$HOME/.config/IdenaAI" \
+IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
+npm start
+```
+
+After Electron opens, verify the real identity address, node sync, and AI test
+connection in the UI before clicking `Enable auto-solve next session`. If the
+terminal refuses to start, copy the full command and full error into a coding
+agent and ask it to explain which profile or guard is blocking startup.
 
 Build and start a packaged app locally on macOS:
 
