@@ -83,7 +83,10 @@ import {
   TimerIcon,
   WalletIcon,
 } from './icons'
-import {resolveIdentityMarkSrc} from '../utils/static-assets'
+import {
+  resolveIdentityMarkSrc,
+  useIdentityMarkFallback,
+} from '../utils/static-assets'
 
 const REHEARSAL_NODE_VERSION = '1.1.2'
 
@@ -333,6 +336,7 @@ export function Logo() {
     <Image
       src={resolveIdentityMarkSrc()}
       alt="IdenaAI mark"
+      onError={useIdentityMarkFallback}
       w="14"
       mt="4"
       mb="2"

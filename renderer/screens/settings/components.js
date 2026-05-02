@@ -3,6 +3,7 @@ import React from 'react'
 import {Box, Button, FormControl, Heading, Stack} from '@chakra-ui/react'
 import {useRouter} from 'next/router'
 import {FormLabel} from '../../shared/components/components'
+import {navigateRendererRoute} from '../../shared/utils/navigation'
 
 export function SettingsNavLink({href, ...props}) {
   const router = useRouter()
@@ -11,7 +12,7 @@ export function SettingsNavLink({href, ...props}) {
     <Button
       variant="tab"
       onClick={() => {
-        router.push(href)
+        navigateRendererRoute(router, href)
       }}
       isActive={router.pathname === href}
       {...props}
