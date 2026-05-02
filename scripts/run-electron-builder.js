@@ -8,7 +8,12 @@ const ELECTRON_BUILDER_CLI = require.resolve('electron-builder/out/cli/cli')
 const PREPARE_BUNDLED_NODE = path.join(__dirname, 'prepare-bundled-node.js')
 
 const MAC_PLATFORM_FLAGS = new Set(['--mac', '-m'])
-const NON_MAC_PLATFORM_FLAGS = new Set(['--win', '-w', '--linux', '-l'])
+const WIN_PLATFORM_FLAGS = new Set(['--win', '-w'])
+const LINUX_PLATFORM_FLAGS = new Set(['--linux', '-l'])
+const NON_MAC_PLATFORM_FLAGS = new Set([
+  ...WIN_PLATFORM_FLAGS,
+  ...LINUX_PLATFORM_FLAGS,
+])
 const ARCH_FLAGS = new Set([
   '--arm64',
   '--x64',
@@ -71,16 +76,27 @@ function shouldAppendMacArch(argv) {
   return !targetsNonMacOnly
 }
 
-function shouldPrepareMacBundle(argv) {
-  if (process.platform !== 'darwin') {
-    return false
+function shouldPreparePlatformBundle(argv) {
+  const targetsMacPlatform = includesAny(argv, MAC_PLATFORM_FLAGS)
+  const targetsWinPlatform = includesAny(argv, WIN_PLATFORM_FLAGS)
+  const targetsLinuxPlatform = includesAny(argv, LINUX_PLATFORM_FLAGS)
+  const hasExplicitPlatform =
+    targetsMacPlatform || targetsWinPlatform || targetsLinuxPlatform
+
+  if (!hasExplicitPlatform) {
+    return true
   }
 
-  const targetsMacPlatform = includesAny(argv, MAC_PLATFORM_FLAGS)
-  const targetsNonMacOnly =
-    includesAny(argv, NON_MAC_PLATFORM_FLAGS) && !targetsMacPlatform
-
-  return !targetsNonMacOnly
+  if (process.platform === 'darwin') {
+    return targetsMacPlatform
+  }
+  if (process.platform === 'win32') {
+    return targetsWinPlatform
+  }
+  if (process.platform === 'linux') {
+    return targetsLinuxPlatform
+  }
+  return false
 }
 
 const args = process.argv.slice(2)
@@ -93,7 +109,7 @@ if (shouldAppendMacArch(args)) {
   )
 }
 
-if (shouldPrepareMacBundle(args)) {
+if (shouldPreparePlatformBundle(args)) {
   const prepareResult = spawnSync(process.execPath, [PREPARE_BUNDLED_NODE], {
     cwd: ROOT,
     env: process.env,

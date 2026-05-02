@@ -128,8 +128,9 @@ a reference build:
 - packaged settings tabs now navigate correctly in static Electron builds
 - the in-app identity mark now has a local fallback instead of showing a broken
   image when an asset path fails
-- macOS packaging prepares the pinned `idena-go` runtime from source mirrors for
-  local builds
+- packaging prepares the pinned `idena-go` runtime from source mirrors for local
+  builds because the old upstream release/build path should not be treated as
+  repaired
 - old `idena-go`, `idena-wasm`, and `idena-wasm-binding` snapshots are no
   longer tracked in the main repo; `npm run setup:sources` clones pinned
   `ubiubi18` mirrors when they are needed
@@ -663,7 +664,7 @@ On macOS with Homebrew:
 
 ```bash
 xcode-select --install
-brew install git node@24 python@3
+brew install git node@24 python@3 go rustup-init
 export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
 node -v
 ```
@@ -773,13 +774,15 @@ release warnings. macOS may warn about unsigned or untrusted software.
 
 ### Windows
 
-Use PowerShell from a local source checkout. Install Git and Node 24 first, then
-run:
+Use PowerShell from a local source checkout. Install Git, Node 24, Python, Go,
+Visual Studio build tools, and MinGW first, then run:
 
 ```powershell
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
 npm ci
+npm run setup:sources
+npm run doctor
 npm start
 ```
 
@@ -789,19 +792,22 @@ For a local Windows package built on your own machine:
 npm run dist:win
 ```
 
-If native dependencies, Electron packaging, Python, Visual Studio build tools,
-or node runtime setup fail, copy the exact PowerShell output into a coding agent
-and ask it to adapt the setup for your Windows version.
+If native dependencies, Electron packaging, Python, Go, MinGW, Visual Studio
+build tools, or node runtime setup fail, copy the exact PowerShell output into a
+coding agent and ask it to adapt the setup for your Windows version.
 
 ### Linux
 
-Install Git, Node 24, Python 3, and the native build dependencies required by
-Electron/canvas on your distribution. Then run:
+Install Git, Node 24, Python 3, Go, `build-essential` or equivalent, and the
+native build dependencies required by Electron/canvas on your distribution. Then
+run:
 
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
 npm ci
+npm run setup:sources
+npm run doctor
 npm start
 ```
 
@@ -953,6 +959,30 @@ npm run setup:flips
 `scripts/source-manifest.json`. `setup:flips` imports FLIP-Challenge data into
 `data/`, which is also ignored by git. The repo keeps only the small bundled
 demo samples needed for smoke tests and quick rehearsal.
+
+The managed `idena-go` runtime is source-first too:
+
+- packaged apps copy a platform node binary bundled at build time
+- source checkouts can build the node locally with `npm run build:node`
+- runtime release lookup defaults to `ubiubi18/idena-go` only
+- add other release repos through `IDENAAI_NODE_RELEASE_REPOS` only if you
+  intentionally trust them
+
+Do not assume the `idena-network` upstream release path is repaired. The
+upstream PRs below explain the failure mode and proposed fixes, but they are not
+a reliable default binary source for this repo because they are still unmerged
+or draft at the time of this README update:
+
+- [`idena-network/idena-wasm-binding#1`](https://github.com/idena-network/idena-wasm-binding/pull/1):
+  open PR adding the Darwin arm64 wasm binding archive
+- [`idena-network/idena-go#1158`](https://github.com/idena-network/idena-go/pull/1158):
+  draft PR for minimal Apple Silicon compatibility
+- [`idena-network/idena-go#1157`](https://github.com/idena-network/idena-go/pull/1157):
+  open PR pinning old Windows/macOS release runners, without adding native Apple
+  Silicon release support
+
+That is why this repo uses pinned source mirrors and local builds first. Treat
+remote binary downloads as an explicit trust decision, not the normal path.
 
 This reduces future checkout/source-archive friction, but it does not erase the
 large files from existing Git history. A fully small historical clone would need
