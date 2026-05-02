@@ -100,10 +100,20 @@ function runAuditSummary() {
   const result = spawnSync(npmCommand, ['audit', '--omit=dev', '--json'], {
     cwd: rootDir,
     encoding: 'utf8',
+    shell: process.platform === 'win32' && /\.cmd$/i.test(npmCommand),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-  const output = result.stdout || result.stderr
+  const output = result.stdout || result.stderr || ''
+
+  if (result.error) {
+    return {
+      ok: false,
+      vulnerabilities: null,
+      error: result.error.message,
+    }
+  }
+
   try {
     const audit = JSON.parse(output)
     return {
