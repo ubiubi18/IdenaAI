@@ -21,7 +21,181 @@ own machine and risk model. The intended P2P posture is local responsibility:
 you bring your own keys, your own AI provider or local model, your own review,
 and your own decision to run.
 
-For a local source run, use this order.
+## Two Autosolver Options
+
+There are two different ways to use the autosolver. Keep them separate.
+
+If you are new to coding, read this as:
+
+- **real session** means a real Idena validation with a real identity. Mistakes
+  can cost your validation or identity.
+- **rehearsal** means a local practice network on your own computer. It is for
+  testing and learning first.
+- **Terminal app** means Electron opened from Terminal with `npm start`.
+- **real app data folder** means the folder where your real IdenaAI identity
+  and node settings live.
+- **packaged app** means the app you build and open from `dist/mac-arm64`.
+
+Rule of thumb:
+
+- first mainnet path in this README: use the **Terminal app** with the real app
+  data folder
+- packaged app path: build and open the **packaged app** if you want to test the
+  built app behavior
+- rehearsal/practice path: use the **Terminal app** with the workspace practice
+  folder
+
+### Option 1: Real On-Chain Session Autosolver
+
+This is the risky path. Use it only with a real identity you control and only at
+your own risk. It can fail. It can spend API money. It can submit wrong answers.
+It can harm your identity.
+
+Main path: run Electron from Terminal, but point it at the real app data folder.
+This avoids waiting for a packaged app build and gives you live Terminal logs.
+
+On macOS Apple Silicon, first get the repo if you do not have it yet:
+
+```bash
+mkdir -p ~/Documents/idena-benchmark-workspace
+cd ~/Documents/idena-benchmark-workspace
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+```
+
+For the real validation run, copy this whole block into Terminal:
+
+```bash
+cd ~/Documents/idena-benchmark-workspace/IdenaAI
+source ~/.nvm/nvm.sh
+nvm install
+nvm use
+npm ci
+npm run setup:sources
+npm run doctor
+IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI" \
+IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
+npm start
+```
+
+What the two long lines mean:
+
+- `IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI"`
+  tells IdenaAI to use the real app profile, where your real identity should be.
+- `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` tells IdenaAI that you deliberately
+  allow real session-auto from Terminal.
+- `npm start` starts Electron from the current source code.
+
+When it starts, Terminal should print a line like:
+
+```text
+[IdenaAI] Dev user data: /Users/you/Library/Application Support/IdenaAI
+```
+
+If that line points to `IdenaAI-runtime`, you are in the practice profile, not
+the real profile. Stop and check the command.
+
+Then, inside the opened `IdenaAI` window:
+
+1. Open `Settings -> AI`.
+2. Turn on AI.
+3. Choose your AI provider or local runtime.
+4. Enter your own API key/model if you use an external provider.
+5. Click `Test connection`.
+6. Open `Settings -> Node`.
+7. Make sure the app is using your real mainnet node/profile, not the validation
+   rehearsal network.
+8. Import or confirm the real identity you intend to validate.
+9. Open `Validation`.
+10. Click `Enable auto-solve next session`.
+11. Keep the IdenaAI window and Terminal open, and watch the validation.
+
+There are no guarantees. Do not test this first on an identity you care about.
+
+#### Built-App Path: Build And Open The Packaged App
+
+If you want to test the built packaged app instead of the Terminal app, run:
+
+```bash
+cd ~/Documents/idena-benchmark-workspace/IdenaAI
+source ~/.nvm/nvm.sh
+nvm install
+nvm use
+npm ci
+npm run setup:sources
+npm run doctor
+npm run dist:mac:arm64
+open "dist/mac-arm64/IdenaAI.app"
+```
+
+If you already installed dependencies and only want to rebuild/open again, the
+short version is:
+
+```bash
+nvm use
+npm ci
+npm run dist:mac:arm64
+open "dist/mac-arm64/IdenaAI.app"
+```
+
+Then, inside the packaged `IdenaAI` window:
+
+1. Open `Settings -> AI`.
+2. Turn on AI.
+3. Choose your AI provider or local runtime.
+4. Enter your own API key/model if you use an external provider.
+5. Click `Test connection`.
+6. Open `Settings -> Node`.
+7. Make sure the app is using your real mainnet node/profile, not the validation
+   rehearsal network.
+8. Import or confirm the real identity you intend to validate.
+9. Open `Validation`.
+10. Click `Enable auto-solve next session`.
+11. Keep the IdenaAI window open and watch the validation.
+
+### Option 2: Rehearsal Mode Autosolver
+
+This is the practice path. Use this first. It runs a local rehearsal network on
+your computer and does not submit answers to mainnet.
+
+On macOS Apple Silicon, copy these commands into Terminal:
+
+```bash
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+source ~/.nvm/nvm.sh
+nvm install
+nvm use
+npm ci
+npm run setup:sources
+npm run doctor
+npm start
+```
+
+Then, inside the opened practice app:
+
+1. Open `Settings -> AI`.
+2. Turn on AI.
+3. Choose your AI provider or local runtime.
+4. Enter your own API key/model if you use an external provider.
+5. Click `Test connection`.
+6. Open `Settings -> Node`.
+7. In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
+8. Wait until the rehearsal network is running.
+9. Open validation when the app offers it.
+10. Click `Run 1 rehearsal autosolve`.
+11. Use `Run optional 9-ID parallel rehearsal` only as a local capacity test
+    with your own provider key, machine, and cost limits.
+
+The rehearsal path is the recommended first test because it is local practice,
+not real validation.
+
+Important: `npm start` uses a separate workspace practice profile under
+`IdenaAI-runtime/IdenaAI`. It intentionally refuses to start if that practice
+profile still has real on-chain `session-auto` armed. That guard exists to stop
+you from accidentally using the wrong runtime for a real validation.
+
+For general source exploration outside a real ceremony, use this order.
 
 1. Clone and start the app from source:
 
@@ -433,9 +607,11 @@ In short: local AI experiments are enabled, but the broader local-model directio
 `session-auto` is meant to reduce or remove ceremony babysitting, but it is
 still experimental and should not be blindly trusted.
 
-Real on-chain `session-auto` is disabled in dev builds started with
-`npm start`; use the installed app for real ceremonies. Dev builds can still run
-the off-chain solver preview and validation rehearsal network.
+Plain `npm start` uses the workspace practice profile and blocks real on-chain
+`session-auto` on purpose. For a real session from Terminal, you must explicitly
+set `IDENA_DESKTOP_USER_DATA_DIR` to the real app data folder and set
+`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1`. Dev/practice runs can still run the
+off-chain solver preview and validation rehearsal network without that override.
 
 Current intended behavior:
 
@@ -477,27 +653,29 @@ is your own responsibility.
 
 Required startup for a real identity:
 
-- recommended path: use the packaged or installed `IdenaAI` app, not `npm start`
-- advanced no-package path: use source Electron only with the deliberate
-  `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` override documented below
+- main path: run source Electron from Terminal with
+  `IDENA_DESKTOP_USER_DATA_DIR` pointed at the real app data folder and
+  `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1`
+- built-app path: build and open the packaged `IdenaAI` app if you want to test
+  the built app behavior
 - use a real mainnet identity in the profile you actually start
 - keep the node online, synced, and eligible for the next ceremony
 - keep the app open, the computer awake, and the internet connection stable
 - stay nearby and watch the ceremony; this is not unattended production software
 
-Why the packaged app matters: source runs started with `npm start` use the
-workspace-local development profile under `../IdenaAI-runtime/IdenaAI/`.
-Packaged macOS runs use `~/Library/Application Support/IdenaAI/`. Real
-on-chain `session-auto` is intentionally blocked in dev builds so users do not
-accidentally arm automation in the wrong profile with no real identity.
+Why the data-folder setting matters: plain `npm start` uses the workspace-local
+practice profile under `../IdenaAI-runtime/IdenaAI/`. The normal macOS real app
+profile is `~/Library/Application Support/IdenaAI/`. For real validation from
+Terminal, point `IDENA_DESKTOP_USER_DATA_DIR` at the real profile so the app can
+see the real identity and node settings. The safety override exists so this is a
+deliberate choice, not an accident.
 
-### Advanced: Real Session From Source Electron Without Packaging
+### Real Session From Terminal Without Packaging
 
-Use this only if you deliberately want to run the real autosolver from the
-source Electron runtime without first building a packaged app. This is not the
-recommended path. It disables the dev-runtime safety guard, so make sure you
-know which `userData` profile contains the real identity, node data, settings,
-and API key.
+This is the main real-session path documented here. It starts Electron from the
+source checkout without first building a packaged app. It uses an explicit real
+data folder and an explicit safety override, so make sure you know which
+`userData` profile contains the real identity, node data, settings, and API key.
 
 Before starting:
 
@@ -508,8 +686,8 @@ Before starting:
 - confirm `Settings -> AI -> Test connection` works before the ceremony
 - keep API spending limits low
 
-For a separate source-runtime profile, start from the repo and import/configure
-the real identity inside that source profile:
+Do not use this default source profile for real validation unless you
+intentionally imported and configured a real identity there:
 
 ```bash
 nvm use
@@ -517,14 +695,14 @@ npm ci
 IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 npm start
 ```
 
-That uses the default source profile:
+That command uses the default source/practice profile:
 
 ```text
 ../IdenaAI-runtime/IdenaAI/
 ```
 
-To run source Electron against the same profile an installed app would use,
-point `IDENA_DESKTOP_USER_DATA_DIR` explicitly.
+For the normal real app profile, point `IDENA_DESKTOP_USER_DATA_DIR`
+explicitly.
 
 macOS:
 
@@ -556,7 +734,7 @@ connection in the UI before clicking `Enable auto-solve next session`. If the
 terminal refuses to start, copy the full command and full error into a coding
 agent and ask it to explain which profile or guard is blocking startup.
 
-Build and start a packaged app locally on macOS:
+Built-app path: build and start a packaged app locally on macOS:
 
 ```bash
 nvm use
@@ -568,11 +746,12 @@ open "dist/mac-arm64/IdenaAI.app"
 For Intel or universal macOS builds, use `npm run dist:mac` or
 `npm run dist:mac:universal` and open the generated `IdenaAI.app` from `dist/`.
 If you downloaded an installed release instead, start that installed app
-normally.
+normally, but still treat it as unaudited experimental software.
 
 OpenAI `gpt-5.5` example:
 
-1. Start the packaged `IdenaAI` app.
+1. Start IdenaAI with the Terminal real-session command above, or use the
+   packaged app path if you deliberately want to test the built app.
 2. Make sure the app is using your real mainnet identity and real mainnet node,
    not the validation rehearsal network.
 3. Open `Settings -> AI`.
@@ -585,14 +764,14 @@ OpenAI `gpt-5.5` example:
    validation window.
 10. Open `Validation`.
 11. Click `Enable auto-solve next session`.
-12. Keep the packaged app running through the ceremony and monitor short and
-    long session submissions.
+12. Keep the IdenaAI window and Terminal running through the ceremony and
+    monitor short and long session submissions.
 
 Do not commit API keys, screenshots containing keys, `settings.json`, node data,
 or files from `~/Library/Application Support/IdenaAI/`. Keep provider spending
 limits low until you have your own successful rehearsal and smoke-test history.
-`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` is only a deliberate developer override
-for local testing; it is not the recommended real-session path.
+`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` is a deliberate override for real
+Terminal session-auto. Do not add it casually to normal practice runs.
 
 ## Safety and Privacy
 
@@ -844,7 +1023,8 @@ software.
 
 ## User Paths
 
-Use these paths after `npm start`.
+Use the rehearsal and development paths below after `npm start`. Use the
+packaged/local app path above for real on-chain session automation.
 
 ### GPT-5.5 API Smoke Test
 
