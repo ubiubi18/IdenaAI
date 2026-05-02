@@ -26,6 +26,7 @@
     "setup:sources": "node scripts/setup-sources.js",
     "update:sources": "node scripts/setup-sources.js --update",
     "setup:flips": "node scripts/setup-flips.js",
+    "build:node": "node scripts/build-node-from-sources.js",
     "build:social": "npm ci --prefix vendor/idena.social-ui && npm run build --prefix vendor/idena.social-ui && node scripts/sync-idena-social-ui.js",
     "build:renderer": "node scripts/run-next-static-build.js",
     "build": "npm run build:social && npm run build:renderer",
@@ -119,9 +120,6 @@
         "dna"
       ]
     },
-    "win": {
-      "icon": "main/static/icons/icon_512_2x.ico"
-    },
     "mac": {
       "target": [
         "dmg",
@@ -130,8 +128,17 @@
       "icon": "main/static/icons/icon-512@2x.icns",
       "extraResources": [
         {
-          "from": "build/node/darwin-arm64/idena-go",
-          "to": "node/idena-go"
+          "from": "build/node/current",
+          "to": "node"
+        }
+      ]
+    },
+    "win": {
+      "icon": "main/static/icons/icon_512_2x.ico",
+      "extraResources": [
+        {
+          "from": "build/node/current",
+          "to": "node"
         }
       ]
     },
@@ -140,7 +147,13 @@
         "deb"
       ],
       "icon": "main/static/icons/icon-512@2x.icns",
-      "maintainer": "Idena <info@idena.io> (https://idena.io/)"
+      "maintainer": "Idena <info@idena.io> (https://idena.io/)",
+      "extraResources": [
+        {
+          "from": "build/node/current",
+          "to": "node"
+        }
+      ]
     }
   },
   "devDependencies": {
