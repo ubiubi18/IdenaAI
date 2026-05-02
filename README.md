@@ -1,4 +1,4 @@
-# IdenaAI v0.0.3
+# IdenaAI v0.0.4
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,15 +8,22 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This repository is the main app-integration line. Version `0.0.3` is a
-development snapshot of the recent dependency, runtime, local AI, rehearsal, and
-autosolver work. It is research software, not a hardened wallet release.
+This repository is the main app-integration line. Version `0.0.4` is a
+reference checkpoint for dependency, runtime, local AI, rehearsal, packaging,
+and autosolver work. It is research software, not a hardened wallet release and
+not a trusted installer distribution.
 
-## Start Here
+## Use This As A Reference
 
-For a first run, use this order.
+Do not install or run this blindly. Clone it, inspect it, ask a coding agent or
+human reviewer to explain the parts you do not understand, and adapt it to your
+own machine and risk model. The intended P2P posture is local responsibility:
+you bring your own keys, your own AI provider or local model, your own review,
+and your own decision to run.
 
-1. Install and start the app from source:
+For a local source run, use this order.
+
+1. Clone and start the app from source:
 
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
@@ -53,8 +60,8 @@ npm start
 - Use `Run current draft now`, `Run short (6)`, or `Run long (14)` to compare
   solving behavior without publishing anything.
 
-5. Use live validation automation only after rehearsal works and only from the
-   packaged app.
+5. Use live validation automation only after rehearsal works and only from a
+   local build/profile you understand.
 
 - Open `Validation`.
 - Use `Enable auto-solve next session` only after reading
@@ -67,7 +74,7 @@ own risk.
 
 ## Experimental Warning
 
-Read this part first. `v0.0.3` is not production ready.
+Read this part first. `v0.0.4` is not production ready.
 
 - no warranties
 - not audited
@@ -79,6 +86,7 @@ Read this part first. `v0.0.3` is not production ready.
 - not suitable for valuable identities, funds, unattended automation, or blind trust
 - not suitable for unattended on-chain validation or reporting
 - do not install or run this if you do not understand what it is doing
+- do not expect a trusted downloadable app; build and inspect locally
 - use throwaway or low-value Idena addresses only
 - do not attach valuable identities to this fork
 - use it only on a secured system you control
@@ -93,10 +101,11 @@ small-scale experimentation with the user's own API key. They are not a
 reliability guarantee for synchronized live validation windows. For serious use,
 prefer local models so capacity scales with your own hardware.
 
-## v0.0.3 Repo Status
+## v0.0.4 Repo Status
 
-`v0.0.3` extends the cleaner-runtime development snapshot after the Node 24 LTS
-and Electron 41 migration. It adds another hardening pass for managed local AI,
+`v0.0.4` extends the cleaner-runtime development snapshot after the Node 24 LTS
+and Electron 41 migration. It adds a release-readiness pass for local-source
+usage, packaged macOS runtime behavior, settings navigation, logo fallback,
 validation rehearsal, submit/retry handling, real-session transition timing, and
 autosolver/reporting telemetry.
 
@@ -110,6 +119,28 @@ It should be treated as an auditable checkpoint, not a production release:
   should assume mistakes can exist even where tests pass
 - no guarantee is made that on-chain validation, reporting, wallet, node,
   identity, or model-runtime flows behave safely under real user stakes
+
+## v0.0.4 Release Notes
+
+This checkpoint had to fix several practical issues before it could be useful as
+a reference build:
+
+- packaged settings tabs now navigate correctly in static Electron builds
+- the in-app identity mark now has a local fallback instead of showing a broken
+  image when an asset path fails
+- macOS packaging prepares the pinned `idena-go` runtime for local builds
+- packaged app inputs now exclude old source trees and large rehearsal shards
+  that do not need to ship inside the Electron app
+- the README now describes source-first usage instead of implying that users
+  should trust a downloaded app
+- one-identity rehearsal autosolving remains the default
+- the optional 9-ID rehearsal path is documented as a local shared-provider
+  capacity test, not as mainnet multi-identity automation
+
+The repository still carries large historical source and sample assets for
+reproducible local research. The better long-term direction is a smaller repo
+plus scripts that clone/update pinned `ubiubi18` forks of the needed Idena
+sources and generate/import rehearsal flips locally.
 
 ## Latest Changes
 
@@ -595,6 +626,113 @@ npm run audit:deps
 npm test
 ```
 
+## User Experience: Terminal-First Local Build
+
+Do not expect a trusted installer or ready-made build to download. Treat this
+repo as a reference implementation that you clone, inspect, adapt, and run on
+your own machine. If a command fails, copy the full terminal command, the full
+error output, your OS/CPU, and `node -v && npm -v` into a coding agent or give it
+to someone with real local knowledge of your system. You are responsible for the
+changes you make and the risk you accept.
+
+IdenaAI has been tested primarily on macOS Apple Silicon. Windows and Linux are
+source-build paths for people who can debug their own local toolchain.
+
+### macOS Apple Silicon
+
+Use this path for rehearsal autosolving from a local Electron dev run:
+
+```bash
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+nvm install
+nvm use
+npm ci
+npm start
+```
+
+`npm start` opens Electron from your local source checkout and uses the
+workspace development profile. This is the right path for rehearsal work,
+debugging, AI settings, and local iteration. It is not the same profile as an
+installed macOS app.
+
+To build a local macOS app from source on Apple Silicon:
+
+```bash
+nvm use
+npm ci
+npm run dist:mac:arm64
+open "dist/mac-arm64/IdenaAI.app"
+```
+
+Use the locally built app only after reviewing the source, build output, and
+release warnings. macOS may warn about unsigned or untrusted software.
+
+### Windows
+
+Use PowerShell from a local source checkout. Install Git and Node 24 first, then
+run:
+
+```powershell
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+npm ci
+npm start
+```
+
+For a local Windows package built on your own machine:
+
+```powershell
+npm run dist:win
+```
+
+If native dependencies, Electron packaging, Python, Visual Studio build tools,
+or node runtime setup fail, copy the exact PowerShell output into a coding agent
+and ask it to adapt the setup for your Windows version.
+
+### Linux
+
+Install Git, Node 24, Python 3, and the native build dependencies required by
+Electron/canvas on your distribution. Then run:
+
+```bash
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+npm ci
+npm start
+```
+
+For a local Linux package built on your own machine:
+
+```bash
+npm run dist:linux
+```
+
+Distribution packages and native dependency names differ. If setup fails, paste
+the terminal output into a coding agent and let it adjust the commands for your
+distribution.
+
+### Autosolver From The Local Electron App
+
+For the safe rehearsal path:
+
+1. Start Electron from the terminal with `npm start`.
+2. Open `Settings -> AI`.
+3. Turn on AI, choose your backend, set your own API key or local runtime, and
+   click `Test connection`.
+4. Open `Settings -> Node`.
+5. Start `Validation Rehearsal Devnet`.
+6. Open validation when the rehearsal network is ready.
+7. Run `Run 1 rehearsal autosolve`.
+8. Use `Run optional 9-ID parallel rehearsal` only as a local capacity test with
+   your own provider key, machine, and cost limits.
+
+For a real identity, read
+[Real Session Auto-Solve With OpenAI](#real-session-auto-solve-with-openai)
+first. Real-session automation can miss, submit wrong answers, spend API money,
+or damage an identity. Do not treat this repo as unattended validation
+software.
+
 ## User Paths
 
 Use these paths after `npm start`.
@@ -696,16 +834,32 @@ Related notes:
 - [docs/federated-model-distribution.md](docs/federated-model-distribution.md)
 - [docs/federated-human-teacher-protocol.md](docs/federated-human-teacher-protocol.md)
 
-## Large bundled artifacts
+## Large bundled artifacts and smaller-app direction
 
-This repo intentionally carries large static libraries in `idena-wasm-binding/lib/` for reproducible local builds.
+This repo currently carries large static libraries in `idena-wasm-binding/lib/`
+for reproducible local builds.
 
-It also carries the chunked `samples/flips/flip-challenge-human-teacher-500-balanced.part-*.json` rehearsal sample shards. Those shards keep the local validation rehearsal and benchmark loop reproducible without requiring a network fetch, while staying below GitHub's hard per-file limit.
+It also carries chunked
+`samples/flips/flip-challenge-human-teacher-500-balanced.part-*.json` rehearsal
+sample shards. Those shards keep the local validation rehearsal and benchmark
+loop reproducible without requiring a network fetch, while staying below
+GitHub's hard per-file limit.
+
+The package-size problem comes from this bundled-source approach around the old
+Idena repos. A cleaner P2P workflow is to keep the app smaller and use scripts
+that clone or update pinned source mirrors only when the user chooses to build a
+node, run deep rehearsal, or import FLIP-Challenge samples. For now, those
+sources should point at `ubiubi18` forks as the default mirrors so users are not
+blocked if old upstream repositories disappear. Users can still repoint those
+mirrors to their own forks before building.
 
 If public release packaging becomes more formal later:
 
 - keep those files under review before every tag
-- consider Git LFS or external release artifacts if the bundle grows further
+- prefer clone/update scripts and local generated caches over larger committed
+  bundles
+- consider Git LFS or external release artifacts only if the bundle cannot be
+  removed yet
 - make sure `THIRD_PARTY_NOTICES.md` ships with any redistributed binary bundle
 
 ## Development History
