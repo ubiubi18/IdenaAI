@@ -17,7 +17,7 @@ const {
   updateNode,
 } = require('./idena-node')
 
-const VALIDATION_DEVNET_NODE_COUNT = 9
+const VALIDATION_DEVNET_NODE_COUNT = 10
 const VALIDATION_DEVNET_MAX_LOG_LINES = 400
 const VALIDATION_DEVNET_RPC_BASE_PORT = 22300
 const VALIDATION_DEVNET_TCP_BASE_PORT = 22400
@@ -47,9 +47,10 @@ const VALIDATION_DEVNET_VALIDATOR_ONLINE_TIMEOUT_MS = 3 * 60 * 1000
 const VALIDATION_DEVNET_SEED_CONFIRM_TIMEOUT_MS = 2 * 60 * 1000
 const VALIDATION_DEVNET_PRIMARY_SEED_VISIBILITY_TIMEOUT_MS = 2 * 60 * 1000
 const VALIDATION_DEVNET_MIN_PRIMARY_PEERS = 3
-const VALIDATION_DEVNET_SOLVER_LANE_LIMIT = 8
+const VALIDATION_DEVNET_SOLVER_LANE_LIMIT = 9
 const VALIDATION_DEVNET_SOLVER_LANE_DEADLINE_MS = 180 * 1000
 const VALIDATION_DEVNET_SOLVER_LANE_REQUEST_TIMEOUT_MS = 90 * 1000
+const VALIDATION_DEVNET_SOLVER_LANE_START_STAGGER_MS = 500
 const REHEARSAL_BENCHMARK_REVIEW_STORAGE_SUFFIX = 'rehearsal-benchmark-review'
 const REHEARSAL_BENCHMARK_ANNOTATION_DATASET_STORAGE_KEY =
   'rehearsal-benchmark-annotations'
@@ -1244,6 +1245,10 @@ function buildNodeRole(index) {
   return index === 0 ? 'bootstrap' : 'validator'
 }
 
+function buildNodeProfile(index) {
+  return index === 0 ? 'shared' : 'default'
+}
+
 function createNodeKeyHex() {
   return randomBytes(32).toString('hex')
 }
@@ -1274,6 +1279,7 @@ function summarizeValidationDevnetNode(node) {
   return {
     name: node.name,
     role: node.role,
+    nodeProfile: node.nodeProfile || null,
     address: node.address,
     rpcPort: node.rpcPort,
     tcpPort: node.tcpPort,
@@ -1331,6 +1337,37 @@ function normalizeValidationDevnetSolverLaneCount(value, fallback) {
       VALIDATION_DEVNET_SOLVER_LANE_LIMIT,
       Number.isInteger(parsed) && parsed > 0 ? parsed : normalizedFallback
     )
+  )
+}
+
+function normalizeValidationDevnetSolverLaneStartDelayMs(
+  value,
+  fallback = VALIDATION_DEVNET_SOLVER_LANE_START_STAGGER_MS
+) {
+  const parsed = Number.parseInt(value, 10)
+  const normalizedFallback = Math.max(0, Number.parseInt(fallback, 10) || 0)
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return normalizedFallback
+  }
+
+  return Math.min(5000, parsed)
+}
+
+function isRunnableValidationDevnetLaneNode(node) {
+  if (!node || node.role !== 'validator') {
+    return false
+  }
+
+  const rpcPort = Number(node.rpcPort)
+
+  return (
+    node.rpcReady &&
+    node.process &&
+    node.process.exitCode == null &&
+    Number.isInteger(rpcPort) &&
+    rpcPort > 0 &&
+    rpcPort < 65536
   )
 }
 
@@ -1573,6 +1610,7 @@ function buildValidationDevnetPlan({
       index,
       name,
       role: buildNodeRole(index),
+      nodeProfile: buildNodeProfile(index),
       address,
       nodeKeyHex,
       apiKey: `validation-devnet-${randomBytes(8).toString('hex')}`,
@@ -2429,6 +2467,8 @@ function createValidationDevnetController({
       '--autoonline',
       '--verbosity',
       '4',
+      '--profile',
+      node.nodeProfile || 'default',
       '--config',
       node.configFile,
     ]
@@ -3194,9 +3234,32 @@ function createValidationDevnetController({
     laneIndex,
     solveFlipBatch,
     providerPayload,
+    laneStartDelayMs = 0,
   }) {
+    const participantLabel = `Participant ${laneIndex + 1}`
+    const isParallelParticipantRun =
+      providerPayload.mode === 'shared-node-participant-rehearsal'
+    const rehearsalLogLabel = isParallelParticipantRun
+      ? 'shared-node rehearsal'
+      : 'single-identity rehearsal'
+    const startDelayMs = Math.max(0, laneIndex * laneStartDelayMs)
+
+    if (startDelayMs > 0) {
+      updateValidationDevnetSolverLane(node.name, {
+        status: 'waiting-start-delay',
+        participantLabel,
+        startDelayMs,
+      })
+      appendLog(
+        `[devnet] ${rehearsalLogLabel} ${participantLabel}: delaying provider start by ${startDelayMs} ms`
+      )
+      await delay(startDelayMs)
+    }
+
     updateValidationDevnetSolverLane(node.name, {
       status: 'collecting-hashes',
+      participantLabel,
+      startDelayMs,
       startedAt: new Date(now()).toISOString(),
     })
 
@@ -3218,6 +3281,7 @@ function createValidationDevnetController({
 
       updateValidationDevnetSolverLane(node.name, {
         status: 'done',
+        participantLabel,
         currentPeriod,
         session,
         flipCount: 0,
@@ -3228,6 +3292,7 @@ function createValidationDevnetController({
 
       return {
         nodeName: node.name,
+        participantLabel,
         status: 'done',
         currentPeriod,
         session,
@@ -3238,12 +3303,11 @@ function createValidationDevnetController({
     }
 
     appendLog(
-      `[devnet] rehearsal solver lane ${laneIndex + 1}: ${node.name} solving ${
-        flips.length
-      } ${session}-session flips`
+      `[devnet] ${rehearsalLogLabel} ${participantLabel}: ${node.name} solving ${flips.length} ${session}-session flips`
     )
     updateValidationDevnetSolverLane(node.name, {
       status: 'running',
+      participantLabel,
       currentPeriod,
       session,
       flipCount: flips.length,
@@ -3266,6 +3330,8 @@ function createValidationDevnetController({
       session: {
         type: 'rehearsal-solver-lane',
         lane: laneIndex + 1,
+        participantLabel,
+        harness: providerPayload.mode || 'single-participant-rehearsal',
         nodeName: node.name,
         validationSession: session,
         networkId:
@@ -3274,7 +3340,7 @@ function createValidationDevnetController({
       flips,
       onFlipStart(event) {
         appendLog(
-          `[devnet] rehearsal solver lane ${laneIndex + 1}: ${
+          `[devnet] ${rehearsalLogLabel} ${participantLabel}: ${
             node.name
           } started ${normalizeValidationDevnetSolverFlipHash(event.hash)}`
         )
@@ -3284,7 +3350,7 @@ function createValidationDevnetController({
           ? event.answer
           : 'skip'
         appendLog(
-          `[devnet] rehearsal solver lane ${laneIndex + 1}: ${
+          `[devnet] ${rehearsalLogLabel} ${participantLabel}: ${
             node.name
           } ${normalizeValidationDevnetSolverFlipHash(event.hash)} -> ${answer}`
         )
@@ -3314,6 +3380,7 @@ function createValidationDevnetController({
     }
     const laneResult = {
       nodeName: node.name,
+      participantLabel,
       status: 'done',
       currentPeriod,
       session,
@@ -3334,6 +3401,12 @@ function createValidationDevnetController({
   async function runSolverLanes(payload = {}, dependencies = {}) {
     setEmitters(payload)
 
+    if (payload.rehearsalOnly !== true) {
+      throw new Error(
+        'Rehearsal autosolve requires an explicit rehearsal-only request.'
+      )
+    }
+
     if (!state.run) {
       throw new Error(
         'Rehearsal solver lanes require an active local rehearsal network.'
@@ -3346,19 +3419,24 @@ function createValidationDevnetController({
 
     await refreshRunRuntimeSerialized()
 
+    const sharedNode =
+      state.run.nodes.find((node) => node && node.role === 'bootstrap') || null
     const availableValidators = state.run.nodes.filter(
-      (node) =>
-        node &&
-        node.role === 'validator' &&
-        node.rpcReady &&
-        node.process &&
-        node.process.exitCode == null
+      isRunnableValidationDevnetLaneNode
     )
     const laneCount = normalizeValidationDevnetSolverLaneCount(
       payload.laneCount,
       Math.min(VALIDATION_DEVNET_SOLVER_LANE_LIMIT, availableValidators.length)
     )
     const validators = availableValidators.slice(0, laneCount)
+    const laneStartDelayMs = normalizeValidationDevnetSolverLaneStartDelayMs(
+      payload.laneStartDelayMs,
+      laneCount > 1 ? VALIDATION_DEVNET_SOLVER_LANE_START_STAGGER_MS : 0
+    )
+    const solverMode =
+      laneCount > 1
+        ? 'shared-node-participant-rehearsal'
+        : 'single-participant-rehearsal'
 
     if (!validators.length) {
       throw new Error('No RPC-ready rehearsal validator lanes are available.')
@@ -3366,6 +3444,7 @@ function createValidationDevnetController({
 
     const providerPayload = {
       ...payload,
+      mode: solverMode,
       provider: normalizeValidationDevnetSolverProvider(payload.provider),
       model: normalizeValidationDevnetSolverModel(payload.model),
       maxRetries: Math.max(0, Number.parseInt(payload.maxRetries, 10) || 1),
@@ -3385,10 +3464,12 @@ function createValidationDevnetController({
     const startedAt = new Date(now()).toISOString()
     const queuedLanes = validators.map((node, index) => ({
       lane: index + 1,
+      participantLabel: `Participant ${index + 1}`,
       nodeName: node.name,
       role: node.role,
       address: node.address,
       rpcPort: node.rpcPort,
+      startDelayMs: index * laneStartDelayMs,
       status: 'queued',
       session: null,
       flipCount: 0,
@@ -3407,18 +3488,32 @@ function createValidationDevnetController({
 
     state.run.parallelSolverLanes = {
       running: true,
+      mode: solverMode,
       startedAt,
       completedAt: null,
       laneLimit: laneCount,
+      participantCount: validators.length,
+      sharedNodeName: sharedNode ? sharedNode.name : null,
+      sharedNodeProfile: sharedNode ? sharedNode.nodeProfile || null : null,
+      laneStartDelayMs,
       provider: providerPayload.provider,
       model: providerPayload.model,
-      note: 'Rehearsal-only dry run. It solves assigned local validator hashes and never submits answers.',
+      note:
+        laneCount > 1
+          ? 'Optional rehearsal-only shared-node participant dry run. It solves assigned local validator hashes, staggers shared provider starts, records telemetry, and never submits answers to mainnet.'
+          : 'Default rehearsal-only single-identity dry run. It solves one local validator identity, records telemetry, and never submits answers to mainnet.',
       lanes: queuedLanes,
       summary: summarizeValidationDevnetSolverLanes(queuedLanes),
     }
-    appendLog(
-      `[devnet] starting ${validators.length} rehearsal-only solver lanes with ${providerPayload.provider} ${providerPayload.model}`
-    )
+    if (laneCount > 1) {
+      appendLog(
+        `[devnet] starting ${validators.length} optional shared-node rehearsal participants with ${providerPayload.provider} ${providerPayload.model}; provider starts staggered by ${laneStartDelayMs} ms`
+      )
+    } else {
+      appendLog(
+        `[devnet] starting single-identity rehearsal autosolve with ${providerPayload.provider} ${providerPayload.model}`
+      )
+    }
     publishStatus()
 
     const settled = await Promise.allSettled(
@@ -3428,6 +3523,7 @@ function createValidationDevnetController({
           laneIndex,
           solveFlipBatch: dependencies.solveFlipBatch,
           providerPayload,
+          laneStartDelayMs,
         })
       )
     )
@@ -3443,12 +3539,13 @@ function createValidationDevnetController({
           ? entry.reason.message
           : String(entry.reason || 'unknown solver lane error')
       appendLog(
-        `[devnet] rehearsal solver lane ${index + 1}: ${
-          node.name
-        } failed: ${message}`
+        `[devnet] ${
+          laneCount > 1 ? 'shared-node rehearsal' : 'single-identity rehearsal'
+        } Participant ${index + 1}: ${node.name} failed: ${message}`
       )
       updateValidationDevnetSolverLane(node.name, {
         status: 'failed',
+        participantLabel: `Participant ${index + 1}`,
         error: message,
         completedAt: new Date(now()).toISOString(),
       })
@@ -3467,7 +3564,11 @@ function createValidationDevnetController({
       summary: summarizeValidationDevnetSolverLanes(finalLanes),
     }
 
-    appendLog('[devnet] rehearsal solver lanes finished')
+    appendLog(
+      laneCount > 1
+        ? '[devnet] shared-node participant rehearsal finished'
+        : '[devnet] single-identity rehearsal autosolve finished'
+    )
     return publishStatus()
   }
 

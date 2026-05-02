@@ -83,6 +83,7 @@ import {
   TimerIcon,
   WalletIcon,
 } from './icons'
+import {resolveIdentityMarkSrc} from '../utils/static-assets'
 
 const REHEARSAL_NODE_VERSION = '1.1.2'
 
@@ -330,7 +331,7 @@ function BandwidthItem(props) {
 export function Logo() {
   return (
     <Image
-      src="/static/identity-mark.png"
+      src={resolveIdentityMarkSrc()}
       alt="IdenaAI mark"
       w="14"
       mt="4"
