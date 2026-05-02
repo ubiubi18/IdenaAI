@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "idena-go",
+      "path": "idena-go",
+      "url": "https://github.com/ubiubi18/idena-go.git",
+      "ref": "fix/apple-silicon-macos",
+      "commit": "67c10f864ee316cf91e4ffba67941be04167322f",
+      "requiredFiles": [
+        "go.mod",
+        "scripts/build-node-macos-arm64.sh",
+        "scripts/run-go-toolchain.sh"
+      ]
+    },
+    {
+      "name": "idena-wasm",
+      "path": "idena-wasm",
+      "url": "https://github.com/ubiubi18/idena-wasm.git",
+      "ref": "master",
+      "commit": "9fc402edd41a1dbaf5ace82cc9e8e17fc235f926",
+      "requiredFiles": ["Cargo.toml"]
+    },
+    {
+      "name": "idena-wasm-binding",
+      "path": "idena-wasm-binding",
+      "url": "https://github.com/ubiubi18/idena-wasm-binding.git",
+      "ref": "fix/macos-arm64-binding",
+      "commit": "aebb58414c9859b15c9d3d465ea05433ab63758e",
+      "requiredFiles": ["go.mod", "lib"]
+    }
+  ]
+}
