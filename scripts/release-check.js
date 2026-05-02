@@ -34,6 +34,7 @@ function runStep(label, command, args) {
   const result = spawnSync(command, args, {
     cwd: process.cwd(),
     env: process.env,
+    shell: process.platform === 'win32' && /\.cmd$/i.test(command),
     stdio: 'inherit',
   })
 
