@@ -15,7 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - os: macos-latest
+            electron_builder_args: --mac --publish always
+          - os: ubuntu-latest
+            electron_builder_args: --linux --publish always
+          - os: windows-latest
+            electron_builder_args: --win --publish always
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -58,10 +64,10 @@ jobs:
       - name: Bump version
         run: npm --no-git-tag-version version --allow-same-version ${{ steps.refs.outputs.tag }}
 
+      - name: Build renderer
+        run: npm run build
+
       - name: Build & release
-        uses: samuelmeuli/action-electron-builder@v1.6.0
+        run: node scripts/run-electron-builder.js ${{ matrix.electron_builder_args }}
         env:
-          EP_PRE_RELEASE: true
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release: true
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
