@@ -55,7 +55,7 @@ jobs:
         run: npm run release:check
 
       - name: Bump version
-        run: npm --no-git-tag-version version ${{ steps.refs.outputs.tag }}
+        run: npm --no-git-tag-version version --allow-same-version ${{ steps.refs.outputs.tag }}
 
       - name: Build & release
         uses: samuelmeuli/action-electron-builder@v1.6.0
