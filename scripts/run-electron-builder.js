@@ -5,6 +5,7 @@ const {execFileSync, spawnSync} = require('child_process')
 
 const ROOT = path.join(__dirname, '..')
 const ELECTRON_BUILDER_CLI = require.resolve('electron-builder/out/cli/cli')
+const PREPARE_BUNDLED_NODE = path.join(__dirname, 'prepare-bundled-node.js')
 
 const MAC_PLATFORM_FLAGS = new Set(['--mac', '-m'])
 const NON_MAC_PLATFORM_FLAGS = new Set(['--win', '-w', '--linux', '-l'])
@@ -70,6 +71,18 @@ function shouldAppendMacArch(argv) {
   return !targetsNonMacOnly
 }
 
+function shouldPrepareMacBundle(argv) {
+  if (process.platform !== 'darwin') {
+    return false
+  }
+
+  const targetsMacPlatform = includesAny(argv, MAC_PLATFORM_FLAGS)
+  const targetsNonMacOnly =
+    includesAny(argv, NON_MAC_PLATFORM_FLAGS) && !targetsMacPlatform
+
+  return !targetsNonMacOnly
+}
+
 const args = process.argv.slice(2)
 
 if (shouldAppendMacArch(args)) {
@@ -78,6 +91,25 @@ if (shouldAppendMacArch(args)) {
   console.log(
     `[electron-builder-wrapper] Detected macOS machine architecture ${targetArch}; packaging target set to ${targetArch}.`
   )
+}
+
+if (shouldPrepareMacBundle(args)) {
+  const prepareResult = spawnSync(process.execPath, [PREPARE_BUNDLED_NODE], {
+    cwd: ROOT,
+    env: process.env,
+    stdio: 'inherit',
+  })
+
+  if (prepareResult.error) {
+    console.error(
+      `preparing bundled Idena node failed: ${prepareResult.error.message}`
+    )
+    process.exit(1)
+  }
+
+  if (prepareResult.status !== 0) {
+    process.exit(prepareResult.status || 1)
+  }
 }
 
 const result = spawnSync(process.execPath, [ELECTRON_BUILDER_CLI, ...args], {
