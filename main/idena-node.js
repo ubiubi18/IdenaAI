@@ -15,7 +15,7 @@ const httpClient = require('./utils/fetch-client')
 const idenaBin = 'idena-go'
 const pinnedNodeVersion = '1.1.2'
 const pinnedNodeTag = `v${pinnedNodeVersion}`
-const idenaNodePinnedReleaseUrl = `https://api.github.com/repos/idena-network/idena-go/releases/tags/${pinnedNodeTag}`
+const defaultNodeReleaseRepos = ['ubiubi18/idena-go']
 const idenaChainDbFolder = 'idenachain.db'
 const minNodeBinarySize = 1024 * 1024
 const localNodeBuildToolchain = 'go1.19.13'
@@ -922,13 +922,6 @@ function isCompatibleAssetName(assetName) {
   return false
 }
 
-async function getPinnedRelease() {
-  const {data: release} = await httpClient.get(idenaNodePinnedReleaseUrl, {
-    timeout: 15000,
-  })
-  return release
-}
-
 function getLocalNodeRepoCandidates() {
   return [
     path.resolve(__dirname, '..', 'idena-go'),
@@ -948,6 +941,94 @@ function findLocalNodeRepo() {
     }
   }
   return null
+}
+
+function getLocalWasmBindingRepoCandidates() {
+  return [
+    path.resolve(__dirname, '..', 'idena-wasm-binding'),
+    path.resolve(process.cwd(), 'idena-wasm-binding'),
+    path.resolve(__dirname, '..', '..', 'idena-wasm-binding'),
+    path.resolve(process.cwd(), '..', 'idena-wasm-binding'),
+    process.env.IDENAAI_IDENA_WASM_BINDING_DIR,
+  ].filter(Boolean)
+}
+
+function findLocalWasmBindingRepo() {
+  const candidates = getLocalWasmBindingRepoCandidates()
+  for (const repoDir of candidates) {
+    const goMod = path.join(repoDir, 'go.mod')
+    if (fs.existsSync(goMod)) {
+      return repoDir
+    }
+  }
+  return null
+}
+
+function normalizeNodeArchForBinding(arch = process.arch) {
+  if (arch === 'x64') return 'amd64'
+  if (arch === 'arm64') return 'aarch64'
+  return arch
+}
+
+function getLocalWasmBindingLibName(
+  platform = process.platform,
+  arch = process.arch
+) {
+  const bindingArch = normalizeNodeArchForBinding(arch)
+  if (platform === 'darwin') {
+    return arch === 'arm64'
+      ? 'libidena_wasm_darwin_arm64.a'
+      : `libidena_wasm_darwin_${bindingArch}.a`
+  }
+  if (platform === 'linux') {
+    return `libidena_wasm_linux_${bindingArch}.a`
+  }
+  if (platform === 'win32') {
+    return `libidena_wasm_windows_${bindingArch}.a`
+  }
+  return ''
+}
+
+function isTruthyEnv(value) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(value || '')
+      .trim()
+      .toLowerCase()
+  )
+}
+
+function isFalseyEnv(value) {
+  return ['0', 'false', 'no', 'off'].includes(
+    String(value || '')
+      .trim()
+      .toLowerCase()
+  )
+}
+
+function localNodeSourceBuildAvailable() {
+  const repoDir = findLocalNodeRepo()
+  const wasmBindingDir = findLocalWasmBindingRepo()
+  const libName = getLocalWasmBindingLibName()
+
+  return Boolean(
+    repoDir &&
+      wasmBindingDir &&
+      libName &&
+      fs.existsSync(path.join(wasmBindingDir, 'lib', libName))
+  )
+}
+
+function getNodeReleaseRepos() {
+  const configured = String(process.env.IDENAAI_NODE_RELEASE_REPOS || '')
+    .split(',')
+    .map((repo) => repo.trim())
+    .filter(Boolean)
+
+  return configured.length > 0 ? configured : defaultNodeReleaseRepos
+}
+
+function getPinnedReleaseUrl(repo) {
+  return `https://api.github.com/repos/${repo}/releases/tags/${pinnedNodeTag}`
 }
 
 function runCommand(command, args, options = {}) {
@@ -977,7 +1058,7 @@ function runCommand(command, args, options = {}) {
   })
 }
 
-async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
+async function buildLocalPinnedNode(tempNodeFile, onProgress) {
   const cargoBinDir = path.join(os.homedir(), '.cargo', 'bin')
   const env = {
     ...process.env,
@@ -989,6 +1070,11 @@ async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
     desktopRoot,
     'scripts',
     'build-node-macos-arm64.sh'
+  )
+  const genericBuildScript = path.join(
+    desktopRoot,
+    'scripts',
+    'build-node-from-sources.js'
   )
 
   if (onProgress) {
@@ -1005,6 +1091,8 @@ async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
   }
 
   if (
+    process.platform === 'darwin' &&
+    process.arch === 'arm64' &&
     !desktopBuildScript.includes('.asar') &&
     fs.existsSync(desktopBuildScript)
   ) {
@@ -1016,62 +1104,73 @@ async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
         env,
       }
     )
+  } else if (
+    !genericBuildScript.includes('.asar') &&
+    fs.existsSync(genericBuildScript)
+  ) {
+    await runCommand(process.execPath, [genericBuildScript, tempNodeFile], {
+      cwd: desktopRoot,
+      env,
+    })
   } else {
     const repoDir = findLocalNodeRepo()
     if (!repoDir) {
       throw new Error(
-        'cannot find local idena-go repo for darwin/arm64 pinned build'
+        `cannot find local idena-go repo for ${process.platform}/${process.arch} pinned build`
       )
     }
 
-    const buildScript = path.join(
-      repoDir,
-      'scripts',
-      'build-node-macos-arm64.sh'
-    )
+    const wasmBindingDir = findLocalWasmBindingRepo()
+    const wasmBindingGoMod =
+      wasmBindingDir && path.join(wasmBindingDir, 'go.mod')
+    const wasmBindingLib = wasmBindingDir
+      ? path.join(wasmBindingDir, 'lib', getLocalWasmBindingLibName())
+      : ''
+    if (
+      !wasmBindingDir ||
+      !fs.existsSync(wasmBindingGoMod) ||
+      !fs.existsSync(wasmBindingLib)
+    ) {
+      throw new Error(
+        `missing local idena-wasm-binding artifacts for ${process.platform}/${process.arch}`
+      )
+    }
 
-    if (fs.existsSync(buildScript)) {
-      await runCommand(
-        '/usr/bin/arch',
-        ['-arm64', '/bin/bash', buildScript, tempNodeFile],
-        {
-          cwd: repoDir,
-          env,
-        }
-      )
-    } else {
-      const wasmBindingDir = path.resolve(repoDir, '..', 'idena-wasm-binding')
-      const wasmBindingGoMod = path.join(wasmBindingDir, 'go.mod')
-      const wasmBindingArm64Lib = path.join(
-        wasmBindingDir,
-        'lib',
-        'libidena_wasm_darwin_arm64.a'
-      )
-      if (
-        !fs.existsSync(wasmBindingGoMod) ||
-        !fs.existsSync(wasmBindingArm64Lib)
-      ) {
-        throw new Error(
-          'missing local idena-wasm-binding arm64 artifacts. Expected ../idena-wasm-binding with lib/libidena_wasm_darwin_arm64.a'
-        )
+    const localWasmBinding = path.relative(repoDir, wasmBindingDir) || '.'
+    await runCommand(
+      process.platform === 'win32' ? 'go.exe' : 'go',
+      [
+        'mod',
+        'edit',
+        `-replace=github.com/idena-network/idena-wasm-binding=${
+          localWasmBinding.startsWith('.')
+            ? localWasmBinding
+            : `.${path.sep}${localWasmBinding}`
+        }`,
+      ],
+      {
+        cwd: repoDir,
+        env,
       }
-
-      await runCommand(
-        'go',
-        [
-          'build',
-          '-ldflags',
-          `-X main.version=${pinnedNodeVersion}`,
-          '-o',
-          tempNodeFile,
-          '.',
-        ],
-        {
-          cwd: repoDir,
-          env,
-        }
-      )
-    }
+    )
+    await runCommand(
+      process.platform === 'win32' ? 'go.exe' : 'go',
+      [
+        'build',
+        '-ldflags',
+        `-X main.version=${pinnedNodeVersion}`,
+        '-o',
+        tempNodeFile,
+        '.',
+      ],
+      {
+        cwd: repoDir,
+        env: {
+          ...env,
+          CGO_ENABLED: '1',
+        },
+      }
+    )
   }
 
   const stats = await fs.stat(tempNodeFile)
@@ -1099,25 +1198,67 @@ async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
   }
 }
 
-async function getCompatibleReleaseInfo() {
-  const release = await getPinnedRelease()
-  if (release && !release.draft) {
-    const assets = Array.isArray(release.assets) ? release.assets : []
-    const asset = assets.find(({name}) => isCompatibleAssetName(name))
-    const version = semver.clean(release.tag_name)
+async function getPinnedRelease(repo) {
+  const {data: release} = await httpClient.get(getPinnedReleaseUrl(repo), {
+    timeout: 15000,
+  })
+  return release
+}
 
-    if (asset && asset.browser_download_url && version) {
-      return {
-        version,
-        url: asset.browser_download_url,
-        assetName: asset.name,
-        assetSize: Number(asset.size) || 0,
-        tag: release.tag_name,
+async function getCompatibleRemoteReleaseInfo() {
+  for (const repo of getNodeReleaseRepos()) {
+    try {
+      const release = await getPinnedRelease(repo)
+      if (release && !release.draft) {
+        const assets = Array.isArray(release.assets) ? release.assets : []
+        const asset = assets.find(({name}) => isCompatibleAssetName(name))
+        const version = semver.clean(release.tag_name)
+
+        if (asset && asset.browser_download_url && version) {
+          return {
+            version,
+            url: asset.browser_download_url,
+            assetName: asset.name,
+            assetSize: Number(asset.size) || 0,
+            tag: release.tag_name,
+            repo,
+          }
+        }
       }
+    } catch (error) {
+      logger.warn('cannot inspect idena-go release repo', {
+        repo,
+        error: error.message,
+      })
     }
   }
 
-  if (process.platform === 'darwin' && process.arch === 'arm64') {
+  return null
+}
+
+async function getCompatibleReleaseInfo() {
+  const preferRemote = isTruthyEnv(
+    process.env.IDENAAI_NODE_PREFER_REMOTE_RELEASE
+  )
+  const localBuildAllowed = !isFalseyEnv(process.env.IDENAAI_NODE_SOURCE_BUILD)
+
+  if (!preferRemote && localBuildAllowed && localNodeSourceBuildAvailable()) {
+    return {
+      version: pinnedNodeVersion,
+      url: '',
+      assetName: '',
+      assetSize: 0,
+      tag: pinnedNodeTag,
+      localBuild: true,
+    }
+  }
+
+  const remote = await getCompatibleRemoteReleaseInfo()
+  if (remote) {
+    return remote
+  }
+
+  if (localBuildAllowed && localNodeSourceBuildAvailable()) {
     return {
       version: pinnedNodeVersion,
       url: '',
@@ -1197,12 +1338,43 @@ function writeDownloadStream(
   })
 }
 
+async function downloadRemoteNode(release, tempNodeFile, onProgress) {
+  if (!release.url) {
+    throw new Error(
+      `cannot resolve node download URL for release ${
+        release.tag || release.version
+      }`
+    )
+  }
+
+  const response = await httpClient.request({
+    method: 'get',
+    url: release.url,
+    responseType: 'stream',
+    timeout: 30000,
+    validateStatus: (status) => status >= 200 && status < 300,
+  })
+
+  const headerLength = Number.parseInt(response.headers['content-length'], 10)
+  const expectedLength =
+    Number.isFinite(headerLength) && headerLength > 0
+      ? headerLength
+      : release.assetSize
+  const streamLength = expectedLength > 0 ? expectedLength : 1
+
+  await writeDownloadStream(response.data, tempNodeFile, {
+    length: streamLength,
+    version: release.version,
+    onProgress,
+  })
+}
+
 async function downloadNode(onProgress) {
   const tempNodeFile = getTempNodeFile()
 
   try {
     const release = await getCompatibleReleaseInfo()
-    const {url, version, localBuild} = release
+    const {version, localBuild} = release
 
     await fs.ensureDir(getNodeDir())
     await fs.remove(tempNodeFile)
@@ -1214,39 +1386,24 @@ async function downloadNode(onProgress) {
     }
 
     if (localBuild) {
-      await buildLocalArm64PinnedNode(tempNodeFile, onProgress)
-    } else {
-      if (!url) {
-        throw new Error(
-          `cannot resolve node download URL for release ${
-            release.tag || version
-          }`
-        )
+      try {
+        await buildLocalPinnedNode(tempNodeFile, onProgress)
+      } catch (error) {
+        if (isTruthyEnv(process.env.IDENAAI_NODE_DISABLE_REMOTE_DOWNLOAD)) {
+          throw error
+        }
+
+        logger.warn('local idena-go build failed, trying release download', {
+          error: error.message,
+        })
+        const remote = await getCompatibleRemoteReleaseInfo()
+        if (!remote) {
+          throw error
+        }
+        await downloadRemoteNode(remote, tempNodeFile, onProgress)
       }
-
-      const response = await httpClient.request({
-        method: 'get',
-        url,
-        responseType: 'stream',
-        timeout: 30000,
-        validateStatus: (status) => status >= 200 && status < 300,
-      })
-
-      const headerLength = Number.parseInt(
-        response.headers['content-length'],
-        10
-      )
-      const expectedLength =
-        Number.isFinite(headerLength) && headerLength > 0
-          ? headerLength
-          : release.assetSize
-      const streamLength = expectedLength > 0 ? expectedLength : 1
-
-      await writeDownloadStream(response.data, tempNodeFile, {
-        length: streamLength,
-        version,
-        onProgress,
-      })
+    } else {
+      await downloadRemoteNode(release, tempNodeFile, onProgress)
     }
 
     const stats = await fs.stat(tempNodeFile)

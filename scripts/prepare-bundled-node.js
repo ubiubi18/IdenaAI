@@ -8,11 +8,13 @@ const {spawnSync} = require('child_process')
 const ROOT = path.join(__dirname, '..')
 const PINNED_NODE_VERSION = '1.1.2'
 const MIN_NODE_BINARY_SIZE = 1024 * 1024
-const TARGET_DIR = path.join(ROOT, 'build', 'node', 'darwin-arm64')
-const TARGET_FILE = path.join(TARGET_DIR, 'idena-go')
+const TARGET_DIR = path.join(ROOT, 'build', 'node', 'current')
+const TARGET_FILE = path.join(
+  TARGET_DIR,
+  process.platform === 'win32' ? 'idena-go.exe' : 'idena-go'
+)
 const REQUIRED_SOURCE_FILES = [
   path.join(ROOT, 'idena-go', 'go.mod'),
-  path.join(ROOT, 'idena-wasm', 'Cargo.toml'),
   path.join(ROOT, 'idena-wasm-binding', 'go.mod'),
 ]
 
@@ -69,14 +71,26 @@ function copyBinary(sourcePath) {
 }
 
 function getExistingNodeCandidates() {
-  return [
-    path.join(
+  let platformProfileDir = path.join(os.homedir(), '.config', 'IdenaAI')
+  if (process.platform === 'darwin') {
+    platformProfileDir = path.join(
       os.homedir(),
       'Library',
       'Application Support',
-      'IdenaAI',
+      'IdenaAI'
+    )
+  } else if (process.platform === 'win32') {
+    platformProfileDir = path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'IdenaAI'
+    )
+  }
+
+  return [
+    path.join(
+      platformProfileDir,
       'node',
-      'idena-go'
+      process.platform === 'win32' ? 'idena-go.exe' : 'idena-go'
     ),
     process.env.IDENAAI_BUNDLED_NODE_SOURCE,
   ].filter(Boolean)
@@ -86,10 +100,23 @@ function hasRequiredSources() {
   return REQUIRED_SOURCE_FILES.every((filePath) => fs.existsSync(filePath))
 }
 
+function isSupportedSourceBuildPlatform() {
+  if (process.platform === 'darwin') {
+    return ['arm64', 'x64'].includes(process.arch)
+  }
+  if (process.platform === 'linux') {
+    return ['arm64', 'x64'].includes(process.arch)
+  }
+  if (process.platform === 'win32') {
+    return process.arch === 'x64'
+  }
+  return false
+}
+
 function main() {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+  if (!isSupportedSourceBuildPlatform()) {
     console.log(
-      `[prepare-bundled-node] Skipping bundled node for ${process.platform}/${process.arch}`
+      `[prepare-bundled-node] Skipping bundled node for unsupported ${process.platform}/${process.arch}`
     )
     return
   }
@@ -110,10 +137,17 @@ function main() {
     run(process.execPath, [path.join(ROOT, 'scripts', 'setup-sources.js')])
   }
 
-  run('/bin/bash', [
-    path.join(ROOT, 'scripts', 'build-node-macos-arm64.sh'),
-    TARGET_FILE,
-  ])
+  if (process.platform === 'darwin' && process.arch === 'arm64') {
+    run('/bin/bash', [
+      path.join(ROOT, 'scripts', 'build-node-macos-arm64.sh'),
+      TARGET_FILE,
+    ])
+  } else {
+    run(process.execPath, [
+      path.join(ROOT, 'scripts', 'build-node-from-sources.js'),
+      TARGET_FILE,
+    ])
+  }
 
   if (!isUsableNodeBinary(TARGET_FILE)) {
     throw new Error('prepared bundled idena-go binary is missing or invalid')
