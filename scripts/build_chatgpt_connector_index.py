@@ -40,8 +40,14 @@ def iso_utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).replace(microsecond=0).isoformat()
 
 
-def exists(paths: Iterable[Path]) -> List[Path]:
-    return [p for p in paths if p.exists() and p.is_file()]
+def exists(paths: Iterable[Path], tracked: Optional[set[str]] = None) -> List[Path]:
+    return [
+        p
+        for p in paths
+        if p.exists()
+        and p.is_file()
+        and (tracked is None or rel(p) in tracked)
+    ]
 
 
 def digest_12(path: Path) -> str:
@@ -90,6 +96,7 @@ def git_meta(cwd: Path) -> dict:
 def main() -> None:
     repo_name = ROOT.name
     now = datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat()
+    tracked = set((git_output(ROOT, ["ls-files"]) or "").splitlines())
 
     root_docs = exists(
         [
@@ -99,7 +106,8 @@ def main() -> None:
             ROOT / "docs" / "deep-research-integration.md",
             ROOT / "docs" / "private-repo-codex-context.md",
             ROOT / "docs" / "deep-research-private-notes.md",
-        ]
+        ],
+        tracked,
     )
 
     desktop_core = exists(
@@ -111,7 +119,8 @@ def main() -> None:
             ROOT / "docs" / "context-snapshot.md",
             ROOT / "docs" / "fork-plan.md",
             ROOT / "docs" / "worklog.md",
-        ]
+        ],
+        tracked,
     )
 
     go_core = exists(
@@ -121,7 +130,8 @@ def main() -> None:
             ROOT / "idena-go" / "docs" / "context-snapshot.md",
             ROOT / "idena-go" / "docs" / "fork-plan.md",
             ROOT / "idena-go" / "docs" / "worklog.md",
-        ]
+        ],
+        tracked,
     )
 
     tools = exists(
@@ -131,10 +141,13 @@ def main() -> None:
             ROOT / "scripts" / "import_flip_challenge.py",
             ROOT / "scripts" / "audit_flip_consensus.py",
             ROOT / "scripts" / "preload_ai_test_unit_queue.py",
-        ]
+        ],
+        tracked,
     )
 
-    samples = sorted((ROOT / "samples").glob("**/*.json"))
+    samples = sorted(
+        p for p in (ROOT / "samples").glob("**/*.json") if rel(p) in tracked
+    )
     sample_subset = samples[:30]
 
     entries = []
@@ -160,7 +173,7 @@ def main() -> None:
     )
 
     subrepos = []
-    for d in [ROOT, ROOT / "idena-go"]:
+    for d in [ROOT]:
         if (d / ".git").exists():
             subrepos.append(git_meta(d))
 

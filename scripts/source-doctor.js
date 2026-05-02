@@ -72,7 +72,7 @@ function main() {
   ok = printStatus('npm', commandVersion('npm')) && ok
   ok = printStatus('git', commandVersion('git')) && ok
   printInfo('python3', commandVersion('python3'))
-  printInfo('go', commandVersion('go'))
+  printInfo('go', commandVersion('go', ['version']))
   printInfo('rustc', commandVersion('rustc'))
 
   for (const source of manifest.sources || []) {

@@ -1,10 +1,10 @@
 {
   "schema_version": "1.0",
-  "generated_at_utc": "2026-05-01T23:59:04+00:00",
+  "generated_at_utc": "2026-05-02T20:04:59+00:00",
   "project": {
     "name": "idena-ai",
     "product_name": "IdenaAI",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "repository": {
       "type": "git",
       "url": "https://github.com/ubiubi18/IdenaAI.git"
@@ -12,8 +12,8 @@
   },
   "git": {
     "branch": "main",
-    "head": "2f4b8bdac9cc8cb64e13f0149876d8c8c9273b99",
-    "head_short": "2f4b8bd",
+    "head": "928527c2be04bb2a44b08a4a5c38254010c791d4",
+    "head_short": "928527c2",
     "remotes": {
       "origin": "https://github.com/ubiubi18/IdenaAI.git",
       "upstream": "https://github.com/idena-network/idena-desktop.git"
@@ -226,8 +226,8 @@
         "role": "frontend",
         "area": "ai",
         "notes": "UI flow for flip builder, validation, and test unit",
-        "size_bytes": 280456,
-        "modified_utc": "2026-04-26T23:19:33+00:00"
+        "size_bytes": 281644,
+        "modified_utc": "2026-05-02T16:20:56+00:00"
       },
       {
         "path": "renderer/pages/settings/ai-test-unit.js",

@@ -1,1 +1,0 @@
-{"source": "aplesner-eth/FLIP-Challenge", "split": "all", "count": 500, "skip": 0, "malformedRows": 0, "parts": [{"file": "flip-challenge-human-teacher-500-balanced.part-1.json", "count": 250}, {"file": "flip-challenge-human-teacher-500-balanced.part-2.json", "count": 250}]}

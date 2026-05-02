@@ -102,6 +102,8 @@ main/node/**
 # local benchmark artifacts
 .tmp/
 data/
+!renderer/shared/data/
+!renderer/shared/data/**
 downloads/
 build/
 
