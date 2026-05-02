@@ -103,3 +103,4 @@ main/node/**
 .tmp/
 data/
 downloads/
+build/

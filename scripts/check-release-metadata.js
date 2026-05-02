@@ -20,7 +20,16 @@ const requiredPackageExcludes = [
   '!tmp/**',
   '!data/**',
   '!logs/**',
+  '!build/**',
   '!coverage/**',
+  '!idena-go/**',
+  '!idena-wasm/**',
+  '!idena-wasm-binding/**',
+  '!samples/flips/flip-challenge-human-teacher-500-balanced.part-*.json',
+  '!docs/**',
+  '!test/**',
+  '!output/**',
+  '!.playwright-cli/**',
 ]
 
 const requiredNoticeSnippets = [
@@ -99,8 +108,9 @@ requireCondition(
     packageJson.build.publish[0] &&
     packageJson.build.publish[0].provider === 'github' &&
     packageJson.build.publish[0].owner === 'ubiubi18' &&
-    packageJson.build.publish[0].repo === 'IdenaAI',
-  'package.json build.publish must point to the IdenaAI GitHub release feed'
+    packageJson.build.publish[0].repo === 'IdenaAI' &&
+    packageJson.build.publish[0].releaseType === 'release',
+  'package.json build.publish must point to the IdenaAI GitHub release feed and publish final releases'
 )
 
 const buildFiles = new Set(
