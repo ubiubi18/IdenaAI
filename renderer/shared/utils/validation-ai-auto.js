@@ -40,8 +40,11 @@ export function shouldBlockSessionAutoInDev({
   isDev = false,
   forceAiPreview = false,
   isRehearsalNodeSession = false,
+  allowDevSessionAuto = false,
 } = {}) {
-  return Boolean(isDev && !forceAiPreview && !isRehearsalNodeSession)
+  return Boolean(
+    isDev && !allowDevSessionAuto && !forceAiPreview && !isRehearsalNodeSession
+  )
 }
 
 export function hasOnchainAutoSubmitConsent(aiSolver = {}) {

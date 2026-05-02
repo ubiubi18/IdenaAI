@@ -218,6 +218,17 @@ describe('validation ai auto gating', () => {
     ).toBe(true)
   })
 
+  it('allows real session auto mode in dev builds with explicit override', () => {
+    expect(
+      shouldBlockSessionAutoInDev({
+        isDev: true,
+        allowDevSessionAuto: true,
+        forceAiPreview: false,
+        isRehearsalNodeSession: false,
+      })
+    ).toBe(false)
+  })
+
   it('allows real session auto mode outside dev builds', () => {
     expect(
       shouldBlockSessionAutoInDev({

@@ -1371,6 +1371,9 @@ function ValidationSession({
   }
   const isRealSessionAutoBlockedInDev = shouldBlockSessionAutoInDev({
     isDev: global.isDev,
+    allowDevSessionAuto:
+      String(global.env?.IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO || '').trim() ===
+      '1',
     forceAiPreview,
     isRehearsalNodeSession,
   })
@@ -1679,7 +1682,7 @@ function ValidationSession({
           <Toast
             title={t('Automatic session solving is blocked in dev mode')}
             description={t(
-              'Use the off-chain preview flow while developing. Real ceremony auto-start and auto-solve stay disabled in the dev build, but rehearsal sessions can still run automatically.'
+              'Plain npm start uses a separate workspace practice profile. For real validation from Terminal, restart with IDENA_DESKTOP_USER_DATA_DIR pointed at the real app profile and IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1.'
             )}
             status="warning"
           />
