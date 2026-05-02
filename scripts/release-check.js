@@ -18,6 +18,7 @@ const syntaxCheckedFiles = [
   'scripts/setup-sources.js',
   'scripts/setup-flips.js',
   'scripts/source-doctor.js',
+  'scripts/build-node-from-sources.js',
   'scripts/run-electron-builder.js',
   'scripts/prepare-bundled-node.js',
   'main/channels.js',

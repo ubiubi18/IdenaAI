@@ -102,7 +102,8 @@ function main() {
   const outputPath = path.resolve(ROOT, options.output)
   fs.mkdirSync(path.dirname(outputPath), {recursive: true})
 
-  run('python3', [
+  run(process.execPath, [
+    path.join('scripts', 'run-python.js'),
     path.join('scripts', 'import_flip_challenge.py'),
     '--split',
     options.split,
