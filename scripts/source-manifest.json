@@ -7,11 +7,7 @@
       "url": "https://github.com/ubiubi18/idena-go.git",
       "ref": "fix/apple-silicon-macos",
       "commit": "67c10f864ee316cf91e4ffba67941be04167322f",
-      "requiredFiles": [
-        "go.mod",
-        "scripts/build-node-macos-arm64.sh",
-        "scripts/run-go-toolchain.sh"
-      ]
+      "requiredFiles": ["go.mod", "main.go"]
     },
     {
       "name": "idena-wasm",
