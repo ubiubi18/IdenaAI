@@ -82,6 +82,7 @@ import {
   resolveManagedLocalRuntimeMemoryReference,
   resolveLocalAiWireRuntimeType,
 } from '../../shared/utils/local-ai-settings'
+import {shouldBlockSessionAutoInDev} from '../../shared/utils/validation-ai-auto'
 import {getSharedGlobal} from '../../shared/utils/shared-global'
 
 const DEFAULT_MODELS = {
@@ -1675,6 +1676,11 @@ export default function AiSettingsPage() {
     error: '',
   })
   const [systemMemoryTelemetry, setSystemMemoryTelemetry] = useState(null)
+  const isRealSessionAutoBlockedInDev = shouldBlockSessionAutoInDev({
+    isDev: global.isDev,
+    forceAiPreview: false,
+    isRehearsalNodeSession: false,
+  })
 
   const notify = useCallback(
     (title, description, status = 'info') => {
@@ -1695,6 +1701,16 @@ export default function AiSettingsPage() {
     },
     [toast]
   )
+
+  const notifyDevSessionAutoBlocked = useCallback(() => {
+    notify(
+      t('Automatic session solving is blocked in dev mode'),
+      t(
+        'Start the packaged IdenaAI app for real validation. Source runs started with npm start use a separate workspace profile and can only use off-chain solver tests or rehearsal sessions.'
+      ),
+      'warning'
+    )
+  }, [notify, t])
 
   const updateNumberField = (field, value) => {
     updateAiSolverSettings({
@@ -1777,6 +1793,11 @@ export default function AiSettingsPage() {
   }, [refreshSystemMemoryTelemetry])
 
   const enableAutomaticNextValidationSession = useCallback(() => {
+    if (isRealSessionAutoBlockedInDev) {
+      notifyDevSessionAutoBlocked()
+      return
+    }
+
     updateAiSolverSettings({
       enabled: true,
       mode: 'session-auto',
@@ -1789,9 +1810,20 @@ export default function AiSettingsPage() {
       ),
       'warning'
     )
-  }, [notify, t, updateAiSolverSettings])
+  }, [
+    isRealSessionAutoBlockedInDev,
+    notify,
+    notifyDevSessionAutoBlocked,
+    t,
+    updateAiSolverSettings,
+  ])
 
   const openOnchainAutomaticFlow = useCallback(() => {
+    if (isRealSessionAutoBlockedInDev) {
+      notifyDevSessionAutoBlocked()
+      return
+    }
+
     setShowAdvancedAiSettings(true)
     updateAiSolverSettings({
       enabled: true,
@@ -1806,7 +1838,14 @@ export default function AiSettingsPage() {
       ),
       'warning'
     )
-  }, [aiSolver.onchainAutoSubmitConsentAt, notify, t, updateAiSolverSettings])
+  }, [
+    aiSolver.onchainAutoSubmitConsentAt,
+    isRealSessionAutoBlockedInDev,
+    notify,
+    notifyDevSessionAutoBlocked,
+    t,
+    updateAiSolverSettings,
+  ])
 
   const ensureBridge = () => {
     if (!global.aiSolver) {
@@ -5247,6 +5286,11 @@ export default function AiSettingsPage() {
                         onChange={(e) => {
                           const nextMode = e.target.value
                           if (nextMode === 'session-auto') {
+                            if (isRealSessionAutoBlockedInDev) {
+                              notifyDevSessionAutoBlocked()
+                              return
+                            }
+
                             updateAiSolverSettings({
                               mode: nextMode,
                               onchainAutoSubmitConsentAt:
