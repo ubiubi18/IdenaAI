@@ -25,15 +25,15 @@
     "build:social": "npm ci --prefix vendor/idena.social-ui && npm run build --prefix vendor/idena.social-ui && node scripts/sync-idena-social-ui.js",
     "build:renderer": "node scripts/run-next-static-build.js",
     "build": "npm run build:social && npm run build:renderer",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win --publish onTag",
-    "dist:mac": "npm run build && electron-builder --mac --publish onTag",
-    "dist:mac:arm64": "npm run build && electron-builder --mac --arm64 --publish onTag",
-    "dist:mac:universal": "npm run build && electron-builder --mac --universal --publish onTag",
-    "dist:linux": "npm run build && electron-builder --linux --publish onTag",
-    "pack": "npm run build && electron-builder --dir",
-    "pack:mac:arm64": "npm run build && electron-builder --dir --mac --arm64",
-    "pack:mac:universal": "npm run build && electron-builder --dir --mac --universal",
+    "dist": "npm run build && node scripts/run-electron-builder.js",
+    "dist:win": "npm run build && node scripts/run-electron-builder.js --win --publish onTag",
+    "dist:mac": "npm run build && node scripts/run-electron-builder.js --mac --publish onTag",
+    "dist:mac:arm64": "npm run build && node scripts/run-electron-builder.js --mac --arm64 --publish onTag",
+    "dist:mac:universal": "npm run build && node scripts/run-electron-builder.js --mac --universal --publish onTag",
+    "dist:linux": "npm run build && node scripts/run-electron-builder.js --linux --publish onTag",
+    "pack": "npm run build && node scripts/run-electron-builder.js --dir",
+    "pack:mac:arm64": "npm run build && node scripts/run-electron-builder.js --dir --mac --arm64",
+    "pack:mac:universal": "npm run build && node scripts/run-electron-builder.js --dir --mac --universal",
     "clean": "node scripts/clean-paths.js renderer/out renderer/.next dist",
     "audit:privacy": "node scripts/check-release-privacy.js",
     "audit:metadata": "node scripts/check-release-metadata.js",
@@ -62,7 +62,8 @@
       {
         "provider": "github",
         "owner": "ubiubi18",
-        "repo": "IdenaAI"
+        "repo": "IdenaAI",
+        "releaseType": "release"
       }
     ],
     "files": [
@@ -78,12 +79,31 @@
       "!data/**",
       "!logs",
       "!logs/**",
+      "!build",
+      "!build/**",
       "!coverage",
       "!coverage/**",
       "!.nyc_output",
       "!.nyc_output/**",
       "!vendor",
       "!vendor/**",
+      "!idena-go",
+      "!idena-go/**",
+      "!idena-wasm",
+      "!idena-wasm/**",
+      "!idena-wasm-binding",
+      "!idena-wasm-binding/**",
+      "!samples/flips/flip-challenge-human-teacher-500-balanced.part-*.json",
+      "!docs",
+      "!docs/**",
+      "!test",
+      "!test/**",
+      "!output",
+      "!output/**",
+      "!.playwright-cli",
+      "!.playwright-cli/**",
+      "!.vscode",
+      "!.vscode/**",
       "!downloads",
       "!downloads/**",
       "!renderer",
@@ -103,7 +123,13 @@
         "dmg",
         "zip"
       ],
-      "icon": "main/static/icons/icon-512@2x.icns"
+      "icon": "main/static/icons/icon-512@2x.icns",
+      "extraResources": [
+        {
+          "from": "build/node/darwin-arm64/idena-go",
+          "to": "node/idena-go"
+        }
+      ]
     },
     "linux": {
       "target": [

@@ -16,6 +16,7 @@ const syntaxCheckedFiles = [
   'scripts/run-next-static-build.js',
   'scripts/release-check.js',
   'scripts/run-electron-builder.js',
+  'scripts/prepare-bundled-node.js',
   'main/channels.js',
   'main/index.js',
   'main/preload.js',
