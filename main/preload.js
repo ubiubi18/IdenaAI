@@ -1710,6 +1710,9 @@ const bridge = {
       BUMP_EXTRA_FLIPS: process.env.BUMP_EXTRA_FLIPS,
       FINALIZE_FLIPS: process.env.FINALIZE_FLIPS,
       INDEXER_URL: process.env.INDEXER_URL,
+      IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO:
+        process.env.IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO,
+      IDENA_DESKTOP_USER_DATA_DIR: process.env.IDENA_DESKTOP_USER_DATA_DIR,
     },
     getZoomLevel: () => webFrame.getZoomLevel(),
     setZoomLevel: (level) => webFrame.setZoomLevel(level),

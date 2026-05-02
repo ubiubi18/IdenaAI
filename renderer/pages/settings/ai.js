@@ -1678,6 +1678,9 @@ export default function AiSettingsPage() {
   const [systemMemoryTelemetry, setSystemMemoryTelemetry] = useState(null)
   const isRealSessionAutoBlockedInDev = shouldBlockSessionAutoInDev({
     isDev: global.isDev,
+    allowDevSessionAuto:
+      String(global.env?.IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO || '').trim() ===
+      '1',
     forceAiPreview: false,
     isRehearsalNodeSession: false,
   })
@@ -1706,7 +1709,7 @@ export default function AiSettingsPage() {
     notify(
       t('Automatic session solving is blocked in dev mode'),
       t(
-        'Start the packaged IdenaAI app for real validation. Source runs started with npm start use a separate workspace profile and can only use off-chain solver tests or rehearsal sessions.'
+        'Plain npm start uses a separate workspace practice profile. For real validation from Terminal, restart with IDENA_DESKTOP_USER_DATA_DIR pointed at the real app profile and IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1.'
       ),
       'warning'
     )
