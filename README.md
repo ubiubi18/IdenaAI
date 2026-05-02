@@ -687,11 +687,35 @@ npm run pack:mac:universal
 Useful checks:
 
 ```bash
+npm run doctor
 npm run audit:privacy
 npm run audit:electron
 npm run audit:deps
 npm test
 ```
+
+Optional source mirrors for node/runtime work:
+
+```bash
+npm run setup:sources
+npm run update:sources
+```
+
+These commands use `scripts/source-manifest.json` and default to pinned
+`ubiubi18` mirrors for `idena-go`, `idena-wasm`, and `idena-wasm-binding`. Edit
+that manifest if you want to point at your own forks before building or testing
+the node/runtime layer.
+
+Optional FLIP-Challenge import for local benchmark and rehearsal work:
+
+```bash
+npm run setup:flips
+npm run setup:flips -- --split test --skip-flips 200 --max-flips 200
+```
+
+Generated imports are written under `data/`, which is intentionally ignored by
+git. If import fails, paste the full terminal output into a coding agent and ask
+it to adapt Python dependencies or network access for your machine.
 
 ## User Experience: Terminal-First Local Build
 
@@ -919,6 +943,20 @@ node, run deep rehearsal, or import FLIP-Challenge samples. For now, those
 sources should point at `ubiubi18` forks as the default mirrors so users are not
 blocked if old upstream repositories disappear. Users can still repoint those
 mirrors to their own forks before building.
+
+The repo now includes the transition scripts for that workflow:
+
+```bash
+npm run doctor
+npm run setup:sources
+npm run setup:flips
+```
+
+The next shrinking step is to remove the currently tracked source snapshots and
+large rehearsal shards after the scripted mirror/import path has had enough
+independent testing. Removing those files from future commits reduces checkout
+friction, but a full Git history cleanup would require a separate repository
+rewrite or a fresh source mirror.
 
 If public release packaging becomes more formal later:
 
