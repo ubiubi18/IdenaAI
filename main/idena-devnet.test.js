@@ -24,7 +24,7 @@ const {
 const sampleSeedPayload = require('../samples/flips/flip-challenge-test-5-decoded-labeled.json')
 
 describe('validation devnet helpers', () => {
-  it('builds a nine-node private rehearsal plan by default', () => {
+  it('builds a ten-node private rehearsal plan by default', () => {
     const plan = buildValidationDevnetPlan({
       baseDir: '/tmp/idena-validation-devnet',
       now: () => new Date('2026-04-21T12:00:00.000Z').getTime(),
@@ -32,10 +32,14 @@ describe('validation devnet helpers', () => {
     })
 
     expect(plan.networkId).toBe(44001)
-    expect(plan.nodes).toHaveLength(9)
+    expect(plan.nodes).toHaveLength(10)
     expect(plan.primaryNodeName).toBe('node-2')
     expect(plan.godAddress).toBe(plan.nodes[0].address)
-    expect(new Set(plan.nodes.map(({rpcPort}) => rpcPort)).size).toBe(9)
+    expect(plan.nodes[0].nodeProfile).toBe('shared')
+    expect(
+      plan.nodes.slice(1).every(({nodeProfile}) => nodeProfile === 'default')
+    ).toBe(true)
+    expect(new Set(plan.nodes.map(({rpcPort}) => rpcPort)).size).toBe(10)
     expect(plan.firstCeremonyUnix).toBe(1776773280)
     expect(plan.initialEpoch).toBe(1)
     expect(plan.requiredFlipsPerIdentity).toBe(3)
@@ -53,7 +57,7 @@ describe('validation devnet helpers', () => {
         (total, allocation) => total + allocation.RequiredFlips,
         0
       )
-    ).toBe(27)
+    ).toBe(30)
     expect(plan.nodes[0].configFile).toBe(
       path.join('/tmp/idena-validation-devnet', 'node-1', 'config.json')
     )
@@ -132,6 +136,7 @@ describe('validation devnet helpers', () => {
     const summary = summarizeValidationDevnetNode({
       name: 'node-1',
       role: 'bootstrap',
+      nodeProfile: 'shared',
       address: '0xabc',
       rpcPort: 22300,
       tcpPort: 22400,
@@ -150,6 +155,7 @@ describe('validation devnet helpers', () => {
     expect(summary).toEqual({
       name: 'node-1',
       role: 'bootstrap',
+      nodeProfile: 'shared',
       address: '0xabc',
       rpcPort: 22300,
       tcpPort: 22400,

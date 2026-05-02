@@ -263,6 +263,14 @@ function isTrustedRendererUrl(url) {
   }
 }
 
+function resolvePackagedRendererRouteName(url) {
+  if (!app.isPackaged) {
+    return null
+  }
+
+  return loadRoute.resolvePackagedRouteNameFromUrl(url)
+}
+
 function assertTrustedSender(event) {
   const senderUrl = String(
     (event && event.senderFrame && event.senderFrame.url) ||
@@ -1754,6 +1762,14 @@ const createMainWindow = () => {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     mainWindowRendererReady = false
 
+    const routeName = resolvePackagedRendererRouteName(url)
+
+    if (routeName) {
+      event.preventDefault()
+      loadRoute(mainWindow, routeName)
+      return
+    }
+
     if (isTrustedRendererUrl(url)) {
       return
     }
@@ -1786,6 +1802,18 @@ const createMainWindow = () => {
         `Renderer failed to load (${isMainFrame ? 'main' : 'sub'} frame): ` +
           `${errorCode} ${errorDescription} ${validatedUrl}`
       )
+
+      if (isMainFrame) {
+        const routeName = resolvePackagedRendererRouteName(validatedUrl)
+
+        if (routeName) {
+          logger.warn('Recovering packaged renderer route', {
+            url: validatedUrl,
+            routeName,
+          })
+          loadRoute(mainWindow, routeName)
+        }
+      }
     }
   )
 
@@ -2050,6 +2078,25 @@ let isFinalizingQuit = false
 let quitCleanupPromise = null
 let quitAfterCleanup = () => app.quit()
 
+function canPromptForQuitConfirmation() {
+  return (
+    mainWindow &&
+    mainWindowRendererReady &&
+    mainWindow.webContents &&
+    !mainWindow.webContents.isDestroyed()
+  )
+}
+
+function continueQuitWithoutRendererConfirmation(reason) {
+  if (didConfirmQuit || isFinalizingQuit) {
+    return
+  }
+
+  logger.warn('Continuing quit without renderer confirmation', {reason})
+  didConfirmQuit = true
+  app.quit()
+}
+
 function finalizeQuitAfterCleanup() {
   if (isFinalizingQuit) {
     return
@@ -2082,6 +2129,12 @@ app.on('before-quit', (e) => {
 
   if (!didConfirmQuit && !isDev) {
     e.preventDefault()
+
+    if (!canPromptForQuitConfirmation()) {
+      continueQuitWithoutRendererConfirmation('renderer-not-ready')
+      return
+    }
+
     sendMainWindowMsg('confirm-quit')
     return
   }
