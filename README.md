@@ -12,6 +12,55 @@ This repository is the main app-integration line. Version `0.0.3` is a
 development snapshot of the recent dependency, runtime, local AI, rehearsal, and
 autosolver work. It is research software, not a hardened wallet release.
 
+## Start Here
+
+For a first run, use this order.
+
+1. Install and start the app from source:
+
+```bash
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+nvm use
+npm ci
+npm start
+```
+
+2. Choose an AI backend in `Settings -> AI`.
+
+- Hosted API path: turn on AI, choose `Use external API provider`, select
+  `OpenAI`, set your API key, choose `gpt-5.5`, then click `Test connection`.
+- Local path: turn on AI, use the managed local runtime path, approve the model
+  download/trust prompt, and wait until the runtime is ready.
+
+3. Run a safe rehearsal before touching a real ceremony.
+
+- Open `Settings -> Node`.
+- In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
+- Wait for the app to switch to the rehearsal node.
+- Use `Open countdown` or `Open validation` when available.
+- Click `Run 8 rehearsal solver lanes` to dry-run the configured AI backend.
+
+4. Try the flip builder and off-chain solver path.
+
+- Open `Flips -> New`.
+- Use the AI builder controls if you want generated draft panels.
+- Click `Build flips`, review/edit the result, then use `Add current draft flip
+  to queue`.
+- Use `Run current draft now`, `Run short (6)`, or `Run long (14)` to compare
+  solving behavior without publishing anything.
+
+5. Use live validation automation only after rehearsal works.
+
+- Open `Validation`.
+- Use `Enable auto-solve next session` only with a throwaway or low-value
+  identity.
+- Keep manual oversight. This is not production-safe unattended automation.
+
+Rehearsal and off-chain queue runs stay local and do not submit mainnet
+answers. Mainnet validation, reporting, wallet, and identity use remain at your
+own risk.
+
 ## Experimental Warning
 
 Read this part first. `v0.0.3` is not production ready.
@@ -440,6 +489,7 @@ Clone and start:
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
+nvm use
 npm ci
 npm start
 ```
@@ -467,21 +517,34 @@ npm run audit:deps
 npm test
 ```
 
-## Quick Rehearsal and GPT-5.5 API Smoke Test
+## User Paths
 
-After `npm start`, use the desktop app for a quick controlled check.
+Use these paths after `npm start`.
 
-For an OpenAI API provider test:
+### GPT-5.5 API Smoke Test
 
 1. Open `Settings -> AI`.
-2. Turn on AI, then choose `Use external API provider`.
+2. Turn on AI and choose `Use external API provider`.
 3. Set `Main AI provider` to `OpenAI`.
 4. Paste your OpenAI API key and click `Set key`.
-5. Set `Model preset` to `gpt-5.5`, or choose `Custom model id` and type
-   `gpt-5.5`.
+5. Choose `gpt-5.5`, or enter `gpt-5.5` as a custom model id.
 6. Click `Test connection`.
 
-For a local rehearsal run:
+If the key does not have access to `gpt-5.5`, the provider bridge records the
+fallback and can retry the configured fallback model.
+
+### Managed Local AI
+
+1. Open `Settings -> AI`.
+2. Turn on AI.
+3. Use the managed local runtime path.
+4. Review the RAM/disk warning and Hugging Face trust prompt.
+5. Start the preparation and wait until the runtime is ready.
+
+The managed local path is for research. It can take several minutes on first
+startup and can fail on low-memory machines.
+
+### Validation Rehearsal
 
 1. Open `Settings -> Node`.
 2. In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
@@ -494,6 +557,38 @@ For a local rehearsal run:
 
 The rehearsal path is local-devnet only. It is meant for benchmark and protocol
 flow testing, not for multi-identity mainnet automation.
+
+### Flip Builder And Off-Chain Solving
+
+1. Open `Flips -> New`.
+2. Build or edit a draft flip.
+3. Click `Build flips` if you want AI-generated panels.
+4. Click `Add current draft flip to queue`.
+5. Use `Run current draft now`, `Run short (6)`, or `Run long (14)` to compare
+   model behavior before publishing.
+
+This path benchmarks the selected provider/model on queued flips. It does not
+train the local model and does not publish a flip unless you continue through
+the normal submit flow yourself.
+
+### Live Validation Automation
+
+1. First complete a rehearsal run with the same AI settings.
+2. Open `Validation`.
+3. Click `Enable auto-solve next session`.
+4. Keep the app open and watch the session.
+
+Use this only with throwaway or low-value identities. It is still experimental
+and should not be treated as unattended production validation.
+
+### Results And Logs
+
+Local run data is written under `userData/ai-benchmark/`.
+
+- `session-metrics.jsonl`: per-session and per-flip AI traces
+- `audits/`: local review and benchmark audit output
+- post-session validation pages: local stats, costs, fallback traces, and
+  rehearsal benchmark summaries where labels are available
 
 ## Training Workflow
 
