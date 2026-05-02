@@ -208,10 +208,20 @@ describe('validation ai auto gating', () => {
     ).toBe(false)
   })
 
-  it('allows real session auto mode in dev builds', () => {
+  it('blocks real session auto mode in dev builds', () => {
     expect(
       shouldBlockSessionAutoInDev({
         isDev: true,
+        forceAiPreview: false,
+        isRehearsalNodeSession: false,
+      })
+    ).toBe(true)
+  })
+
+  it('allows real session auto mode outside dev builds', () => {
+    expect(
+      shouldBlockSessionAutoInDev({
+        isDev: false,
         forceAiPreview: false,
         isRehearsalNodeSession: false,
       })

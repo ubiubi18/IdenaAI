@@ -290,6 +290,11 @@ You can override the runtime directory explicitly:
 IDENA_DESKTOP_USER_DATA_DIR=/absolute/path/to/idenaai-runtime npm start
 ```
 
+For real validation, use the packaged IdenaAI app. `npm start` is a source
+development runtime with a separate profile, and it refuses to start if that
+profile has real on-chain `session-auto` armed unless
+`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` is set deliberately.
+
 Important subdirectories inside `userData`:
 
 - `node/datadir/`: built-in node database, key material, and node API key
@@ -378,6 +383,10 @@ In short: local AI experiments are enabled, but the broader local-model directio
 
 `session-auto` is meant to reduce or remove ceremony babysitting, but it is
 still experimental and should not be blindly trusted.
+
+Real on-chain `session-auto` is disabled in dev builds started with
+`npm start`; use the installed app for real ceremonies. Dev builds can still run
+the off-chain solver preview and validation rehearsal network.
 
 Current intended behavior:
 
