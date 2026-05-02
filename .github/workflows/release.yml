@@ -73,6 +73,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Prepare source mirrors
+        run: npm run setup:sources
+
       - name: Run release check
         run: npm run release:check
 
