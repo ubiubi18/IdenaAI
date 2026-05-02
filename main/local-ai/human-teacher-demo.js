@@ -26,13 +26,13 @@ const DEMO_SAMPLE_DEFINITIONS = Object.freeze({
 
 const DEVELOPER_SAMPLE_DEFINITIONS = Object.freeze({
   'flip-challenge-test-20-decoded-labeled': {
-    label: 'Balanced training slice (500 flips)',
+    label: 'Bundled review slice (20 flips)',
     relativePath: path.join(
       '..',
       '..',
       'samples',
       'flips',
-      'flip-challenge-human-teacher-500-balanced.json'
+      'flip-challenge-test-20-decoded-labeled.json'
     ),
   },
 })

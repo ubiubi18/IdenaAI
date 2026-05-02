@@ -931,6 +931,8 @@ async function getPinnedRelease() {
 
 function getLocalNodeRepoCandidates() {
   return [
+    path.resolve(__dirname, '..', 'idena-go'),
+    path.resolve(process.cwd(), 'idena-go'),
     path.resolve(__dirname, '..', '..', 'idena-go'),
     path.resolve(process.cwd(), '..', 'idena-go'),
     process.env.IDENA_BENCHMARK_NODE_SOURCE_DIR,
@@ -976,20 +978,18 @@ function runCommand(command, args, options = {}) {
 }
 
 async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
-  const repoDir = findLocalNodeRepo()
-  if (!repoDir) {
-    throw new Error(
-      'cannot find local idena-go repo for darwin/arm64 pinned build'
-    )
-  }
-
   const cargoBinDir = path.join(os.homedir(), '.cargo', 'bin')
   const env = {
     ...process.env,
     GOTOOLCHAIN: localNodeBuildToolchain,
     PATH: [process.env.PATH || '', cargoBinDir].join(path.delimiter),
   }
-  const buildScript = path.join(repoDir, 'scripts', 'build-node-macos-arm64.sh')
+  const desktopRoot = path.resolve(__dirname, '..')
+  const desktopBuildScript = path.join(
+    desktopRoot,
+    'scripts',
+    'build-node-macos-arm64.sh'
+  )
 
   if (onProgress) {
     onProgress({
@@ -1004,47 +1004,74 @@ async function buildLocalArm64PinnedNode(tempNodeFile, onProgress) {
     })
   }
 
-  if (fs.existsSync(buildScript)) {
+  if (
+    !desktopBuildScript.includes('.asar') &&
+    fs.existsSync(desktopBuildScript)
+  ) {
     await runCommand(
       '/usr/bin/arch',
-      ['-arm64', '/bin/bash', buildScript, tempNodeFile],
+      ['-arm64', '/bin/bash', desktopBuildScript, tempNodeFile],
       {
-        cwd: repoDir,
+        cwd: desktopRoot,
         env,
       }
     )
   } else {
-    const wasmBindingDir = path.resolve(repoDir, '..', 'idena-wasm-binding')
-    const wasmBindingGoMod = path.join(wasmBindingDir, 'go.mod')
-    const wasmBindingArm64Lib = path.join(
-      wasmBindingDir,
-      'lib',
-      'libidena_wasm_darwin_arm64.a'
-    )
-    if (
-      !fs.existsSync(wasmBindingGoMod) ||
-      !fs.existsSync(wasmBindingArm64Lib)
-    ) {
+    const repoDir = findLocalNodeRepo()
+    if (!repoDir) {
       throw new Error(
-        'missing local idena-wasm-binding arm64 artifacts. Expected ../idena-wasm-binding with lib/libidena_wasm_darwin_arm64.a'
+        'cannot find local idena-go repo for darwin/arm64 pinned build'
       )
     }
 
-    await runCommand(
-      'go',
-      [
-        'build',
-        '-ldflags',
-        `-X main.version=${pinnedNodeVersion}`,
-        '-o',
-        tempNodeFile,
-        '.',
-      ],
-      {
-        cwd: repoDir,
-        env,
-      }
+    const buildScript = path.join(
+      repoDir,
+      'scripts',
+      'build-node-macos-arm64.sh'
     )
+
+    if (fs.existsSync(buildScript)) {
+      await runCommand(
+        '/usr/bin/arch',
+        ['-arm64', '/bin/bash', buildScript, tempNodeFile],
+        {
+          cwd: repoDir,
+          env,
+        }
+      )
+    } else {
+      const wasmBindingDir = path.resolve(repoDir, '..', 'idena-wasm-binding')
+      const wasmBindingGoMod = path.join(wasmBindingDir, 'go.mod')
+      const wasmBindingArm64Lib = path.join(
+        wasmBindingDir,
+        'lib',
+        'libidena_wasm_darwin_arm64.a'
+      )
+      if (
+        !fs.existsSync(wasmBindingGoMod) ||
+        !fs.existsSync(wasmBindingArm64Lib)
+      ) {
+        throw new Error(
+          'missing local idena-wasm-binding arm64 artifacts. Expected ../idena-wasm-binding with lib/libidena_wasm_darwin_arm64.a'
+        )
+      }
+
+      await runCommand(
+        'go',
+        [
+          'build',
+          '-ldflags',
+          `-X main.version=${pinnedNodeVersion}`,
+          '-o',
+          tempNodeFile,
+          '.',
+        ],
+        {
+          cwd: repoDir,
+          env,
+        }
+      )
+    }
   }
 
   const stats = await fs.stat(tempNodeFile)

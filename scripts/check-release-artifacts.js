@@ -6,36 +6,7 @@ const {execFileSync} = require('child_process')
 const githubWarningLimitBytes = 50 * 1024 * 1024
 const githubHardLimitGuardBytes = 95 * 1024 * 1024
 
-const allowedLargeArtifacts = new Map([
-  [
-    'idena-wasm-binding/lib/libidena_wasm_darwin_amd64.a',
-    'bundled wasm artifact',
-  ],
-  [
-    'idena-wasm-binding/lib/libidena_wasm_darwin_arm64.a',
-    'bundled wasm artifact',
-  ],
-  [
-    'idena-wasm-binding/lib/libidena_wasm_linux_aarch64.a',
-    'bundled wasm artifact',
-  ],
-  [
-    'idena-wasm-binding/lib/libidena_wasm_linux_amd64.a',
-    'bundled wasm artifact',
-  ],
-  [
-    'idena-wasm-binding/lib/libidena_wasm_windows_amd64.a',
-    'bundled wasm artifact',
-  ],
-  [
-    'samples/flips/flip-challenge-human-teacher-500-balanced.part-1.json',
-    'chunked FLIP-Challenge rehearsal sample',
-  ],
-  [
-    'samples/flips/flip-challenge-human-teacher-500-balanced.part-2.json',
-    'chunked FLIP-Challenge rehearsal sample',
-  ],
-])
+const allowedLargeArtifacts = new Map()
 
 function formatMb(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -96,17 +67,19 @@ for (const filePath of listTrackedFiles()) {
 const notices = fs.existsSync('THIRD_PARTY_NOTICES.md')
   ? fs.readFileSync('THIRD_PARTY_NOTICES.md', 'utf8')
   : ''
-if (!notices.includes('Large static libraries in `idena-wasm-binding/lib/`')) {
+if (!notices.includes('generated `idena-wasm-binding/lib/`')) {
   failures.push(
-    'THIRD_PARTY_NOTICES.md must mention large idena-wasm-binding static libraries'
+    'THIRD_PARTY_NOTICES.md must mention generated idena-wasm-binding static libraries'
   )
 }
 
 const readme = fs.existsSync('README.md')
   ? fs.readFileSync('README.md', 'utf8')
   : ''
-if (!readme.includes('Large bundled artifacts')) {
-  failures.push('README.md must document large bundled artifact handling')
+if (!readme.includes('Source Mirrors and Smaller Checkouts')) {
+  failures.push(
+    'README.md must document source mirror and checkout-size handling'
+  )
 }
 
 if (failures.length > 0) {

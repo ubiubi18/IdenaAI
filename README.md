@@ -128,19 +128,27 @@ a reference build:
 - packaged settings tabs now navigate correctly in static Electron builds
 - the in-app identity mark now has a local fallback instead of showing a broken
   image when an asset path fails
-- macOS packaging prepares the pinned `idena-go` runtime for local builds
-- packaged app inputs now exclude old source trees and large rehearsal shards
-  that do not need to ship inside the Electron app
+- macOS packaging prepares the pinned `idena-go` runtime from source mirrors for
+  local builds
+- old `idena-go`, `idena-wasm`, and `idena-wasm-binding` snapshots are no
+  longer tracked in the main repo; `npm run setup:sources` clones pinned
+  `ubiubi18` mirrors when they are needed
+- the large 500-flip rehearsal shards are no longer tracked; use
+  `npm run setup:flips` to import larger local FLIP-Challenge data
+- packaged app inputs still exclude generated source trees and local rehearsal
+  data so Electron packages do not ship those caches
 - the README now describes source-first usage instead of implying that users
   should trust a downloaded app
 - one-identity rehearsal autosolving remains the default
 - the optional 9-ID rehearsal path is documented as a local shared-provider
   capacity test, not as mainnet multi-identity automation
 
-The repository still carries large historical source and sample assets for
-reproducible local research. The better long-term direction is a smaller repo
-plus scripts that clone/update pinned `ubiubi18` forks of the needed Idena
-sources and generate/import rehearsal flips locally.
+The repository no longer tracks the old source snapshots or the large 500-flip
+sample shards. Existing Git history still contains them; fully shrinking
+historical clone size would require a fresh repo or a deliberate history
+rewrite. New source archives and future checkouts are now based on scripts that
+clone/update pinned `ubiubi18` forks and generate/import rehearsal flips
+locally.
 
 ## Latest Changes
 
@@ -667,12 +675,15 @@ git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
 nvm use
 npm ci
+npm run setup:sources
+npm run doctor
 npm start
 ```
 
 Optional build:
 
 ```bash
+npm run setup:sources
 npm run build
 npm run dist
 ```
@@ -694,7 +705,7 @@ npm run audit:deps
 npm test
 ```
 
-Optional source mirrors for node/runtime work:
+Source mirrors for node/runtime work and macOS packaging:
 
 ```bash
 npm run setup:sources
@@ -704,7 +715,8 @@ npm run update:sources
 These commands use `scripts/source-manifest.json` and default to pinned
 `ubiubi18` mirrors for `idena-go`, `idena-wasm`, and `idena-wasm-binding`. Edit
 that manifest if you want to point at your own forks before building or testing
-the node/runtime layer.
+the node/runtime layer. The source directories are generated local caches and
+are intentionally ignored by git.
 
 Optional FLIP-Challenge import for local benchmark and rehearsal work:
 
@@ -925,26 +937,11 @@ Related notes:
 - [docs/federated-model-distribution.md](docs/federated-model-distribution.md)
 - [docs/federated-human-teacher-protocol.md](docs/federated-human-teacher-protocol.md)
 
-## Large bundled artifacts and smaller-app direction
+## Source Mirrors and Smaller Checkouts
 
-This repo currently carries large static libraries in `idena-wasm-binding/lib/`
-for reproducible local builds.
-
-It also carries chunked
-`samples/flips/flip-challenge-human-teacher-500-balanced.part-*.json` rehearsal
-sample shards. Those shards keep the local validation rehearsal and benchmark
-loop reproducible without requiring a network fetch, while staying below
-GitHub's hard per-file limit.
-
-The package-size problem comes from this bundled-source approach around the old
-Idena repos. A cleaner P2P workflow is to keep the app smaller and use scripts
-that clone or update pinned source mirrors only when the user chooses to build a
-node, run deep rehearsal, or import FLIP-Challenge samples. For now, those
-sources should point at `ubiubi18` forks as the default mirrors so users are not
-blocked if old upstream repositories disappear. Users can still repoint those
-mirrors to their own forks before building.
-
-The repo now includes the transition scripts for that workflow:
+The old bundled `idena-go`, `idena-wasm`, and `idena-wasm-binding` source trees
+are no longer tracked in this repo. They are generated local caches now. Use
+scripts when you need them:
 
 ```bash
 npm run doctor
@@ -952,19 +949,22 @@ npm run setup:sources
 npm run setup:flips
 ```
 
-The next shrinking step is to remove the currently tracked source snapshots and
-large rehearsal shards after the scripted mirror/import path has had enough
-independent testing. Removing those files from future commits reduces checkout
-friction, but a full Git history cleanup would require a separate repository
-rewrite or a fresh source mirror.
+`setup:sources` clones the pinned `ubiubi18` mirrors from
+`scripts/source-manifest.json`. `setup:flips` imports FLIP-Challenge data into
+`data/`, which is also ignored by git. The repo keeps only the small bundled
+demo samples needed for smoke tests and quick rehearsal.
+
+This reduces future checkout/source-archive friction, but it does not erase the
+large files from existing Git history. A fully small historical clone would need
+a separate history rewrite or a fresh source mirror.
 
 If public release packaging becomes more formal later:
 
 - keep those files under review before every tag
-- prefer clone/update scripts and local generated caches over larger committed
-  bundles
-- consider Git LFS or external release artifacts only if the bundle cannot be
-  removed yet
+- keep clone/update scripts and local generated caches instead of recommitting
+  large bundles
+- consider Git LFS or external release artifacts only for data that cannot be
+  generated or fetched locally
 - make sure `THIRD_PARTY_NOTICES.md` ships with any redistributed binary bundle
 
 ## Development History

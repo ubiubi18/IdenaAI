@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "generated_at_utc": "2026-05-01T23:59:04+00:00",
+  "generated_at_utc": "2026-05-02T20:05:00+00:00",
   "repository": {
     "name": "IdenaAI",
     "relative_root": ".",
@@ -11,8 +11,8 @@
     {
       "path": ".",
       "branch": "main",
-      "head": "2f4b8bdac9cc8cb64e13f0149876d8c8c9273b99",
-      "head_short": "2f4b8bd",
+      "head": "928527c2be04bb2a44b08a4a5c38254010c791d4",
+      "head_short": "928527c2",
       "origin": "https://github.com/ubiubi18/IdenaAI.git",
       "upstream": "https://github.com/idena-network/idena-desktop.git"
     }
@@ -28,19 +28,19 @@
   "sections": {
     "root_docs_count": 4,
     "desktop_core_count": 7,
-    "go_core_count": 5,
+    "go_core_count": 0,
     "tooling_count": 5,
-    "sample_json_count_total": 5,
-    "sample_json_indexed": 5
+    "sample_json_count_total": 2,
+    "sample_json_indexed": 2
   },
   "files": [
     {
       "path": "README.md",
       "area": "root",
       "role": "documentation",
-      "size_bytes": 23762,
-      "sha256_12": "9f1da8722e23",
-      "modified_utc": "2026-05-01T23:58:36+00:00",
+      "size_bytes": 39477,
+      "sha256_12": "5801bc4f7f8e",
+      "modified_utc": "2026-05-02T20:03:47+00:00",
       "notes": "Top-level repo docs"
     },
     {
@@ -74,9 +74,9 @@
       "path": "main/index.js",
       "area": "desktop",
       "role": "core",
-      "size_bytes": 85719,
-      "sha256_12": "660a12219b50",
-      "modified_utc": "2026-04-28T21:59:29+00:00",
+      "size_bytes": 86903,
+      "sha256_12": "6b1c6e61e243",
+      "modified_utc": "2026-05-02T17:53:39+00:00",
       "notes": "Desktop AI benchmark and UI flow"
     },
     {
@@ -134,51 +134,6 @@
       "notes": "Desktop AI benchmark and UI flow"
     },
     {
-      "path": "idena-go/main.go",
-      "area": "chain",
-      "role": "core",
-      "size_bytes": 4117,
-      "sha256_12": "5160ef3b3280",
-      "modified_utc": "2026-04-11T12:05:24+00:00",
-      "notes": "Node/chain fork sources and docs"
-    },
-    {
-      "path": "idena-go/go.mod",
-      "area": "chain",
-      "role": "core",
-      "size_bytes": 14547,
-      "sha256_12": "df4752abaf86",
-      "modified_utc": "2026-04-21T05:22:37+00:00",
-      "notes": "Node/chain fork sources and docs"
-    },
-    {
-      "path": "idena-go/docs/context-snapshot.md",
-      "area": "chain",
-      "role": "core",
-      "size_bytes": 772,
-      "sha256_12": "2017fb8c2283",
-      "modified_utc": "2026-04-11T12:05:24+00:00",
-      "notes": "Node/chain fork sources and docs"
-    },
-    {
-      "path": "idena-go/docs/fork-plan.md",
-      "area": "chain",
-      "role": "core",
-      "size_bytes": 1474,
-      "sha256_12": "09632335bb38",
-      "modified_utc": "2026-04-11T12:05:24+00:00",
-      "notes": "Node/chain fork sources and docs"
-    },
-    {
-      "path": "idena-go/docs/worklog.md",
-      "area": "chain",
-      "role": "core",
-      "size_bytes": 2071,
-      "sha256_12": "07ad4888b6a5",
-      "modified_utc": "2026-04-11T12:05:24+00:00",
-      "notes": "Node/chain fork sources and docs"
-    },
-    {
       "path": "scripts/build_deep_research_index.py",
       "area": "tooling",
       "role": "scripts",
@@ -191,9 +146,9 @@
       "path": "scripts/build_chatgpt_connector_index.py",
       "area": "tooling",
       "role": "scripts",
-      "size_bytes": 5934,
-      "sha256_12": "b07829287c5a",
-      "modified_utc": "2026-04-11T15:02:51+00:00",
+      "size_bytes": 6229,
+      "sha256_12": "37821d163e40",
+      "modified_utc": "2026-05-02T20:04:55+00:00",
       "notes": "Reproducibility and dataset tools"
     },
     {
@@ -222,33 +177,6 @@
       "sha256_12": "cae28bbc64a2",
       "modified_utc": "2026-04-11T12:05:25+00:00",
       "notes": "Reproducibility and dataset tools"
-    },
-    {
-      "path": "samples/flips/flip-challenge-human-teacher-500-balanced.json",
-      "area": "samples",
-      "role": "data",
-      "size_bytes": 275,
-      "sha256_12": "9a9fa780a030",
-      "modified_utc": "2026-04-23T17:14:58+00:00",
-      "notes": "Sample labeled flips for audit/testing"
-    },
-    {
-      "path": "samples/flips/flip-challenge-human-teacher-500-balanced.part-1.json",
-      "area": "samples",
-      "role": "data",
-      "size_bytes": 55107331,
-      "sha256_12": "5585da66d49a",
-      "modified_utc": "2026-04-23T17:14:58+00:00",
-      "notes": "Sample labeled flips for audit/testing"
-    },
-    {
-      "path": "samples/flips/flip-challenge-human-teacher-500-balanced.part-2.json",
-      "area": "samples",
-      "role": "data",
-      "size_bytes": 56607212,
-      "sha256_12": "360ce5b222e6",
-      "modified_utc": "2026-04-23T17:14:58+00:00",
-      "notes": "Sample labeled flips for audit/testing"
     },
     {
       "path": "samples/flips/flip-challenge-test-20-decoded-labeled.json",

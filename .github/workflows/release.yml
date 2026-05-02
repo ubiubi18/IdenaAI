@@ -73,6 +73,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Verify source mirror clone
+        run: npm run setup:sources -- --target-root .tmp/source-mirror-check
+
       - name: Prepare source mirrors
         run: npm run setup:sources
 
