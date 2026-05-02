@@ -36,7 +36,9 @@ import {EyeIcon, EyeOffIcon} from '../../shared/components/icons'
 import {getNodeBridge} from '../../shared/utils/node-bridge'
 import {
   buildRehearsalNetworkPayload,
+  REHEARSAL_DEFAULT_SOLVER_PARTICIPANT_COUNT,
   REHEARSAL_NETWORK_VALIDATOR_COUNT,
+  REHEARSAL_SHARED_NODE_PARTICIPANT_START_DELAY_MS,
 } from '../../shared/utils/rehearsal-devnet'
 import {
   canOpenRehearsalValidation,
@@ -120,11 +122,25 @@ function buildRehearsalLaneProviderConfig(aiSolver = {}) {
   }
 }
 
-function buildRehearsalSolverLanePayload(aiSolver = {}) {
+function buildRehearsalSolverLanePayload(
+  aiSolver = {},
+  {participantCount = REHEARSAL_DEFAULT_SOLVER_PARTICIPANT_COUNT} = {}
+) {
   const provider = aiSolver.provider || 'openai'
+  const laneCount = Math.max(
+    1,
+    Math.min(REHEARSAL_NETWORK_VALIDATOR_COUNT, Number(participantCount) || 1)
+  )
 
   return {
-    laneCount: REHEARSAL_NETWORK_VALIDATOR_COUNT,
+    rehearsalOnly: true,
+    mode:
+      laneCount > 1
+        ? 'shared-node-participant-rehearsal'
+        : 'single-participant-rehearsal',
+    laneCount,
+    laneStartDelayMs:
+      laneCount > 1 ? REHEARSAL_SHARED_NODE_PARTICIPANT_START_DELAY_MS : 0,
     provider,
     model: aiSolver.model || 'gpt-5.4',
     providerConfig: buildRehearsalLaneProviderConfig(aiSolver),
@@ -574,6 +590,8 @@ function NodeSettings() {
   const rehearsalSolverLanes = devnetStatus.parallelSolverLanes
   const rehearsalSolverLaneRunning = rehearsalSolverLanes?.running === true
   const rehearsalSolverLaneSummary = rehearsalSolverLanes?.summary || null
+  const rehearsalSolverIsParallel =
+    Number(rehearsalSolverLanes?.participantCount || 0) > 1
   const canRunRehearsalSolverLanes =
     devnetStatus.active && devnetStatus.stage === 'running'
 
@@ -587,9 +605,13 @@ function NodeSettings() {
       buildRehearsalNetworkPayload({connectApp})
     )
 
-  const runRehearsalSolverLanes = () =>
+  const runRehearsalSolverLanes = ({
+    participantCount = REHEARSAL_DEFAULT_SOLVER_PARTICIPANT_COUNT,
+  } = {}) =>
     getNodeBridge().runValidationDevnetSolverLanes(
-      buildRehearsalSolverLanePayload(settings.aiSolver || {})
+      buildRehearsalSolverLanePayload(settings.aiSolver || {}, {
+        participantCount,
+      })
     )
 
   return (
@@ -766,7 +788,7 @@ function NodeSettings() {
               </Text>
               <Text color="muted" mt={2}>
                 {t(
-                  'Current rehearsal topology: 1 bootstrap node plus {{count}} validator identities. IdenaAI connects one primary validator for the live rehearsal session; any parallel lane work must stay rehearsal-only and must not be wired to mainnet identities.',
+                  'Current rehearsal topology: 1 shared-profile bootstrap node plus {{count}} validator identities. IdenaAI connects one primary validator for the live rehearsal session; any parallel participant work must stay rehearsal-only and must not be wired to mainnet identities.',
                   {count: REHEARSAL_NETWORK_VALIDATOR_COUNT}
                 )}
               </Text>
@@ -1069,7 +1091,7 @@ function NodeSettings() {
                     </SecondaryButton>
 
                     <SecondaryButton
-                      onClick={runRehearsalSolverLanes}
+                      onClick={() => runRehearsalSolverLanes()}
                       isDisabled={
                         !canUseIpcRenderer ||
                         !canRunRehearsalSolverLanes ||
@@ -1077,8 +1099,23 @@ function NodeSettings() {
                       }
                     >
                       {rehearsalSolverLaneRunning
-                        ? t('Running rehearsal solver lanes')
-                        : t('Run 8 rehearsal solver lanes')}
+                        ? t('Running rehearsal autosolve')
+                        : t('Run 1 rehearsal autosolve')}
+                    </SecondaryButton>
+
+                    <SecondaryButton
+                      onClick={() =>
+                        runRehearsalSolverLanes({
+                          participantCount: REHEARSAL_NETWORK_VALIDATOR_COUNT,
+                        })
+                      }
+                      isDisabled={
+                        !canUseIpcRenderer ||
+                        !canRunRehearsalSolverLanes ||
+                        rehearsalSolverLaneRunning
+                      }
+                    >
+                      {t('Run optional 9-ID parallel rehearsal')}
                     </SecondaryButton>
 
                     <SecondaryButton
@@ -1102,17 +1139,31 @@ function NodeSettings() {
                 >
                   <Stack spacing={1}>
                     <Text fontWeight={500}>
-                      {t('Parallel rehearsal solver lanes')}
+                      {rehearsalSolverIsParallel
+                        ? t('Shared-node participant rehearsal')
+                        : t('Single-identity rehearsal autosolve')}
                     </Text>
                     <Text color="muted" fontSize="sm">
-                      {t(
-                        'Rehearsal-only dry run. It uses the current AI provider key in the main process, records compact telemetry, and does not submit answers or touch mainnet identities.'
-                      )}
+                      {rehearsalSolverIsParallel
+                        ? t(
+                            'Optional rehearsal-only dry run. It uses the current AI provider key in the main process, staggers participant request starts, records compact telemetry, and does not submit answers or touch mainnet identities.'
+                          )
+                        : t(
+                            'Default rehearsal-only dry run. It uses the current AI provider key for one local rehearsal identity, records compact telemetry, and does not submit answers or touch mainnet identities.'
+                          )}
                     </Text>
                     <Text color="muted" fontSize="sm">
                       {t('Provider')}: {rehearsalSolverLanes.provider || '-'}{' '}
                       {t('Model')}: {rehearsalSolverLanes.model || '-'}
                     </Text>
+                    {typeof rehearsalSolverLanes.laneStartDelayMs ===
+                      'number' && (
+                      <Text color="muted" fontSize="sm">
+                        {t('Participant start delay')}:{' '}
+                        {rehearsalSolverLanes.laneStartDelayMs}
+                        {t(' ms')}
+                      </Text>
+                    )}
                   </Stack>
 
                   {rehearsalSolverLaneSummary && (
@@ -1186,6 +1237,9 @@ function NodeSettings() {
                               fontSize="sm"
                             >
                               {lane.nodeName || `lane-${lane.lane}`}:{' '}
+                              {lane.participantLabel
+                                ? `${lane.participantLabel}, `
+                                : ''}
                               {lane.status}
                               {lane.session ? `, ${lane.session}` : ''}
                               {typeof lane.flipCount === 'number'

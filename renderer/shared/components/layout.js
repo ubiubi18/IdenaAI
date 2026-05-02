@@ -78,6 +78,7 @@ import {
 import {viewVotingHref} from '../../screens/oracles/utils'
 import {useHardFork} from '../../screens/hardfork/hooks'
 import {ChevronRightIcon, GithubIcon} from './icons'
+import {resolveIdentityMarkSrc} from '../utils/static-assets'
 import {AiEnableDialog} from './ai-enable-dialog'
 import {
   DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
@@ -982,7 +983,7 @@ function OfflineApp() {
         <Stack spacing={3} w="md">
           <Stack isInline spacing={4} align="center">
             <Image
-              src="/static/identity-mark.png"
+              src={resolveIdentityMarkSrc()}
               alt="IdenaAI mark"
               boxSize={12}
             />
@@ -1146,7 +1147,7 @@ function HardForkScreen({
             <Stack spacing={8}>
               <Stack isInline spacing={5} align="center">
                 <Image
-                  src="/static/identity-mark.png"
+                  src={resolveIdentityMarkSrc()}
                   alt={t('IdenaAI mark')}
                   boxSize={20}
                 />

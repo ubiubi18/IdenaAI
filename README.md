@@ -39,7 +39,10 @@ npm start
 - In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
 - Wait for the app to switch to the rehearsal node.
 - Use `Open countdown` or `Open validation` when available.
-- Click `Run 8 rehearsal solver lanes` to dry-run the configured AI backend.
+- Click `Run 1 rehearsal autosolve` to dry-run the configured AI backend on one
+  rehearsal identity.
+- Use `Run optional 9-ID parallel rehearsal` only when you deliberately want a
+  local multi-participant capacity test.
 
 4. Try the flip builder and off-chain solver path.
 
@@ -117,7 +120,8 @@ This section should stay current and act as a short roadmap of what has already 
   including `session-metrics.jsonl` and local audit output files.
 - Validation rehearsal devnet:
   the app now exposes a private multi-node rehearsal network in `Settings -> Node`
-  with one bootstrap node plus eight local validator identities, seeded
+  with one shared-profile bootstrap node plus nine local validator identities,
+  seeded
   FLIP-Challenge flips, background start, restart/stop controls, and app-only
   rehearsal switching. Parallel lane benchmarking is documented as
   rehearsal-only work in `docs/rehearsal-parallel-lane-benchmark.md` and is not
@@ -318,7 +322,9 @@ What you can do from `Settings -> Node`:
 
 - start and use the rehearsal network immediately
 - start it in the background without switching the app over yet
-- run eight rehearsal-only solver lanes against the current local devnet status
+- run one rehearsal autosolve lane against the current local devnet status
+- optionally run nine parallel rehearsal-only participant lanes against the
+  current local devnet status
 - restart a fresh rehearsal network
 - stop the rehearsal network
 
@@ -348,9 +354,11 @@ Behavior notes:
   post-session wait has ended
 - those local results and annotation screens now refresh live from persisted
   validation state while the countdown is still running
-- parallel rehearsal solver lanes use the current AI provider/model for a local
-  dry run only; they record compact telemetry and do not submit answers or touch
-  mainnet identities
+- the default rehearsal autosolve uses one local identity and the current AI
+  provider/model for a local dry run only
+- the optional nine-participant rehearsal uses the same AI provider/model,
+  staggers provider request starts, records compact per-participant telemetry,
+  and does not submit answers or touch mainnet identities
 - this is still experimental and can still break in edge cases
 
 ## Local AI Preparations
@@ -622,8 +630,10 @@ startup and can fail on low-memory machines.
    rehearsal node.
 4. Use `Open countdown` or `Open validation` when those buttons become
    available.
-5. Click `Run 8 rehearsal solver lanes` to dry-run the current AI
-   provider/model against local rehearsal validators.
+5. Click `Run 1 rehearsal autosolve` to dry-run the current AI provider/model
+   against one local rehearsal validator.
+6. Optionally click `Run optional 9-ID parallel rehearsal` to test whether the
+   same provider key and machine can handle nine local rehearsal participants.
 
 The rehearsal path is local-devnet only. It is meant for benchmark and protocol
 flow testing, not for multi-identity mainnet automation.

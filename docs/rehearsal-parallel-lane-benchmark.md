@@ -1,14 +1,18 @@
 # Rehearsal Parallel Lane Benchmark
 
-IdenaAI's rehearsal devnet starts nine local nodes by default: one bootstrap node
-and eight validator identities. This is enough to benchmark parallel validation
-lanes on a private loopback network without touching mainnet.
+IdenaAI's rehearsal devnet starts ten local nodes by default: one shared-profile
+bootstrap node and nine validator identities. The normal custom rehearsal action
+solves one local identity. The nine-identity parallel runner is optional and is
+only for local capacity testing on a private loopback network without touching
+mainnet.
 
 This document defines the safe boundary for that work.
 
 ## Allowed Scope
 
-- Run multiple autosolver lanes only against the local rehearsal devnet.
+- Run one autosolver lane by default against the local rehearsal devnet.
+- Run multiple autosolver lanes only through the explicit optional parallel
+  rehearsal action.
 - Use only node endpoints created by the current rehearsal controller.
 - Require loopback RPC URLs such as `127.0.0.1` or `localhost`.
 - Store per-lane telemetry locally for benchmark comparison.
@@ -35,8 +39,9 @@ A safe rehearsal lane runner should:
 5. Write one telemetry record per lane, including endpoint, period, solved
    counts, report counts, provider/model, token use, cost estimate, and errors.
 6. Refuse to start if the app is not in rehearsal mode.
+7. Stagger provider request starts when the optional nine-participant runner is
+   active.
 
-The current app already has the eight local validator identities. The missing
-piece is a rehearsal-only lane runner that reuses the existing solver logic
-without exposing this as a real-session multi-account feature.
-
+The current app has nine local validator identities. The single-identity run is
+the default. The optional parallel runner reuses the same solver logic without
+exposing this as a real-session multi-account feature.
