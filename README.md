@@ -50,11 +50,12 @@ npm start
 - Use `Run current draft now`, `Run short (6)`, or `Run long (14)` to compare
   solving behavior without publishing anything.
 
-5. Use live validation automation only after rehearsal works.
+5. Use live validation automation only after rehearsal works and only from the
+   packaged app.
 
 - Open `Validation`.
-- Use `Enable auto-solve next session` only with a throwaway or low-value
-  identity.
+- Use `Enable auto-solve next session` only after reading
+  [Real Session Auto-Solve With OpenAI](#real-session-auto-solve-with-openai).
 - Keep manual oversight. This is not production-safe unattended automation.
 
 Rehearsal and off-chain queue runs stay local and do not submit mainnet
@@ -417,6 +418,66 @@ Current limitation:
   node readiness, and model latency all compete with protocol timing
 - you should still assume short-session automation can miss under bad network,
   slow provider, or reconnect-heavy conditions
+
+## Real Session Auto-Solve With OpenAI
+
+Use this path only if you understand the risk. There are no guarantees: the app,
+the node, the OpenAI API, the model, the network, or your machine can fail at
+the wrong time. The AI can also submit wrong answers. Any missed validation,
+wrong submission, reward loss, identity impact, API cost, or other consequence
+is your own responsibility.
+
+Required startup for a real identity:
+
+- use the packaged or installed `IdenaAI` app, not `npm start`
+- use a real mainnet identity in that packaged app profile
+- keep the node online, synced, and eligible for the next ceremony
+- keep the app open, the computer awake, and the internet connection stable
+- stay nearby and watch the ceremony; this is not unattended production software
+
+Why the packaged app matters: source runs started with `npm start` use the
+workspace-local development profile under `../IdenaAI-runtime/IdenaAI/`.
+Packaged macOS runs use `~/Library/Application Support/IdenaAI/`. Real
+on-chain `session-auto` is intentionally blocked in dev builds so users do not
+accidentally arm automation in the wrong profile with no real identity.
+
+Build and start a packaged app locally on macOS:
+
+```bash
+nvm use
+npm ci
+npm run dist:mac:arm64
+open "dist/mac-arm64/IdenaAI.app"
+```
+
+For Intel or universal macOS builds, use `npm run dist:mac` or
+`npm run dist:mac:universal` and open the generated `IdenaAI.app` from `dist/`.
+If you downloaded an installed release instead, start that installed app
+normally.
+
+OpenAI `gpt-5.5` example:
+
+1. Start the packaged `IdenaAI` app.
+2. Make sure the app is using your real mainnet identity and real mainnet node,
+   not the validation rehearsal network.
+3. Open `Settings -> AI`.
+4. Turn on AI.
+5. Choose `Use external API provider`.
+6. Set `Main AI provider` to `OpenAI`.
+7. Paste your OpenAI API key and click `Set key`.
+8. Choose `gpt-5.5`, or enter `gpt-5.5` as the custom model id.
+9. Click `Test connection` and confirm the configured model works before the
+   validation window.
+10. Open `Validation`.
+11. Click `Enable auto-solve next session`.
+12. Keep the packaged app running through the ceremony and monitor short and
+    long session submissions.
+
+Do not commit API keys, screenshots containing keys, `settings.json`, node data,
+or files from `~/Library/Application Support/IdenaAI/`. Keep provider spending
+limits low until you have your own successful rehearsal and smoke-test history.
+`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` is only a deliberate developer override
+for local testing; it is not the recommended real-session path.
 
 ## Safety and Privacy
 
