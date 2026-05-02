@@ -1836,7 +1836,7 @@ Pages compressed:                       2097152.`)
     )
   })
 
-  it('expands the existing developer annotation pool to the balanced 500-flip slice without losing prior annotations', async () => {
+  it('expands the existing developer annotation pool to the bundled review slice without losing prior annotations', async () => {
     const manager = createLocalAiManager({logger: mockLogger(), storage})
 
     await storage.writeJsonAtomic(
@@ -1886,11 +1886,11 @@ Pages compressed:                       2097152.`)
         taskCount: 5,
       }),
       state: expect.objectContaining({
-        totalAvailableTasks: 500,
+        totalAvailableTasks: 20,
         supportsLocalTraining: true,
         annotatedCount: 5,
         pendingTrainingCount: 5,
-        remainingTaskCount: 495,
+        remainingTaskCount: 15,
       }),
     })
     expect(session).not.toHaveProperty('statePath')
@@ -3436,7 +3436,7 @@ Pages compressed:                       2097152.`)
       results: [
         {
           index: 1,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:101',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:1',
           flipHash: 'flip-improved',
           expected: 'left',
           predicted: 'right',
@@ -3445,7 +3445,7 @@ Pages compressed:                       2097152.`)
         },
         {
           index: 2,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:102',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:2',
           flipHash: 'flip-regressed',
           expected: 'right',
           predicted: 'right',
@@ -3478,7 +3478,7 @@ Pages compressed:                       2097152.`)
       results: [
         {
           index: 1,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:101',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:1',
           flipHash: 'flip-improved',
           expected: 'left',
           predicted: 'left',
@@ -3525,7 +3525,7 @@ Pages compressed:                       2097152.`)
         },
         {
           index: 2,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:102',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:2',
           flipHash: 'flip-regressed',
           expected: 'right',
           predicted: 'left',
@@ -3533,7 +3533,7 @@ Pages compressed:                       2097152.`)
         },
         {
           index: 3,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:103',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:3',
           flipHash: 'flip-stable',
           expected: 'right',
           predicted: 'right',
@@ -3545,7 +3545,7 @@ Pages compressed:                       2097152.`)
       results: [
         {
           index: 1,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:101',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:1',
           flipHash: 'flip-improved',
           expected: 'left',
           predicted: 'right',
@@ -3553,7 +3553,7 @@ Pages compressed:                       2097152.`)
         },
         {
           index: 2,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:102',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:2',
           flipHash: 'flip-regressed',
           expected: 'right',
           predicted: 'right',
@@ -3561,7 +3561,7 @@ Pages compressed:                       2097152.`)
         },
         {
           index: 3,
-          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:103',
+          sampleId: 'demo:flip-challenge-test-20-decoded-labeled:3',
           flipHash: 'flip-stable',
           expected: 'right',
           predicted: 'right',
@@ -3613,8 +3613,8 @@ Pages compressed:                       2097152.`)
             flipHash: 'flip-improved',
             changeType: 'improved',
             reviewTarget: expect.objectContaining({
-              taskId: 'demo:flip-challenge-test-20-decoded-labeled:101',
-              offset: 100,
+              taskId: 'demo:flip-challenge-test-20-decoded-labeled:1',
+              offset: 0,
             }),
             current: expect.objectContaining({
               predicted: 'left',

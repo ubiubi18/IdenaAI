@@ -64,13 +64,6 @@ const VALIDATION_DEVNET_DEFAULT_SEED_FILES = [
     '..',
     'samples',
     'flips',
-    'flip-challenge-human-teacher-500-balanced.json'
-  ),
-  path.join(
-    __dirname,
-    '..',
-    'samples',
-    'flips',
     'flip-challenge-test-20-decoded-labeled.json'
   ),
   path.join(

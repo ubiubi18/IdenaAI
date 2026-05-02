@@ -4,7 +4,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import {QueryClient} from 'react-query'
 import i18n from '../../i18n'
 import {EpochPeriod} from '../types'
-import bundledLegacyKeywords from '../../../idena-go/keywords/keywords.json'
+import bundledLegacyKeywords from '../data/legacy-keywords.json'
 
 dayjs.extend(duration)
 dayjs.extend(relativeTime)

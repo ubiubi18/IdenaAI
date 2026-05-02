@@ -10,6 +10,11 @@ const PINNED_NODE_VERSION = '1.1.2'
 const MIN_NODE_BINARY_SIZE = 1024 * 1024
 const TARGET_DIR = path.join(ROOT, 'build', 'node', 'darwin-arm64')
 const TARGET_FILE = path.join(TARGET_DIR, 'idena-go')
+const REQUIRED_SOURCE_FILES = [
+  path.join(ROOT, 'idena-go', 'go.mod'),
+  path.join(ROOT, 'idena-wasm', 'Cargo.toml'),
+  path.join(ROOT, 'idena-wasm-binding', 'go.mod'),
+]
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -77,6 +82,10 @@ function getExistingNodeCandidates() {
   ].filter(Boolean)
 }
 
+function hasRequiredSources() {
+  return REQUIRED_SOURCE_FILES.every((filePath) => fs.existsSync(filePath))
+}
+
 function main() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     console.log(
@@ -97,8 +106,12 @@ function main() {
     }
   }
 
+  if (!hasRequiredSources()) {
+    run(process.execPath, [path.join(ROOT, 'scripts', 'setup-sources.js')])
+  }
+
   run('/bin/bash', [
-    path.join(ROOT, 'idena-go', 'scripts', 'build-node-macos-arm64.sh'),
+    path.join(ROOT, 'scripts', 'build-node-macos-arm64.sh'),
     TARGET_FILE,
   ])
 
