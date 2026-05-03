@@ -1,7 +1,7 @@
-import { MAX_POST_MEDIA_BYTES_RPC, supportedImageTypes, type Post, type Tip, type RpcPostCostEstimate } from './logic/asyncUtils';
+import { MAX_POST_MEDIA_BYTES_RPC, type Post, type Tip, type RpcPostCostEstimate } from './logic/asyncUtils';
 import { useLocation, useOutletContext } from 'react-router';
 import PostComponent from './components/PostComponent';
-import { type BrowserStateHistorySettings, type MouseEventLocal } from './App.exports';
+import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from './App.exports';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { DesktopBootstrap } from './logic/desktopBootstrap';
 import SortPostsByComponent from './components/SortPostsByComponent';
@@ -22,7 +22,7 @@ type LatestPostsProps = {
     SET_NEW_POSTS_ADDED_DELAY: number,
     inputPostDisabled: boolean,
     copyPostTxHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
-    submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
+    submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined, storeTextIpfs?: boolean | undefined, storeMediaIpfs?: boolean | undefined) => Promise<void>,
     submitLikeHandler: (emoji: string, location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
     submittingPost: string,
     submittingLike: string,
@@ -32,9 +32,11 @@ type LatestPostsProps = {
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
     handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
     handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
+    handleOpenAddMediaModal: (e: MouseEventLocal, location: string) => void,
+    handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
-    setPostMediaAttachmentHandler: (location: string, file?: File | undefined) => Promise<void>,
-    postMediaAttachmentsRef: React.RefObject<any>,
+    postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
+    makePostsWith: string,
     estimatePostCostHandler: (inputText: string, mediaFile?: File | undefined) => Promise<RpcPostCostEstimate | null>,
     mainComposerCostEstimate: RpcPostCostEstimate | null,
     setMainComposerCostEstimate: React.Dispatch<React.SetStateAction<RpcPostCostEstimate | null>>,
@@ -98,9 +100,11 @@ function LatestPosts() {
         handleOpenLikesModal,
         handleOpenTipsModal,
         handleOpenSendTipModal,
+        handleOpenAddMediaModal,
+        handleOpenRpcMakePostModal,
         tipsRef,
-        setPostMediaAttachmentHandler,
         postMediaAttachmentsRef,
+        makePostsWith,
         estimatePostCostHandler,
         mainComposerCostEstimate,
         setMainComposerCostEstimate,
@@ -202,7 +206,8 @@ function LatestPosts() {
             setMainComposerCostEstimateLoading(true);
 
             try {
-                const estimate = await estimatePostCostHandler(mainDraftText, mainPostMediaAttachment?.file);
+                const estimateMediaFile = mainPostMediaAttachment?.ipfsUrl ? undefined : mainPostMediaAttachment?.file;
+                const estimate = await estimatePostCostHandler(mainDraftText, estimateMediaFile);
                 if (!canceled) {
                     setMainComposerCostEstimate(estimate);
                 }
@@ -230,17 +235,11 @@ function LatestPosts() {
         mainComposerDisabled,
         mainDraftText,
         mainPostMediaAttachment?.file,
+        mainPostMediaAttachment?.ipfsUrl,
         setMainComposerCostEstimate,
         setMainComposerCostEstimateError,
         setMainComposerCostEstimateLoading,
     ]);
-
-    const addMediaHandler = async (e: React.ChangeEvent<HTMLInputElement>, location: string) => {
-        e?.stopPropagation();
-
-        await setPostMediaAttachmentHandler(location, e.currentTarget.files?.[0]);
-        forceUpdate();
-    };
 
     const removeMediaHandler = (e: MouseEventLocal, location: string) => {
         e?.stopPropagation();
@@ -284,7 +283,7 @@ function LatestPosts() {
                 </p>
                 <p>
                     <strong>Posting model:</strong> RPC + on-chain reference
-                    <HoverInfo label="An image post adds one dna_storeToIpfs transaction for the file plus one contract_call for the message. Text over 100 characters adds another IPFS storage transaction." />
+                    <HoverInfo label="When enabled in the RPC posting dialog, text and local images add dna_storeToIpfs transactions before the contract call. Existing IPFS images are referenced directly." />
                 </p>
                 <p>
                     <strong>Current max-fee:</strong>{' '}
@@ -304,16 +303,7 @@ function LatestPosts() {
                     {mainPostMediaAttachment ? <>
                         <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => !mainComposerDisabled && removeMediaHandler(e, 'main')}>Remove image</p>
                     </> : <>
-                        <label htmlFor="post-input-media-main" className={`inline-block -mt-1 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={(e) => e.stopPropagation()}>Add image</label>
-                        <input
-                            id="post-input-media-main"
-                            type="file"
-                            accept={supportedImageTypes.join(',')}
-                            className="hidden"
-                            disabled={mainComposerDisabled}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) => addMediaHandler(e, 'main')}
-                        />
+                        <p className={`inline-block -mt-1 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, 'main')}>Add image</p>
                     </>}
                     {proposalMode && proposalPrefillText && (
                         <p
@@ -326,7 +316,7 @@ function LatestPosts() {
                     <p id="post-copytx-main" className={`inline-block -mt-1 ml-2 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={() => !mainComposerDisabled && copyPostTxHandler('main')}>Copy tx</p>
                 </div>
                 <p className="text-right w-50 mt-0.5 text-gray-400 text-[12px]">Your post will take time to display due to blockchain acceptance.</p>
-                <button className="h-9 w-27 my-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" disabled={mainComposerDisabled} onClick={() => submitPostHandler('main')}>{submittingPost === 'main' ? 'Posting...' : 'Post!'}</button>
+                <button className="h-9 w-27 my-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" disabled={mainComposerDisabled} onClick={(e) => makePostsWith === 'rpc' ? handleOpenRpcMakePostModal(e, 'main') : submitPostHandler('main')}>{submittingPost === 'main' ? 'Posting...' : 'Post!'}</button>
             </div>
         </div>
         {proposalMode && visiblePostIds.length === 0 && (
@@ -361,9 +351,11 @@ function LatestPosts() {
                         handleOpenLikesModal={handleOpenLikesModal}
                         handleOpenTipsModal={handleOpenTipsModal}
                         handleOpenSendTipModal={handleOpenSendTipModal}
+                        handleOpenAddMediaModal={handleOpenAddMediaModal}
+                        handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
                         tipsRef={tipsRef}
-                        setPostMediaAttachmentHandler={setPostMediaAttachmentHandler}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
+                        makePostsWith={makePostsWith}
                     />
                 </li>
             ))}
