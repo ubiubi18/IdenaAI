@@ -1,7 +1,7 @@
 import { useReducer, type FocusEventHandler } from 'react';
-import { getChildPostIds, breakingChanges, type Post, type Tip, supportedImageTypes } from '../logic/asyncUtils';
+import { getChildPostIds, breakingChanges, type Post, type Tip } from '../logic/asyncUtils';
 import { getDisplayAddress, getDisplayAddressShort, getDisplayDateTime, getDisplayTipAmount, getIdentityStatus, getMessageLines, getShortDisplayTipAmount } from '../logic/utils';
-import { initDomSettings, isPostOutletDomSettings, type BrowserStateHistorySettings, type MouseEventLocal, type PostDomSettings } from '../App.exports';
+import { initDomSettings, isPostOutletDomSettings, type BrowserStateHistorySettings, type MouseEventLocal, type PostDomSettings, type PostMediaAttachment } from '../App.exports';
 import { useLocation, useNavigate } from 'react-router';
 import commentGraySvg from '../assets/comment-alt-lines-gray.svg';
 import commentBlueSvg from '../assets/comment-alt-lines-blue.svg';
@@ -26,7 +26,7 @@ type PostComponentProps = {
     SET_NEW_POSTS_ADDED_DELAY: number,
     inputPostDisabled: boolean,
     copyPostTxHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
-    submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
+    submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined, storeTextIpfs?: boolean | undefined, storeMediaIpfs?: boolean | undefined) => Promise<void>,
     submitLikeHandler: (emoji: string, location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
     submittingPost: string,
     submittingLike: string,
@@ -36,9 +36,11 @@ type PostComponentProps = {
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
     handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
     handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
+    handleOpenAddMediaModal: (e: MouseEventLocal, location: string) => void,
+    handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
-    setPostMediaAttachmentHandler: (location: string, file?: File | undefined) => Promise<void>,
-    postMediaAttachmentsRef: React.RefObject<any>,
+    postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
+    makePostsWith: string,
     isPostOutlet?: boolean,
 };
 
@@ -66,9 +68,11 @@ function PostComponent(props: PostComponentProps) {
         handleOpenLikesModal,
         handleOpenTipsModal,
         handleOpenSendTipModal,
+        handleOpenAddMediaModal,
+        handleOpenRpcMakePostModal,
         tipsRef,
-        setPostMediaAttachmentHandler,
         postMediaAttachmentsRef,
+        makePostsWith,
         isPostOutlet,
     } = props;
 
@@ -90,7 +94,7 @@ function PostComponent(props: PostComponentProps) {
         };
 
         setBrowserStateHistorySettings({ postDomSettings: postDomSettingsUpdated }, rerender);
-    }
+    };
 
     const mainPostDomSettings = isPostOutlet ? isPostOutletDomSettings : initDomSettings;
 
@@ -178,11 +182,11 @@ function PostComponent(props: PostComponentProps) {
 
         const newRepliesHidden = !postDomSettings.repliesHidden;
 
-        if (postDomSettings.repliesHidden || postDomSettings.discussReplyToPostId) {
+        if (postDomSettings.repliesHidden || postDomSettings.discussReplyToPostId === post.postId) {
             setPostDomSettings(post.postId, { repliesHidden: newRepliesHidden }, true);
         }
 
-        if (!newRepliesHidden || (!postDomSettings.repliesHidden && !postDomSettings.discussReplyToPostId)) {
+        if (!newRepliesHidden || (!postDomSettings.repliesHidden && postDomSettings.discussReplyToPostId !== post.postId)) {
             setDiscussReplyToPostIdHandler(post, post.postId);
         }
     };
@@ -224,51 +228,48 @@ function PostComponent(props: PostComponentProps) {
         }
     };
 
-    const addMediaHandler = async (e: React.ChangeEvent<HTMLInputElement>, location: string) => {
-        e?.stopPropagation();
-
-        await setPostMediaAttachmentHandler(location, e.currentTarget.files?.[0])
-        forceUpdate();
-    };
-
     const removeMediaHandler = (e: MouseEventLocal, location: string) => {
-        e?.stopPropagation();
+        e.stopPropagation();
 
         postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [location]: undefined };
         forceUpdate();
     };
 
-    const localCopyPostTxHandler = async (location: string, replyToPostId?: string, e?: MouseEventLocal, channelId?: string) => {
-        e?.stopPropagation();
+    const localCopyPostTxHandler = async (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => {
+        e.stopPropagation();
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
         }
 
         copyPostTxHandler(location, replyToPostId, channelId);
-    }
+    };
 
 
-    const localSubmitPostHandler = async (location: string, replyToPostId?: string, e?: MouseEventLocal, channelId?: string) => {
-        e?.stopPropagation();
+    const localSubmitPostHandler = async (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => {
+        e.stopPropagation();
 
-        await submitPostHandler(location, replyToPostId, channelId);
+        if (makePostsWith === 'rpc') {
+            handleOpenRpcMakePostModal(e, location, replyToPostId, channelId);
+        } else {
+            await submitPostHandler(location, replyToPostId, channelId);
+        }
 
         const post = postsRef.current[location];
         if (post) {
             setDiscussReplyToPostIdHandler(post);
         }
-    }
+    };
 
-    const localSubmitLikeHandler = async (location: string, replyToPostId?: string, e?: MouseEventLocal, channelId?: string) => {
-        e?.stopPropagation();
+    const localSubmitLikeHandler = async (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => {
+        e.stopPropagation();
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
         }
 
         await submitLikeHandler(likeEmoji, location, replyToPostId, channelId);
-    }
+    };
 
     let mouseClicked = false;
 
@@ -331,9 +332,9 @@ function PostComponent(props: PostComponentProps) {
                 </div>
                 <div className="w-20">
                     {replyLikes.length ?
-                        <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === post.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(post.postId, post.postId, e)} /><a className="text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, replyLikes)}>{ replyLikes.length} likes</a></div>
+                        <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === post.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, post.postId, post.postId)} /><a className="text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, replyLikes)}>{ replyLikes.length} likes</a></div>
                     :
-                        <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === post.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(post.postId, post.postId, e)} /><span className="align-[-0.5px]">0 likes</span></div>
+                        <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === post.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, post.postId, post.postId)} /><span className="align-[-0.5px]">0 likes</span></div>
                     }
                 </div>
                 <div className="flex-1">
@@ -363,7 +364,7 @@ function PostComponent(props: PostComponentProps) {
                             />
                         </div>
                         <div>
-                            <button className="h-8 w-17 mb-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={inputPostDisabled} onClick={(e) => localSubmitPostHandler(post.postId, post.postId, e)}>{submittingPost === post.postId ? '...' : 'Post!'}</button>
+                            <button className="h-8 w-17 mb-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={inputPostDisabled} onClick={(e) => localSubmitPostHandler(e, post.postId, post.postId)}>{submittingPost === post.postId ? '...' : 'Post!'}</button>
                         </div>
                     </div>
                     {postMediaAttachment && <div className="my-1">
@@ -373,18 +374,9 @@ function PostComponent(props: PostComponentProps) {
                         {postMediaAttachment ? <>
                             <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => removeMediaHandler(e, post.postId)}>Remove image</p>
                         </> : <>
-                            <label htmlFor={`post-input-media-${post.postId}`} className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => e.stopPropagation()}>Add image</label>
-                            <input
-                                id={`post-input-media-${post.postId}`}
-                                type="file"
-                                accept={supportedImageTypes.join(',')}
-                                className="hidden"
-                                disabled={inputPostDisabled}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => addMediaHandler(e, post.postId)}
-                            />
+                            <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => handleOpenAddMediaModal(e, post.postId)}>Add image</p>
                         </>}
-                        <p id={`post-copytx-${post.postId}`} className="inline-block -mt-1 ml-2 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => localCopyPostTxHandler(post.postId, post.postId, e)}>Copy tx</p>
+                        <p id={`post-copytx-${post.postId}`} className="inline-block -mt-1 ml-2 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => localCopyPostTxHandler(e, post.postId, post.postId)}>Copy tx</p>
                     </div>
                 </div>
             </>}
@@ -460,9 +452,9 @@ function PostComponent(props: PostComponentProps) {
                                     </div>
                                     <div className="w-19">
                                         {likesForReplyPost.length ?
-                                            <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === replyPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(replyPost.postId, replyPost.postId, e, discussParentId)} /><a className="text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForReplyPost)}>{likesForReplyPost.length} likes</a></div>
+                                            <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === replyPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, replyPost.postId, replyPost.postId, discussParentId)} /><a className="text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForReplyPost)}>{likesForReplyPost.length} likes</a></div>
                                         :
-                                            <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === replyPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(replyPost.postId, replyPost.postId, e, discussParentId)} /><span className="align-[-0.5px]">0 likes</span></div>
+                                            <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === replyPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, replyPost.postId, replyPost.postId, discussParentId)} /><span className="align-[-0.5px]">0 likes</span></div>
                                         }
                                     </div>
                                     <div className="flex-1">
@@ -531,9 +523,9 @@ function PostComponent(props: PostComponentProps) {
                                                             <div className="pt-0.5 mr-1 text-[12px] flex flex-col gap-0.5">
                                                                 <div className=""><img src={commentGraySvg} onMouseOver={(e) => { e.currentTarget.src = commentBlueSvg; }} onMouseOut={(e) => { e.currentTarget.src = commentGraySvg; }} className={'h-6 p-[0px] -ml-0.5 mr-0.5 inline-block rounded-md hover:bg-blue-400/30 hover:cursor-pointer'} onClick={() => setDiscussReplyToPostIdHandler(replyPost, discussionPost.postId)} /></div>
                                                                 {likesForDiscussionPost.length ?
-                                                                    <div className="text-red-400 text-left whitespace-nowrap"><img src={heartRedSvg} className={'h-5 p-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === discussionPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(discussionPost.postId, discussionPost.postId, e, discussParentId)} /><a className="text-red-400 ml-[1px] align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForDiscussionPost)}>{likesForDiscussionPost.length}</a></div>
+                                                                    <div className="text-red-400 text-left whitespace-nowrap"><img src={heartRedSvg} className={'h-5 p-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === discussionPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, discussionPost.postId, discussionPost.postId, discussParentId)} /><a className="text-red-400 ml-[1px] align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForDiscussionPost)}>{likesForDiscussionPost.length}</a></div>
                                                                 :
-                                                                    <div className="text-gray-500 text-left"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-5 p-[2px] inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === discussionPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(discussionPost.postId, discussionPost.postId, e, discussParentId)} /></div>
+                                                                    <div className="text-gray-500 text-left"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-5 p-[2px] inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === discussionPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, discussionPost.postId, discussionPost.postId, discussParentId)} /></div>
                                                                 }
                                                                 {postTips.totalAmount ?
                                                                     <div className="text-green-400 text-left whitespace-nowrap"><img src={cashGreenSvg} className={'h-5 p-0.5 -ml-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === discussionPost.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, discussionPost)} /><a className="text-green-400 ml-0.5 align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getShortDisplayTipAmount(postTips.totalAmount)}</a></div>
@@ -566,7 +558,7 @@ function PostComponent(props: PostComponentProps) {
                                                     />
                                                 </div>
                                                 <div>
-                                                    <button className="h-7 w-16 mb-1 px-4 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={inputPostDisabled} onClick={() => localSubmitPostHandler(replyPost.postId, discussReplyToPostId, undefined, discussParentId)}>{submittingPost === replyPost.postId ? '...' : 'Post!'}</button>
+                                                    <button className="h-7 w-16 mb-1 px-4 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={inputPostDisabled} onClick={(e) => localSubmitPostHandler(e, replyPost.postId, discussReplyToPostId, discussParentId)}>{submittingPost === replyPost.postId ? '...' : 'Post!'}</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -577,18 +569,9 @@ function PostComponent(props: PostComponentProps) {
                                             {postMediaAttachment ? <>
                                                 <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => removeMediaHandler(e, replyPost.postId)}>Remove image</p>
                                             </> : <>
-                                                <label htmlFor={`post-input-media-${replyPost.postId}`} className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => e.stopPropagation()}>Add image</label>
-                                                <input
-                                                    id={`post-input-media-${replyPost.postId}`}
-                                                    type="file"
-                                                    accept={supportedImageTypes.join(',')}
-                                                    className="hidden"
-                                                    disabled={inputPostDisabled}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    onChange={(e) => addMediaHandler(e, replyPost.postId)}
-                                                />
+                                                <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => handleOpenAddMediaModal(e, replyPost.postId)}>Add image</p>
                                             </>}
-                                            <p id={`post-copytx-${replyPost.postId}`} className="inline-block -mt-1 ml-2 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={() => localCopyPostTxHandler(replyPost.postId, discussReplyToPostId, undefined, discussParentId)}>Copy tx</p>
+                                            <p id={`post-copytx-${replyPost.postId}`} className="inline-block -mt-1 ml-2 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => localCopyPostTxHandler(e, replyPost.postId, discussReplyToPostId, discussParentId)}>Copy tx</p>
                                         </div>
                                     </>}
                                 </div>}
