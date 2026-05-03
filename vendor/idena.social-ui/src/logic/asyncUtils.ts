@@ -1,5 +1,7 @@
 import { create, toBinary } from "@bufbuild/protobuf";
 import Decimal from "decimal.js";
+import imageType from 'image-type';
+import isSvg from 'is-svg';
 import { calculateMaxFee, calculateNextNonce, dna2num, dnaBase, getCallTransaction, getMakePostTransactionPayload, hex2str, hexToDecimal, sanitizeStr, str2bytes } from "./utils";
 import { CallContractAttachment, ProtoStoreToIpfsAttachmentSchema, contractArgumentFormat, hexToUint8Array, toHexString, Transaction, transactionType, type ContractArgumentFormatValue, type TransactionTypeValue } from "idena-sdk-js-lite";
 import ErrorLoadingMedia from '../assets/error-loading-media.png';
@@ -88,7 +90,7 @@ type GetMaxFeeData = {
         type: TransactionTypeValue,
         amount: number,
         payload: any,
-}
+};
 export const getMaxFee = async (rpcClient: RpcClient, data: GetMaxFeeData) => {
     try {
         const params: any = data;
@@ -164,7 +166,7 @@ export const estimateRpcPostCost = async (
     channelId?: string | null,
 ): Promise<RpcPostCostEstimate> => {
     const textBytes = str2bytes(inputText);
-    const textStoredToIpfs = textBytes.length > 100;
+    const textStoredToIpfs = textBytes.length > 0;
     const imageStoredToIpfs = !!mediaFile;
 
     const messageForContract = textStoredToIpfs ? PLACEHOLDER_IPFS_URL : inputText;
@@ -487,7 +489,7 @@ export const getNewPosterAndPost = async (
     };
 
     const messagePromise = message && getMessage(postId, message, rpcClient);
-    const mediaPromise = (media && mediaType) && getMedia(postId, media, mediaType, rpcClient);
+    const mediaPromise = (media && mediaType) && getMedia(postId, media, rpcClient);
 
     const newPost = {
         timestamp,
@@ -525,9 +527,11 @@ const getMessage = async (postId: string, message: string, rpcClient: RpcClient)
     return { postId, message };
 };
 
-const getMedia = async (postId: string, media: string, mediaType: string, rpcClient: RpcClient) => {
+export const getMedia = async (postId: string, media: string, rpcClient: RpcClient) => {
     let image = '';
     let video = '';
+    let mediaType = '';
+    let blob;
 
     if (media.startsWith('ipfs://')) {
         const cid = media.split('ipfs://')[1];
@@ -535,27 +539,30 @@ const getMedia = async (postId: string, media: string, mediaType: string, rpcCli
 
         if (!getCidResult) {
             image = ErrorLoadingMedia;
-            return { postId, image, video };
+            return { postId, image, video, mediaType, blob };
         }
 
         const bytes = hexToUint8Array(getCidResult);
-        ({ image, video } = await getMediaFromHex(bytes, mediaType));
+        ({ image, video, mediaType, blob } = await getMediaFromHex(bytes));
     } else {
         // @ts-ignore: Uint8Array.fromBase64 not recognized yet
         const bytes = Uint8Array.fromBase64(media);
-        ({ image, video } = await getMediaFromHex(bytes, mediaType));
+        ({ image, video, mediaType, blob } = await getMediaFromHex(bytes));
     }
 
-    return { postId, image, video };
-}
+    return { postId, image, video, mediaType, blob };
+};
 
-const getMediaFromHex = async (bytes: Uint8Array, mediaType: string) => {
-    const bytesCopy = new Uint8Array(bytes);
-    const blob = new Blob([bytesCopy], { type: mediaType || 'application/octet-stream' });
-    const objectUrl = URL.createObjectURL(blob);
-
+const getMediaFromHex = async (bytes: Uint8Array) => {
     let image = '';
     let video = '';
+    let mediaType = '';
+
+    const bytesCopy = new Uint8Array(bytes);
+    mediaType = await getMediaTypeFromBuffer(bytesCopy) ?? '';
+
+    const blob = new Blob([bytesCopy], { type: mediaType || 'application/octet-stream' });
+    const objectUrl = URL.createObjectURL(blob);
 
     if (supportedImageTypes.includes(mediaType)) {
         const validImage = await isValidImageUrlCheck(objectUrl);
@@ -563,15 +570,34 @@ const getMediaFromHex = async (bytes: Uint8Array, mediaType: string) => {
             image = objectUrl;
         } else {
             image = ErrorLoadingMedia;
+            mediaType = 'image/png';
         }
     } else if (supportedVideoTypes.includes(mediaType)) {
         video = objectUrl;
     } else {
         image = ErrorLoadingMedia;
+        mediaType = 'image/png';
     }
 
-    return { image, video };
-}
+    return { image, video, mediaType, blob };
+};
+
+const getMediaTypeFromBuffer = async (bytes: Uint8Array) => {
+    const imageTypeResult = await imageType(bytes);
+
+    if (imageTypeResult) {
+        return imageTypeResult.mime;
+    } else {
+        const svgString = new TextDecoder().decode(bytes);
+        const isSvgResult = isSvg(svgString);
+
+        if (isSvgResult) {
+            return 'image/svg+xml';
+        }
+    }
+
+    return;
+};
 
 const isValidImageUrlCheck = (url: string, wait = 2000): Promise<boolean> => {
     return new Promise((resolve) => {
