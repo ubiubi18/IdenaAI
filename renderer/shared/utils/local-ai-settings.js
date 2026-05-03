@@ -25,6 +25,14 @@ const INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY = 'internvl3.5-8b'
 const INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL = 'OpenGVLab/InternVL3_5-8B-HF'
 const INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL =
   'OpenGVLab/InternVL3_5-8B-HF'
+const QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL =
+  'idenaai-qwen36-27b-claude-opus:q4km'
+const QWEN36_27B_CLAUDE_OPUS_HF_OLLAMA_MODEL =
+  'hf.co/rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF:Q4_K_M'
+const QWEN36_27B_CLAUDE_OPUS_GGUF_REPO =
+  'rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF'
+const QWEN36_27B_CLAUDE_OPUS_GGUF_FILE =
+  'Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-Q4_K_M.gguf'
 const MANAGED_MOLMO2_RUNTIME_FAMILIES = [
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_O_RESEARCH_RUNTIME_FAMILY,
@@ -73,11 +81,11 @@ const MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES = {
   },
 }
 const MANAGED_LOCAL_RUNTIME_TRUST_VERSION = 2
-const DEFAULT_LOCAL_AI_OLLAMA_MODEL = ''
+const DEFAULT_LOCAL_AI_OLLAMA_MODEL = QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL
 const DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL = ''
-const RECOMMENDED_LOCAL_AI_OLLAMA_MODEL = ''
+const RECOMMENDED_LOCAL_AI_OLLAMA_MODEL = QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL
 const RECOMMENDED_LOCAL_AI_OLLAMA_VISION_MODEL = ''
-const RECOMMENDED_LOCAL_AI_TRAINING_MODEL = ''
+const RECOMMENDED_LOCAL_AI_TRAINING_MODEL = QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL
 const STRONG_FALLBACK_LOCAL_AI_OLLAMA_MODEL = RECOMMENDED_LOCAL_AI_OLLAMA_MODEL
 const STRONG_FALLBACK_LOCAL_AI_OLLAMA_VISION_MODEL =
   RECOMMENDED_LOCAL_AI_OLLAMA_VISION_MODEL
@@ -918,6 +926,16 @@ function buildLocalAiSettings(settings = {}) {
   const normalizedRuntimeBackend = normalizeRuntimeBackend(source)
   const normalizedModel = trimString(source.model)
   const normalizedVisionModel = trimString(source.visionModel)
+  const resolvedModel =
+    normalizedModel ||
+    (normalizedRuntimeBackend === 'ollama-direct'
+      ? DEFAULT_LOCAL_AI_OLLAMA_MODEL
+      : '')
+  const resolvedVisionModel =
+    normalizedVisionModel ||
+    (normalizedRuntimeBackend === 'ollama-direct'
+      ? DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL
+      : '')
   const activeAdapterEpoch = normalizeActiveAdapterEpoch(
     source.activeAdapterEpoch
   )
@@ -954,16 +972,8 @@ function buildLocalAiSettings(settings = {}) {
     managedRuntimeTrustRevision: trimString(source.managedRuntimeTrustRevision),
     runtimeType: trimString(source.runtimeType),
     runtimeFamily: normalizeLegacyRuntimeFamily(source),
-    model:
-      normalizedModel ||
-      (normalizedRuntimeBackend === 'ollama-direct'
-        ? DEFAULT_LOCAL_AI_OLLAMA_MODEL
-        : ''),
-    visionModel:
-      normalizedVisionModel ||
-      (normalizedRuntimeBackend === 'ollama-direct'
-        ? DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL
-        : ''),
+    model: resolvedModel,
+    visionModel: resolvedVisionModel,
     activeAdapterEnabled:
       source.activeAdapterEnabled === true &&
       Boolean(activeAdapterEpoch || activeAdapterSha256),
@@ -1037,7 +1047,7 @@ function buildLocalAiSettings(settings = {}) {
     trainEnabled:
       source.enabled === true &&
       normalizedRuntimeBackend === 'ollama-direct' &&
-      Boolean(normalizedModel || normalizedVisionModel),
+      Boolean(resolvedModel || resolvedVisionModel),
     federated: {
       ...DEFAULT_LOCAL_AI_SETTINGS.federated,
       ...((source && source.federated) || {}),
@@ -1131,6 +1141,10 @@ module.exports = {
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL,
+  QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
+  QWEN36_27B_CLAUDE_OPUS_HF_OLLAMA_MODEL,
+  QWEN36_27B_CLAUDE_OPUS_GGUF_REPO,
+  QWEN36_27B_CLAUDE_OPUS_GGUF_FILE,
   MANAGED_MOLMO2_RUNTIME_FAMILIES,
   MANAGED_LOCAL_RUNTIME_FAMILIES,
   DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,

@@ -65,6 +65,7 @@ import {
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
   MANAGED_LOCAL_RUNTIME_FAMILIES,
+  QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
   buildManagedLocalAiTrustApprovalPatch,
   buildLocalAiRepairPreset,
   buildRecommendedLocalAiMacPreset,
@@ -177,11 +178,11 @@ const CONSULT_PROVIDER_OPTIONS = MAIN_PROVIDER_OPTIONS.filter(
 const LOCAL_AI_RUNTIME_OPTIONS = [
   {
     value: 'ollama-direct',
-    label: 'Local runtime via Ollama (recommended on Mac)',
+    label: 'Qwen via Ollama (default)',
   },
   {
     value: 'local-runtime-service',
-    label: 'Local runtime service (Molmo / MLX / vLLM)',
+    label: 'Smaller local runtime fallback',
   },
 ]
 
@@ -250,11 +251,20 @@ const DEFAULT_SYSTEM_RESERVE_GIB = 6
 const MIN_SYSTEM_RESERVE_GIB = 0
 const MAX_SYSTEM_RESERVE_GIB = 32
 const EXTERNAL_PROVIDER_SESSION_TARGET_GIB = 8
-const DEFAULT_LOCAL_AI_MEMORY_REFERENCE = 'molmo2-4b'
+const DEFAULT_LOCAL_AI_MEMORY_REFERENCE = 'qwen36-27b-q4km'
 const LOCAL_AI_MEMORY_REFERENCE_PROFILES = [
   {
+    value: 'qwen36-27b-q4km',
+    label: `${QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL} (default target)`,
+    shortLabel: 'Qwen3.6 27B Q4_K_M',
+    minimumGiB: 24,
+    comfortableGiB: 36,
+    detail:
+      'Default text/reasoning target through Ollama. Use a smaller managed fallback if this desktop cannot run it comfortably.',
+  },
+  {
     value: 'molmo2-4b',
-    label: `Managed ${MOLMO2_4B_RESEARCH_RUNTIME_MODEL} (default target)`,
+    label: `Managed ${MOLMO2_4B_RESEARCH_RUNTIME_MODEL} (compact fallback)`,
     shortLabel: 'Molmo2 4B',
     minimumGiB: 12,
     comfortableGiB: 18,
@@ -340,6 +350,7 @@ const LOCAL_AI_MODEL_CEILING_GUIDE = [
   {label: 'around compact 4B local models', comfortableGiB: 18},
   {label: 'around 7B-class local models', comfortableGiB: 24},
   {label: 'around Molmo2-O / heavier 7B multimodal models', comfortableGiB: 32},
+  {label: 'around Qwen3.6 27B Q4_K_M', comfortableGiB: 36},
   {label: 'around 13B-class local models', comfortableGiB: 48},
   {label: 'around 34B-class local models', comfortableGiB: 96},
   {label: 'around 70B-class local models', comfortableGiB: 128},
@@ -1491,11 +1502,21 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
   }
 
   if (backend === 'ollama-direct') {
+    const isRecommendedQwen =
+      String(localAi?.model || '').trim() ===
+      QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL
+
     return {
-      title: t('Ollama local runtime'),
-      description: t(
-        'Best for simple local chat. IdenaAI talks to your own Ollama runtime on this device.'
-      ),
+      title: isRecommendedQwen
+        ? t('Qwen via Ollama')
+        : t('Ollama local runtime'),
+      description: isRecommendedQwen
+        ? t(
+            'IdenaAI chat and code review use this selected Qwen model first. No API key is required for this path.'
+          )
+        : t(
+            'Best for simple local chat. IdenaAI talks to your own Ollama runtime on this device.'
+          ),
       endpointLabel: t('Ollama endpoint'),
       endpointHelper: t(
         'Recommended: http://127.0.0.1:11434. Use a loopback-only Ollama URL here.'
@@ -3701,21 +3722,13 @@ export default function AiSettingsPage() {
   const enableLocalAiSetup = useCallback(
     () =>
       startLocalAiWithSettings({
-        localAiPatch: buildManagedLocalRuntimeInstallPreset(
-          oneClickManagedRuntimeFamily
-        ),
+        localAiPatch: buildRecommendedLocalAiMacPreset(),
         enableLocalProvider: true,
         preparingMessage: t(
-          'Preparing {{runtime}} now. Progress will appear below.',
-          {runtime: oneClickManagedInstallProfile.displayName}
+          'Preparing Qwen via Ollama now. IdenaAI will try to start Ollama and connect to your configured local model endpoint.'
         ),
       }),
-    [
-      oneClickManagedInstallProfile.displayName,
-      oneClickManagedRuntimeFamily,
-      startLocalAiWithSettings,
-      t,
-    ]
+    [startLocalAiWithSettings, t]
   )
   const toggleProviderSetup = useCallback(() => {
     setShowProviderSetup((value) => {
@@ -3854,7 +3867,7 @@ export default function AiSettingsPage() {
                     <Text fontWeight={600}>{t('Turn on AI')}</Text>
                     <Text color="muted" fontSize="sm">
                       {t(
-                        'New users should start with the managed local runtime on this device. External API providers stay available if you want them later.'
+                        'New users should start with Qwen via Ollama on this device. External API providers stay available if you want them later.'
                       )}
                     </Text>
                   </Box>
@@ -3881,11 +3894,11 @@ export default function AiSettingsPage() {
                     <Stack spacing={3}>
                       <Box>
                         <Text fontWeight={600}>
-                          {t('Recommended: local AI on this device')}
+                          {t('Default: Qwen local AI on this device')}
                         </Text>
                         <Text color="muted" fontSize="sm" mt={1}>
                           {t(
-                            'IdenaAI can prepare and start the local runtime for you. Click once here and follow the progress below. No API key is required for this path.'
+                            'IdenaAI uses Qwen through Ollama as the local-first text and code review model. No API key is required for this path.'
                           )}
                         </Text>
                       </Box>
@@ -3909,25 +3922,40 @@ export default function AiSettingsPage() {
                       >
                         <Stack spacing={1}>
                           <Text fontSize="sm" fontWeight={600}>
-                            {t('One-click install target')}
+                            {t('One-click local target')}
                           </Text>
                           <Text color="muted" fontSize="xs">
-                            {formatManagedRuntimeInstallTarget(
-                              oneClickManagedInstallProfile,
-                              t
-                            )}
+                            {selectedMemoryReferenceIsManagedRuntime
+                              ? formatManagedRuntimeInstallTarget(
+                                  oneClickManagedInstallProfile,
+                                  t
+                                )
+                              : t('Qwen via Ollama · {{model}}', {
+                                  model: QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
+                                })}
                           </Text>
                           <Text color="muted" fontSize="xs">
-                            {oneClickManagedInstallRequirement}
+                            {selectedMemoryReferenceIsManagedRuntime
+                              ? oneClickManagedInstallRequirement
+                              : t(
+                                  'RAM guide: safer around {{comfortable}} GB total with {{reserve}} GB reserved for node/app.',
+                                  {
+                                    comfortable:
+                                      selectedLocalAiMemoryReference.comfortableGiB +
+                                      normalizedSystemReserveGiB,
+                                    reserve: normalizedSystemReserveGiB,
+                                  }
+                                )}
                           </Text>
                           {!selectedMemoryReferenceIsManagedRuntime ? (
                             <Text color="muted" fontSize="xs">
                               {t(
-                                'The selected RAM reference is only a sizing guide. The managed installer will use the install target shown above.'
+                                'If this desktop is too small for Qwen, open Local AI settings and use a compact managed fallback.'
                               )}
                             </Text>
                           ) : null}
-                          {oneClickManagedInstallWarning ? (
+                          {selectedMemoryReferenceIsManagedRuntime &&
+                          oneClickManagedInstallWarning ? (
                             <Text color="orange.600" fontSize="xs">
                               {oneClickManagedInstallWarning}
                             </Text>
@@ -5746,12 +5774,9 @@ export default function AiSettingsPage() {
                     }
 
                     startLocalAiWithSettings({
-                      localAiPatch: buildManagedLocalRuntimeInstallPreset(
-                        oneClickManagedRuntimeFamily
-                      ),
+                      localAiPatch: buildRecommendedLocalAiMacPreset(),
                       preparingMessage: t(
-                        'Preparing {{runtime}} now. Progress will appear below.',
-                        {runtime: oneClickManagedInstallProfile.displayName}
+                        'Preparing Qwen via Ollama now. IdenaAI will try to start Ollama and connect to your configured local model endpoint.'
                       ),
                     })
                   }}
@@ -5849,11 +5874,17 @@ export default function AiSettingsPage() {
 
               <Stack isInline spacing={2} flexWrap="wrap">
                 <PrimaryButton
+                  onClick={applyRecommendedLocalAiSetup}
+                  isLoading={isStartingLocalAi}
+                >
+                  {t('Use Qwen/Ollama default')}
+                </PrimaryButton>
+                <SecondaryButton
                   onClick={applyMolmo24BCompactSetup}
                   isLoading={isStartingLocalAi}
                 >
-                  {t('Install recommended Molmo2-4B')}
-                </PrimaryButton>
+                  {t('Use compact Molmo2-4B fallback')}
+                </SecondaryButton>
                 <SecondaryButton
                   onClick={applyMolmo2OResearchSetup}
                   isLoading={isStartingLocalAi}
@@ -5878,13 +5909,10 @@ export default function AiSettingsPage() {
                 >
                   {t('Fix automatically')}
                 </SecondaryButton>
-                <SecondaryButton onClick={applyRecommendedLocalAiSetup}>
-                  {t('Use Ollama instead')}
-                </SecondaryButton>
               </Stack>
               <Text color="muted" fontSize="sm">
                 {t(
-                  'Recommended for most people: let IdenaAI prepare the default Molmo runtime now and follow the progress bar below. The compact Molmo path is the safer fallback. InternVL3.5-1B is the lightest official same-provider alternative, while InternVL3.5-8B stays the heavy experimental option. Pick Ollama only if you already run your own local model runtime.'
+                  'Qwen/Ollama is the default text and code review path. Use the smaller managed fallbacks only when this computer cannot run it comfortably.'
                 )}
               </Text>
               <Box

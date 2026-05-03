@@ -582,8 +582,14 @@ Behavior notes:
 
 Local AI is deliberately conservative right now.
 
-- there is still no permanently approved bundled local base model
-- the managed local runtime is a research path, not a final endorsement
+- the default text and code-review path is Qwen via Ollama:
+  `idenaai-qwen36-27b-claude-opus:q4km`
+- the source GGUF and local alias setup are documented in
+  [docs/local-ai-qwen36-gguf.md](docs/local-ai-qwen36-gguf.md)
+- this Qwen path is a practical local-first default, not a final endorsement or
+  a guarantee that the model is neutral, complete, or safe
+- smaller managed runtimes remain research fallbacks for machines that cannot
+  run the Qwen/Ollama target comfortably
 - first use asks for an explicit one-time trust approval before installing and starting managed runtime components
 - the managed runtime is loopback-only and token-gated
 - trusted runtime files and model shards are verified before startup
@@ -591,6 +597,8 @@ Local AI is deliberately conservative right now.
 
 Prepared research lanes currently include:
 
+- `rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` as the default
+  text/reasoning model through Ollama
 - `allenai/Molmo2-O-7B` as the main managed research runtime
 - `allenai/Molmo2-4B` as a more compact managed fallback
 - `OpenGVLab/InternVL3_5-1B-HF` as the light same-provider alternative
@@ -603,7 +611,13 @@ Advanced users can still point the app at their own local-only:
 - Transformers-based server
 - `vLLM` endpoint
 
-In short: local AI experiments are enabled, but the broader local-model direction is still being evaluated.
+All base models contain cultural, political, linguistic, and dataset bias. Treat
+their output with distance, review important answers yourself, and avoid turning
+one model's framing into protocol truth. A future P2P direction could be to
+train or curate an AI base model toward broader worldwide representation of
+diverse ideas, languages, and mindsets, but that is not realistic for this
+project today. For now, local AI experiments are enabled and the broader
+local-model direction is still being evaluated.
 
 ## Session-Auto Validation
 

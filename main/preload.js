@@ -831,6 +831,21 @@ function sanitizeLocalAiGenerationOptions(value) {
   }
 }
 
+function sanitizeOptionalLocalAiGenerationOptions(value) {
+  return isPlainObject(value) ? sanitizeLocalAiGenerationOptions(value) : null
+}
+
+function sanitizeLocalAiModelFallbacks(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .slice(0, 8)
+    .map((item) => sanitizeOptionalBoundedString(item, 256))
+    .filter(Boolean)
+}
+
 function sanitizeLocalAiResponseFormat(value) {
   if (typeof value === 'string') {
     return sanitizeOptionalBoundedString(value, 32)
@@ -904,7 +919,7 @@ function sanitizeLocalAiRuntimePayload(payload = {}) {
     ),
     endpoint: sanitizeOptionalBoundedString(source.endpoint, 2048),
     baseUrl: sanitizeOptionalBoundedString(source.baseUrl, 2048),
-    timeoutMs: sanitizeInteger(source.timeoutMs, 15000, 1000, 120000),
+    timeoutMs: sanitizeInteger(source.timeoutMs, 15000, 1000, 10 * 60 * 1000),
     responseFormat: sanitizeLocalAiResponseFormat(source.responseFormat),
     prompt: sanitizeOptionalBoundedString(source.prompt, 10000),
     message: sanitizeOptionalBoundedString(source.message, 10000),
@@ -912,11 +927,36 @@ function sanitizeLocalAiRuntimePayload(payload = {}) {
     generationOptions: sanitizeLocalAiGenerationOptions(
       source.generationOptions
     ),
+    fallbackGenerationOptions: sanitizeOptionalLocalAiGenerationOptions(
+      source.fallbackGenerationOptions
+    ),
+    modelFallbacks: sanitizeLocalAiModelFallbacks(source.modelFallbacks),
+    visionModelFallbacks: sanitizeLocalAiModelFallbacks(
+      source.visionModelFallbacks
+    ),
     developerHumanTeacherSystemPrompt: sanitizeOptionalBoundedString(
       source.developerHumanTeacherSystemPrompt,
       8000
     ),
     input: sanitizedInput,
+  }
+}
+
+function sanitizeLocalAiCodebaseContextPayload(payload = {}) {
+  const source = isPlainObject(payload) ? payload : {}
+
+  return {
+    root: sanitizeOptionalBoundedString(source.root, 4096),
+    query: sanitizeOptionalBoundedString(source.query, 4000),
+    maxFiles: sanitizeInteger(source.maxFiles, 14, 1, 24),
+    maxChars: sanitizeInteger(source.maxChars, 70000, 8000, 120000),
+    maxFileChars: sanitizeInteger(source.maxFileChars, 6000, 1200, 45000),
+    excludePaths: Array.isArray(source.excludePaths)
+      ? source.excludePaths
+          .slice(0, 256)
+          .map((item) => sanitizeOptionalBoundedString(item, 4096))
+          .filter(Boolean)
+      : [],
   }
 }
 
@@ -1482,6 +1522,11 @@ const localAiBridge = Object.freeze({
   status: (payload) =>
     invokeCloneable('localAi.status', sanitizeLocalAiRuntimePayload(payload)),
   getDeveloperTelemetry: () => invokeCloneable('localAi.getDeveloperTelemetry'),
+  getCodebaseContext: (payload) =>
+    invokeCloneable(
+      'localAi.getCodebaseContext',
+      sanitizeLocalAiCodebaseContextPayload(payload)
+    ),
   start: (payload) =>
     invokeCloneable('localAi.start', sanitizeLocalAiRuntimePayload(payload)),
   stop: () => invokeCloneable('localAi.stop'),
@@ -1781,4 +1826,11 @@ contextBridge.exposeInMainWorld('idena', bridge)
 
 if (typeof window !== 'undefined') {
   window.dispatchEvent(new window.Event('idena-preload-ready'))
+}
+
+module.exports = {
+  __test__: {
+    sanitizeLocalAiCodebaseContextPayload,
+    sanitizeLocalAiRuntimePayload,
+  },
 }

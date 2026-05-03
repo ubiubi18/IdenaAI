@@ -64,9 +64,10 @@ import {
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   MANAGED_LOCAL_RUNTIME_FAMILIES,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
+  RECOMMENDED_LOCAL_AI_OLLAMA_MODEL,
+  buildRecommendedLocalAiMacPreset,
   buildManagedLocalAiTrustApprovalPatch,
   buildLocalAiRepairPreset,
-  buildManagedLocalRuntimePreset,
   buildLocalAiSettings,
   getManagedLocalRuntimeInstallProfile,
   hasManagedLocalAiTrustApproval,
@@ -94,20 +95,36 @@ const CHAT_COMPOSER_COLLAPSED_HEIGHT = 58
 const MANAGED_RUNTIME_DEFAULT_RESERVE_GIB = 6
 const CHAT_COMPOSER_EXPANDED_MIN_HEIGHT = 96
 const CHAT_COMPOSER_EXPANDED_MAX_HEIGHT = 240
+const CHAT_CODEBASE_CONTEXT_MAX_FILES = 5
+const CHAT_CODEBASE_CONTEXT_MAX_CHARS = 14000
+const CHAT_CODEBASE_CONTEXT_MAX_FILE_CHARS = 4200
+const CHAT_CODEBASE_CONTEXT_MAX_PASSES = 5
+const CHAT_CODEBASE_MEMORY_NUM_PREDICT = 520
+const CHAT_CODEBASE_PASS_TIMEOUT_MS = 60 * 1000
 const LOCAL_CHAT_CONTEXT_WINDOW_TOKENS = 4096
-const LOCAL_CHAT_TEXT_RESPONSE_TOKENS = 96
 const LOCAL_CHAT_IMAGE_RESPONSE_TOKENS = 384
 const LOCAL_CHAT_TEXT_HISTORY_LIMIT = 12
 const LOCAL_CHAT_IMAGE_HISTORY_LIMIT = 8
-const LOCAL_CHAT_TEXT_TIMEOUT_MS = 120 * 1000
-const LOCAL_CHAT_IMAGE_TIMEOUT_MS = 120 * 1000
 const LOCAL_CHAT_TEACHING_NOTE_LIMIT = 4
 const LOCAL_CHAT_TEACHING_NOTE_MAX_CHARS = 900
 const LOCAL_CHAT_TEACHING_CONTEXT_MAX_CHARS = 3200
+const CHAT_LOCAL_AI_OLLAMA_FALLBACK_MODEL = 'qwen3.5:9b'
+const CHAT_WAIT_MODE_STRONG = 'strong'
+const CHAT_WAIT_MODE_FAST = 'fast'
+const CHAT_WAIT_MODE_FAST_DEEP = 'fast_deep'
+const CHAT_DEFAULT_STRONG_WAIT_MINUTES = 5
+const CHAT_MAX_STRONG_WAIT_MINUTES = 10
+const CHAT_MIN_STRONG_WAIT_MINUTES = 1
+const CHAT_FAST_ATTEMPT_TIMEOUT_MS = 60 * 1000
+const CHAT_IMAGE_ATTEMPT_TIMEOUT_MS = 90 * 1000
+const CHAT_FAST_NUM_PREDICT = 256
+const CHAT_STRONG_NUM_PREDICT = 2048
+const CHAT_STRONG_NUM_CTX_WITH_CODEBASE = 32768
+const CHAT_FAST_NUM_CTX_WITH_CODEBASE = 8192
 const SYSTEM_CHAT_MESSAGE = {
   role: 'system',
   content:
-    'You are a concise, practical assistant inside the Idena desktop app. Answer with the final answer only. Do not write hidden chain-of-thought. Keep normal text replies under 120 words unless the user explicitly asks for detail. For flip annotation, explain the next concrete action instead of pretending live model training happens instantly.',
+    'You are a concise, practical assistant inside the Idena desktop app. Answer with the final answer only. Do not write hidden chain-of-thought. Keep normal text replies under 120 words unless the user explicitly asks for detail. When the app supplies read-only local codebase context, treat it as owner-authorized local software development for IdenaAI. You may audit, explain, and propose code changes from those snippets. Do not say you lack codebase access when snippets were attached; say you lack direct shell or full filesystem access only if that distinction matters. For flip annotation, explain the next concrete action instead of pretending live model training happens instantly.',
 }
 const OCR_IMAGE_CHAT_SYSTEM_MESSAGE = {
   role: 'system',
@@ -116,6 +133,7 @@ const OCR_IMAGE_CHAT_SYSTEM_MESSAGE = {
 }
 const QUICK_PROMPTS = [
   'Explain this node error in plain English.',
+  'Audit the local IdenaAI code context for likely bugs.',
   'Help me draft better flips for the next validation.',
   'Summarize what I should do before validation starts.',
   'Show me a bundled sample test flip.',
@@ -334,9 +352,172 @@ function persistStoredDraft(value) {
   window.localStorage.setItem(CHAT_DRAFT_STORAGE_KEY, String(value || ''))
 }
 
+function normalizeChatWaitMode(value) {
+  if (value === CHAT_WAIT_MODE_FAST) {
+    return CHAT_WAIT_MODE_FAST
+  }
+
+  if (value === CHAT_WAIT_MODE_FAST_DEEP) {
+    return CHAT_WAIT_MODE_FAST_DEEP
+  }
+
+  return CHAT_WAIT_MODE_STRONG
+}
+
+function getChatWaitModeLabel(value, t) {
+  const mode = normalizeChatWaitMode(value)
+
+  if (mode === CHAT_WAIT_MODE_FAST) {
+    return t('Fast fallback')
+  }
+
+  if (mode === CHAT_WAIT_MODE_FAST_DEEP) {
+    return t('Fast + deep later')
+  }
+
+  return t('Strong model')
+}
+
+function getChatWaitModeDescription(value, t) {
+  const mode = normalizeChatWaitMode(value)
+
+  if (mode === CHAT_WAIT_MODE_FAST) {
+    return t(
+      'Keeps the short wait and may use qwen3.5:9b when the selected model is too slow.'
+    )
+  }
+
+  if (mode === CHAT_WAIT_MODE_FAST_DEEP) {
+    return t(
+      'Shows a compact answer after the soft deadline, then appends the selected model answer if it finishes later.'
+    )
+  }
+
+  return t(
+    'Waits longer for the selected model and will not fall back to qwen3.5:9b.'
+  )
+}
+
+function normalizeStrongWaitMinutes(value) {
+  const minutes = Number.parseInt(value, 10)
+
+  if (!Number.isFinite(minutes)) {
+    return CHAT_DEFAULT_STRONG_WAIT_MINUTES
+  }
+
+  return Math.min(
+    CHAT_MAX_STRONG_WAIT_MINUTES,
+    Math.max(CHAT_MIN_STRONG_WAIT_MINUTES, minutes)
+  )
+}
+
+function formatChatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  if (minutes <= 0) {
+    return `${seconds}s`
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+}
+
+function delayChat(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(ms || 0)))
+  })
+}
+
+function buildAssistantDisplayText({
+  assistantContent,
+  bundledSampleMeta,
+  fallbackNotice,
+  flipAnalysis,
+  prefixNotice,
+  t,
+}) {
+  const bundledSampleNotice = formatBundledSampleFlipNotice(
+    bundledSampleMeta,
+    t
+  )
+  const introParts = [bundledSampleNotice, prefixNotice, fallbackNotice].filter(
+    Boolean
+  )
+  const introText = introParts.length ? `${introParts.join('\n\n')}\n\n` : ''
+
+  if (flipAnalysis) {
+    return `${introText}${formatFlipAnalysisForDisplay(
+      flipAnalysis,
+      t
+    )}\n\n${assistantContent}`
+  }
+
+  return `${introText}${assistantContent}`
+}
+
+function resolveChatRequestSettings({
+  chatWaitMode,
+  strongWaitMinutes,
+  runtimePayload,
+  outgoingAttachments,
+}) {
+  const hasAttachments = outgoingAttachments.length > 0
+  const runtimeModel = String(runtimePayload?.model || '').trim()
+  const canUseCompactQwenFallback =
+    !hasAttachments &&
+    String(runtimePayload?.runtimeBackend || '').trim() === 'ollama-direct' &&
+    runtimeModel === RECOMMENDED_LOCAL_AI_OLLAMA_MODEL
+  const normalizedMode = normalizeChatWaitMode(chatWaitMode)
+  const allowCompactFallback =
+    normalizedMode === CHAT_WAIT_MODE_FAST && canUseCompactQwenFallback
+  const allowDelayedStrongFallback =
+    normalizedMode === CHAT_WAIT_MODE_FAST_DEEP && canUseCompactQwenFallback
+  const strongTimeoutMs =
+    normalizeStrongWaitMinutes(strongWaitMinutes) * 60 * 1000
+  let attemptTimeoutMs = CHAT_FAST_ATTEMPT_TIMEOUT_MS
+
+  if (
+    normalizedMode === CHAT_WAIT_MODE_STRONG ||
+    normalizedMode === CHAT_WAIT_MODE_FAST_DEEP
+  ) {
+    attemptTimeoutMs = strongTimeoutMs
+  } else if (hasAttachments) {
+    attemptTimeoutMs = CHAT_IMAGE_ATTEMPT_TIMEOUT_MS
+  }
+
+  return {
+    mode: normalizedMode,
+    allowCompactFallback,
+    allowDelayedStrongFallback,
+    attemptTimeoutMs,
+    softTimeoutMs: allowDelayedStrongFallback
+      ? CHAT_FAST_ATTEMPT_TIMEOUT_MS
+      : attemptTimeoutMs,
+    fallbackTimeoutMs: CHAT_FAST_ATTEMPT_TIMEOUT_MS,
+    totalBudgetMs: allowCompactFallback
+      ? attemptTimeoutMs * 2
+      : attemptTimeoutMs,
+    numPredict:
+      normalizedMode === CHAT_WAIT_MODE_FAST
+        ? CHAT_FAST_NUM_PREDICT
+        : CHAT_STRONG_NUM_PREDICT,
+    fallbackModel:
+      allowCompactFallback || allowDelayedStrongFallback
+        ? CHAT_LOCAL_AI_OLLAMA_FALLBACK_MODEL
+        : '',
+    requestedModel: runtimeModel,
+  }
+}
+
 function loadStoredChatPreferences() {
   if (typeof window === 'undefined') {
-    return {storeLocally: false}
+    return {
+      storeLocally: false,
+      chatWaitMode: CHAT_WAIT_MODE_STRONG,
+      strongWaitMinutes: CHAT_DEFAULT_STRONG_WAIT_MINUTES,
+      includeCodebaseContext: false,
+    }
   }
 
   const hasExistingStoredChat = Boolean(
@@ -349,8 +530,14 @@ function loadStoredChatPreferences() {
       window.localStorage.getItem(CHAT_PREFERENCES_STORAGE_KEY) || '{}'
     )
 
-    if (typeof raw?.storeLocally === 'boolean') {
-      return {storeLocally: raw.storeLocally}
+    return {
+      storeLocally:
+        typeof raw?.storeLocally === 'boolean'
+          ? raw.storeLocally
+          : hasExistingStoredChat,
+      chatWaitMode: normalizeChatWaitMode(raw?.chatWaitMode),
+      strongWaitMinutes: normalizeStrongWaitMinutes(raw?.strongWaitMinutes),
+      includeCodebaseContext: raw?.includeCodebaseContext === true,
     }
   } catch {
     // Ignore malformed preferences and fall back to the privacy-first default.
@@ -358,6 +545,9 @@ function loadStoredChatPreferences() {
 
   return {
     storeLocally: hasExistingStoredChat,
+    chatWaitMode: CHAT_WAIT_MODE_STRONG,
+    strongWaitMinutes: CHAT_DEFAULT_STRONG_WAIT_MINUTES,
+    includeCodebaseContext: false,
   }
 }
 
@@ -370,6 +560,11 @@ function persistStoredChatPreferences(preferences = {}) {
     CHAT_PREFERENCES_STORAGE_KEY,
     JSON.stringify({
       storeLocally: preferences.storeLocally === true,
+      chatWaitMode: normalizeChatWaitMode(preferences.chatWaitMode),
+      strongWaitMinutes: normalizeStrongWaitMinutes(
+        preferences.strongWaitMinutes
+      ),
+      includeCodebaseContext: preferences.includeCodebaseContext === true,
     })
   )
 }
@@ -1032,6 +1227,126 @@ function getFlipContextSourceLabel(flipContext) {
   return String(firstLine || '').trim()
 }
 
+function formatCodebaseContextSummary(result) {
+  if (!result?.ok) {
+    return ''
+  }
+
+  const files = Array.isArray(result.files)
+    ? result.files.map((file) => file.path).filter(Boolean)
+    : []
+
+  const count = Number(result.includedFileCount || files.length || 0)
+  const chars = Number(result.totalChars || 0)
+  const skippedPathCount = Array.isArray(result.skippedPaths)
+    ? result.skippedPaths.length
+    : 0
+  const skippedFileCount = Array.isArray(result.skippedFiles)
+    ? result.skippedFiles.length
+    : 0
+  const filePreview = files.slice(0, 4).join(', ')
+  const skippedText =
+    skippedPathCount || skippedFileCount
+      ? `; skipped ${skippedPathCount} heavy path(s), ${skippedFileCount} large file(s)`
+      : ''
+
+  return filePreview
+    ? `Codebase context attached: ${count} files, ${chars} chars (${filePreview})${skippedText}`
+    : `Codebase context attached: ${count} files, ${chars} chars${skippedText}`
+}
+
+function getCodebaseContextFilePaths(result) {
+  return Array.isArray(result?.files)
+    ? result.files
+        .map((file) => String(file?.path || '').trim())
+        .filter(Boolean)
+    : []
+}
+
+function extractCodebaseNextQuery(value) {
+  const match = String(value || '').match(/^NEXT_QUERY:\s*(.+)$/imu)
+  return match ? match[1].trim().slice(0, 500) : ''
+}
+
+function isCodebaseInspectionReady(value) {
+  return /^READY_FOR_FINAL:\s*yes\b/imu.test(String(value || ''))
+}
+
+function shouldUseCodebaseMultiPass(prompt, result) {
+  if (!result?.ok) {
+    return false
+  }
+
+  return (
+    result.truncated ||
+    /\b(audit|review|bug|bugs|security|inspect|inspection|codebase|repo|repository|architecture|refactor|trace|where|why)\b/iu.test(
+      String(prompt || '')
+    )
+  )
+}
+
+function buildCodebaseInspectionFallbackMemory({
+  inspectedPaths = [],
+  passSummaries = [],
+  lastError = '',
+}) {
+  return [
+    'WORKING_MEMORY:',
+    '- Codebase context was split into small read-only passes.',
+    inspectedPaths.length
+      ? `- Inspected files: ${inspectedPaths.join(', ')}`
+      : '- Inspected files: none; the model timed out before summarizing snippets.',
+    passSummaries.length
+      ? `- Pass metadata: ${passSummaries
+          .map(
+            (item) =>
+              `pass ${item.passIndex}: ${item.files.length} file(s), ${
+                item.chars
+              } chars${item.error ? `, error=${item.error}` : ''}`
+          )
+          .join('; ')}`
+      : '- Pass metadata: none.',
+    lastError ? `- Last local model error: ${lastError}` : '',
+    'GAPS:',
+    '- A narrower follow-up may be needed if the local model times out again.',
+    'NEXT_QUERY: NONE',
+    'READY_FOR_FINAL: yes',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function buildCodebaseInspectionPrompt({
+  originalPrompt,
+  previousMemory,
+  passIndex,
+  maxPasses,
+}) {
+  return [
+    `Codebase inspection pass ${passIndex} of ${maxPasses}.`,
+    `Original user question: ${originalPrompt}`,
+    previousMemory
+      ? `Previous compressed working memory:\n${previousMemory}`
+      : 'Previous compressed working memory: none yet.',
+    '',
+    'Inspect only the source snippets attached in this pass.',
+    'If a path is marked skipped because it is huge, generated, fixture data, wasm, or dependency code, acknowledge the skip and do not request that same path again unless the user explicitly asked for it.',
+    'Update the compressed working memory so the next pass does not repeat work.',
+    'Keep concrete file paths, likely bugs, assumptions, skipped-heavy-path notes, and remaining gaps.',
+    'Be concise. Do not write a full audit yet.',
+    '',
+    'Return exactly these sections:',
+    'WORKING_MEMORY:',
+    '- compact durable facts from all passes so far',
+    '- important file paths inspected',
+    '- likely answer direction',
+    'GAPS:',
+    '- what still needs inspection, if anything',
+    'NEXT_QUERY: short search phrase for the next code slice, or NONE',
+    'READY_FOR_FINAL: yes or no',
+  ].join('\n')
+}
+
 function toBridgeMessage(message, options = {}) {
   const includeImages = Boolean(options.includeImages)
   const next = {
@@ -1570,11 +1885,19 @@ export default function AiChatPage() {
   const [draft, setDraft] = React.useState('')
   const [attachments, setAttachments] = React.useState([])
   const [storeChatLocally, setStoreChatLocally] = React.useState(false)
+  const [includeCodebaseContext, setIncludeCodebaseContext] =
+    React.useState(false)
+  const [chatWaitMode, setChatWaitMode] = React.useState(CHAT_WAIT_MODE_STRONG)
+  const [strongWaitMinutes, setStrongWaitMinutes] = React.useState(
+    CHAT_DEFAULT_STRONG_WAIT_MINUTES
+  )
   const [statusResult, setStatusResult] = React.useState(null)
   const [isCheckingStatus, setIsCheckingStatus] = React.useState(false)
   const [isStartingRuntime, setIsStartingRuntime] = React.useState(false)
   const [isStoppingRuntime, setIsStoppingRuntime] = React.useState(false)
   const [isSending, setIsSending] = React.useState(false)
+  const [activeChatRequest, setActiveChatRequest] = React.useState(null)
+  const [chatProgressNow, setChatProgressNow] = React.useState(0)
   const [isComposerFocused, setIsComposerFocused] = React.useState(false)
   const [lastError, setLastError] = React.useState('')
   const [isManagedRuntimeTrustDialogOpen, setIsManagedRuntimeTrustDialogOpen] =
@@ -1685,10 +2008,14 @@ export default function AiChatPage() {
   const fileInputRef = React.useRef(null)
   const composerRef = React.useRef(null)
   const sampleFlipCursorRef = React.useRef(0)
+  const activeChatRequestRef = React.useRef({id: '', cancelled: false})
 
   React.useEffect(() => {
     const preferences = loadStoredChatPreferences()
     setStoreChatLocally(preferences.storeLocally)
+    setChatWaitMode(preferences.chatWaitMode)
+    setStrongWaitMinutes(preferences.strongWaitMinutes)
+    setIncludeCodebaseContext(preferences.includeCodebaseContext)
 
     if (preferences.storeLocally) {
       setMessages(loadStoredChatHistory())
@@ -1697,8 +2024,18 @@ export default function AiChatPage() {
   }, [])
 
   React.useEffect(() => {
-    persistStoredChatPreferences({storeLocally: storeChatLocally})
-  }, [storeChatLocally])
+    persistStoredChatPreferences({
+      storeLocally: storeChatLocally,
+      chatWaitMode,
+      strongWaitMinutes,
+      includeCodebaseContext,
+    })
+  }, [
+    chatWaitMode,
+    includeCodebaseContext,
+    storeChatLocally,
+    strongWaitMinutes,
+  ])
 
   React.useEffect(() => {
     if (storeChatLocally) {
@@ -1721,7 +2058,19 @@ export default function AiChatPage() {
       behavior: 'smooth',
       block: 'end',
     })
-  }, [messages, isSending])
+  }, [activeChatRequest, messages, isSending])
+
+  React.useEffect(() => {
+    if (!activeChatRequest) {
+      return undefined
+    }
+
+    const timerId = setInterval(() => {
+      setChatProgressNow(Date.now())
+    }, 1000)
+
+    return () => clearInterval(timerId)
+  }, [activeChatRequest])
 
   React.useEffect(() => {
     const node = composerRef.current
@@ -1940,6 +2289,54 @@ export default function AiChatPage() {
     fileInputRef.current?.click()
   }, [])
 
+  const isActiveChatRequest = React.useCallback((requestId) => {
+    const active = activeChatRequestRef.current
+
+    return active.id === requestId && active.cancelled !== true
+  }, [])
+
+  const updateActiveChatRequestStage = React.useCallback(
+    (requestId, stage) => {
+      if (!isActiveChatRequest(requestId)) {
+        return
+      }
+
+      setActiveChatRequest((current) =>
+        current && current.id === requestId
+          ? {...current, stage: String(stage || '').trim()}
+          : current
+      )
+    },
+    [isActiveChatRequest]
+  )
+
+  const handleCancelChatRequest = React.useCallback(() => {
+    activeChatRequestRef.current = {
+      id: activeChatRequestRef.current.id,
+      cancelled: true,
+    }
+    setIsSending(false)
+    setActiveChatRequest(null)
+    setChatProgressNow(0)
+    toast({
+      render: () => (
+        <Toast title={t('Local AI request cancelled')}>
+          {t(
+            'IdenaAI stopped waiting and will ignore a late answer from the local runtime.'
+          )}
+        </Toast>
+      ),
+    })
+  }, [t, toast])
+
+  const handleStrongWaitMinutesChange = React.useCallback((event) => {
+    setStrongWaitMinutes(event?.target?.value || '')
+  }, [])
+
+  const handleStrongWaitMinutesBlur = React.useCallback(() => {
+    setStrongWaitMinutes((current) => normalizeStrongWaitMinutes(current))
+  }, [])
+
   const handleSend = React.useCallback(async () => {
     const prompt = String(draft || '').trim()
     const selectedAttachments = attachments.slice(0, CHAT_ATTACHMENT_LIMIT)
@@ -1975,6 +2372,14 @@ export default function AiChatPage() {
       teachingNote: correctionTeachingNote,
     })
     const nextHistory = [...messages, userMessage].slice(-CHAT_HISTORY_LIMIT)
+    const requestSettings = resolveChatRequestSettings({
+      chatWaitMode,
+      strongWaitMinutes,
+      runtimePayload,
+      outgoingAttachments,
+    })
+    const requestId = createChatId('chat-request')
+    const startedAt = Date.now()
 
     setMessages(nextHistory)
     setDraft('')
@@ -1998,22 +2403,47 @@ export default function AiChatPage() {
       return
     }
 
+    activeChatRequestRef.current = {id: requestId, cancelled: false}
     setIsSending(true)
+    setChatProgressNow(startedAt)
+    setActiveChatRequest({
+      id: requestId,
+      startedAt,
+      stage: t('Starting local runtime'),
+      mode: requestSettings.mode,
+      allowCompactFallback: requestSettings.allowCompactFallback,
+      allowDelayedStrongFallback: requestSettings.allowDelayedStrongFallback,
+      attemptTimeoutMs: requestSettings.attemptTimeoutMs,
+      softTimeoutMs: requestSettings.softTimeoutMs,
+      fallbackTimeoutMs: requestSettings.fallbackTimeoutMs,
+      totalBudgetMs: requestSettings.totalBudgetMs,
+      numPredict: requestSettings.numPredict,
+      requestedModel: requestSettings.requestedModel,
+      fallbackModel: requestSettings.fallbackModel,
+    })
 
     try {
       const {bridge} = await ensureInteractiveRuntimeReady()
+
+      if (!isActiveChatRequest(requestId)) {
+        return
+      }
+
       let flipAnalysis = null
 
       if (shouldAnalyzeFlipRequest(effectivePrompt, outgoingAttachments)) {
+        updateActiveChatRequestStage(requestId, t('Reading attached flip'))
         const images = outgoingAttachments.map(({dataUrl}) => dataUrl)
         const [sequenceResult, checkerResult] = await Promise.all([
           bridge.flipToText({
             ...runtimePayload,
             input: {images},
+            timeoutMs: requestSettings.attemptTimeoutMs,
           }),
           bridge.checkFlipSequence({
             ...runtimePayload,
             input: {images},
+            timeoutMs: requestSettings.attemptTimeoutMs,
           }),
         ])
 
@@ -2025,6 +2455,42 @@ export default function AiChatPage() {
             confidence: String(checkerResult?.confidence || '').trim() || null,
             reason: String(checkerResult?.reason || '').trim() || null,
           }
+        }
+
+        if (!isActiveChatRequest(requestId)) {
+          return
+        }
+      }
+
+      let codebaseContext = null
+
+      if (
+        includeCodebaseContext &&
+        outgoingAttachments.length === 0 &&
+        typeof bridge.getCodebaseContext === 'function'
+      ) {
+        updateActiveChatRequestStage(
+          requestId,
+          t('Reading local codebase context')
+        )
+
+        try {
+          codebaseContext = await bridge.getCodebaseContext({
+            query: effectivePrompt,
+            maxFiles: CHAT_CODEBASE_CONTEXT_MAX_FILES,
+            maxChars: CHAT_CODEBASE_CONTEXT_MAX_CHARS,
+            maxFileChars: CHAT_CODEBASE_CONTEXT_MAX_FILE_CHARS,
+          })
+        } catch (error) {
+          appendAssistantErrorToast(
+            t('Codebase context was unavailable: {{message}}', {
+              message: String(error?.message || error || '').trim(),
+            })
+          )
+        }
+
+        if (!isActiveChatRequest(requestId)) {
+          return
         }
       }
 
@@ -2045,6 +2511,10 @@ export default function AiChatPage() {
         bundledSampleMeta: bundledSampleFlip?.meta,
         flipAnalysis,
       })
+      const codebaseContextText =
+        codebaseContext?.ok && codebaseContext.context
+          ? String(codebaseContext.context).trim()
+          : ''
       const bridgeHistory = nextHistory.slice(
         outgoingAttachments.length > 0
           ? -LOCAL_CHAT_IMAGE_HISTORY_LIMIT
@@ -2060,109 +2530,536 @@ export default function AiChatPage() {
             outgoingAttachments.length > 0 && entry.id === userMessage.id,
         })
       )
-      const result = await bridge.chat({
-        ...runtimePayload,
-        messages: [
-          SYSTEM_CHAT_MESSAGE,
-          ...(teachingContext
-            ? [
-                {
-                  role: 'system',
-                  content:
-                    `User correction notes for this local conversation are challenges/new context to evaluate. ` +
-                    `Compare them with retained image, flip, or chat context. If they contradict an earlier assistant answer, do not repeat the old answer unless it still fits the available context; explain uncertainty briefly if verification is not possible.\n${teachingContext}`,
-                },
-              ]
-            : []),
-          ...(followUpFlipContext
-            ? [
-                {
-                  role: 'system',
-                  content:
-                    `The user is asking about the last discussed flip without reattaching images. ` +
-                    `Use the following retained flip context instead of expecting image payloads:\n${followUpFlipContext}`,
-                },
-              ]
-            : []),
-          ...(analysisContext
-            ? [
-                {
-                  role: 'system',
-                  content: `Attached flip analysis from the local runtime:\n${analysisContext}`,
-                },
-              ]
-            : []),
-          ...(outgoingAttachments.length > 0
-            ? [OCR_IMAGE_CHAT_SYSTEM_MESSAGE]
-            : []),
-          ...bridgeMessages,
-        ],
-        generationOptions:
-          outgoingAttachments.length > 0
-            ? {
-                temperature: 0,
-                num_predict: LOCAL_CHAT_IMAGE_RESPONSE_TOKENS,
-              }
-            : {
-                temperature: 0,
-                num_ctx: LOCAL_CHAT_CONTEXT_WINDOW_TOKENS,
-                num_predict: LOCAL_CHAT_TEXT_RESPONSE_TOKENS,
+      const chatMessages = [
+        SYSTEM_CHAT_MESSAGE,
+        ...(teachingContext
+          ? [
+              {
+                role: 'system',
+                content:
+                  `User correction notes for this local conversation are challenges/new context to evaluate. ` +
+                  `Compare them with retained image, flip, or chat context. If they contradict an earlier assistant answer, do not repeat the old answer unless it still fits the available context; explain uncertainty briefly if verification is not possible.\n${teachingContext}`,
               },
-        timeoutMs:
+            ]
+          : []),
+        ...(followUpFlipContext
+          ? [
+              {
+                role: 'system',
+                content:
+                  `The user is asking about the last discussed flip without reattaching images. ` +
+                  `Use the following retained flip context instead of expecting image payloads:\n${followUpFlipContext}`,
+              },
+            ]
+          : []),
+        ...(analysisContext
+          ? [
+              {
+                role: 'system',
+                content: `Attached flip analysis from the local runtime:\n${analysisContext}`,
+              },
+            ]
+          : []),
+        ...(outgoingAttachments.length > 0
+          ? [OCR_IMAGE_CHAT_SYSTEM_MESSAGE]
+          : []),
+        ...(codebaseContextText
+          ? [
+              {
+                role: 'system',
+                content: codebaseContextText,
+              },
+            ]
+          : []),
+        ...bridgeMessages,
+      ]
+      const strongGenerationOptions = {
+        temperature: 0,
+        num_predict:
           outgoingAttachments.length > 0
-            ? LOCAL_CHAT_IMAGE_TIMEOUT_MS
-            : LOCAL_CHAT_TEXT_TIMEOUT_MS,
+            ? LOCAL_CHAT_IMAGE_RESPONSE_TOKENS
+            : requestSettings.numPredict,
+        ...(outgoingAttachments.length === 0
+          ? {
+              num_ctx: codebaseContextText
+                ? CHAT_STRONG_NUM_CTX_WITH_CODEBASE
+                : LOCAL_CHAT_CONTEXT_WINDOW_TOKENS,
+            }
+          : {}),
+      }
+      const fastGenerationOptions = {
+        temperature: 0,
+        num_predict: CHAT_FAST_NUM_PREDICT,
+        ...(codebaseContextText
+          ? {num_ctx: CHAT_FAST_NUM_CTX_WITH_CODEBASE}
+          : {}),
+      }
+      const appendAssistantMessage = ({
+        result: assistantResult,
+        fallbackNotice: noticeText = '',
+        prefixNotice = '',
+        nextFlipAnalysis = flipAnalysis,
+      }) => {
+        const assistantContent = extractChatContent(assistantResult)
+        const codebaseNotice = formatCodebaseContextSummary(codebaseContext)
+        const nextPrefixNotice = [codebaseNotice, prefixNotice]
+          .filter(Boolean)
+          .join('\n')
+
+        if (!assistantResult?.ok || !assistantContent) {
+          throw new Error(formatRuntimeStatusError(assistantResult, t))
+        }
+
+        const displayText = buildAssistantDisplayText({
+          assistantContent,
+          bundledSampleMeta: bundledSampleFlip?.meta,
+          fallbackNotice: noticeText,
+          flipAnalysis: nextFlipAnalysis,
+          prefixNotice: nextPrefixNotice,
+          t,
+        })
+
+        setMessages((current) =>
+          [
+            ...current,
+            createChatMessage('assistant', displayText, {
+              flipAnalysis: nextFlipAnalysis,
+              flipContext: currentFlipContext || followUpFlipContext || null,
+              persistLocally:
+                storeChatLocally && outgoingAttachments.length === 0,
+            }),
+          ].slice(-CHAT_HISTORY_LIMIT)
+        )
+        setStatusResult(assistantResult)
+      }
+
+      const runCodebaseMultiPassAnswer = async () => {
+        const inspectedPaths = new Set()
+        const passSummaries = []
+        let passContext = codebaseContext
+        let compressedMemory = ''
+        let codebaseInspectionNotice = ''
+        let lastInspectionError = ''
+        const useCompactCodebaseModel = Boolean(requestSettings.fallbackModel)
+        const codebaseRuntimePayload = useCompactCodebaseModel
+          ? {
+              ...runtimePayload,
+              model: requestSettings.fallbackModel,
+              visionModel: '',
+            }
+          : runtimePayload
+        const codebaseGenerationOptions = {
+          temperature: 0,
+          num_predict: CHAT_CODEBASE_MEMORY_NUM_PREDICT,
+          num_ctx: useCompactCodebaseModel
+            ? CHAT_FAST_NUM_CTX_WITH_CODEBASE
+            : CHAT_STRONG_NUM_CTX_WITH_CODEBASE,
+        }
+        const codebaseTimeoutMs = Math.min(
+          requestSettings.attemptTimeoutMs,
+          CHAT_CODEBASE_PASS_TIMEOUT_MS
+        )
+
+        for (
+          let passIndex = 1;
+          passIndex <= CHAT_CODEBASE_CONTEXT_MAX_PASSES;
+          passIndex += 1
+        ) {
+          const passContextText =
+            passContext?.ok && passContext.context
+              ? String(passContext.context).trim()
+              : ''
+
+          if (!passContextText) {
+            break
+          }
+
+          const passFiles = getCodebaseContextFilePaths(passContext)
+          passFiles.forEach((filePath) => inspectedPaths.add(filePath))
+          const passSummary = {
+            passIndex,
+            files: passFiles,
+            chars: Number(passContext.totalChars || 0),
+          }
+          passSummaries.push(passSummary)
+          updateActiveChatRequestStage(
+            requestId,
+            t('Inspecting codebase pass {{pass}}/{{total}}', {
+              pass: passIndex,
+              total: CHAT_CODEBASE_CONTEXT_MAX_PASSES,
+            })
+          )
+
+          let passResult = null
+
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            passResult = await bridge.chat({
+              ...codebaseRuntimePayload,
+              messages: [
+                SYSTEM_CHAT_MESSAGE,
+                {
+                  role: 'system',
+                  content: passContextText,
+                },
+                {
+                  role: 'user',
+                  content: buildCodebaseInspectionPrompt({
+                    originalPrompt: effectivePrompt,
+                    previousMemory: compressedMemory,
+                    passIndex,
+                    maxPasses: CHAT_CODEBASE_CONTEXT_MAX_PASSES,
+                  }),
+                },
+              ],
+              generationOptions: codebaseGenerationOptions,
+              fallbackGenerationOptions: null,
+              modelFallbacks: [],
+              timeoutMs: codebaseTimeoutMs,
+            })
+          } catch (error) {
+            lastInspectionError = formatChatError(error, t)
+            passSummary.error = lastInspectionError
+            break
+          }
+
+          if (!isActiveChatRequest(requestId)) {
+            return
+          }
+
+          const nextMemory = extractChatContent(passResult)
+
+          if (!passResult?.ok || !nextMemory) {
+            lastInspectionError = formatRuntimeStatusError(passResult, t)
+            passSummary.error = lastInspectionError
+            break
+          }
+
+          compressedMemory = nextMemory.slice(-12000)
+
+          const readyForFinal = isCodebaseInspectionReady(compressedMemory)
+          const shouldStop =
+            readyForFinal ||
+            passIndex >= CHAT_CODEBASE_CONTEXT_MAX_PASSES ||
+            !passContext.truncated ||
+            Number(passContext.remainingCandidateCount || 0) <= 0
+
+          if (shouldStop) {
+            break
+          }
+
+          const nextQuery =
+            extractCodebaseNextQuery(compressedMemory) || effectivePrompt
+          updateActiveChatRequestStage(
+            requestId,
+            t('Selecting another codebase slice')
+          )
+
+          // eslint-disable-next-line no-await-in-loop
+          passContext = await bridge.getCodebaseContext({
+            query: `${effectivePrompt}\n${nextQuery}\n${compressedMemory.slice(
+              0,
+              3000
+            )}`,
+            excludePaths: [...inspectedPaths],
+            maxFiles: CHAT_CODEBASE_CONTEXT_MAX_FILES,
+            maxChars: CHAT_CODEBASE_CONTEXT_MAX_CHARS,
+            maxFileChars: CHAT_CODEBASE_CONTEXT_MAX_FILE_CHARS,
+          })
+
+          if (!isActiveChatRequest(requestId)) {
+            return
+          }
+        }
+
+        const inspectedFileList = [...inspectedPaths]
+        if (!compressedMemory) {
+          compressedMemory = buildCodebaseInspectionFallbackMemory({
+            inspectedPaths: inspectedFileList,
+            passSummaries,
+            lastError: lastInspectionError,
+          })
+        }
+        codebaseInspectionNotice = `Codebase multi-pass inspection: ${passSummaries.length} pass(es), ${inspectedFileList.length} file(s).`
+        updateActiveChatRequestStage(
+          requestId,
+          t('Writing final answer from compressed codebase memory')
+        )
+
+        let finalResult = null
+
+        try {
+          finalResult = await bridge.chat({
+            ...codebaseRuntimePayload,
+            messages: [
+              SYSTEM_CHAT_MESSAGE,
+              {
+                role: 'system',
+                content: [
+                  'Use this compressed codebase working memory from prior inspection passes.',
+                  'Do not repeat the exploration; answer the user directly.',
+                  'If the memory says a path was skipped because it is huge/generated/fixture data, mention that briefly and do not treat it as a failure.',
+                  `Inspected files:\n${inspectedFileList.join('\n')}`,
+                  `Compressed working memory:\n${compressedMemory}`,
+                ].join('\n\n'),
+              },
+              {
+                role: 'user',
+                content: effectivePrompt,
+              },
+            ],
+            generationOptions: {
+              ...(useCompactCodebaseModel
+                ? fastGenerationOptions
+                : strongGenerationOptions),
+              num_predict: useCompactCodebaseModel
+                ? CHAT_FAST_NUM_PREDICT
+                : requestSettings.numPredict,
+            },
+            fallbackGenerationOptions: null,
+            modelFallbacks: [],
+            timeoutMs: useCompactCodebaseModel
+              ? requestSettings.fallbackTimeoutMs
+              : requestSettings.attemptTimeoutMs,
+          })
+        } catch (error) {
+          finalResult = {
+            ok: true,
+            content: [
+              'Codebase context was split into smaller passes, but the local model did not finish the audit in time.',
+              '',
+              `Inspected files: ${
+                inspectedFileList.length ? inspectedFileList.join(', ') : 'none'
+              }`,
+              lastInspectionError
+                ? `Last inspection issue: ${lastInspectionError}`
+                : `Final model issue: ${formatChatError(error, t)}`,
+              '',
+              'The app skipped heavy/generated data such as dependency folders, build output, flip fixtures, and WASM source unless explicitly requested. Ask a narrower question such as "audit main/local-ai/codebase-context.js" or switch to Strong model with a longer wait for a deeper audit.',
+            ].join('\n'),
+          }
+        }
+
+        if (!isActiveChatRequest(requestId)) {
+          return
+        }
+
+        appendAssistantMessage({
+          result: finalResult,
+          prefixNotice: codebaseInspectionNotice,
+          nextFlipAnalysis: null,
+        })
+      }
+
+      if (
+        codebaseContextText &&
+        shouldUseCodebaseMultiPass(effectivePrompt, codebaseContext)
+      ) {
+        await runCodebaseMultiPassAnswer()
+        return
+      }
+
+      if (requestSettings.allowDelayedStrongFallback) {
+        updateActiveChatRequestStage(
+          requestId,
+          t('Asking selected model before compact fallback deadline')
+        )
+        const strongResultPromise = bridge
+          .chat({
+            ...runtimePayload,
+            messages: chatMessages,
+            generationOptions: strongGenerationOptions,
+            fallbackGenerationOptions: null,
+            modelFallbacks: [],
+            timeoutMs: requestSettings.attemptTimeoutMs,
+          })
+          .then((strongResult) => ({kind: 'strong', result: strongResult}))
+          .catch((error) => ({kind: 'strong-error', error}))
+        const firstOutcome = await Promise.race([
+          strongResultPromise,
+          delayChat(requestSettings.softTimeoutMs).then(() => ({
+            kind: 'soft-timeout',
+          })),
+        ])
+
+        if (!isActiveChatRequest(requestId)) {
+          return
+        }
+
+        if (firstOutcome.kind === 'strong-error') {
+          throw firstOutcome.error
+        }
+
+        if (firstOutcome.kind === 'strong') {
+          appendAssistantMessage({result: firstOutcome.result})
+          return
+        }
+
+        updateActiveChatRequestStage(
+          requestId,
+          t('Asking compact model while selected model keeps working')
+        )
+
+        let fallbackShown = false
+
+        try {
+          const fallbackResult = await bridge.chat({
+            ...runtimePayload,
+            model: requestSettings.fallbackModel,
+            visionModel: '',
+            messages: chatMessages,
+            generationOptions: fastGenerationOptions,
+            fallbackGenerationOptions: null,
+            modelFallbacks: [],
+            timeoutMs: requestSettings.fallbackTimeoutMs,
+          })
+
+          if (!isActiveChatRequest(requestId)) {
+            return
+          }
+
+          appendAssistantMessage({
+            result: fallbackResult,
+            fallbackNotice: t(
+              'Fast answer from {{fallbackModel}}. {{strongModel}} is still running and may add a deeper answer later.',
+              {
+                fallbackModel: requestSettings.fallbackModel,
+                strongModel: requestSettings.requestedModel,
+              }
+            ),
+            nextFlipAnalysis: null,
+          })
+          fallbackShown = true
+          updateActiveChatRequestStage(
+            requestId,
+            t('Waiting for delayed deep answer')
+          )
+        } catch {
+          if (!isActiveChatRequest(requestId)) {
+            return
+          }
+
+          updateActiveChatRequestStage(
+            requestId,
+            t('Compact fallback failed; still waiting for selected model')
+          )
+        }
+
+        const strongOutcome = await strongResultPromise
+
+        if (!isActiveChatRequest(requestId)) {
+          return
+        }
+
+        if (strongOutcome.kind === 'strong-error') {
+          if (!fallbackShown) {
+            throw strongOutcome.error
+          }
+
+          return
+        }
+
+        try {
+          appendAssistantMessage({
+            result: strongOutcome.result,
+            prefixNotice: fallbackShown
+              ? t('Delayed deep answer from {{model}} is ready.', {
+                  model:
+                    strongOutcome.result?.activeModel ||
+                    requestSettings.requestedModel,
+                })
+              : '',
+            nextFlipAnalysis: fallbackShown ? null : flipAnalysis,
+          })
+        } catch (strongError) {
+          if (!fallbackShown) {
+            throw strongError
+          }
+        }
+
+        return
+      }
+
+      updateActiveChatRequestStage(
+        requestId,
+        requestSettings.allowCompactFallback
+          ? t('Asking selected model, then compact fallback if needed')
+          : t('Asking selected model')
+      )
+      const fallbackGenerationOptions = requestSettings.allowCompactFallback
+        ? fastGenerationOptions
+        : null
+      const modelFallbacks = requestSettings.allowCompactFallback
+        ? [requestSettings.fallbackModel]
+        : []
+      const chatResult = await bridge.chat({
+        ...runtimePayload,
+        messages: chatMessages,
+        generationOptions: strongGenerationOptions,
+        fallbackGenerationOptions,
+        modelFallbacks,
+        timeoutMs: requestSettings.attemptTimeoutMs,
       })
-      const assistantContent = extractChatContent(result)
 
-      if (!result?.ok || !assistantContent) {
-        throw new Error(formatRuntimeStatusError(result, t))
+      if (!isActiveChatRequest(requestId)) {
+        return
       }
 
-      const bundledSampleNotice = formatBundledSampleFlipNotice(
-        bundledSampleFlip?.meta,
-        t
-      )
-      const introText = bundledSampleNotice ? `${bundledSampleNotice}\n\n` : ''
-      let displayText = `${introText}${assistantContent}`
+      const compactFallbackNotice =
+        chatResult?.fallbackUsed &&
+        chatResult.activeModel &&
+        chatResult.requestedModel
+          ? t(
+              'Local chat used {{activeModel}} because {{requestedModel}} did not return a usable reply fast enough.',
+              {
+                activeModel: chatResult.activeModel,
+                requestedModel: chatResult.requestedModel,
+              }
+            )
+          : ''
 
-      if (flipAnalysis) {
-        displayText = `${introText}${formatFlipAnalysisForDisplay(
-          flipAnalysis,
-          t
-        )}\n\n${assistantContent}`
-      }
-
-      setMessages((current) =>
-        [
-          ...current,
-          createChatMessage('assistant', displayText, {
-            flipAnalysis,
-            flipContext: currentFlipContext || followUpFlipContext || null,
-            persistLocally:
-              storeChatLocally && outgoingAttachments.length === 0,
-          }),
-        ].slice(-CHAT_HISTORY_LIMIT)
-      )
-      setStatusResult(result)
+      appendAssistantMessage({
+        result: chatResult,
+        fallbackNotice: compactFallbackNotice,
+      })
     } catch (error) {
+      if (!isActiveChatRequest(requestId)) {
+        return
+      }
+
       const message = formatChatError(error, t)
       setLastError(message)
       appendAssistantErrorToast(message)
     } finally {
-      setIsSending(false)
+      if (activeChatRequestRef.current.id === requestId) {
+        activeChatRequestRef.current = {
+          id: requestId,
+          cancelled: activeChatRequestRef.current.cancelled === true,
+        }
+
+        if (activeChatRequestRef.current.cancelled !== true) {
+          setIsSending(false)
+          setActiveChatRequest(null)
+          setChatProgressNow(0)
+        }
+      }
     }
   }, [
     appendAssistantErrorToast,
     attachments,
+    chatWaitMode,
     draft,
     ensureInteractiveRuntimeReady,
+    includeCodebaseContext,
+    isActiveChatRequest,
     isSending,
     latestFlipContextMessage,
     messages,
     runtimePayload,
     storeChatLocally,
+    strongWaitMinutes,
     t,
+    updateActiveChatRequestStage,
   ])
 
   const handleDraftKeyDown = React.useCallback(
@@ -2203,7 +3100,7 @@ export default function AiChatPage() {
     setLastError('')
   }, [])
 
-  const shouldBootstrapManagedLocalAi = React.useMemo(() => {
+  const shouldBootstrapRecommendedLocalAi = React.useMemo(() => {
     const currentEndpoint = String(
       localAi.endpoint || localAi.baseUrl || ''
     ).trim()
@@ -2228,18 +3125,16 @@ export default function AiChatPage() {
     updateLocalAiSettings(
       localAi.runtimeBackend === 'local-runtime-service' ||
         (localAi.runtimeBackend === 'ollama-direct' &&
-          !shouldBootstrapManagedLocalAi)
+          !shouldBootstrapRecommendedLocalAi)
         ? {enabled: true}
         : {
             enabled: true,
-            ...buildManagedLocalRuntimePreset(
-              DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
-            ),
+            ...buildRecommendedLocalAiMacPreset(),
           }
     )
   }, [
     localAi.runtimeBackend,
-    shouldBootstrapManagedLocalAi,
+    shouldBootstrapRecommendedLocalAi,
     updateLocalAiSettings,
   ])
 
@@ -2318,19 +3213,17 @@ export default function AiChatPage() {
     const nextSettingsPatch =
       localAi.runtimeBackend === 'local-runtime-service' ||
       (localAi.runtimeBackend === 'ollama-direct' &&
-        !shouldBootstrapManagedLocalAi)
+        !shouldBootstrapRecommendedLocalAi)
         ? {enabled: true}
         : {
             enabled: true,
-            ...buildManagedLocalRuntimePreset(
-              DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
-            ),
+            ...buildRecommendedLocalAiMacPreset(),
           }
 
     return startLocalAiRuntime(nextSettingsPatch)
   }, [
     localAi.runtimeBackend,
-    shouldBootstrapManagedLocalAi,
+    shouldBootstrapRecommendedLocalAi,
     startLocalAiRuntime,
   ])
 
@@ -2377,13 +3270,13 @@ export default function AiChatPage() {
       enabled: true,
       ...buildLocalAiRepairPreset(localAi, {
         preferManaged:
-          shouldBootstrapManagedLocalAi ||
+          shouldBootstrapRecommendedLocalAi ||
           localAi.runtimeBackend === 'local-runtime-service',
       }),
     }
 
     return startLocalAiRuntime(nextSettingsPatch)
-  }, [localAi, shouldBootstrapManagedLocalAi, startLocalAiRuntime])
+  }, [localAi, shouldBootstrapRecommendedLocalAi, startLocalAiRuntime])
 
   const closeManagedRuntimeTrustDialog = React.useCallback(() => {
     setIsManagedRuntimeTrustDialogOpen(false)
@@ -2486,10 +3379,13 @@ export default function AiChatPage() {
       : t('Start local runtime'))
   let backendLabel = t('Custom local runtime')
 
-  if (shouldBootstrapManagedLocalAi) {
-    backendLabel = t('Managed on-device runtime')
+  if (shouldBootstrapRecommendedLocalAi) {
+    backendLabel = t('Qwen via Ollama')
   } else if (localAi.runtimeBackend === 'ollama-direct') {
-    backendLabel = t('Ollama local runtime')
+    backendLabel =
+      String(localAi.model || '').trim() === RECOMMENDED_LOCAL_AI_OLLAMA_MODEL
+        ? t('Qwen via Ollama')
+        : t('Ollama local runtime')
   } else if (localAi.runtimeBackend === 'local-runtime-service') {
     const managedRuntimeFamily = getManagedLocalRuntimeFamily(localAi)
     backendLabel = managedRuntimeFamily
@@ -2506,7 +3402,7 @@ export default function AiChatPage() {
   }
   let runtimeStatusLabel = t('Disabled')
 
-  if (shouldBootstrapManagedLocalAi && !localAi.enabled) {
+  if (shouldBootstrapRecommendedLocalAi && !localAi.enabled) {
     runtimeStatusLabel = t('Ready to set up')
   } else if (runtimeProgressDisplay) {
     runtimeStatusLabel =
@@ -2533,6 +3429,23 @@ export default function AiChatPage() {
       'Text-only messages in this chat will be kept locally until you clear them.'
     )
   }
+
+  const activeChatElapsedMs = activeChatRequest
+    ? Math.max(
+        0,
+        Number(chatProgressNow || Date.now()) -
+          Number(activeChatRequest.startedAt || Date.now())
+      )
+    : 0
+  const activeChatBudgetMs =
+    Number(activeChatRequest?.totalBudgetMs || 0) ||
+    Number(activeChatRequest?.attemptTimeoutMs || 0)
+  const activeChatProgressPercent = activeChatBudgetMs
+    ? Math.min(
+        98,
+        Math.max(3, (activeChatElapsedMs / activeChatBudgetMs) * 100)
+      )
+    : undefined
 
   let runtimeStatusTone = 'orange'
 
@@ -2641,7 +3554,7 @@ export default function AiChatPage() {
         >
           <Text>
             {t(
-              'Local AI is off. Turn it on once and IdenaAI will prepare the on-device runtime for you.'
+              'Local AI is off. Turn it on once and IdenaAI will prepare Qwen via Ollama on this device.'
             )}
           </Text>
           <HStack spacing={2}>
@@ -2849,6 +3762,11 @@ export default function AiChatPage() {
                 {runtimeStatusLabel}
               </Badge>
               <Badge variant="subtle">{backendLabel}</Badge>
+              {localAi.model ? (
+                <Badge variant="subtle">
+                  {t('Model: {{model}}', {model: localAi.model})}
+                </Badge>
+              ) : null}
               <SecondaryButton
                 leftIcon={<SyncIcon boxSize="4" />}
                 isLoading={isCheckingStatus}
@@ -3014,11 +3932,68 @@ export default function AiChatPage() {
                         px={4}
                         py={3}
                         boxShadow="sm"
+                        minW={['full', '360px']}
+                        maxW="xl"
                       >
-                        <HStack spacing={3}>
-                          <Spinner size="sm" color="brandBlue.500" />
-                          <Text color="muted">{t('Thinking...')}</Text>
-                        </HStack>
+                        <Stack spacing={3}>
+                          <HStack spacing={3} align="flex-start">
+                            <Spinner size="sm" color="brandBlue.500" mt={1} />
+                            <Box minW={0} flex={1}>
+                              <Text fontWeight={600}>
+                                {activeChatRequest?.stage || t('Thinking...')}
+                              </Text>
+                              <Text color="muted" fontSize="sm" noOfLines={1}>
+                                {activeChatRequest?.fallbackModel
+                                  ? t('{{model}} with fallback {{fallback}}', {
+                                      model:
+                                        activeChatRequest.requestedModel ||
+                                        localAi.model ||
+                                        t('selected model'),
+                                      fallback: activeChatRequest.fallbackModel,
+                                    })
+                                  : activeChatRequest?.requestedModel ||
+                                    localAi.model ||
+                                    t('Local AI')}
+                              </Text>
+                            </Box>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              colorScheme="red"
+                              onClick={handleCancelChatRequest}
+                            >
+                              {t('Cancel request')}
+                            </Button>
+                          </HStack>
+                          <Progress
+                            value={activeChatProgressPercent}
+                            isIndeterminate={!activeChatProgressPercent}
+                            size="sm"
+                            borderRadius="full"
+                          />
+                          <Flex justify="space-between" gap={3}>
+                            <Text color="muted" fontSize="xs">
+                              {getChatWaitModeDescription(
+                                activeChatRequest?.mode || chatWaitMode,
+                                t
+                              )}
+                            </Text>
+                            <Text
+                              color="muted"
+                              fontSize="xs"
+                              fontWeight={600}
+                              whiteSpace="nowrap"
+                            >
+                              {activeChatBudgetMs
+                                ? `${formatChatDuration(
+                                    activeChatElapsedMs
+                                  )} / ${formatChatDuration(
+                                    activeChatBudgetMs
+                                  )}`
+                                : formatChatDuration(activeChatElapsedMs)}
+                            </Text>
+                          </Flex>
+                        </Stack>
                       </Box>
                     </Flex>
                   ) : null}
@@ -3177,6 +4152,98 @@ export default function AiChatPage() {
                   align={['flex-start', 'center']}
                   direction={['column', 'row']}
                   gap={3}
+                  bg="blue.012"
+                  borderWidth="1px"
+                  borderColor="blue.100"
+                  borderRadius="xl"
+                  px={3}
+                  py={3}
+                >
+                  <Stack spacing={1} minW={0}>
+                    <HStack spacing={2} wrap="wrap">
+                      <Badge colorScheme="blue">{t('Answer mode')}</Badge>
+                      <Text fontSize="sm" fontWeight={600}>
+                        {getChatWaitModeLabel(chatWaitMode, t)}
+                      </Text>
+                    </HStack>
+                    <Text color="muted" fontSize="xs">
+                      {getChatWaitModeDescription(chatWaitMode, t)}
+                    </Text>
+                  </Stack>
+
+                  <HStack spacing={2} wrap="wrap" align="center">
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      variant={
+                        chatWaitMode === CHAT_WAIT_MODE_STRONG
+                          ? 'solid'
+                          : 'outline'
+                      }
+                      onClick={() => setChatWaitMode(CHAT_WAIT_MODE_STRONG)}
+                    >
+                      {t('Strong model')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      variant={
+                        chatWaitMode === CHAT_WAIT_MODE_FAST
+                          ? 'solid'
+                          : 'outline'
+                      }
+                      onClick={() => setChatWaitMode(CHAT_WAIT_MODE_FAST)}
+                    >
+                      {t('Fast fallback')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      variant={
+                        chatWaitMode === CHAT_WAIT_MODE_FAST_DEEP
+                          ? 'solid'
+                          : 'outline'
+                      }
+                      onClick={() => setChatWaitMode(CHAT_WAIT_MODE_FAST_DEEP)}
+                    >
+                      {t('Fast + deep later')}
+                    </Button>
+                    {chatWaitMode !== CHAT_WAIT_MODE_FAST ? (
+                      <HStack spacing={2}>
+                        <Text
+                          color="muted"
+                          fontSize="xs"
+                          fontWeight={600}
+                          whiteSpace="nowrap"
+                        >
+                          {chatWaitMode === CHAT_WAIT_MODE_FAST_DEEP
+                            ? t('Deep max')
+                            : t('Max wait')}
+                        </Text>
+                        <Input
+                          type="number"
+                          size="sm"
+                          min={CHAT_MIN_STRONG_WAIT_MINUTES}
+                          max={CHAT_MAX_STRONG_WAIT_MINUTES}
+                          value={strongWaitMinutes}
+                          onChange={handleStrongWaitMinutesChange}
+                          onBlur={handleStrongWaitMinutesBlur}
+                          w="72px"
+                          bg="white"
+                        />
+                        <Text color="muted" fontSize="xs">
+                          {t('min')}
+                        </Text>
+                      </HStack>
+                    ) : null}
+                  </HStack>
+                </Flex>
+
+                <Flex
+                  justify="space-between"
+                  align={['flex-start', 'center']}
+                  direction={['column', 'row']}
+                  gap={3}
                 >
                   <Stack spacing={2}>
                     <HStack spacing={3} wrap="wrap">
@@ -3200,9 +4267,38 @@ export default function AiChatPage() {
                           ),
                         ]}
                       </HelpPopover>
+                      <ChakraCheckbox
+                        size="sm"
+                        isChecked={includeCodebaseContext}
+                        onChange={(event) =>
+                          setIncludeCodebaseContext(
+                            Boolean(event?.target?.checked)
+                          )
+                        }
+                        isDisabled={attachments.length > 0}
+                      >
+                        {t('Attach local codebase context')}
+                      </ChakraCheckbox>
+                      <HelpPopover label={t('Codebase context privacy')}>
+                        {[
+                          t(
+                            'When enabled, IdenaAI reads bounded source snippets from this local repo and sends them to the selected local model as read-only context.'
+                          ),
+                          t(
+                            'Secrets, build outputs, dependencies, and heavy folders are skipped. The model still cannot execute commands or edit files.'
+                          ),
+                          t(
+                            'Use this for audits, explanations, and change proposals. Use Codex or another coding tool to apply patches.'
+                          ),
+                        ]}
+                      </HelpPopover>
                     </HStack>
                     <Text color="muted" fontSize="xs">
-                      {storageHelperText}
+                      {includeCodebaseContext && attachments.length === 0
+                        ? t(
+                            'Repo context will be selected per question and kept out of saved chat history.'
+                          )
+                        : storageHelperText}
                     </Text>
                   </Stack>
 

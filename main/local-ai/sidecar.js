@@ -18,6 +18,7 @@ const DEFAULT_TIMEOUT_MS = 5000
 const MAX_FLIP_IMAGES = 8
 const MIN_TIMEOUT_MS = 1000
 const MAX_TIMEOUT_MS = 90 * 1000
+const MAX_CHAT_TIMEOUT_MS = 10 * 60 * 1000
 const MAX_MODEL_NAME_LENGTH = 160
 const MAX_CHAT_MESSAGES = 48
 const MAX_CHAT_MESSAGE_CHARS = 10 * 1000
@@ -168,14 +169,18 @@ function normalizeModelList(data) {
     .filter(Boolean)
 }
 
-function normalizeTimeoutMs(value, fallback = DEFAULT_TIMEOUT_MS) {
+function normalizeTimeoutMs(
+  value,
+  fallback = DEFAULT_TIMEOUT_MS,
+  maxTimeoutMs = MAX_TIMEOUT_MS
+) {
   const timeoutMs = Number.parseInt(value, 10)
 
   if (!Number.isFinite(timeoutMs)) {
     return fallback
   }
 
-  return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, timeoutMs))
+  return Math.min(maxTimeoutMs, Math.max(MIN_TIMEOUT_MS, timeoutMs))
 }
 
 function normalizeResponseFormat(value) {
@@ -629,7 +634,14 @@ function supportsOllamaThinkingToggle(model) {
   }
 
   return (
-    nextModel.startsWith('deepseek-r1') || nextModel.includes('/deepseek-r1')
+    nextModel.startsWith('deepseek-r1') ||
+    nextModel.includes('/deepseek-r1') ||
+    nextModel.startsWith('qwen3') ||
+    nextModel.startsWith('qwen36') ||
+    nextModel.startsWith('qwen35') ||
+    nextModel.includes('/qwen3') ||
+    nextModel.includes('idenaai-qwen36') ||
+    nextModel.includes('idenaarc-qwen36')
   )
 }
 
@@ -1528,7 +1540,11 @@ function createLocalAiSidecar({
     )
     const selectedModel =
       includesImages && nextVisionModel ? nextVisionModel : nextModel
-    const normalizedTimeoutMs = normalizeTimeoutMs(timeoutMs, 15 * 1000)
+    const normalizedTimeoutMs = normalizeTimeoutMs(
+      timeoutMs,
+      15 * 1000,
+      MAX_CHAT_TIMEOUT_MS
+    )
     const normalizedResponseFormat = normalizeResponseFormat(responseFormat)
     const normalizedGenerationOptions =
       normalizeGenerationOptions(generationOptions)
@@ -2068,6 +2084,7 @@ function createLocalAiSidecar({
     timeoutMs = 15 * 1000,
     responseFormat = null,
     generationOptions = null,
+    fallbackGenerationOptions = null,
     modelFallbacks = [],
     visionModelFallbacks = [],
   } = {}) {
@@ -2152,6 +2169,16 @@ function createLocalAiSidecar({
       const candidateModel = includesImages
         ? candidateVisionModel
         : String(candidateVisionModel || '').trim()
+      let activeGenerationOptions = generationOptions
+
+      if (
+        !includesImages &&
+        fallbackGenerationOptions &&
+        candidateModel !== textModelCandidates[0]
+      ) {
+        activeGenerationOptions = fallbackGenerationOptions
+      }
+
       // eslint-disable-next-line no-await-in-loop
       result = await requestRuntimeChat({
         baseUrl,
@@ -2163,7 +2190,7 @@ function createLocalAiSidecar({
         messages: nextMessages,
         timeoutMs,
         responseFormat,
-        generationOptions,
+        generationOptions: activeGenerationOptions,
       })
       modelAttempts.push({
         model: candidateModel,

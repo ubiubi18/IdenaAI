@@ -118,6 +118,7 @@ const {createLocalAiFederated} = require('./local-ai/federated')
 const {createLocalAiManager} = require('./local-ai/manager')
 const {resolveLocalAiRuntimeAdapter} = require('./local-ai/runtime-adapter')
 const {ensureLocalAiEnabled} = require('./local-ai/enablement')
+const {buildCodebaseContext} = require('./local-ai/codebase-context')
 const {
   LOCAL_AI_RUNTIME_MODE,
   LOCAL_AI_RUNTIME,
@@ -2883,6 +2884,10 @@ handleTrusted('localAi.getDeveloperTelemetry', async () => ({
   ...(await localAiManager.getDeveloperTelemetry()),
   enabled: isLocalAiEnabled(),
 }))
+
+handleTrusted('localAi.getCodebaseContext', async (_event, payload = {}) =>
+  buildCodebaseContext(payload)
+)
 
 handleTrusted(
   'localAi.start',
