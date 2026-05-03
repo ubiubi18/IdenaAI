@@ -116,6 +116,7 @@ function syncLegacyBridgeGlobals(bridge = {}) {
       start: empty,
       stop: async () => ({ok: true}),
       listModels: async () => ({ok: false, models: [], total: 0}),
+      getCodebaseContext: empty,
       chat: empty,
       captionFlip: async () => ({ok: false, status: 'not_implemented'}),
       ocrImage: async () => ({ok: false, status: 'not_implemented'}),

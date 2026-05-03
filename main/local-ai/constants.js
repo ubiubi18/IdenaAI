@@ -6,15 +6,17 @@ const LOCAL_AI_REASONER_BACKEND = 'local-reasoner'
 const LOCAL_AI_VISION_BACKEND = 'local-vision'
 const LOCAL_AI_RUNTIME_FAMILY = 'local-reasoner'
 const LOCAL_AI_DEFAULT_BASE_URL = 'http://127.0.0.1:11434'
-const LOCAL_AI_DEFAULT_MODEL = ''
+const LOCAL_AI_RECOMMENDED_OLLAMA_MODEL = 'idenaai-qwen36-27b-claude-opus:q4km'
+const LOCAL_AI_HF_OLLAMA_MODEL =
+  'hf.co/rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF:Q4_K_M'
+const LOCAL_AI_DEFAULT_MODEL = LOCAL_AI_RECOMMENDED_OLLAMA_MODEL
 const LOCAL_AI_DEFAULT_VISION_MODEL = ''
 const LOCAL_AI_PUBLIC_MODEL_ID = 'Idena-text-v1'
 const LOCAL_AI_PUBLIC_VISION_ID = 'Idena-multimodal-v1'
 const LOCAL_AI_ADAPTER_STRATEGY = 'lora-first'
 const LOCAL_AI_TRAINING_POLICY = 'approved-post-consensus-only'
 const LOCAL_AI_CONTRACT_VERSION = 'idena-local/v1'
-const LOCAL_AI_BASE_MODEL_ID =
-  'idena-local:Idena-multimodal-v1:adapter-lora-first-v1'
+const LOCAL_AI_BASE_MODEL_ID = `ollama:${LOCAL_AI_RECOMMENDED_OLLAMA_MODEL}:adapter-lora-first-v1`
 
 module.exports = {
   LOCAL_AI_PROVIDER,
@@ -24,6 +26,8 @@ module.exports = {
   LOCAL_AI_REASONER_BACKEND,
   LOCAL_AI_VISION_BACKEND,
   LOCAL_AI_RUNTIME_FAMILY,
+  LOCAL_AI_RECOMMENDED_OLLAMA_MODEL,
+  LOCAL_AI_HF_OLLAMA_MODEL,
   LOCAL_AI_DEFAULT_BASE_URL,
   LOCAL_AI_DEFAULT_MODEL,
   LOCAL_AI_DEFAULT_VISION_MODEL,
