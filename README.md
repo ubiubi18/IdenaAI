@@ -86,10 +86,13 @@ What the two long lines mean:
   allow real session-auto from Terminal.
 - `npm start` starts Electron from the current source code.
 
+This explicit `IDENA_DESKTOP_USER_DATA_DIR` overrides the default development
+profile. Do not remove it from the real on-chain session command.
+
 When it starts, Terminal should print a line like:
 
 ```text
-[IdenaAI] Dev user data: /Users/you/Library/Application Support/IdenaAI
+[IdenaAI] Dev user data: <home>/Library/Application Support/IdenaAI
 ```
 
 If that line points to `IdenaAI-runtime`, you are in the practice profile, not
@@ -191,7 +194,7 @@ The rehearsal path is the recommended first test because it is local practice,
 not real validation.
 
 Important: `npm start` uses a separate workspace practice profile under
-`IdenaAI-runtime/IdenaAI`. It intentionally refuses to start if that practice
+`IdenaAI-runtime/IdenaAIDev`. It intentionally refuses to start if that practice
 profile still has real on-chain `session-auto` armed. That guard exists to stop
 you from accidentally using the wrong runtime for a real validation.
 
@@ -458,7 +461,7 @@ For source runs from the standard workspace layout, `npm start` resolves
 `userData` under the workspace-local runtime directory:
 
 ```text
-../IdenaAI-runtime/IdenaAI/ai-benchmark/
+../IdenaAI-runtime/IdenaAIDev/ai-benchmark/
 ```
 
 For a packaged macOS app, the same metrics path resolves under:
@@ -481,7 +484,7 @@ Source runs started with `npm start` use `scripts/start-electron-dev.js`, which
 defaults to a workspace-local runtime root next to the checked-out repository:
 
 ```text
-../IdenaAI-runtime/IdenaAI/
+../IdenaAI-runtime/IdenaAIDev/
 ```
 
 For example, if the repository is checked out at:
@@ -493,7 +496,7 @@ For example, if the repository is checked out at:
 the default source-run `userData` path is:
 
 ```text
-~/src/IdenaAI-runtime/IdenaAI/
+~/src/IdenaAI-runtime/IdenaAIDev/
 ```
 
 Packaged builds default to the OS app-data directory with storage name
@@ -664,7 +667,7 @@ Required startup for a real identity:
 - stay nearby and watch the ceremony; this is not unattended production software
 
 Why the data-folder setting matters: plain `npm start` uses the workspace-local
-practice profile under `../IdenaAI-runtime/IdenaAI/`. The normal macOS real app
+practice profile under `../IdenaAI-runtime/IdenaAIDev/`. The normal macOS real app
 profile is `~/Library/Application Support/IdenaAI/`. For real validation from
 Terminal, point `IDENA_DESKTOP_USER_DATA_DIR` at the real profile so the app can
 see the real identity and node settings. The safety override exists so this is a
@@ -698,7 +701,7 @@ IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 npm start
 That command uses the default source/practice profile:
 
 ```text
-../IdenaAI-runtime/IdenaAI/
+../IdenaAI-runtime/IdenaAIDev/
 ```
 
 For the normal real app profile, point `IDENA_DESKTOP_USER_DATA_DIR`
