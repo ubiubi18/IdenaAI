@@ -84,8 +84,8 @@ import {
 } from '../utils/static-assets'
 import {AiEnableDialog} from './ai-enable-dialog'
 import {
-  DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY,
-  buildManagedLocalRuntimePreset,
+  RECOMMENDED_LOCAL_AI_OLLAMA_MODEL,
+  buildRecommendedLocalAiMacPreset,
 } from '../utils/local-ai-settings'
 import {buildLocalAiRuntimePayload} from '../utils/ai-provider-readiness'
 import {
@@ -485,6 +485,18 @@ function BenchmarkResearchBanner() {
   const settings = useSettingsState()
   const [, {updateAiSolverSettings, updateLocalAiSettings}] = useSettings()
   const aiEnabled = Boolean(settings?.aiSolver?.enabled)
+  const localAi = settings?.localAi || {}
+  const localAiModel =
+    String(localAi.model || '').trim() || RECOMMENDED_LOCAL_AI_OLLAMA_MODEL
+  const localAiSummary =
+    String(localAi.runtimeBackend || '').trim() === 'ollama-direct' &&
+    localAiModel === RECOMMENDED_LOCAL_AI_OLLAMA_MODEL
+      ? t('AI is enabled with Qwen via Ollama · {{model}}.', {
+          model: localAiModel,
+        })
+      : t(
+          'Turn on AI if you want AI solving or AI-assisted flip generation. New installs can start with Qwen via Ollama on this device.'
+        )
   const aiSetupDisclosure = useDisclosure()
 
   return (
@@ -508,9 +520,11 @@ function BenchmarkResearchBanner() {
           gap={2}
         >
           <Text fontSize="sm" color={aiEnabled ? 'orange.700' : 'blue.700'}>
-            {t(
-              'Turn on AI if you want AI solving or AI-assisted flip generation. New installs can start with the managed local runtime on this device.'
-            )}
+            {aiEnabled
+              ? localAiSummary
+              : t(
+                  'Turn on AI if you want AI solving or AI-assisted flip generation. New installs can start with Qwen via Ollama on this device.'
+                )}
           </Text>
           <Stack isInline spacing={3} align="center">
             <Stack isInline spacing={2} align="center">
@@ -561,9 +575,7 @@ function BenchmarkResearchBanner() {
           if (provider === 'local-ai') {
             updateLocalAiSettings({
               enabled: true,
-              ...buildManagedLocalRuntimePreset(
-                DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY
-              ),
+              ...buildRecommendedLocalAiMacPreset(),
             })
           }
           updateAiSolverSettings({

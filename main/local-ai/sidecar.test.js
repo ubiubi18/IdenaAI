@@ -947,7 +947,7 @@ describe('local-ai sidecar', () => {
     expect(httpClient.post).not.toHaveBeenCalled()
   })
 
-  it('allows longer image-chat timeouts up to the extended cap', async () => {
+  it('allows longer chat timeouts up to the extended cap', async () => {
     const httpClient = {
       post: jest.fn(async () => ({
         data: {
@@ -990,7 +990,7 @@ describe('local-ai sidecar', () => {
         model: 'reasoner-lab:latest',
       }),
       expect.objectContaining({
-        timeout: 90000,
+        timeout: 120000,
       })
     )
   })
