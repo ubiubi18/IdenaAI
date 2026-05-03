@@ -7,6 +7,13 @@ const {spawnSync} = require('child_process')
 const ROOT = path.join(__dirname, '..')
 const manifest = require('./source-manifest.json')
 
+const DEFAULT_DEV_USER_DATA_NAME = 'IdenaAIDev'
+const APP_USER_DATA_NAME =
+  process.env.IDENA_DESKTOP_APP_USER_DATA_NAME || DEFAULT_DEV_USER_DATA_NAME
+const WORKSPACE_RUNTIME_DIR =
+  process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
+  path.join(path.dirname(ROOT), 'IdenaAI-runtime')
+
 function commandVersion(command, args = ['--version']) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -89,10 +96,8 @@ function main() {
   printStatus('FLIP-Challenge input', localFlipStatus(), true)
   console.log(
     `Source dev profile: ${path.resolve(
-      ROOT,
-      '..',
-      'IdenaAI-runtime',
-      'IdenaAI'
+      WORKSPACE_RUNTIME_DIR,
+      APP_USER_DATA_NAME
     )}`
   )
   console.log('Packaged macOS profile: ~/Library/Application Support/IdenaAI')

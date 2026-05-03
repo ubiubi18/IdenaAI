@@ -20,8 +20,9 @@ const DEV_HOST = process.env.IDENA_DESKTOP_RENDERER_HOST || '127.0.0.1'
 const DEV_SERVER_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const STARTUP_TIMEOUT_MS = 120000
 const POLL_INTERVAL_MS = 1000
+const DEFAULT_DEV_USER_DATA_NAME = 'IdenaAIDev'
 const APP_USER_DATA_NAME =
-  process.env.IDENA_DESKTOP_APP_USER_DATA_NAME || 'IdenaAI'
+  process.env.IDENA_DESKTOP_APP_USER_DATA_NAME || DEFAULT_DEV_USER_DATA_NAME
 const WORKSPACE_RUNTIME_DIR =
   process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
   path.join(path.dirname(ROOT), 'IdenaAI-runtime')
@@ -115,7 +116,7 @@ function assertDevRuntimeCanStart(env) {
   throw new Error(
     [
       `Refusing to start the source dev runtime because real validation session-auto is armed in ${settingsPath}.`,
-      'Use the packaged IdenaAI app for real validation, or disable session-auto in that profile before running npm start.',
+      `Use the packaged IdenaAI app for real validation, switch to a clean dev profile with IDENA_DESKTOP_APP_USER_DATA_NAME=${DEFAULT_DEV_USER_DATA_NAME}, or disable session-auto in that profile before running npm start.`,
       `For deliberate local testing only, set ${ALLOW_DEV_SESSION_AUTO_ENV}=1.`,
     ].join(' ')
   )
