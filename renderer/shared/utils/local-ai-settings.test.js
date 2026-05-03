@@ -333,7 +333,7 @@ describe('local-ai settings schema', () => {
     )
   })
 
-  it('builds an embryo-stage Mac Ollama preset without a bundled base model', () => {
+  it('builds the recommended Qwen Ollama preset', () => {
     expect(buildRecommendedLocalAiMacPreset()).toMatchObject({
       runtimeBackend: 'ollama-direct',
       baseUrl: DEFAULT_LOCAL_AI_OLLAMA_BASE_URL,
@@ -342,7 +342,9 @@ describe('local-ai settings schema', () => {
       model: RECOMMENDED_LOCAL_AI_OLLAMA_MODEL,
       visionModel: RECOMMENDED_LOCAL_AI_OLLAMA_VISION_MODEL,
     })
-    expect(RECOMMENDED_LOCAL_AI_TRAINING_MODEL).toBe('')
+    expect(RECOMMENDED_LOCAL_AI_TRAINING_MODEL).toBe(
+      RECOMMENDED_LOCAL_AI_OLLAMA_MODEL
+    )
     expect(DEFAULT_HUMAN_TEACHER_SYSTEM_PROMPT).toMatch(
       /display slot are not evidence/i
     )
@@ -506,14 +508,14 @@ describe('local-ai settings schema', () => {
     })
   })
 
-  it('keeps local training disabled until a local base model is configured', () => {
+  it('enables local training when the default Qwen base model is configured', () => {
     const settings = buildLocalAiSettings({
       enabled: true,
       trainEnabled: false,
     })
 
     expect(settings.enabled).toBe(true)
-    expect(settings.trainEnabled).toBe(false)
+    expect(settings.trainEnabled).toBe(true)
   })
 
   it('keeps persisted explicit local runtime picks instead of forcing a fixed lane', () => {
