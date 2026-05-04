@@ -295,16 +295,20 @@ if (Test-Path .\IdenaAI) {
 }
 ```
 
-Step 6: install app dependencies and prepare the bundled Idena source runtime.
+Step 6: install app dependencies, prepare the source mirrors, and build the
+pinned Idena node from source in PowerShell before Electron opens.
 
 ```powershell
 npm ci
 npm run setup:sources
+npm run build:node
 npm run doctor
 ```
 
 Step 7: optionally start the normal source Electron app as a smoke test. This
-uses the source-run practice profile, not the normal real app profile.
+uses the source-run practice profile, not the normal real app profile. Keep the
+`npm run build:node` result in place so `Install node` / `Update node` can copy
+the pinned source-built node instead of opening a hidden local `go.exe` build.
 
 ```powershell
 npm start
@@ -312,7 +316,7 @@ npm start
 
 Step 8: for real-session autosolve from PowerShell, close the smoke-test app
 first. Then point Electron at the normal real Windows profile and set the
-explicit autosolve override:
+explicit autosolve override.
 
 ```powershell
 cd $env:USERPROFILE\Documents\IdenaAI
@@ -1430,17 +1434,21 @@ if (Test-Path .\IdenaAI) {
 }
 ```
 
-Step 6: install JavaScript dependencies and prepare the Idena source runtime.
+Step 6: install JavaScript dependencies, prepare the source mirrors, and build
+the pinned Idena node from source in PowerShell before Electron opens.
 
 ```powershell
 npm ci
 npm run setup:sources
+npm run build:node
 npm run doctor
 ```
 
 Step 7: optionally start the normal source Electron app as a smoke test. This
 uses the source-run practice profile unless you set the real-session environment
-variables in the next step.
+variables in the next step. The earlier `npm run build:node` step makes the
+in-app `Install node` / `Update node` path copy the pinned source-built node
+instead of opening a hidden local `go.exe` build.
 
 ```powershell
 npm start
@@ -1660,12 +1668,13 @@ The managed `idena-go` runtime is source-first too:
 
 - packaged apps copy a platform node binary bundled at build time
 - source checkouts can build the node locally with `npm run build:node`
-- runtime release lookup checks `ubiubi18/idena-go` first, then
-  `idena-network/idena-go` as a fallback for pinned node binaries
-- Windows source runs prefer the remote pinned node release by default so the
-  in-app `Install node` / `Update node` action downloads a binary instead of
-  opening a long local `go.exe` build
-- override release repos through `IDENAAI_NODE_RELEASE_REPOS` only if you
+- Windows first-install commands run `npm run build:node` before the first
+  Electron startup so the in-app `Install node` / `Update node` action can copy
+  the pinned source-built node instead of opening a hidden local `go.exe` build
+- runtime release lookup defaults to `ubiubi18/idena-go` only and should remain
+  a fallback path, not the normal Windows source-run installation path
+- override release repos through `IDENAAI_NODE_RELEASE_REPOS` or force remote
+  release lookup through `IDENAAI_NODE_PREFER_REMOTE_RELEASE=1` only if you
   intentionally trust the replacement source
 
 Do not assume the official `idena-desktop` app release path is repaired. The

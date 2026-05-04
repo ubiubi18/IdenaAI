@@ -15,7 +15,7 @@ const httpClient = require('./utils/fetch-client')
 const idenaBin = 'idena-go'
 const pinnedNodeVersion = '1.1.2'
 const pinnedNodeTag = `v${pinnedNodeVersion}`
-const defaultNodeReleaseRepos = ['ubiubi18/idena-go', 'idena-network/idena-go']
+const defaultNodeReleaseRepos = ['ubiubi18/idena-go']
 const idenaChainDbFolder = 'idenachain.db'
 const minNodeBinarySize = 1024 * 1024
 const localNodeBuildToolchain = 'go1.19.13'
@@ -73,6 +73,15 @@ function getBundledNodeFileCandidates() {
   }
 
   candidates.push(
+    path.resolve(
+      __dirname,
+      '..',
+      'build',
+      'node',
+      'current',
+      idenaBin + suffix
+    ),
+    path.resolve(process.cwd(), 'build', 'node', 'current', idenaBin + suffix),
     path.resolve(__dirname, '..', 'node', idenaBin + suffix),
     path.resolve(__dirname, '..', '..', 'node', idenaBin + suffix)
   )
@@ -1027,14 +1036,10 @@ function getNodeReleaseRepos(env = process.env) {
   return configured.length > 0 ? configured : defaultNodeReleaseRepos
 }
 
-function shouldPreferRemoteNodeRelease({
-  platform = process.platform,
-  env = process.env,
-} = {}) {
+function shouldPreferRemoteNodeRelease({env = process.env} = {}) {
   const configured = env.IDENAAI_NODE_PREFER_REMOTE_RELEASE
   if (isTruthyEnv(configured)) return true
-  if (isFalseyEnv(configured)) return false
-  return platform === 'win32'
+  return false
 }
 
 function getPinnedReleaseUrl(repo) {
@@ -1738,6 +1743,7 @@ module.exports = {
   getNodeIpfsDir,
   tryStopNode,
   __test__: {
+    getBundledNodeFileCandidates,
     getNodeReleaseRepos,
     getPeerHintFailureBackoffMs,
     isRpcMethodUnavailableError,
