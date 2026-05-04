@@ -2,12 +2,55 @@ const {
   __test__: {
     isPeerHintRetryable,
     isRpcMethodUnavailableError,
+    getNodeReleaseRepos,
     mergePeerHints,
     normalizePeerHint,
+    shouldPreferRemoteNodeRelease,
     sortPeerHintsForRetry,
     toBootstrapPeerHints,
   },
 } = require('./idena-node')
+
+describe('idena node release selection', () => {
+  it('checks the IdenaAI fork before falling back to the upstream node release', () => {
+    expect(getNodeReleaseRepos({})).toEqual([
+      'ubiubi18/idena-go',
+      'idena-network/idena-go',
+    ])
+  })
+
+  it('keeps explicit node release repo overrides', () => {
+    expect(
+      getNodeReleaseRepos({
+        IDENAAI_NODE_RELEASE_REPOS: 'example/one, example/two',
+      })
+    ).toEqual(['example/one', 'example/two'])
+  })
+
+  it('prefers remote node releases by default on Windows', () => {
+    expect(shouldPreferRemoteNodeRelease({platform: 'win32', env: {}})).toBe(
+      true
+    )
+    expect(shouldPreferRemoteNodeRelease({platform: 'darwin', env: {}})).toBe(
+      false
+    )
+  })
+
+  it('lets the remote release preference env override the platform default', () => {
+    expect(
+      shouldPreferRemoteNodeRelease({
+        platform: 'darwin',
+        env: {IDENAAI_NODE_PREFER_REMOTE_RELEASE: '1'},
+      })
+    ).toBe(true)
+    expect(
+      shouldPreferRemoteNodeRelease({
+        platform: 'win32',
+        env: {IDENAAI_NODE_PREFER_REMOTE_RELEASE: '0'},
+      })
+    ).toBe(false)
+  })
+})
 
 describe('idena node peer hints', () => {
   const now = Date.parse('2026-04-25T10:00:00.000Z')
