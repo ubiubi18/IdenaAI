@@ -970,28 +970,65 @@ release warnings. macOS may warn about unsigned or untrusted software.
 
 ### Windows
 
-Use PowerShell from a local source checkout. Install Git, Node 24, Python, Go,
-Visual Studio build tools, and MinGW first.
+Use PowerShell from a local source checkout. These commands are intentionally
+written one step at a time so you can see which dependency or setup stage fails.
 
-One-time Windows 10 dependency setup:
+Step 1: install the Windows 10 prerequisites. The Visual Studio Build Tools
+installer may open a separate installer window.
 
 ```powershell
 winget install --id Git.Git -e
-winget install --id CoreyButler.NVMforWindows -e
+winget install --id OpenJS.NodeJS.LTS -e --version 24.15.0
 winget install --id Python.Python.3.12 -e
 winget install --id GoLang.Go -e
 winget install --id MSYS2.MSYS2 -e
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-Close PowerShell, reopen it, then run:
+If `winget` cannot find the exact Node `24.15.0` package, run
+`winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 3
+shows Node `v24.15.0` or a newer `v24.x` release.
+
+Step 2: install the MinGW toolchain inside MSYS2 and add it to the current
+PowerShell path. If MSYS2 was installed somewhere else, adjust `C:\msys64`.
 
 ```powershell
-nvm install 24.15.0
-nvm use 24.15.0
-npm install -g npm@11.12.0
-git config --global core.longpaths true
+& "C:\msys64\usr\bin\bash.exe" -lc "pacman -Sy --needed --noconfirm base-devel mingw-w64-ucrt-x86_64-toolchain"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*C:\msys64\ucrt64\bin*") {
+  [Environment]::SetEnvironmentVariable("Path", "C:\msys64\ucrt64\bin;$userPath", "User")
+}
+$env:Path = "C:\msys64\ucrt64\bin;$env:Path"
+```
 
+Step 3: close PowerShell, reopen it, then verify that direct Node.js LTS is
+available. Do not use NVM for Windows for this setup if it fails on your PC.
+The app requires Node `24.15.0` or newer on the Node 24 line, and it rejects
+Node 25+.
+
+```powershell
+Get-Command node
+node -v
+npm -v
+```
+
+If `Get-Command node` still points to an NVM folder from an older attempt,
+remove NVM for Windows or fix `Path`, then reopen PowerShell and rerun this
+step.
+
+Step 4: install the required npm version, then verify the runtime versions and
+enable long Windows paths for Git.
+
+```powershell
+npm install -g npm@11.12.0
+node -v
+npm -v
+git config --global core.longpaths true
+```
+
+Step 5: clone or update the IdenaAI source checkout.
+
+```powershell
 cd $env:USERPROFILE\Documents
 if (Test-Path .\IdenaAI) {
   cd IdenaAI
@@ -1000,16 +1037,27 @@ if (Test-Path .\IdenaAI) {
   git clone https://github.com/ubiubi18/IdenaAI.git
   cd IdenaAI
 }
+```
 
+Step 6: install JavaScript dependencies and prepare the Idena source runtime.
+
+```powershell
 npm ci
 npm run setup:sources
 npm run doctor
+```
+
+Step 7: optionally start the normal source app as a smoke test. This uses the
+source-run practice profile unless you set the real-session environment
+variables in the next step.
+
+```powershell
 npm start
 ```
 
-For real-session autosolve from PowerShell, do not use the default source-run
-practice profile. Point the app at the normal real Windows profile and set the
-explicit autosolve override:
+Step 8: for real-session autosolve from PowerShell, close the normal source app
+first. Do not use the default source-run practice profile. Point the app at the
+normal real Windows profile and set the explicit autosolve override:
 
 ```powershell
 cd $env:USERPROFILE\Documents\IdenaAI
@@ -1020,7 +1068,7 @@ $env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
 npm start
 ```
 
-After Electron opens, check all of these before clicking
+Step 9: after Electron opens, check all of these before clicking
 `Enable auto-solve next session`:
 
 - the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
@@ -1035,14 +1083,14 @@ This can submit answers on-chain automatically. Wrong answers, missed sessions,
 provider costs, node failures, network failures, Windows sleep, or app crashes
 are your responsibility. Do not test this first on an identity you care about.
 
-After the real session, clear the PowerShell-only override:
+Step 10: after the real session, clear the PowerShell-only override:
 
 ```powershell
 Remove-Item Env:\IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO
 Remove-Item Env:\IDENA_DESKTOP_USER_DATA_DIR
 ```
 
-For a local Windows package built on your own machine:
+Step 11: for a local Windows package built on your own machine:
 
 ```powershell
 npm run dist:win
