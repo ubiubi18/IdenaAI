@@ -14,17 +14,57 @@ const WORKSPACE_RUNTIME_DIR =
   process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
   path.join(path.dirname(ROOT), 'IdenaAI-runtime')
 
-function commandVersion(command, args = ['--version']) {
-  const result = spawnSync(command, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+function windowsMsysUcrtBinCandidates() {
+  if (process.platform !== 'win32') return []
 
-  if (result.error || result.status !== 0) {
-    return null
+  return [
+    'C:\\msys64\\ucrt64\\bin',
+    process.env.LOCALAPPDATA &&
+      path.join(
+        process.env.LOCALAPPDATA,
+        'Programs',
+        'msys64',
+        'ucrt64',
+        'bin'
+      ),
+    process.env.ProgramFiles &&
+      path.join(process.env.ProgramFiles, 'msys64', 'ucrt64', 'bin'),
+    process.env['ProgramFiles(x86)'] &&
+      path.join(process.env['ProgramFiles(x86)'], 'msys64', 'ucrt64', 'bin'),
+  ].filter(Boolean)
+}
+
+function windowsCommandCandidates(command) {
+  if (process.platform !== 'win32' || path.isAbsolute(command)) {
+    return [command]
   }
 
-  return `${result.stdout || ''}${result.stderr || ''}`.trim().split('\n')[0]
+  return [command, `${command}.cmd`, `${command}.exe`]
+}
+
+function commandVersion(command, args = ['--version'], extraCandidates = []) {
+  const candidates = [...extraCandidates, ...windowsCommandCandidates(command)]
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    if (!result.error && result.status === 0) {
+      return `${result.stdout || ''}${result.stderr || ''}`
+        .trim()
+        .split('\n')[0]
+    }
+  }
+
+  return null
+}
+
+function gccCommandCandidates() {
+  return windowsMsysUcrtBinCandidates()
+    .map((candidate) => path.join(candidate, 'gcc.exe'))
+    .filter((candidate) => fs.existsSync(candidate))
 }
 
 function hasRequiredFiles(source) {
@@ -78,8 +118,23 @@ function main() {
     printStatus('node', process.version, /^v24\./u.test(process.version)) && ok
   ok = printStatus('npm', commandVersion('npm')) && ok
   ok = printStatus('git', commandVersion('git')) && ok
-  printInfo('python3', commandVersion('python3'))
+  printInfo(
+    process.platform === 'win32' ? 'python' : 'python3',
+    process.platform === 'win32'
+      ? commandVersion('python')
+      : commandVersion('python3')
+  )
   printInfo('go', commandVersion('go', ['version']))
+  const gccVersion = commandVersion(
+    'gcc',
+    ['--version'],
+    gccCommandCandidates()
+  )
+  if (process.platform === 'win32') {
+    ok = printStatus('gcc', gccVersion) && ok
+  } else {
+    printInfo('gcc', gccVersion)
+  }
   printInfo('rustc', commandVersion('rustc'))
 
   for (const source of manifest.sources || []) {

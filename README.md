@@ -247,6 +247,13 @@ if ($userPath -notlike "*$ucrtBin*") {
 }
 
 $env:Path = "$ucrtBin;$env:Path"
+
+if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
+  throw "gcc was not found after installing MSYS2. Close PowerShell, reopen it, and rerun Step 3."
+}
+
+Get-Command gcc
+gcc --version
 ```
 
 Step 4: close PowerShell, reopen it, then verify Node and npm. Continue only if
@@ -274,6 +281,8 @@ if ($npmVersion -lt [version]"11.12.0") {
 git --version
 python --version
 go version
+Get-Command gcc
+gcc --version
 git config --global core.longpaths true
 ```
 
@@ -296,12 +305,21 @@ if (Test-Path .\IdenaAI) {
 ```
 
 Step 6: install app dependencies, prepare the source mirrors, and build the
-pinned Idena node from source in PowerShell before Electron opens.
+pinned Idena node from source in PowerShell before Electron opens. `detached
+HEAD` messages inside `idena-go`, `idena-wasm`, or `idena-wasm-binding` are
+normal because the setup pins exact source commits.
 
 ```powershell
 npm ci
 npm run setup:sources
 npm run build:node
+
+$builtNodeVersion = (& .\build\node\current\idena-go.exe --version) -join "`n"
+$builtNodeVersion
+if ($builtNodeVersion -notmatch "1\.1\.2") {
+  throw "The source-built Idena node is missing or not version 1.1.2."
+}
+
 npm run doctor
 ```
 
@@ -1394,6 +1412,13 @@ if ($userPath -notlike "*$ucrtBin*") {
 }
 
 $env:Path = "$ucrtBin;$env:Path"
+
+if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
+  throw "gcc was not found after installing MSYS2. Close PowerShell, reopen it, and rerun Step 2."
+}
+
+Get-Command gcc
+gcc --version
 ```
 
 Step 3: close PowerShell, reopen it, then verify that direct Node.js LTS is
@@ -1418,6 +1443,11 @@ enable long Windows paths for Git.
 npm install -g npm@11.12.0
 node -v
 npm -v
+git --version
+python --version
+go version
+Get-Command gcc
+gcc --version
 git config --global core.longpaths true
 ```
 
@@ -1436,11 +1466,20 @@ if (Test-Path .\IdenaAI) {
 
 Step 6: install JavaScript dependencies, prepare the source mirrors, and build
 the pinned Idena node from source in PowerShell before Electron opens.
+`detached HEAD` messages inside `idena-go`, `idena-wasm`, or
+`idena-wasm-binding` are normal because the setup pins exact source commits.
 
 ```powershell
 npm ci
 npm run setup:sources
 npm run build:node
+
+$builtNodeVersion = (& .\build\node\current\idena-go.exe --version) -join "`n"
+$builtNodeVersion
+if ($builtNodeVersion -notmatch "1\.1\.2") {
+  throw "The source-built Idena node is missing or not version 1.1.2."
+}
+
 npm run doctor
 ```
 
