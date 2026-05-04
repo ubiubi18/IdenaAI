@@ -1660,14 +1660,18 @@ The managed `idena-go` runtime is source-first too:
 
 - packaged apps copy a platform node binary bundled at build time
 - source checkouts can build the node locally with `npm run build:node`
-- runtime release lookup defaults to `ubiubi18/idena-go` only
-- add other release repos through `IDENAAI_NODE_RELEASE_REPOS` only if you
-  intentionally trust them
+- runtime release lookup checks `ubiubi18/idena-go` first, then
+  `idena-network/idena-go` as a fallback for pinned node binaries
+- Windows source runs prefer the remote pinned node release by default so the
+  in-app `Install node` / `Update node` action downloads a binary instead of
+  opening a long local `go.exe` build
+- override release repos through `IDENAAI_NODE_RELEASE_REPOS` only if you
+  intentionally trust the replacement source
 
-Do not assume the `idena-network` upstream release path is repaired. The
-upstream PRs below explain the failure mode and proposed fixes, but they are not
-a reliable default binary source for this repo because they are still unmerged
-or draft at the time of this README update:
+Do not assume the official `idena-desktop` app release path is repaired. The
+upstream PRs below explain the desktop failure mode and proposed fixes, but they
+are not a reliable default app binary source for this repo because they are
+still unmerged or draft at the time of this README update:
 
 - [`idena-network/idena-wasm-binding#1`](https://github.com/idena-network/idena-wasm-binding/pull/1):
   open PR adding the Darwin arm64 wasm binding archive
