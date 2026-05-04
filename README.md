@@ -972,6 +972,9 @@ release warnings. macOS may warn about unsigned or untrusted software.
 
 Use PowerShell from a local source checkout. These commands are intentionally
 written one step at a time so you can see which dependency or setup stage fails.
+Run each block in order. The `npm start` commands below start IdenaAI inside
+Electron from the source checkout; the real-session block also enables the
+explicit autosolve override for that PowerShell window.
 
 Step 1: install the Windows 10 prerequisites. The Visual Studio Build Tools
 installer may open a separate installer window.
@@ -1047,8 +1050,8 @@ npm run setup:sources
 npm run doctor
 ```
 
-Step 7: optionally start the normal source app as a smoke test. This uses the
-source-run practice profile unless you set the real-session environment
+Step 7: optionally start the normal source Electron app as a smoke test. This
+uses the source-run practice profile unless you set the real-session environment
 variables in the next step.
 
 ```powershell
@@ -1056,7 +1059,7 @@ npm start
 ```
 
 Step 8: for real-session autosolve from PowerShell, close the normal source app
-first. Do not use the default source-run practice profile. Point the app at the
+first. Do not use the default source-run practice profile. Point Electron at the
 normal real Windows profile and set the explicit autosolve override:
 
 ```powershell
@@ -1068,7 +1071,7 @@ $env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
 npm start
 ```
 
-Step 9: after Electron opens, check all of these before clicking
+Step 9: inside the Electron app, check all of these before clicking
 `Enable auto-solve next session`:
 
 - the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
