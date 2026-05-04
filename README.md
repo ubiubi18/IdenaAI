@@ -18,11 +18,35 @@ not a trusted installer distribution.
 - [first installation on mac](#first-installation-on-mac)
 - [first installation on windows](#first-installation-on-windows)
 
+Use the walkthrough for your operating system only. On Mac, open the Terminal
+app. On Windows, open Windows PowerShell or Windows Terminal with a PowerShell
+tab. Do not paste Windows PowerShell commands into Mac Terminal, and do not
+paste Mac Terminal commands into Windows PowerShell.
+
+For each step, copy only the grey code block under that step. On GitHub you can
+usually use the small copy button on the code block; otherwise select the lines
+and copy with `Cmd+C` on Mac or `Ctrl+C` on Windows. Paste into the terminal
+with `Cmd+V` on Mac or `Ctrl+V` / right-click on Windows, then press `Enter` if
+it does not start automatically. Wait until the command finishes and the normal
+prompt comes back before moving to the next step. If a password is requested on
+Mac, type it even if no characters appear. If an installer window opens, finish
+that installer before continuing.
+
+If a command shows an error, stop at that step. Copy the command you ran, the
+full error text, your operating system version, and the output from
+`npm run doctor` if available, then ask an AI assistant or someone technical to
+help debug that exact step.
+
 ## First Installation On Mac
 
 These steps assume a fresh macOS machine with no Git, Node, npm, Go, Python, or
-Homebrew already prepared. Run each block in Terminal, in order. The final
-`npm start` command opens IdenaAI inside Electron from the source checkout.
+Homebrew already prepared. Open Terminal from `Applications -> Utilities` or
+with Spotlight search, then run each code block in order. The final `npm start`
+command opens IdenaAI inside Electron from the source checkout.
+
+The correct window is the normal macOS Terminal app, usually with a prompt that
+ends in `%` or `$`. These are shell commands; do not paste them into a browser,
+TextEdit, or the IdenaAI app itself.
 
 Experimental safety warning: there are no warranties. This code can be buggy,
 unsafe, or wrong, and autosolve can affect a real validation session. Run it
@@ -158,20 +182,18 @@ This can submit answers on-chain automatically. Wrong answers, missed sessions,
 provider costs, node failures, network failures, macOS sleep, or app crashes
 are your responsibility. Do not test this first on an identity you care about.
 
-Step 11: for a local macOS package built on your own machine:
-
-```bash
-cd "$HOME/Documents/idena-benchmark-workspace/IdenaAI"
-npm run dist:mac:arm64
-open "dist/mac-arm64/IdenaAI.app"
-```
-
 ## First Installation On Windows
 
 These steps assume a fresh Windows 10 PC with no Git, Node, npm, Go, Python,
-MSYS2, MinGW, NVM, or Visual Studio build tools already prepared. Run each block
-in PowerShell, in order. The final `npm start` command opens IdenaAI inside
+MSYS2, MinGW, NVM, or Visual Studio build tools already prepared. Open Windows
+PowerShell from the Start menu, or open Windows Terminal and choose a PowerShell
+tab. Do not use `cmd.exe`, Git Bash, or the MSYS2 shell for these steps. Run
+each code block in order. The final `npm start` command opens IdenaAI inside
 Electron from the source checkout.
+
+The correct window usually shows a prompt like `PS C:\Users\YourName>`. Some
+installers may ask for administrator permission in a separate Windows dialog;
+approve only if you trust the source checkout and the command you just ran.
 
 Experimental safety warning: there are no warranties. This code can be buggy,
 unsafe, or wrong, and autosolve can affect a real validation session. Run it
