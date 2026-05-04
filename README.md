@@ -171,6 +171,12 @@ layouts, antivirus tools, and older shells. If a copied block fails or appears
 to do nothing, do not keep pasting the whole walkthrough at once. Paste one step
 at a time, and if needed one command at a time, so you can see exactly which
 dependency is missing and fix that install manually before continuing.
+Windows Defender, firewall products, controlled folder access, corporate device
+guards, and other security tools can also block downloads, compilers, scripts,
+or app startup in ways this README cannot predict for every PC. If that happens,
+copy the exact command, the full error output, and the relevant `npm run doctor`
+output into an AI assistant or coding agent and ask for a Windows-specific
+adjustment instead of guessing.
 
 Step 1: verify `winget`. If this opens Microsoft Store, install App Installer,
 close PowerShell, reopen it, and rerun this step.
@@ -1368,6 +1374,12 @@ setups. If anything behaves strangely, paste one step at a time instead of the
 whole section. If a step still fails, run it one command at a time, read the
 first error, then manually fix that missing installation or path issue before
 continuing.
+Windows Defender, firewalls, controlled folder access, corporate device guards,
+and similar security tools can also interfere with downloads, build tools,
+scripts, compilers, or Electron startup. Those cases often need individual
+adjustments, so copy the exact command, full error output, and `npm run doctor`
+output into an AI assistant or coding agent if you need help debugging the local
+Windows setup.
 
 Step 1: install the Windows 10 prerequisites. The Visual Studio Build Tools
 installer may open a separate installer window.
