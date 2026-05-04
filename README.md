@@ -454,231 +454,40 @@ and your own decision to run.
 
 ## Two Autosolver Options
 
-There are two different ways to use the autosolver. Keep them separate.
+The install commands live in the newer first-install walkthroughs above. Use
+those sections as the source of truth:
 
-If you are new to coding, read this as:
+- [first installation on mac](#first-installation-on-mac)
+- [first installation on windows](#first-installation-on-windows)
 
-- **real session** means a real Idena validation with a real identity. Mistakes
-  can cost your validation or identity.
-- **rehearsal** means a local practice network on your own computer. It is for
-  testing and learning first.
-- **Terminal app** means Electron opened from Terminal with `npm start`.
-- **real app data folder** means the folder where your real IdenaAI identity
-  and node settings live.
-- **packaged app** means the app you build and open from `dist/mac-arm64`.
+Keep these modes separate:
 
-Rule of thumb:
+- **Real session** means a real Idena validation with a real identity. Mistakes
+  can cost your validation or identity. Use only the real-session startup step
+  from the Mac or Windows walkthrough, and only after you understand the warning
+  there.
+- **Rehearsal** means a local practice network on your own computer. Use this
+  before touching a real validation. Start the normal source app, open
+  `Settings -> Node`, and use `Start and use rehearsal network`.
+- **Off-chain flip tests** stay local. Use `Flips -> New`, build or edit draft
+  flips, and run the local queue/solver controls before publishing anything.
 
-- first mainnet path in this README: use the **Terminal app** with the real app
-  data folder
-- packaged app path: build and open the **packaged app** if you want to test the
-  built app behavior
-- rehearsal/practice path: use the **Terminal app** with the workspace practice
-  folder
+Profile rule:
 
-### Option 1: Real On-Chain Session Autosolver
+- plain `npm start` uses the workspace practice profile under
+  `IdenaAI-runtime/IdenaAIDev`
+- real-session startup must explicitly point at the real app data folder:
+  `~/Library/Application Support/IdenaAI` on macOS or `%APPDATA%\IdenaAI` on
+  Windows
+- if the startup log points to `IdenaAI-runtime`, you are in the practice
+  profile, not the real profile
 
-This is the risky path. Use it only with a real identity you control and only at
-your own risk. It can fail. It can spend API money. It can submit wrong answers.
-It can harm your identity.
+Packaged app builds are developer/debugging work, not the beginner install path.
+For first use, prefer the terminal-first source run described in the Mac or
+Windows walkthrough.
 
-Main path: run Electron from Terminal, but point it at the real app data folder.
-This avoids waiting for a packaged app build and gives you live Terminal logs.
-
-On macOS Apple Silicon, first get the repo if you do not have it yet:
-
-```bash
-mkdir -p ~/Documents/idena-benchmark-workspace
-cd ~/Documents/idena-benchmark-workspace
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
-```
-
-For the real validation run, copy this whole block into Terminal:
-
-```bash
-cd ~/Documents/idena-benchmark-workspace/IdenaAI
-source ~/.nvm/nvm.sh
-nvm install
-nvm use
-npm ci
-npm run setup:sources
-npm run doctor
-IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI" \
-IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
-npm start
-```
-
-What the two long lines mean:
-
-- `IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI"`
-  tells IdenaAI to use the real app profile, where your real identity should be.
-- `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` tells IdenaAI that you deliberately
-  allow real session-auto from Terminal.
-- `npm start` starts Electron from the current source code.
-
-This explicit `IDENA_DESKTOP_USER_DATA_DIR` overrides the default development
-profile. Do not remove it from the real on-chain session command.
-
-When it starts, Terminal should print a line like:
-
-```text
-[IdenaAI] Dev user data: <home>/Library/Application Support/IdenaAI
-```
-
-If that line points to `IdenaAI-runtime`, you are in the practice profile, not
-the real profile. Stop and check the command.
-
-Then, inside the opened `IdenaAI` window:
-
-1. Open `Settings -> AI`.
-2. Turn on AI.
-3. Choose your AI provider or local runtime.
-4. Enter your own API key/model if you use an external provider.
-5. Click `Test connection`.
-6. Open `Settings -> Node`.
-7. Make sure the app is using your real mainnet node/profile, not the validation
-   rehearsal network.
-8. Import or confirm the real identity you intend to validate.
-9. Open `Validation`.
-10. Click `Enable auto-solve next session`.
-11. Keep the IdenaAI window and Terminal open, and watch the validation.
-
-There are no guarantees. Do not test this first on an identity you care about.
-
-#### Built-App Path: Build And Open The Packaged App
-
-If you want to test the built packaged app instead of the Terminal app, run:
-
-```bash
-cd ~/Documents/idena-benchmark-workspace/IdenaAI
-source ~/.nvm/nvm.sh
-nvm install
-nvm use
-npm ci
-npm run setup:sources
-npm run doctor
-npm run dist:mac:arm64
-open "dist/mac-arm64/IdenaAI.app"
-```
-
-If you already installed dependencies and only want to rebuild/open again, the
-short version is:
-
-```bash
-nvm use
-npm ci
-npm run dist:mac:arm64
-open "dist/mac-arm64/IdenaAI.app"
-```
-
-Then, inside the packaged `IdenaAI` window:
-
-1. Open `Settings -> AI`.
-2. Turn on AI.
-3. Choose your AI provider or local runtime.
-4. Enter your own API key/model if you use an external provider.
-5. Click `Test connection`.
-6. Open `Settings -> Node`.
-7. Make sure the app is using your real mainnet node/profile, not the validation
-   rehearsal network.
-8. Import or confirm the real identity you intend to validate.
-9. Open `Validation`.
-10. Click `Enable auto-solve next session`.
-11. Keep the IdenaAI window open and watch the validation.
-
-### Option 2: Rehearsal Mode Autosolver
-
-This is the practice path. Use this first. It runs a local rehearsal network on
-your computer and does not submit answers to mainnet.
-
-On macOS Apple Silicon, copy these commands into Terminal:
-
-```bash
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
-source ~/.nvm/nvm.sh
-nvm install
-nvm use
-npm ci
-npm run setup:sources
-npm run doctor
-npm start
-```
-
-Then, inside the opened practice app:
-
-1. Open `Settings -> AI`.
-2. Turn on AI.
-3. Choose your AI provider or local runtime.
-4. Enter your own API key/model if you use an external provider.
-5. Click `Test connection`.
-6. Open `Settings -> Node`.
-7. In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
-8. Wait until the rehearsal network is running.
-9. Open validation when the app offers it.
-10. Click `Run 1 rehearsal autosolve`.
-11. Use `Run optional 9-ID parallel rehearsal` only as a local capacity test
-    with your own provider key, machine, and cost limits.
-
-The rehearsal path is the recommended first test because it is local practice,
-not real validation.
-
-Important: `npm start` uses a separate workspace practice profile under
-`IdenaAI-runtime/IdenaAIDev`. It intentionally refuses to start if that practice
-profile still has real on-chain `session-auto` armed. That guard exists to stop
-you from accidentally using the wrong runtime for a real validation.
-
-For general source exploration outside a real ceremony, use this order.
-
-1. Clone and start the app from source:
-
-```bash
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
-nvm use
-npm ci
-npm start
-```
-
-2. Choose an AI backend in `Settings -> AI`.
-
-- Hosted API path: turn on AI, choose `Use external API provider`, select
-  `OpenAI`, set your API key, choose `gpt-5.5`, then click `Test connection`.
-- Local path: turn on AI, use the managed local runtime path, approve the model
-  download/trust prompt, and wait until the runtime is ready.
-
-3. Run a safe rehearsal before touching a real ceremony.
-
-- Open `Settings -> Node`.
-- In `Validation Rehearsal Devnet`, click `Start and use rehearsal network`.
-- Wait for the app to switch to the rehearsal node.
-- Use `Open countdown` or `Open validation` when available.
-- Click `Run 1 rehearsal autosolve` to dry-run the configured AI backend on one
-  rehearsal identity.
-- Use `Run optional 9-ID parallel rehearsal` only when you deliberately want a
-  local multi-participant capacity test.
-
-4. Try the flip builder and off-chain solver path.
-
-- Open `Flips -> New`.
-- Use the AI builder controls if you want generated draft panels.
-- Click `Build flips`, review/edit the result, then use `Add current draft flip
-  to queue`.
-- Use `Run current draft now`, `Run short (6)`, or `Run long (14)` to compare
-  solving behavior without publishing anything.
-
-5. Use live validation automation only after rehearsal works and only from a
-   local build/profile you understand.
-
-- Open `Validation`.
-- Use `Enable auto-solve next session` only after reading
-  [Real Session Auto-Solve With OpenAI](#real-session-auto-solve-with-openai).
-- Keep manual oversight. This is not production-safe unattended automation.
-
-Rehearsal and off-chain queue runs stay local and do not submit mainnet
-answers. Mainnet validation, reporting, wallet, and identity use remain at your
-own risk.
+Rehearsal and off-chain queue runs stay local and do not submit mainnet answers.
+Mainnet validation, reporting, wallet, and identity use remain at your own risk.
 
 ## Experimental Warning
 
@@ -1099,107 +908,28 @@ the wrong time. The AI can also submit wrong answers. Any missed validation,
 wrong submission, reward loss, identity impact, API cost, or other consequence
 is your own responsibility.
 
-Required startup for a real identity:
+Use the first-install walkthroughs as the source of truth for startup commands:
 
-- main path: run source Electron from Terminal with
-  `IDENA_DESKTOP_USER_DATA_DIR` pointed at the real app data folder and
-  `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1`
-- built-app path: build and open the packaged `IdenaAI` app if you want to test
-  the built app behavior
-- use a real mainnet identity in the profile you actually start
-- keep the node online, synced, and eligible for the next ceremony
-- keep the app open, the computer awake, and the internet connection stable
-- stay nearby and watch the ceremony; this is not unattended production software
+- [first installation on mac](#first-installation-on-mac)
+- [first installation on windows](#first-installation-on-windows)
 
-Why the data-folder setting matters: plain `npm start` uses the workspace-local
-practice profile under `../IdenaAI-runtime/IdenaAIDev/`. The normal macOS real app
-profile is `~/Library/Application Support/IdenaAI/`. For real validation from
-Terminal, point `IDENA_DESKTOP_USER_DATA_DIR` at the real profile so the app can
-see the real identity and node settings. The safety override exists so this is a
-deliberate choice, not an accident.
-
-### Real Session From Terminal Without Packaging
-
-This is the main real-session path documented here. It starts Electron from the
-source checkout without first building a packaged app. It uses an explicit real
-data folder and an explicit safety override, so make sure you know which
-`userData` profile contains the real identity, node data, settings, and API key.
-
-Before starting:
+Before arming real session-auto:
 
 - close every other IdenaAI app/window
 - back up the identity/private key yourself
+- start IdenaAI from the real-session step for your operating system
 - confirm the selected profile is mainnet, not the rehearsal node
 - confirm the identity is eligible for the next validation
 - confirm `Settings -> AI -> Test connection` works before the ceremony
+- keep the node online, synced, and eligible for the next ceremony
+- keep the app open, the computer awake, and the internet connection stable
+- stay nearby and watch the ceremony; this is not unattended production software
 - keep API spending limits low
-
-Do not use this default source profile for real validation unless you
-intentionally imported and configured a real identity there:
-
-```bash
-nvm use
-npm ci
-IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 npm start
-```
-
-That command uses the default source/practice profile:
-
-```text
-../IdenaAI-runtime/IdenaAIDev/
-```
-
-For the normal real app profile, point `IDENA_DESKTOP_USER_DATA_DIR`
-explicitly.
-
-macOS:
-
-```bash
-nvm use
-IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI" \
-IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
-npm start
-```
-
-Windows PowerShell:
-
-```powershell
-$env:IDENA_DESKTOP_USER_DATA_DIR="$env:APPDATA\IdenaAI"
-$env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
-npm start
-```
-
-Linux:
-
-```bash
-IDENA_DESKTOP_USER_DATA_DIR="$HOME/.config/IdenaAI" \
-IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
-npm start
-```
-
-After Electron opens, verify the real identity address, node sync, and AI test
-connection in the UI before clicking `Enable auto-solve next session`. If the
-terminal refuses to start, copy the full command and full error into a coding
-agent and ask it to explain which profile or guard is blocking startup.
-
-Built-app path: build and start a packaged app locally on macOS:
-
-```bash
-nvm use
-npm ci
-npm run dist:mac:arm64
-open "dist/mac-arm64/IdenaAI.app"
-```
-
-For Intel or universal macOS builds, use `npm run dist:mac` or
-`npm run dist:mac:universal` and open the generated `IdenaAI.app` from `dist/`.
-If you downloaded an installed release instead, start that installed app
-normally, but still treat it as unaudited experimental software.
 
 OpenAI `gpt-5.5` example:
 
-1. Start IdenaAI with the Terminal real-session command above, or use the
-   packaged app path if you deliberately want to test the built app.
+1. Start IdenaAI with the real-session command from the Mac or Windows
+   walkthrough above.
 2. Make sure the app is using your real mainnet identity and real mainnet node,
    not the validation rehearsal network.
 3. Open `Settings -> AI`.
@@ -1272,36 +1002,17 @@ Dependency policy:
 
 ## Install and Run from Source
 
-Prerequisites:
+For first installation, use the Mac or Windows walkthrough near the top of this
+README. They include the dependency setup, copy-paste guidance, real-profile
+startup commands, and Windows source-built node steps.
 
-- `git`
-- Node 24 LTS; `.nvmrc` and `.node-version` pin `24.15.0`
-- `npm`
-- `python3`
-
-With `nvm`:
-
-```bash
-nvm install
-nvm use
-node -v
-```
-
-On macOS with Homebrew:
-
-```bash
-xcode-select --install
-brew install git node@24 python@3 go rustup-init
-export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
-node -v
-```
+Developer quick reference after dependencies are already installed:
 
 Clone and start:
 
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
-nvm use
 npm ci
 npm run setup:sources
 npm run doctor
@@ -1369,240 +1080,15 @@ changes you make and the risk you accept.
 IdenaAI has been tested primarily on macOS Apple Silicon. Windows and Linux are
 source-build paths for people who can debug their own local toolchain.
 
-### macOS Apple Silicon
+The detailed Mac and Windows setup commands are intentionally maintained once,
+near the top of this README:
 
-Use this path for rehearsal autosolving from a local Electron dev run:
+- [first installation on mac](#first-installation-on-mac)
+- [first installation on windows](#first-installation-on-windows)
 
-```bash
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
-nvm install
-nvm use
-npm ci
-npm start
-```
-
-`npm start` opens Electron from your local source checkout and uses the
-workspace development profile. This is the right path for rehearsal work,
-debugging, AI settings, and local iteration. It is not the same profile as an
-installed macOS app.
-
-To build a local macOS app from source on Apple Silicon:
-
-```bash
-nvm use
-npm ci
-npm run dist:mac:arm64
-open "dist/mac-arm64/IdenaAI.app"
-```
-
-Use the locally built app only after reviewing the source, build output, and
-release warnings. macOS may warn about unsigned or untrusted software.
-
-### Windows
-
-Use PowerShell from a local source checkout. These commands are intentionally
-written one step at a time so you can see which dependency or setup stage fails.
-Run each block in order. The `npm start` commands below start IdenaAI inside
-Electron from the source checkout; the real-session block also enables the
-explicit autosolve override for that PowerShell window.
-
-PowerShell copy paste can fail silently or stop in the middle on some Windows
-setups. If anything behaves strangely, paste one step at a time instead of the
-whole section. If a step still fails, run it one command at a time, read the
-first error, then manually fix that missing installation or path issue before
-continuing.
-Windows Defender, firewalls, controlled folder access, corporate device guards,
-and similar security tools can also interfere with downloads, build tools,
-scripts, compilers, or Electron startup. Those cases often need individual
-adjustments, so copy the exact command, full error output, and `npm run doctor`
-output into an AI assistant or coding agent if you need help debugging the local
-Windows setup.
-
-Step 1: install the Windows 10 prerequisites. The Visual Studio Build Tools
-installer may open a separate installer window.
-
-```powershell
-winget install --id Git.Git -e
-winget install --id OpenJS.NodeJS.LTS -e --version 24.15.0
-winget install --id Python.Python.3.12 -e
-winget install --id GoLang.Go -e
-winget install --id MSYS2.MSYS2 -e
-winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-```
-
-If `winget` cannot find the exact Node `24.15.0` package, run
-`winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 3
-shows Node `v24.15.0` or a newer `v24.x` release.
-
-Step 2: install the MinGW toolchain inside MSYS2 and add it to the current
-PowerShell path. This block detects the MSYS2 install path instead of assuming
-`C:\msys64`.
-
-```powershell
-function Get-MsysRootCandidates {
-  $wingetRoots = @()
-  $wingetPackagesDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
-  if (Test-Path $wingetPackagesDir) {
-    $wingetRoots = Get-ChildItem $wingetPackagesDir -Directory -Filter "MSYS2.MSYS2*" -ErrorAction SilentlyContinue |
-      ForEach-Object { Join-Path $_.FullName "msys64" }
-  }
-
-  @(
-    "C:\msys64",
-    "$env:LOCALAPPDATA\Programs\msys64",
-    "$env:ProgramFiles\msys64",
-    "${env:ProgramFiles(x86)}\msys64",
-    $wingetRoots
-  ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
-}
-
-$msysRoot = Get-MsysRootCandidates | Select-Object -First 1
-if (-not $msysRoot) {
-  winget install --id MSYS2.MSYS2 -e
-  $msysRoot = Get-MsysRootCandidates | Select-Object -First 1
-}
-
-if (-not $msysRoot) {
-  throw "MSYS2 bash.exe was not found. Reopen PowerShell after installing MSYS2, then rerun this step."
-}
-
-$msysBash = Join-Path $msysRoot "usr\bin\bash.exe"
-$ucrtBin = Join-Path $msysRoot "ucrt64\bin"
-
-& $msysBash -lc "pacman -Sy --needed --noconfirm base-devel mingw-w64-ucrt-x86_64-toolchain"
-
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($null -eq $userPath) {
-  $userPath = ""
-}
-
-if ($userPath -notlike "*$ucrtBin*") {
-  [Environment]::SetEnvironmentVariable("Path", "$ucrtBin;$userPath", "User")
-}
-
-$env:Path = "$ucrtBin;$env:Path"
-
-if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
-  throw "gcc was not found after installing MSYS2. Close PowerShell, reopen it, and rerun Step 2."
-}
-
-Get-Command gcc
-gcc --version
-```
-
-Step 3: close PowerShell, reopen it, then verify that direct Node.js LTS is
-available. Do not use NVM for Windows for this setup if it fails on your PC.
-The app requires Node `24.15.0` or newer on the Node 24 line, and it rejects
-Node 25+.
-
-```powershell
-Get-Command node
-node -v
-npm -v
-```
-
-If `Get-Command node` still points to an NVM folder from an older attempt,
-remove NVM for Windows or fix `Path`, then reopen PowerShell and rerun this
-step.
-
-Step 4: install the required npm version, then verify the runtime versions and
-enable long Windows paths for Git.
-
-```powershell
-npm install -g npm@11.12.0
-node -v
-npm -v
-git --version
-python --version
-go version
-Get-Command gcc
-gcc --version
-git config --global core.longpaths true
-```
-
-Step 5: clone or update the IdenaAI source checkout.
-
-```powershell
-cd $env:USERPROFILE\Documents
-if (Test-Path .\IdenaAI) {
-  cd IdenaAI
-  git pull --ff-only origin main
-} else {
-  git clone https://github.com/ubiubi18/IdenaAI.git
-  cd IdenaAI
-}
-```
-
-Step 6: install JavaScript dependencies, prepare the source mirrors, and build
-the pinned Idena node from source in PowerShell before Electron opens.
-`detached HEAD` messages inside `idena-go`, `idena-wasm`, or
-`idena-wasm-binding` are normal because the setup pins exact source commits.
-
-```powershell
-npm ci
-npm run setup:sources
-npm run build:node
-
-$builtNodeVersion = (& .\build\node\current\idena-go.exe --version) -join "`n"
-$builtNodeVersion
-if ($builtNodeVersion -notmatch "1\.1\.2") {
-  throw "The source-built Idena node is missing or not version 1.1.2."
-}
-
-npm run doctor
-```
-
-Step 7: optionally start the normal source Electron app as a smoke test. This
-uses the source-run practice profile unless you set the real-session environment
-variables in the next step. The earlier `npm run build:node` step makes the
-in-app `Install node` / `Update node` path copy the pinned source-built node
-instead of opening a hidden local `go.exe` build.
-
-```powershell
-npm start
-```
-
-On first startup, the built-in node can take a long time before it finds usable
-P2P peers and begins real syncing. Logs such as `Peers are not found` or
-handshake timeouts do not always mean it is permanently broken; wait at least
-15-30 minutes on a stable network before judging it. Some older bootstrap nodes
-appear to be gone, so the first peer connection can be slow.
-
-Step 8: for real-session autosolve from PowerShell, close the normal source app
-first. Do not use the default source-run practice profile. Point Electron at the
-normal real Windows profile and set the explicit autosolve override:
-
-```powershell
-cd $env:USERPROFILE\Documents\IdenaAI
-
-$env:IDENA_DESKTOP_USER_DATA_DIR="$env:APPDATA\IdenaAI"
-$env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
-
-npm start
-```
-
-The override above only applies to the current PowerShell window. Close that
-PowerShell window when you are done with the real-session run.
-
-Step 9: inside the Electron app, check all of these before clicking
-`Enable auto-solve next session`:
-
-- the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
-- the app shows the real identity you intend to validate
-- the node is mainnet, synced, and eligible for the next validation
-- `Settings -> AI -> Test connection` succeeds with your chosen provider or
-  local runtime
-- the IdenaAI window, PowerShell, internet connection, and computer stay awake
-  through the ceremony
-
-This can submit answers on-chain automatically. Wrong answers, missed sessions,
-provider costs, node failures, network failures, Windows sleep, or app crashes
-are your responsibility. Do not test this first on an identity you care about.
-
-If native dependencies, Electron packaging, Python, Go, MinGW, Visual Studio
-build tools, or node runtime setup fail, copy the exact PowerShell output into a
-coding agent and ask it to adapt the setup for your Windows version.
+Use those walkthroughs for first install, normal source startup, and
+real-session startup. This keeps the README from carrying multiple competing
+copies of the same command sequence.
 
 ### Linux
 
@@ -1652,8 +1138,9 @@ software.
 
 ## User Paths
 
-Use the rehearsal and development paths below after `npm start`. Use the
-packaged/local app path above for real on-chain session automation.
+Use the rehearsal and development paths below after `npm start`. For real
+on-chain session automation, use the real-session startup step in the Mac or
+Windows first-install walkthrough above.
 
 ### GPT-5.5 API Smoke Test
 
