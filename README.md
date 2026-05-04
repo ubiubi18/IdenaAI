@@ -993,15 +993,48 @@ If `winget` cannot find the exact Node `24.15.0` package, run
 shows Node `v24.15.0` or a newer `v24.x` release.
 
 Step 2: install the MinGW toolchain inside MSYS2 and add it to the current
-PowerShell path. If MSYS2 was installed somewhere else, adjust `C:\msys64`.
+PowerShell path. This block detects the MSYS2 install path instead of assuming
+`C:\msys64`.
 
 ```powershell
-& "C:\msys64\usr\bin\bash.exe" -lc "pacman -Sy --needed --noconfirm base-devel mingw-w64-ucrt-x86_64-toolchain"
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*C:\msys64\ucrt64\bin*") {
-  [Environment]::SetEnvironmentVariable("Path", "C:\msys64\ucrt64\bin;$userPath", "User")
+$msysCandidates = @(
+  "C:\msys64",
+  "$env:LOCALAPPDATA\Programs\msys64",
+  "$env:ProgramFiles\msys64",
+  "${env:ProgramFiles(x86)}\msys64"
+) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
+
+$msysRoot = $msysCandidates | Select-Object -First 1
+if (-not $msysRoot) {
+  winget install --id MSYS2.MSYS2 -e
+  $msysCandidates = @(
+    "C:\msys64",
+    "$env:LOCALAPPDATA\Programs\msys64",
+    "$env:ProgramFiles\msys64",
+    "${env:ProgramFiles(x86)}\msys64"
+  ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
+  $msysRoot = $msysCandidates | Select-Object -First 1
 }
-$env:Path = "C:\msys64\ucrt64\bin;$env:Path"
+
+if (-not $msysRoot) {
+  throw "MSYS2 bash.exe was not found. Reopen PowerShell after installing MSYS2, then rerun this step."
+}
+
+$msysBash = Join-Path $msysRoot "usr\bin\bash.exe"
+$ucrtBin = Join-Path $msysRoot "ucrt64\bin"
+
+& $msysBash -lc "pacman -Sy --needed --noconfirm base-devel mingw-w64-ucrt-x86_64-toolchain"
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($null -eq $userPath) {
+  $userPath = ""
+}
+
+if ($userPath -notlike "*$ucrtBin*") {
+  [Environment]::SetEnvironmentVariable("Path", "$ucrtBin;$userPath", "User")
+}
+
+$env:Path = "$ucrtBin;$env:Path"
 ```
 
 Step 3: close PowerShell, reopen it, then verify that direct Node.js LTS is
