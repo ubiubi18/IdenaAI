@@ -13,6 +13,361 @@ reference checkpoint for dependency, runtime, local AI, rehearsal, packaging,
 and autosolver work. It is research software, not a hardened wallet release and
 not a trusted installer distribution.
 
+## First Installation
+
+- [first installation on mac](#first-installation-on-mac)
+- [first installation on windows](#first-installation-on-windows)
+
+## First Installation On Mac
+
+These steps assume a fresh macOS machine with no Git, Node, npm, Go, Python, or
+Homebrew already prepared. Run each block in Terminal, in order. The final
+`npm start` command opens IdenaAI inside Electron from the source checkout.
+
+Step 1: install Apple command line tools. A system dialog may open; finish that
+installer before continuing.
+
+```bash
+xcode-select -p >/dev/null 2>&1 || xcode-select --install
+```
+
+Step 2: install Homebrew if it is missing, then load it into the current shell.
+
+```bash
+if ! command -v brew >/dev/null 2>&1; then
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+fi
+
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+else
+  echo "Homebrew was not found after installation. Reopen Terminal and rerun this step."
+  exit 1
+fi
+```
+
+Step 3: install the required developer dependencies without NVM.
+
+```bash
+brew update
+brew install git node@24 python@3.12 go
+
+NODE24_BIN="$(brew --prefix node@24)/bin"
+case ":$PATH:" in
+  *":$NODE24_BIN:"*) ;;
+  *) echo "export PATH=\"$NODE24_BIN:\$PATH\"" >> ~/.zprofile ;;
+esac
+export PATH="$NODE24_BIN:$PATH"
+```
+
+Step 4: verify Node and npm. Continue only if Node is `v24.15.0` or newer on
+the Node 24 line. Node 25+ is intentionally rejected by this repo.
+
+```bash
+node -v
+npm -v
+npm install -g npm@11.12.0
+node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 15) { throw new Error(`IdenaAI requires Node v24.15.0 or newer on Node 24, got ${process.versions.node}`) }'
+npm -v
+git --version
+python3 --version
+go version
+```
+
+Step 5: clone or update the IdenaAI source checkout.
+
+```bash
+mkdir -p "$HOME/Documents/idena-benchmark-workspace"
+cd "$HOME/Documents/idena-benchmark-workspace"
+
+if [ -d IdenaAI/.git ]; then
+  cd IdenaAI
+  git pull --ff-only origin main
+else
+  git clone https://github.com/ubiubi18/IdenaAI.git
+  cd IdenaAI
+fi
+```
+
+Step 6: install app dependencies and prepare the bundled Idena source runtime.
+
+```bash
+npm ci
+npm run setup:sources
+npm run doctor
+```
+
+Step 7: optionally start the normal source Electron app as a smoke test. This
+uses the source-run practice profile, not the normal real app profile.
+
+```bash
+npm start
+```
+
+Step 8: for real-session autosolve from Terminal, close the smoke-test app
+first. Then point Electron at the normal real macOS profile and set the explicit
+autosolve override:
+
+```bash
+cd "$HOME/Documents/idena-benchmark-workspace/IdenaAI"
+
+IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI" \
+IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
+npm start
+```
+
+Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
+
+1. Open `Settings -> AI`.
+2. Turn on AI.
+3. Choose `Use external API provider`.
+4. Set `Main AI provider` to `OpenAI`.
+5. Paste your own OpenAI API key with `Set key`.
+6. Choose the OpenAI model you intend to pay for, for example `gpt-5.5`, or
+   enter your own OpenAI model id.
+7. Click `Test connection` and continue only after it succeeds.
+
+OpenAI autosolve can spend API money and sends validation flip content to
+OpenAI for model inference. Keep provider spending limits low, do not commit or
+share your API key, and do not run this on a real identity until you understand
+the cost and privacy tradeoff.
+
+Step 10: still inside the Electron app, check all of these before clicking
+`Enable auto-solve next session`:
+
+- the startup log points to `~/Library/Application Support/IdenaAI`, not
+  `IdenaAI-runtime`
+- the app shows the real identity you intend to validate
+- the node is mainnet, synced, and eligible for the next validation
+- `Settings -> AI -> Test connection` succeeds with OpenAI
+- the IdenaAI window, Terminal, internet connection, and computer stay awake
+  through the ceremony
+- `Validation -> Enable auto-solve next session` is clicked only after every
+  check above is true
+
+This can submit answers on-chain automatically. Wrong answers, missed sessions,
+provider costs, node failures, network failures, macOS sleep, or app crashes
+are your responsibility. Do not test this first on an identity you care about.
+
+Step 11: for a local macOS package built on your own machine:
+
+```bash
+cd "$HOME/Documents/idena-benchmark-workspace/IdenaAI"
+npm run dist:mac:arm64
+open "dist/mac-arm64/IdenaAI.app"
+```
+
+## First Installation On Windows
+
+These steps assume a fresh Windows 10 PC with no Git, Node, npm, Go, Python,
+MSYS2, MinGW, NVM, or Visual Studio build tools already prepared. Run each block
+in PowerShell, in order. The final `npm start` command opens IdenaAI inside
+Electron from the source checkout.
+
+Step 1: verify `winget`. If this opens Microsoft Store, install App Installer,
+close PowerShell, reopen it, and rerun this step.
+
+```powershell
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+  Start-Process "ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"
+  throw "Install App Installer from Microsoft Store, reopen PowerShell, then rerun this step."
+}
+
+winget --version
+```
+
+Step 2: install Windows 10 prerequisites. The Visual Studio Build Tools
+installer may open a separate installer window.
+
+```powershell
+winget install --id Git.Git -e
+winget install --id OpenJS.NodeJS.LTS -e --version 24.15.0
+winget install --id Python.Python.3.12 -e
+winget install --id GoLang.Go -e
+winget install --id MSYS2.MSYS2 -e
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+If `winget` cannot find the exact Node `24.15.0` package, run
+`winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 4
+shows Node `v24.15.0` or a newer `v24.x` release. Do not use NVM for Windows for
+this setup if it fails on your PC.
+
+Step 3: install the MinGW toolchain inside MSYS2 and add the detected
+`ucrt64\bin` directory to the user path.
+
+```powershell
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($null -eq $userPath) {
+  $userPath = ""
+}
+
+if (-not (Test-Path "C:\msys64\ucrt64\bin")) {
+  $cleanPath = (($userPath -split ";") | Where-Object { $_ -and $_ -ne "C:\msys64\ucrt64\bin" }) -join ";"
+  [Environment]::SetEnvironmentVariable("Path", $cleanPath, "User")
+}
+
+$msysCandidates = @(
+  "C:\msys64",
+  "$env:LOCALAPPDATA\Programs\msys64",
+  "$env:ProgramFiles\msys64",
+  "${env:ProgramFiles(x86)}\msys64"
+) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
+
+$msysRoot = $msysCandidates | Select-Object -First 1
+if (-not $msysRoot) {
+  winget install --id MSYS2.MSYS2 -e
+  $msysCandidates = @(
+    "C:\msys64",
+    "$env:LOCALAPPDATA\Programs\msys64",
+    "$env:ProgramFiles\msys64",
+    "${env:ProgramFiles(x86)}\msys64"
+  ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
+  $msysRoot = $msysCandidates | Select-Object -First 1
+}
+
+if (-not $msysRoot) {
+  throw "MSYS2 bash.exe was not found. Reopen PowerShell after installing MSYS2, then rerun this step."
+}
+
+$msysBash = Join-Path $msysRoot "usr\bin\bash.exe"
+$ucrtBin = Join-Path $msysRoot "ucrt64\bin"
+
+& $msysBash -lc "pacman -Sy --needed --noconfirm base-devel mingw-w64-ucrt-x86_64-toolchain"
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($null -eq $userPath) {
+  $userPath = ""
+}
+
+if ($userPath -notlike "*$ucrtBin*") {
+  [Environment]::SetEnvironmentVariable("Path", "$ucrtBin;$userPath", "User")
+}
+
+$env:Path = "$ucrtBin;$env:Path"
+```
+
+Step 4: close PowerShell, reopen it, then verify Node and npm. Continue only if
+Node is `v24.15.0` or newer on the Node 24 line. Node 25+ is intentionally
+rejected by this repo.
+
+```powershell
+Get-Command node
+node -v
+npm -v
+
+$nodeVersion = [version]((node -v).TrimStart("v"))
+if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.15.0") {
+  throw "IdenaAI requires Node v24.15.0 or newer on Node 24, got v$nodeVersion"
+}
+
+npm install -g npm@11.12.0
+npm -v
+
+$npmVersion = [version](npm -v)
+if ($npmVersion -lt [version]"11.12.0") {
+  throw "IdenaAI requires npm 11.12.0 or newer, got $npmVersion"
+}
+
+git --version
+python --version
+go version
+git config --global core.longpaths true
+```
+
+If `Get-Command node` still points to an NVM folder from an older attempt,
+remove NVM for Windows or fix `Path`, then reopen PowerShell and rerun this
+step.
+
+Step 5: clone or update the IdenaAI source checkout.
+
+```powershell
+cd $env:USERPROFILE\Documents
+
+if (Test-Path .\IdenaAI) {
+  cd IdenaAI
+  git pull --ff-only origin main
+} else {
+  git clone https://github.com/ubiubi18/IdenaAI.git
+  cd IdenaAI
+}
+```
+
+Step 6: install app dependencies and prepare the bundled Idena source runtime.
+
+```powershell
+npm ci
+npm run setup:sources
+npm run doctor
+```
+
+Step 7: optionally start the normal source Electron app as a smoke test. This
+uses the source-run practice profile, not the normal real app profile.
+
+```powershell
+npm start
+```
+
+Step 8: for real-session autosolve from PowerShell, close the smoke-test app
+first. Then point Electron at the normal real Windows profile and set the
+explicit autosolve override:
+
+```powershell
+cd $env:USERPROFILE\Documents\IdenaAI
+
+$env:IDENA_DESKTOP_USER_DATA_DIR="$env:APPDATA\IdenaAI"
+$env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
+
+npm start
+```
+
+Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
+
+1. Open `Settings -> AI`.
+2. Turn on AI.
+3. Choose `Use external API provider`.
+4. Set `Main AI provider` to `OpenAI`.
+5. Paste your own OpenAI API key with `Set key`.
+6. Choose the OpenAI model you intend to pay for, for example `gpt-5.5`, or
+   enter your own OpenAI model id.
+7. Click `Test connection` and continue only after it succeeds.
+
+OpenAI autosolve can spend API money and sends validation flip content to
+OpenAI for model inference. Keep provider spending limits low, do not commit or
+share your API key, and do not run this on a real identity until you understand
+the cost and privacy tradeoff.
+
+Step 10: still inside the Electron app, check all of these before clicking
+`Enable auto-solve next session`:
+
+- the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
+- the app shows the real identity you intend to validate
+- the node is mainnet, synced, and eligible for the next validation
+- `Settings -> AI -> Test connection` succeeds with OpenAI
+- the IdenaAI window, PowerShell, internet connection, and computer stay awake
+  through the ceremony
+- `Validation -> Enable auto-solve next session` is clicked only after every
+  check above is true
+
+This can submit answers on-chain automatically. Wrong answers, missed sessions,
+provider costs, node failures, network failures, Windows sleep, or app crashes
+are your responsibility. Do not test this first on an identity you care about.
+
+Step 11: after the real session, clear the PowerShell-only override:
+
+```powershell
+Remove-Item Env:\IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO
+Remove-Item Env:\IDENA_DESKTOP_USER_DATA_DIR
+```
+
+Step 12: for a local Windows package built on your own machine:
+
+```powershell
+npm run dist:win
+```
+
 ## Use This As A Reference
 
 Do not install or run this blindly. Clone it, inspect it, ask a coding agent or
