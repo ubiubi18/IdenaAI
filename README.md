@@ -166,6 +166,12 @@ MSYS2, MinGW, NVM, or Visual Studio build tools already prepared. Run each block
 in PowerShell, in order. The final `npm start` command opens IdenaAI inside
 Electron from the source checkout.
 
+PowerShell copy paste can behave differently across Windows terminals, keyboard
+layouts, antivirus tools, and older shells. If a copied block fails or appears
+to do nothing, do not keep pasting the whole walkthrough at once. Paste one step
+at a time, and if needed one command at a time, so you can see exactly which
+dependency is missing and fix that install manually before continuing.
+
 Step 1: verify `winget`. If this opens Microsoft Store, install App Installer,
 close PowerShell, reopen it, and rerun this step.
 
@@ -1356,6 +1362,12 @@ written one step at a time so you can see which dependency or setup stage fails.
 Run each block in order. The `npm start` commands below start IdenaAI inside
 Electron from the source checkout; the real-session block also enables the
 explicit autosolve override for that PowerShell window.
+
+PowerShell copy paste can fail silently or stop in the middle on some Windows
+setups. If anything behaves strangely, paste one step at a time instead of the
+whole section. If a step still fails, run it one command at a time, read the
+first error, then manually fix that missing installation or path issue before
+continuing.
 
 Step 1: install the Windows 10 prerequisites. The Visual Studio Build Tools
 installer may open a separate installer window.
