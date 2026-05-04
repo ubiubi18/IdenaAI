@@ -137,6 +137,12 @@ uses the source-run practice profile, not the normal real app profile.
 npm start
 ```
 
+On first startup, the built-in node can take a long time before it finds usable
+P2P peers and begins real syncing. Logs such as `Peers are not found` or
+handshake timeouts do not always mean it is permanently broken; wait at least
+15-30 minutes on a stable network before judging it. Some older bootstrap nodes
+appear to be gone, so the first peer connection can be slow.
+
 Step 8: for real-session autosolve from Terminal, close the smoke-test app
 first. Then point Electron at the normal real macOS profile and set the explicit
 autosolve override:
@@ -383,6 +389,12 @@ the pinned source-built node instead of opening a hidden local `go.exe` build.
 ```powershell
 npm start
 ```
+
+On first startup, the built-in node can take a long time before it finds usable
+P2P peers and begins real syncing. Logs such as `Peers are not found` or
+handshake timeouts do not always mean it is permanently broken; wait at least
+15-30 minutes on a stable network before judging it. Some older bootstrap nodes
+appear to be gone, so the first peer connection can be slow.
 
 Step 8: for real-session autosolve from PowerShell, close the smoke-test app
 first. Then point Electron at the normal real Windows profile and set the
@@ -1550,6 +1562,12 @@ instead of opening a hidden local `go.exe` build.
 ```powershell
 npm start
 ```
+
+On first startup, the built-in node can take a long time before it finds usable
+P2P peers and begins real syncing. Logs such as `Peers are not found` or
+handshake timeouts do not always mean it is permanently broken; wait at least
+15-30 minutes on a stable network before judging it. Some older bootstrap nodes
+appear to be gone, so the first peer connection can be slow.
 
 Step 8: for real-session autosolve from PowerShell, close the normal source app
 first. Do not use the default source-run practice profile. Point Electron at the
