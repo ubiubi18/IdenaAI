@@ -120,6 +120,46 @@ function goCommand() {
   return process.platform === 'win32' ? 'go.exe' : 'go'
 }
 
+function windowsMsysUcrtBinCandidates() {
+  if (process.platform !== 'win32') return []
+
+  return [
+    'C:\\msys64\\ucrt64\\bin',
+    process.env.LOCALAPPDATA &&
+      path.join(
+        process.env.LOCALAPPDATA,
+        'Programs',
+        'msys64',
+        'ucrt64',
+        'bin'
+      ),
+    process.env.ProgramFiles &&
+      path.join(process.env.ProgramFiles, 'msys64', 'ucrt64', 'bin'),
+    process.env['ProgramFiles(x86)'] &&
+      path.join(process.env['ProgramFiles(x86)'], 'msys64', 'ucrt64', 'bin'),
+  ].filter(Boolean)
+}
+
+function buildEnv() {
+  const env = {
+    ...process.env,
+    CGO_ENABLED: '1',
+    GOTOOLCHAIN: DEFAULT_GO_TOOLCHAIN,
+  }
+
+  if (process.platform === 'win32') {
+    const gccDir = windowsMsysUcrtBinCandidates().find((candidate) =>
+      fs.existsSync(path.join(candidate, 'gcc.exe'))
+    )
+    if (gccDir) {
+      env.PATH = [gccDir, env.PATH || ''].filter(Boolean).join(path.delimiter)
+      env.CC = path.join(gccDir, 'gcc.exe')
+    }
+  }
+
+  return env
+}
+
 function getBinaryVersion(binaryPath) {
   const result = spawnSync(binaryPath, ['--version'], {
     encoding: 'utf8',
@@ -183,11 +223,7 @@ function main() {
     }
   )
 
-  const env = {
-    ...process.env,
-    CGO_ENABLED: '1',
-    GOTOOLCHAIN: DEFAULT_GO_TOOLCHAIN,
-  }
+  const env = buildEnv()
 
   run(
     goCommand(),
