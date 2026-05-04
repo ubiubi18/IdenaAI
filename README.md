@@ -971,15 +971,75 @@ release warnings. macOS may warn about unsigned or untrusted software.
 ### Windows
 
 Use PowerShell from a local source checkout. Install Git, Node 24, Python, Go,
-Visual Studio build tools, and MinGW first, then run:
+Visual Studio build tools, and MinGW first.
+
+One-time Windows 10 dependency setup:
 
 ```powershell
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
+winget install --id Git.Git -e
+winget install --id CoreyButler.NVMforWindows -e
+winget install --id Python.Python.3.12 -e
+winget install --id GoLang.Go -e
+winget install --id MSYS2.MSYS2 -e
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+Close PowerShell, reopen it, then run:
+
+```powershell
+nvm install 24.15.0
+nvm use 24.15.0
+npm install -g npm@11.12.0
+git config --global core.longpaths true
+
+cd $env:USERPROFILE\Documents
+if (Test-Path .\IdenaAI) {
+  cd IdenaAI
+  git pull --ff-only origin main
+} else {
+  git clone https://github.com/ubiubi18/IdenaAI.git
+  cd IdenaAI
+}
+
 npm ci
 npm run setup:sources
 npm run doctor
 npm start
+```
+
+For real-session autosolve from PowerShell, do not use the default source-run
+practice profile. Point the app at the normal real Windows profile and set the
+explicit autosolve override:
+
+```powershell
+cd $env:USERPROFILE\Documents\IdenaAI
+
+$env:IDENA_DESKTOP_USER_DATA_DIR="$env:APPDATA\IdenaAI"
+$env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
+
+npm start
+```
+
+After Electron opens, check all of these before clicking
+`Enable auto-solve next session`:
+
+- the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
+- the app shows the real identity you intend to validate
+- the node is mainnet, synced, and eligible for the next validation
+- `Settings -> AI -> Test connection` succeeds with your chosen provider or
+  local runtime
+- the IdenaAI window, PowerShell, internet connection, and computer stay awake
+  through the ceremony
+
+This can submit answers on-chain automatically. Wrong answers, missed sessions,
+provider costs, node failures, network failures, Windows sleep, or app crashes
+are your responsibility. Do not test this first on an identity you care about.
+
+After the real session, clear the PowerShell-only override:
+
+```powershell
+Remove-Item Env:\IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO
+Remove-Item Env:\IDENA_DESKTOP_USER_DATA_DIR
 ```
 
 For a local Windows package built on your own machine:
