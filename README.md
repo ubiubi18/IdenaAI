@@ -209,23 +209,27 @@ if (-not (Test-Path "C:\msys64\ucrt64\bin")) {
   [Environment]::SetEnvironmentVariable("Path", $cleanPath, "User")
 }
 
-$msysCandidates = @(
-  "C:\msys64",
-  "$env:LOCALAPPDATA\Programs\msys64",
-  "$env:ProgramFiles\msys64",
-  "${env:ProgramFiles(x86)}\msys64"
-) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
+function Get-MsysRootCandidates {
+  $wingetRoots = @()
+  $wingetPackagesDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+  if (Test-Path $wingetPackagesDir) {
+    $wingetRoots = Get-ChildItem $wingetPackagesDir -Directory -Filter "MSYS2.MSYS2*" -ErrorAction SilentlyContinue |
+      ForEach-Object { Join-Path $_.FullName "msys64" }
+  }
 
-$msysRoot = $msysCandidates | Select-Object -First 1
-if (-not $msysRoot) {
-  winget install --id MSYS2.MSYS2 -e
-  $msysCandidates = @(
+  @(
     "C:\msys64",
     "$env:LOCALAPPDATA\Programs\msys64",
     "$env:ProgramFiles\msys64",
-    "${env:ProgramFiles(x86)}\msys64"
+    "${env:ProgramFiles(x86)}\msys64",
+    $wingetRoots
   ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
-  $msysRoot = $msysCandidates | Select-Object -First 1
+}
+
+$msysRoot = Get-MsysRootCandidates | Select-Object -First 1
+if (-not $msysRoot) {
+  winget install --id MSYS2.MSYS2 -e
+  $msysRoot = Get-MsysRootCandidates | Select-Object -First 1
 }
 
 if (-not $msysRoot) {
@@ -1374,23 +1378,27 @@ PowerShell path. This block detects the MSYS2 install path instead of assuming
 `C:\msys64`.
 
 ```powershell
-$msysCandidates = @(
-  "C:\msys64",
-  "$env:LOCALAPPDATA\Programs\msys64",
-  "$env:ProgramFiles\msys64",
-  "${env:ProgramFiles(x86)}\msys64"
-) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
+function Get-MsysRootCandidates {
+  $wingetRoots = @()
+  $wingetPackagesDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+  if (Test-Path $wingetPackagesDir) {
+    $wingetRoots = Get-ChildItem $wingetPackagesDir -Directory -Filter "MSYS2.MSYS2*" -ErrorAction SilentlyContinue |
+      ForEach-Object { Join-Path $_.FullName "msys64" }
+  }
 
-$msysRoot = $msysCandidates | Select-Object -First 1
-if (-not $msysRoot) {
-  winget install --id MSYS2.MSYS2 -e
-  $msysCandidates = @(
+  @(
     "C:\msys64",
     "$env:LOCALAPPDATA\Programs\msys64",
     "$env:ProgramFiles\msys64",
-    "${env:ProgramFiles(x86)}\msys64"
+    "${env:ProgramFiles(x86)}\msys64",
+    $wingetRoots
   ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
-  $msysRoot = $msysCandidates | Select-Object -First 1
+}
+
+$msysRoot = Get-MsysRootCandidates | Select-Object -First 1
+if (-not $msysRoot) {
+  winget install --id MSYS2.MSYS2 -e
+  $msysRoot = Get-MsysRootCandidates | Select-Object -First 1
 }
 
 if (-not $msysRoot) {

@@ -123,7 +123,7 @@ function goCommand() {
 function windowsMsysUcrtBinCandidates() {
   if (process.platform !== 'win32') return []
 
-  return [
+  const candidates = [
     'C:\\msys64\\ucrt64\\bin',
     process.env.LOCALAPPDATA &&
       path.join(
@@ -138,6 +138,29 @@ function windowsMsysUcrtBinCandidates() {
     process.env['ProgramFiles(x86)'] &&
       path.join(process.env['ProgramFiles(x86)'], 'msys64', 'ucrt64', 'bin'),
   ].filter(Boolean)
+
+  const wingetPackagesDir =
+    process.env.LOCALAPPDATA &&
+    path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Packages')
+  try {
+    if (wingetPackagesDir && fs.existsSync(wingetPackagesDir)) {
+      fs.readdirSync(wingetPackagesDir, {withFileTypes: true})
+        .filter(
+          (entry) => entry.isDirectory() && /^MSYS2\.MSYS2/iu.test(entry.name)
+        )
+        .forEach((entry) => {
+          const packageDir = path.join(wingetPackagesDir, entry.name)
+          candidates.push(
+            path.join(packageDir, 'msys64', 'ucrt64', 'bin'),
+            path.join(packageDir, 'ucrt64', 'bin')
+          )
+        })
+    }
+  } catch {
+    // Fall back to the standard install paths above.
+  }
+
+  return candidates
 }
 
 function buildEnv() {
