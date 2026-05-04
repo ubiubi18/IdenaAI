@@ -65,13 +65,60 @@ function windowsCommandCandidates(command) {
   return [command, `${command}.cmd`, `${command}.exe`]
 }
 
+function pathEnvKey(env = process.env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH'
+}
+
+function commandEnv(prependDirs = []) {
+  const env = {...process.env}
+  if (prependDirs.length === 0) return env
+
+  const envPathKey = pathEnvKey(env)
+  env[envPathKey] = [...prependDirs, env[envPathKey] || '']
+    .filter(Boolean)
+    .join(path.delimiter)
+  env.PATH = env[envPathKey]
+  return env
+}
+
+function windowsNodeToolCandidates(command) {
+  if (process.platform !== 'win32' || command !== 'npm') return []
+
+  const nodeDir = path.dirname(process.execPath)
+  return [path.join(nodeDir, 'npm.cmd'), path.join(nodeDir, 'npm')].filter(
+    (candidate) => fs.existsSync(candidate)
+  )
+}
+
+function windowsGoCommandCandidates() {
+  if (process.platform !== 'win32') return []
+
+  return [
+    process.env.ProgramFiles &&
+      path.join(process.env.ProgramFiles, 'Go', 'bin', 'go.exe'),
+    process.env['ProgramFiles(x86)'] &&
+      path.join(process.env['ProgramFiles(x86)'], 'Go', 'bin', 'go.exe'),
+    'C:\\Program Files\\Go\\bin\\go.exe',
+  ].filter((candidate) => candidate && fs.existsSync(candidate))
+}
+
 function commandVersion(command, args = ['--version'], extraCandidates = []) {
-  const candidates = [...extraCandidates, ...windowsCommandCandidates(command)]
+  const candidates = [
+    ...extraCandidates,
+    ...windowsCommandCandidates(command),
+  ].filter(
+    (candidate, index, all) => candidate && all.indexOf(candidate) === index
+  )
+  const env = commandEnv(
+    process.platform === 'win32' ? windowsMsysUcrtBinCandidates() : []
+  )
 
   for (const candidate of candidates) {
     const result = spawnSync(candidate, args, {
+      env,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32' && /\.cmd$/i.test(candidate),
     })
 
     if (!result.error && result.status === 0) {
@@ -139,7 +186,11 @@ function main() {
 
   ok =
     printStatus('node', process.version, /^v24\./u.test(process.version)) && ok
-  ok = printStatus('npm', commandVersion('npm')) && ok
+  ok =
+    printStatus(
+      'npm',
+      commandVersion('npm', ['--version'], windowsNodeToolCandidates('npm'))
+    ) && ok
   ok = printStatus('git', commandVersion('git')) && ok
   printInfo(
     process.platform === 'win32' ? 'python' : 'python3',
@@ -147,7 +198,10 @@ function main() {
       ? commandVersion('python')
       : commandVersion('python3')
   )
-  printInfo('go', commandVersion('go', ['version']))
+  printInfo(
+    'go',
+    commandVersion('go', ['version'], windowsGoCommandCandidates())
+  )
   const gccVersion = commandVersion(
     'gcc',
     ['--version'],
