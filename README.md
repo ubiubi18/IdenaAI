@@ -375,6 +375,9 @@ $env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
 npm start
 ```
 
+The override above only applies to the current PowerShell window. Close that
+PowerShell window when you are done with the real-session run.
+
 Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
 
 1. Open `Settings -> AI`.
@@ -406,19 +409,6 @@ Step 10: still inside the Electron app, check all of these before clicking
 This can submit answers on-chain automatically. Wrong answers, missed sessions,
 provider costs, node failures, network failures, Windows sleep, or app crashes
 are your responsibility. Do not test this first on an identity you care about.
-
-Step 11: after the real session, clear the PowerShell-only override:
-
-```powershell
-Remove-Item Env:\IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO
-Remove-Item Env:\IDENA_DESKTOP_USER_DATA_DIR
-```
-
-Step 12: for a local Windows package built on your own machine:
-
-```powershell
-npm run dist:win
-```
 
 ## Use This As A Reference
 
@@ -1552,6 +1542,9 @@ $env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
 npm start
 ```
 
+The override above only applies to the current PowerShell window. Close that
+PowerShell window when you are done with the real-session run.
+
 Step 9: inside the Electron app, check all of these before clicking
 `Enable auto-solve next session`:
 
@@ -1566,19 +1559,6 @@ Step 9: inside the Electron app, check all of these before clicking
 This can submit answers on-chain automatically. Wrong answers, missed sessions,
 provider costs, node failures, network failures, Windows sleep, or app crashes
 are your responsibility. Do not test this first on an identity you care about.
-
-Step 10: after the real session, clear the PowerShell-only override:
-
-```powershell
-Remove-Item Env:\IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO
-Remove-Item Env:\IDENA_DESKTOP_USER_DATA_DIR
-```
-
-Step 11: for a local Windows package built on your own machine:
-
-```powershell
-npm run dist:win
-```
 
 If native dependencies, Electron packaging, Python, Go, MinGW, Visual Studio
 build tools, or node runtime setup fail, copy the exact PowerShell output into a
