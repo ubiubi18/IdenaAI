@@ -24,6 +24,13 @@ These steps assume a fresh macOS machine with no Git, Node, npm, Go, Python, or
 Homebrew already prepared. Run each block in Terminal, in order. The final
 `npm start` command opens IdenaAI inside Electron from the source checkout.
 
+Experimental safety warning: there are no warranties. This code can be buggy,
+unsafe, or wrong, and autosolve can affect a real validation session. Run it
+only on a secure test system with no private data, no valuable wallets, no
+valuable identity, and no important assets attached. Ideally test first with a
+clean identity and ask elsewhere for an invite if needed. Do not run this on a
+computer or profile that holds anything important.
+
 Step 1: install Apple command line tools. A system dialog may open; finish that
 installer before continuing.
 
@@ -165,6 +172,13 @@ These steps assume a fresh Windows 10 PC with no Git, Node, npm, Go, Python,
 MSYS2, MinGW, NVM, or Visual Studio build tools already prepared. Run each block
 in PowerShell, in order. The final `npm start` command opens IdenaAI inside
 Electron from the source checkout.
+
+Experimental safety warning: there are no warranties. This code can be buggy,
+unsafe, or wrong, and autosolve can affect a real validation session. Run it
+only on a secure test system with no private data, no valuable wallets, no
+valuable identity, and no important assets attached. Ideally test first with a
+clean identity and ask elsewhere for an invite if needed. Do not run this on a
+computer or profile that holds anything important.
 
 PowerShell copy paste can behave differently across Windows terminals, keyboard
 layouts, antivirus tools, and older shells. If a copied block fails or appears
