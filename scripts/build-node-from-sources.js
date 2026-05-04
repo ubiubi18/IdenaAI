@@ -163,6 +163,10 @@ function windowsMsysUcrtBinCandidates() {
   return candidates
 }
 
+function pathEnvKey(env = process.env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH'
+}
+
 function buildEnv() {
   const env = {
     ...process.env,
@@ -175,7 +179,11 @@ function buildEnv() {
       fs.existsSync(path.join(candidate, 'gcc.exe'))
     )
     if (gccDir) {
-      env.PATH = [gccDir, env.PATH || ''].filter(Boolean).join(path.delimiter)
+      const envPathKey = pathEnvKey(env)
+      env[envPathKey] = [gccDir, env[envPathKey] || '']
+        .filter(Boolean)
+        .join(path.delimiter)
+      env.PATH = env[envPathKey]
       env.CC = path.join(gccDir, 'gcc.exe')
     }
   }
