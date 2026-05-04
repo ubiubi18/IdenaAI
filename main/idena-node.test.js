@@ -1,5 +1,8 @@
+const path = require('path')
+
 const {
   __test__: {
+    getBundledNodeFileCandidates,
     isPeerHintRetryable,
     isRpcMethodUnavailableError,
     getNodeReleaseRepos,
@@ -12,11 +15,8 @@ const {
 } = require('./idena-node')
 
 describe('idena node release selection', () => {
-  it('checks the IdenaAI fork before falling back to the upstream node release', () => {
-    expect(getNodeReleaseRepos({})).toEqual([
-      'ubiubi18/idena-go',
-      'idena-network/idena-go',
-    ])
+  it('defaults to the IdenaAI fork release repo only', () => {
+    expect(getNodeReleaseRepos({})).toEqual(['ubiubi18/idena-go'])
   })
 
   it('keeps explicit node release repo overrides', () => {
@@ -27,9 +27,9 @@ describe('idena node release selection', () => {
     ).toEqual(['example/one', 'example/two'])
   })
 
-  it('prefers remote node releases by default on Windows', () => {
+  it('does not prefer remote node releases by default on Windows source runs', () => {
     expect(shouldPreferRemoteNodeRelease({platform: 'win32', env: {}})).toBe(
-      true
+      false
     )
     expect(shouldPreferRemoteNodeRelease({platform: 'darwin', env: {}})).toBe(
       false
@@ -49,6 +49,18 @@ describe('idena node release selection', () => {
         env: {IDENAAI_NODE_PREFER_REMOTE_RELEASE: '0'},
       })
     ).toBe(false)
+  })
+
+  it('looks for the PowerShell-built source node before legacy source bundle paths', () => {
+    const suffix = process.platform === 'win32' ? '.exe' : ''
+    expect(
+      getBundledNodeFileCandidates().some(
+        (candidate) =>
+          candidate.endsWith(
+            path.join('build', 'node', 'current', `idena-go${suffix}`)
+          ) || candidate.includes(`build${path.sep}node${path.sep}current`)
+      )
+    ).toBe(true)
   })
 })
 
