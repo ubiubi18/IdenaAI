@@ -34,6 +34,7 @@ type AddressProps = {
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
+    activeContractAddress: string,
 };
 
 function Address() {
@@ -70,6 +71,7 @@ function Address() {
         tipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
+        activeContractAddress,
     } = useOutletContext() as AddressProps;
 
     if (!browserStateHistoryRef.current[locationKey]?.sortPostsBy) {
@@ -144,6 +146,7 @@ function Address() {
                         tipsRef={tipsRef}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
                         makePostsWith={makePostsWith}
+                        activeContractAddress={activeContractAddress}
                     />
                 </li>
             ))}

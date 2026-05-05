@@ -5,6 +5,7 @@ import isSvg from 'is-svg';
 import { calculateMaxFee, dna2num, dnaBase, getCallTransaction, getMakePostTransactionPayload, hex2str, hexToDecimal, sanitizeStr, str2bytes } from "./utils";
 import { CallContractAttachment, ProtoStoreToIpfsAttachmentSchema, contractArgumentFormat, hexToUint8Array, toHexString, Transaction, transactionType, type ContractArgumentFormatValue, type TransactionTypeValue } from "idena-sdk-js-lite";
 import ErrorLoadingMedia from '../assets/error-loading-media.png';
+import { getSocialContractByAddress, stripKnownSocialPostIdPrefix } from "./socialContracts";
 
 export const breakingChanges = {
     v3: { timestamp: 1767578641 },
@@ -13,6 +14,43 @@ export const breakingChanges = {
     v10: { timestamp: 1775992052, block: 10627018, postIdPrefix: 'preV10:' },
     v11: { timestamp: 1777976356, block: 10727655, postIdPrefix: 'preV11:' },
 };
+
+const getContractEra = (timestamp: number, contractAddress?: string) => {
+    const contract = getSocialContractByAddress(contractAddress);
+
+    if (contract?.id === 'v10') {
+        return { preV3: false, preV5: false, preV9: false, preV10: false, preV11: true, postIdPrefix: contract.postIdPrefix };
+    }
+    if (contract?.id === 'v9') {
+        return { preV3: false, preV5: false, preV9: false, preV10: true, preV11: true, postIdPrefix: contract.postIdPrefix };
+    }
+    if (contract?.id === 'v5') {
+        return { preV3: false, preV5: false, preV9: true, preV10: true, preV11: true, postIdPrefix: contract.postIdPrefix };
+    }
+    if (contract?.id === 'v1') {
+        return { preV3: timestamp < breakingChanges.v3.timestamp, preV5: true, preV9: true, preV10: true, preV11: true, postIdPrefix: contract.postIdPrefix };
+    }
+
+    const preV3 = timestamp < breakingChanges.v3.timestamp;
+    const preV5 = timestamp < breakingChanges.v5.timestamp;
+    const preV9 = timestamp < breakingChanges.v9.timestamp;
+    const preV10 = timestamp < breakingChanges.v10.timestamp;
+    const preV11 = timestamp < breakingChanges.v11.timestamp;
+    const postIdPrefix = preV5
+        ? breakingChanges.v5.postIdPrefix
+        : preV9
+            ? breakingChanges.v9.postIdPrefix
+            : preV10
+                ? breakingChanges.v10.postIdPrefix
+                : preV11
+                    ? breakingChanges.v11.postIdPrefix
+                    : '';
+
+    return { preV3, preV5, preV9, preV10, preV11, postIdPrefix };
+};
+
+const prefixContractPostId = (postId: string, postIdPrefix: string) =>
+    postIdPrefix ? postIdPrefix + stripKnownSocialPostIdPrefix(postId) : postId;
 
 export const supportedImageTypes = ['image/apng', 'image/avif', 'image/gif', 'image/jpeg', 'image/png', 'image/svg+xml', 'image/webp'];
 export const supportedVideoTypes = ['audio/mpeg', 'audio/mp4', 'audio/ogg', 'video/mp4', 'video/webm', 'video/ogg'];
@@ -46,6 +84,7 @@ export type Post = {
     image?: string,
     video?: string,
     cid?: string,
+    contractAddress?: string,
     orphaned: boolean,
 };
 export type Poster = { address: string, stake: string, age: number, pubkey: string, state: string };
@@ -365,7 +404,7 @@ export const getChildPostIds = (parentId: string, postsTreeRef: Record<string, s
     return childPostIds;
 };
 
-type GetTransactionDetailsRpcInput = { txHash: string, timestamp: number, blockHeight?: number };
+type GetTransactionDetailsRpcInput = { txHash: string, timestamp: number, blockHeight?: number, contractAddress?: string };
 export const getTransactionDetailsRpc = async (
     transactions: GetTransactionDetailsRpcInput[],
     contractAddress: string,
@@ -383,12 +422,12 @@ export const getTransactionDetailsRpc = async (
     );
 
     const reducedTxs = transactions.reduce((acc, curr) => ({ ...acc, [curr.txHash]: curr }), {}) as Record<string, GetTransactionDetailsRpcInput>;
-    const transactionDetails = filteredReceipts.map(receipt => ({ eventArgs: receipt.result.events?.[0]?.args, eventArgs2nd: receipt.result.events?.[1]?.args, method: receipt.result.method, ...reducedTxs[receipt.result.txHash] }));
+    const transactionDetails = filteredReceipts.map(receipt => ({ eventArgs: receipt.result.events?.[0]?.args, eventArgs2nd: receipt.result.events?.[1]?.args, method: receipt.result.method, contractAddress, ...reducedTxs[receipt.result.txHash] }));
 
     return transactionDetails;
 }
 
-type GetTransactionDetailsIndexerApiInput = { txHash: string, timestamp: number, blockHeight?: number };
+type GetTransactionDetailsIndexerApiInput = { txHash: string, timestamp: number, blockHeight?: number, contractAddress?: string };
 export const getTransactionDetailsIndexerApi = async (
     transactions: GetTransactionDetailsIndexerApiInput[],
     inputIdenaIndexerApiUrl: string,
@@ -407,20 +446,15 @@ export const getTransactionDetailsIndexerApi = async (
 }
 
 export const getNewPosterAndPost = async (
-    transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number },
+    transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number, contractAddress?: string },
     thisChannelId: string,
     postChannelRegex: RegExp,
     rpcClient: RpcClient,
     postsRef: React.RefObject<Record<string, Post>>,
     postersRef: React.RefObject<Record<string, Poster>>,
 ) => {
-    const { txHash, eventArgs, eventArgs2nd, timestamp } = transaction;
-
-    const preV3 = timestamp < breakingChanges.v3.timestamp;
-    const preV5 = timestamp < breakingChanges.v5.timestamp;
-    const preV9 = timestamp < breakingChanges.v9.timestamp;
-    const preV10 = timestamp < breakingChanges.v10.timestamp;
-    const preV11 = timestamp < breakingChanges.v11.timestamp;
+    const { txHash, eventArgs, eventArgs2nd, timestamp, contractAddress } = transaction;
+    const { preV3, preV9, postIdPrefix } = getContractEra(timestamp, contractAddress);
 
     if (!preV9 && !eventArgs2nd?.length) {
         return { continued: true };
@@ -442,17 +476,7 @@ export const getNewPosterAndPost = async (
 
     const postIdRaw = hexToDecimal(eventArgs[1]);
 
-    let postId = postIdRaw;
-
-    if (preV5) {
-        postId = breakingChanges.v5.postIdPrefix + postId;
-    } else if (preV9) {
-        postId = breakingChanges.v9.postIdPrefix + postId;
-    } else if (preV10) {
-        postId = breakingChanges.v10.postIdPrefix + postId;
-    } else if (preV11) {
-        postId = breakingChanges.v11.postIdPrefix + postId;
-    }
+    let postId = prefixContractPostId(postIdRaw, postIdPrefix);
 
     if (postsRef.current[postId]) {
         return { continued: true };
@@ -465,15 +489,7 @@ export const getNewPosterAndPost = async (
     if (replyToPostIdRaw) {
         replyToPostId = replyToPostIdRaw;
 
-        if (preV5) {
-            replyToPostId = breakingChanges.v5.postIdPrefix + replyToPostId;
-        } else if (preV9) {
-            replyToPostId = breakingChanges.v9.postIdPrefix + replyToPostId;
-        } else if (preV10) {
-            replyToPostId = breakingChanges.v10.postIdPrefix + replyToPostId;
-        } else if (preV11) {
-            replyToPostId = breakingChanges.v11.postIdPrefix + replyToPostId;
-        }
+        replyToPostId = prefixContractPostId(replyToPostId, postIdPrefix);
     }
 
     if (replyToPostId) {
@@ -506,6 +522,7 @@ export const getNewPosterAndPost = async (
         channelId,
         txHash,
         replyToPostId,
+        contractAddress,
         orphaned: false,
     } as Post;
 
@@ -641,33 +658,20 @@ const isValidImageUrlCheck = (url: string, wait = 2000): Promise<boolean> => {
 }
 
 export const processTip = async (
-    transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number },
+    transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number, contractAddress?: string },
     rpcClient: RpcClient,
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
     postersRef: React.RefObject<Record<string, Poster>>,
     isRecurseForward: boolean,
 ) => {
-    const { txHash, eventArgs, eventArgs2nd, timestamp } = transaction;
-
-    const preV9 = timestamp < breakingChanges.v9.timestamp;
-    const preV10 = timestamp < breakingChanges.v10.timestamp;
-    const preV11 = timestamp < breakingChanges.v11.timestamp;
+    const { txHash, eventArgs, eventArgs2nd, timestamp, contractAddress } = transaction;
+    const { preV9, preV11, postIdPrefix } = getContractEra(timestamp, contractAddress);
 
     const tipper = eventArgs[0];
 
     const postIdEventArg = preV9 ? eventArgs[1] : eventArgs[2];
     const postIdRaw = hexToDecimal(postIdEventArg);
-    let postId;
-
-    if (preV9) {
-        postId = breakingChanges.v9.postIdPrefix + postIdRaw;
-    } else if (preV10) {
-        postId = breakingChanges.v10.postIdPrefix + postIdRaw;
-    } else if (preV11) {
-        postId = breakingChanges.v11.postIdPrefix + postIdRaw;
-    } else {
-        postId = postIdRaw;
-    }
+    const postId = prefixContractPostId(postIdRaw, postIdPrefix);
 
     const amountEventArg = preV9 ? eventArgs[2] : eventArgs[3];
     const amount = parseInt(amountEventArg, 16);
@@ -967,25 +971,10 @@ export const storeFileToIpfs = async (rpcClient: RpcClient, bytes: Uint8Array, a
     return `ipfs://${cid}`;
 };
 
-export const getPostIdFromChannelId = (timestamp: number, channelId: string, discussPrefix: string) => {
-    const preV9 = timestamp < breakingChanges.v9.timestamp;
-    const preV10 = timestamp < breakingChanges.v10.timestamp;
-    const preV11 = timestamp < breakingChanges.v11.timestamp;
+export const getPostIdFromChannelId = (timestamp: number, channelId: string, discussPrefix: string, contractAddress?: string) => {
+    const { postIdPrefix } = getContractEra(timestamp, contractAddress);
     const discussionPostIdRaw = channelId.split(discussPrefix)[1];
-
-    let discussionPostId;
-
-    if (preV9) {
-        discussionPostId = breakingChanges.v9.postIdPrefix + discussionPostIdRaw;
-    } else if (preV10) {
-        discussionPostId = breakingChanges.v10.postIdPrefix + discussionPostIdRaw;
-    } else if (preV11) {
-        discussionPostId = breakingChanges.v11.postIdPrefix + discussionPostIdRaw;
-    } else {
-        discussionPostId = discussionPostIdRaw;
-    }
-
-    return discussionPostId;
+    return prefixContractPostId(discussionPostIdRaw, postIdPrefix);
 }
 
 export const getNewPostLatestActivity = (
@@ -1011,7 +1000,7 @@ export const getNewPostLatestActivity = (
             if (replyToPostId) {
                 loopPost = postsRef.current[replyToPostId];
             } else if (postChannelRegex.test(channelId)) {
-                const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix);
+                const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix, loopPost.contractAddress);
                 loopPost = postsRef.current[discussionPostId];
             } else {
                 loopPost = undefined;
@@ -1029,7 +1018,7 @@ export const getNewPostLatestActivity = (
             newTimestamp = (postLatestActivityRef.current[replyToPostId] ?? 0) > newTimestamp ? postLatestActivityRef.current[replyToPostId] : newTimestamp;
             newPostLatestActivity[replyToPostId] = newTimestamp;
         } else if (postChannelRegex.test(channelId)) {
-            const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix);
+            const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix, newPost.contractAddress);
             newTimestamp = (postLatestActivityRef.current[discussionPostId] ?? 0) > newTimestamp ? postLatestActivityRef.current[discussionPostId] : newTimestamp;
             newPostLatestActivity[discussionPostId] = newTimestamp;
         }
