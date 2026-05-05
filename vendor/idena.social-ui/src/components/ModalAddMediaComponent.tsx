@@ -6,7 +6,6 @@ type ModalAddMediaComponentProps = {
     modalAddMediaLocation: string,
     addMediaHandler: (location: string, file: File, ipfsUrl?: string | undefined) => Promise<void>,
     rpcClient: RpcClient,
-    lastUsedNonceSavedRef: React.RefObject<number>,
     postersAddress: string,
     makePostsWith: string,
     closeModal: () => void,
@@ -18,7 +17,6 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
         modalAddMediaLocation,
         addMediaHandler,
         rpcClient,
-        lastUsedNonceSavedRef,
         postersAddress,
         makePostsWith,
         closeModal,
@@ -57,7 +55,7 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
 
         const cid = ipfsUrl.split('ipfs://')[1];
 
-        const { nonce, epoch } = await getNonceAndEpoch(rpcClient, lastUsedNonceSavedRef, postersAddress, true);
+        const { nonce, epoch } = await getNonceAndEpoch(rpcClient, postersAddress);
         const { result: storeToIpfsResult } = await rpcClient('dna_storeToIpfs', [{ cid, nonce, epoch }]);
 
         if (!storeToIpfsResult) {
@@ -77,7 +75,7 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
     };
 
     return (<>
-        <div className="px-3">
+        <div className="w-[400px] px-3">
             <p className="mb-2 text-center">Add Image</p>
             <div className="text-[14px]">
                 <div className="mt-5 mb-3">

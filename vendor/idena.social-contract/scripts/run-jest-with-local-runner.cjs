@@ -67,8 +67,8 @@ async function isRunnerAvailable() {
 function ensureRunnerSources() {
   const requiredPaths = [
     runnerDir,
-    path.resolve(contractDir, '..', '..', '..', 'idena-go', 'go.mod'),
-    path.resolve(contractDir, '..', '..', '..', 'idena-wasm-binding', 'lib'),
+    path.resolve(runnerDir, '..', '..', '..', 'idena-go', 'go.mod'),
+    path.resolve(runnerDir, '..', '..', '..', 'idena-wasm-binding', 'lib'),
   ];
 
   const missing = requiredPaths.filter((target) => !fs.existsSync(target));
