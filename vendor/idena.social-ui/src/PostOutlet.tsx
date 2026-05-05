@@ -29,6 +29,7 @@ type PostOutletProps = {
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
+    activeContractAddress: string,
 };
 
 function PostOutlet() {
@@ -59,6 +60,7 @@ function PostOutlet() {
         tipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
+        activeContractAddress,
     } = useOutletContext() as PostOutletProps;
 
     const handleGoBack = () => {
@@ -92,6 +94,7 @@ function PostOutlet() {
             tipsRef={tipsRef}
             postMediaAttachmentsRef={postMediaAttachmentsRef}
             makePostsWith={makePostsWith}
+            activeContractAddress={activeContractAddress}
             isPostOutlet={true}
         />
     </>);

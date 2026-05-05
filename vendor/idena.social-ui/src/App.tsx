@@ -12,6 +12,7 @@ import ModalSendTipComponent from './components/ModalSendTipComponent';
 import ModalAddMediaComponent from './components/ModalAddMediaComponent';
 import ModalRpcMakePostComponent from './components/ModalRpcMakePostComponent';
 import ModalExpandImageComponent from './components/ModalExpandImageComponent';
+import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSocialPostIdForContract, SOCIAL_CONTRACTS, SOCIAL_CONTRACT_CURRENT, type SocialContractId } from './logic/socialContracts';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
 
@@ -19,11 +20,11 @@ const initialDesktopBootstrap = readDesktopBootstrap();
 const defaultNodeUrl = 'http://localhost:9119';
 const defaultNodeApiKey = '';
 const initIndexerApiUrl = officialIndexerApiUrl;
-const contractAddressCurrent = '0x18b0a55eb99AcA113f50eEBbdeAf6f96E789277f';
-const contractAddress4 = '0xa1c5c1A8c6a1Af596078A5c9653F24c216fE1cb2';
-const contractAddress3 = '0xc0324f3Cf8158D6E27dc0A07c221636056174718';
-const contractAddress2 = '0xC5B35B4Dc4359Cc050D502564E789A374f634fA9';
-const contractAddress1 = '0x8d318630eB62A032d2f8073d74f05cbF7c6C87Ae';
+const contractAddressCurrent = SOCIAL_CONTRACT_CURRENT.address;
+const contractAddress4 = getSocialContractById('v10').address;
+const contractAddress3 = getSocialContractById('v9').address;
+const contractAddress2 = getSocialContractById('v5').address;
+const contractAddress1 = getSocialContractById('v1').address;
 const firstBlock = 10135627;
 const makePostMethod = 'makePost';
 const sendTipMethod = 'sendTip';
@@ -137,6 +138,12 @@ function App() {
     const [postersAddressInvalid, setPostersAddressInvalid] = useState<boolean>(false);
     const postersAddressInvalidRef = useRef<boolean>(postersAddressInvalid);
     const [inputSendingTxs, setInputSendingTxs] = useState<string>(initSettings.sendingTxs);
+    const [advancedContractControlsOpen, setAdvancedContractControlsOpen] = useState<boolean>(false);
+    const [legacyContractRiskAccepted, setLegacyContractRiskAccepted] = useState<boolean>(false);
+    const [inputSocialContractId, setInputSocialContractId] = useState<SocialContractId>(SOCIAL_CONTRACT_CURRENT.id);
+    const [activeSocialContractId, setActiveSocialContractId] = useState<SocialContractId>(SOCIAL_CONTRACT_CURRENT.id);
+    const activeSocialContract = getSocialContractById(activeSocialContractId);
+    const activeContractAddress = activeSocialContract.address;
     const [latestPosts, setLatestPosts] = useState<string[]>([]);
     const [latestActivity, setLatestActivity] = useState<string[]>([]);
     const postsRef = useRef({} as Record<string, Post>);
@@ -212,6 +219,45 @@ function App() {
             setFlashNotice(null);
             flashNoticeTimeoutRef.current = undefined;
         }, 8000);
+    };
+
+    const isSameAddress = (left?: string, right?: string) =>
+        (left || '').toLowerCase() === (right || '').toLowerCase();
+
+    const postTargetsActiveContract = (post?: Post) => {
+        if (!post) {
+            return true;
+        }
+        if (post.contractAddress) {
+            return isSameAddress(post.contractAddress, activeContractAddress);
+        }
+        return isSameAddress(activeContractAddress, contractAddressCurrent) &&
+            post.timestamp > breakingChanges.v11.timestamp;
+    };
+
+    const normalizePostIdForActiveContract = (postId?: string | null) =>
+        normalizeSocialPostIdForContract(postId, activeContractAddress);
+
+    const normalizeChannelIdForActiveContract = (channelId?: string | null) =>
+        normalizeSocialChannelIdForContract(channelId, activeContractAddress);
+
+    const handleApplySocialContract = () => {
+        const nextContract = getSocialContractById(inputSocialContractId);
+
+        if (nextContract.legacy && !legacyContractRiskAccepted) {
+            showFlashNotice('warning', 'Tick the legacy contract acknowledgement before switching contract target.');
+            return;
+        }
+
+        setActiveSocialContractId(nextContract.id);
+        setMainComposerCostEstimate(null);
+        setMainComposerCostEstimateError('');
+        currentBlockCapturedRef.current = 0;
+        setCurrentBlockCaptured(0);
+        showFlashNotice(
+            nextContract.legacy ? 'warning' : 'success',
+            `idena.social calls now target ${nextContract.label}.`
+        );
     };
 
     useEffect(() => {
@@ -449,14 +495,14 @@ function App() {
                     const recurseDirection = 'forward';
                     const contentSource = inputFindingPastPostsRef.current === 'rpc' ? 'rpc' : 'indexer-api';
                     const pendingBlock = currentBlockCapturedRef.current ? currentBlockCapturedRef.current + 1 : initialBlock;
-                    const contractAddress = contractAddressCurrent;
+                    const contractAddress = activeContractAddress;
                     recurseForwardIntervalId = setTimeout(postScannerFactory(recurseDirection, contentSource, recurseForward, setCurrentBlockCaptured, currentBlockCapturedRef, contractAddress, pendingBlock), POLLING_INTERVAL);
                 }
             } as RecurseForward)();
 
             return () => clearInterval(recurseForwardIntervalId);
         }
-    }, [initialBlock, nodeAvailable]);
+    }, [initialBlock, nodeAvailable, activeContractAddress]);
 
     type RecurseBackward = (time: number) => Promise<void>;
     useEffect(() => {
@@ -582,7 +628,7 @@ function App() {
                         throw 'no transactions';
                     }
 
-                    transactions = getBlockByHeightResult.transactions.map((txHash: string) => ({ txHash, timestamp: getBlockByHeightResult.timestamp, blockHeight: getBlockByHeightResult.height }));
+                    transactions = getBlockByHeightResult.transactions.map((txHash: string) => ({ txHash, timestamp: getBlockByHeightResult.timestamp, blockHeight: getBlockByHeightResult.height, contractAddress }));
                 } else if (isRecurseForwardWithIndexerApi) {
                     const { result: getBlockByHeightResult, error: getBlockByHeightError } = await getBlockAtWithIdenaIndexerApi(indexerApiUrl, pendingBlock!);
 
@@ -606,8 +652,8 @@ function App() {
                     }
 
                     transactions = getblockTxsResult
-                        ?.filter((transaction: any) => transaction.type === 'CallContract' && allMethods.includes(transaction.txReceipt?.method) && transaction.to === contractAddressCurrent && transaction.txReceipt?.success === true)
-                        .map((transaction: any) => ({ txHash: transaction.hash, timestamp: getTimestampFromIndexerApi(transaction.timestamp), blockHeight: pendingBlock }))
+                        ?.filter((transaction: any) => transaction.type === 'CallContract' && allMethods.includes(transaction.txReceipt?.method) && transaction.to === contractAddress && transaction.txReceipt?.success === true)
+                        .map((transaction: any) => ({ txHash: transaction.hash, timestamp: getTimestampFromIndexerApi(transaction.timestamp), blockHeight: pendingBlock, contractAddress }))
                     ?? [];
                 } else if (isRecurseBackwardWithIndexerApi) {
                     if (continuationTokenRef!.current === 'finished processing') {
@@ -621,7 +667,7 @@ function App() {
 
                     transactions = result
                         ?.filter((balanceUpdate: any) => balanceUpdate.type === 'CallContract' && allMethods.includes(balanceUpdate.txReceipt.method) && balanceUpdate.from === balanceUpdate.address && balanceUpdate.txReceipt.success === true)
-                        .map((balanceUpdate: any) => ({ txHash: balanceUpdate.hash, timestamp: getTimestampFromIndexerApi(balanceUpdate.timestamp) }))
+                        .map((balanceUpdate: any) => ({ txHash: balanceUpdate.hash, timestamp: getTimestampFromIndexerApi(balanceUpdate.timestamp), contractAddress: pastContractAddressRef!.current }))
                     ?? [];
 
                     if (!continuationTokenRef!.current) {
@@ -699,6 +745,7 @@ function App() {
                             postId: newTip.txHash,
                             replyToPostId: postId,
                             timestamp: newTip.timestamp,
+                            contractAddress: transaction.contractAddress,
                         } as Post;
 
                         const newPostLatestActivity = getNewPostLatestActivity(
@@ -767,7 +814,7 @@ function App() {
                     const updatedPosts: Record<string, Post> = {};
 
                     if (postChannelRegex.test(newPost!.channelId)) {
-                        const discussionPostId = getPostIdFromChannelId(newPost!.timestamp, newPost!.channelId, discussPrefix);
+                        const discussionPostId = getPostIdFromChannelId(newPost!.timestamp, newPost!.channelId, discussPrefix, newPost!.contractAddress);
                         const discussionPost = postsRef.current[discussionPostId];
                         const orphaned = !discussionPost || discussionPost.orphaned;
 
@@ -987,7 +1034,7 @@ function App() {
         return estimateRpcPostCost(
             rpcClientRef.current,
             fromAddress,
-            contractAddressCurrent,
+            activeContractAddress,
             makePostMethod,
             inputText,
             mediaFile,
@@ -1026,13 +1073,13 @@ function App() {
 
             copyPostTx(
                 postersAddress,
-                contractAddressCurrent,
+                activeContractAddress,
                 makePostMethod,
                 inputText,
                 media,
                 mediaType,
-                replyToPostId ?? null,
-                channelId ?? null,
+                normalizePostIdForActiveContract(replyToPostId),
+                normalizeChannelIdForActiveContract(channelId),
                 rpcClientRef.current!,
             ).then((res) => {
 
@@ -1114,7 +1161,7 @@ function App() {
 
         setSubmittingPost(location);
 
-        await submitPost(postersAddress, contractAddressCurrent, makePostMethod, inputText, media, mediaType, replyToPostId ?? null, channelId ?? null, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        await submitPost(postersAddress, activeContractAddress, makePostMethod, inputText, media, mediaType, normalizePostIdForActiveContract(replyToPostId), normalizeChannelIdForActiveContract(channelId), inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const submitLikeHandler = async (emoji: string, location: string, replyToPostId?: string, channelId?: string) => {
@@ -1125,7 +1172,7 @@ function App() {
 
         setSubmittingLike(location);
 
-        await submitPost(postersAddress, contractAddressCurrent, makePostMethod, emoji, [], [], replyToPostId ?? null, channelId ?? null, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        await submitPost(postersAddress, activeContractAddress, makePostMethod, emoji, [], [], normalizePostIdForActiveContract(replyToPostId), normalizeChannelIdForActiveContract(channelId), inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const submitSendTipHandler = async (location: string, tipToPostId: string, tipAmount: string) => {
@@ -1136,7 +1183,7 @@ function App() {
 
         setSubmittingTip(location);
 
-        await submitSendTip(postersAddress, contractAddressCurrent, sendTipMethod, tipToPostId, tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        await submitSendTip(postersAddress, activeContractAddress, sendTipMethod, normalizePostIdForActiveContract(tipToPostId) || '', tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const handleOpenLikesModal = (e: MouseEventLocal, likePosts: Post[]) => {
@@ -1154,7 +1201,7 @@ function App() {
     const handleOpenSendTipModal = (e: MouseEventLocal, tipToPost: Post) => {
         e.stopPropagation();
 
-        const isBreakingChangeDisabled = tipToPost.timestamp <= breakingChanges.v11.timestamp;
+        const isBreakingChangeDisabled = !postTargetsActiveContract(tipToPost);
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
@@ -1176,7 +1223,7 @@ function App() {
         e.stopPropagation();
 
         const replyToPost = location !== 'main' && postsRef.current[location];
-        const isBreakingChangeDisabled = replyToPost && replyToPost.timestamp <= breakingChanges.v11.timestamp;
+        const isBreakingChangeDisabled = replyToPost && !postTargetsActiveContract(replyToPost);
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
@@ -1195,7 +1242,7 @@ function App() {
         }
 
         const replyToPost = location !== 'main' && postsRef.current[location];
-        const isBreakingChangeDisabled = replyToPost && replyToPost.timestamp <= breakingChanges.v11.timestamp;
+        const isBreakingChangeDisabled = replyToPost && !postTargetsActiveContract(replyToPost);
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
@@ -1359,6 +1406,67 @@ function App() {
                         </button>
                     </div>
                 )}
+                <div className={`mb-3 rounded-md border px-4 py-3 text-[13px] ${activeSocialContract.legacy ? 'border-amber-400/40 bg-amber-500/10 text-amber-100' : 'border-stone-700 bg-stone-900/70 text-stone-200'}`}>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <p>
+                            <strong>Contract target:</strong> {activeSocialContract.label}
+                        </p>
+                        <a
+                            className="text-blue-400 hover:underline"
+                            href={`https://scan.idena.io/contract/${activeSocialContract.address}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            scan
+                        </a>
+                        <button
+                            className="rounded-sm bg-white/10 px-2 py-1 text-[12px] hover:bg-white/20"
+                            onClick={() => setAdvancedContractControlsOpen(!advancedContractControlsOpen)}
+                        >
+                            {advancedContractControlsOpen ? 'Hide advanced contract target' : 'Advanced contract target'}
+                        </button>
+                    </div>
+                    {activeSocialContract.legacy && (
+                        <p className="mt-2 text-[12px]">
+                            Legacy target is active. Posts, likes, tips, copied transactions, and fee estimates go to this old contract until you switch back to the current contract.
+                        </p>
+                    )}
+                    {advancedContractControlsOpen && (
+                        <div className="mt-3 border-t border-stone-700 pt-3">
+                            <p className="text-[12px] text-stone-300">
+                                Use this only when you deliberately want to call an old idena.social contract. Old contracts can have different behavior and may not be where normal users expect new posts.
+                            </p>
+                            <label className="mt-2 flex items-start gap-2 text-[12px]">
+                                <input
+                                    className="mt-0.5"
+                                    type="checkbox"
+                                    checked={legacyContractRiskAccepted}
+                                    onChange={(event) => setLegacyContractRiskAccepted(event.target.checked)}
+                                />
+                                <span>I understand this can send on-chain calls to a legacy contract.</span>
+                            </label>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <select
+                                    className="min-w-[260px] rounded-sm border border-stone-600 bg-stone-950 px-2 py-1 text-[12px] text-stone-100"
+                                    value={inputSocialContractId}
+                                    onChange={(event) => setInputSocialContractId(event.target.value as SocialContractId)}
+                                >
+                                    {SOCIAL_CONTRACTS.map((contract) => (
+                                        <option key={contract.id} value={contract.id}>
+                                            {contract.label} - {contract.address}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button
+                                    className="rounded-sm bg-white/10 px-3 py-1 text-[12px] hover:bg-white/20"
+                                    onClick={handleApplySocialContract}
+                                >
+                                    Apply contract target
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
                 <Outlet
                     context={{
                         currentBlockCaptured,
@@ -1404,6 +1512,8 @@ function App() {
                         inputSendingTxs,
                         embeddedDesktopOnchainMode: isDesktopOnchainMode,
                         desktopBootstrap,
+                        activeSocialContract,
+                        activeContractAddress,
                     }}
                 />
                 </div>

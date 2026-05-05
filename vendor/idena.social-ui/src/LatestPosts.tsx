@@ -5,6 +5,7 @@ import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaA
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { DesktopBootstrap } from './logic/desktopBootstrap';
 import SortPostsByComponent from './components/SortPostsByComponent';
+import type { SocialContractOption } from './logic/socialContracts';
 
 type LatestPostsProps = {
     currentBlockCaptured: number,
@@ -48,6 +49,8 @@ type LatestPostsProps = {
     inputSendingTxs: string,
     embeddedDesktopOnchainMode?: boolean,
     desktopBootstrap?: DesktopBootstrap,
+    activeSocialContract: SocialContractOption,
+    activeContractAddress: string,
 };
 
 function HoverInfo({ label, widthClass = 'w-72' }: { label: string, widthClass?: string }) {
@@ -117,6 +120,8 @@ function LatestPosts() {
         inputSendingTxs,
         embeddedDesktopOnchainMode,
         desktopBootstrap,
+        activeSocialContract,
+        activeContractAddress,
     } = useOutletContext() as LatestPostsProps;
 
     const [, forceUpdate] = useReducer(x => x + 1, 0);
@@ -287,6 +292,10 @@ function LatestPosts() {
                     <strong>Posting model:</strong> RPC + on-chain reference
                     <HoverInfo label="When enabled in the RPC posting dialog, text and local images add dna_storeToIpfs transactions before the contract call. Existing IPFS images are referenced directly." />
                 </p>
+                <p className={activeSocialContract.legacy ? 'text-amber-300' : ''}>
+                    <strong>Contract:</strong> {activeSocialContract.shortLabel}
+                    <HoverInfo label={`Calls are sent to ${activeSocialContract.address}. Use the advanced contract target control above to switch back to the current contract.`} widthClass="w-80" />
+                </p>
                 <p>
                     <strong>Current max-fee:</strong>{' '}
                     {mainComposerCostEstimateLoading
@@ -359,6 +368,7 @@ function LatestPosts() {
                         tipsRef={tipsRef}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
                         makePostsWith={makePostsWith}
+                        activeContractAddress={activeContractAddress}
                     />
                 </li>
             ))}
