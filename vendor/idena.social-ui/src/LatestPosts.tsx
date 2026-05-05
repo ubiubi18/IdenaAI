@@ -34,6 +34,7 @@ type LatestPostsProps = {
     handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
+    handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
@@ -102,6 +103,7 @@ function LatestPosts() {
         handleOpenSendTipModal,
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
+        handleExpandImageModal,
         tipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
@@ -353,6 +355,7 @@ function LatestPosts() {
                         handleOpenSendTipModal={handleOpenSendTipModal}
                         handleOpenAddMediaModal={handleOpenAddMediaModal}
                         handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
+                        handleExpandImageModal={handleExpandImageModal}
                         tipsRef={tipsRef}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
                         makePostsWith={makePostsWith}

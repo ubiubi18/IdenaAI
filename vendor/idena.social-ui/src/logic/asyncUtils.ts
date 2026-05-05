@@ -2,7 +2,7 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import Decimal from "decimal.js";
 import imageType from 'image-type';
 import isSvg from 'is-svg';
-import { calculateMaxFee, calculateNextNonce, dna2num, dnaBase, getCallTransaction, getMakePostTransactionPayload, hex2str, hexToDecimal, sanitizeStr, str2bytes } from "./utils";
+import { calculateMaxFee, dna2num, dnaBase, getCallTransaction, getMakePostTransactionPayload, hex2str, hexToDecimal, sanitizeStr, str2bytes } from "./utils";
 import { CallContractAttachment, ProtoStoreToIpfsAttachmentSchema, contractArgumentFormat, hexToUint8Array, toHexString, Transaction, transactionType, type ContractArgumentFormatValue, type TransactionTypeValue } from "idena-sdk-js-lite";
 import ErrorLoadingMedia from '../assets/error-loading-media.png';
 
@@ -11,6 +11,7 @@ export const breakingChanges = {
     v5: { timestamp: 1767946325, block: 10219188, postIdPrefix: 'preV5:' },
     v9: { timestamp: 1775551992, block: 10604687, postIdPrefix: 'preV9:' },
     v10: { timestamp: 1775992052, block: 10627018, postIdPrefix: 'preV10:' },
+    v11: { timestamp: 1777976356, block: 10727655, postIdPrefix: 'preV11:' },
 };
 
 export const supportedImageTypes = ['image/apng', 'image/avif', 'image/gif', 'image/jpeg', 'image/png', 'image/svg+xml', 'image/webp'];
@@ -44,10 +45,11 @@ export type Post = {
     replyToPostId: string,
     image?: string,
     video?: string,
+    cid?: string,
     orphaned: boolean,
 };
 export type Poster = { address: string, stake: string, age: number, pubkey: string, state: string };
-export type Tip = { postId: string, txHash: string, timestamp: number, tipper: string, tipperDetails_atTimeOfTip: { stake: number, state: string, age: number }, amount: number };
+export type Tip = { postId: string, txHash: string, timestamp: number, tipper: string, tipperDetails_atTimeOfTip: { stake: number, state: string, age: number }, amount: number, burnAmount: number };
 export type NodeDetails = { idenaNodeUrl: string, idenaNodeApiKey: string };
 
 export const getRpcClient = (nodeDetails: NodeDetails, setNodeAvailable: React.Dispatch<React.SetStateAction<boolean>>) =>
@@ -418,6 +420,7 @@ export const getNewPosterAndPost = async (
     const preV5 = timestamp < breakingChanges.v5.timestamp;
     const preV9 = timestamp < breakingChanges.v9.timestamp;
     const preV10 = timestamp < breakingChanges.v10.timestamp;
+    const preV11 = timestamp < breakingChanges.v11.timestamp;
 
     if (!preV9 && !eventArgs2nd?.length) {
         return { continued: true };
@@ -447,8 +450,10 @@ export const getNewPosterAndPost = async (
         postId = breakingChanges.v9.postIdPrefix + postId;
     } else if (preV10) {
         postId = breakingChanges.v10.postIdPrefix + postId;
+    } else if (preV11) {
+        postId = breakingChanges.v11.postIdPrefix + postId;
     }
-    
+
     if (postsRef.current[postId]) {
         return { continued: true };
     }
@@ -466,6 +471,8 @@ export const getNewPosterAndPost = async (
             replyToPostId = breakingChanges.v9.postIdPrefix + replyToPostId;
         } else if (preV10) {
             replyToPostId = breakingChanges.v10.postIdPrefix + replyToPostId;
+        } else if (preV11) {
+            replyToPostId = breakingChanges.v11.postIdPrefix + replyToPostId;
         }
     }
 
@@ -531,15 +538,16 @@ export const getMedia = async (postId: string, media: string, rpcClient: RpcClie
     let image = '';
     let video = '';
     let mediaType = '';
+    let cid = '';
     let blob;
 
     if (media.startsWith('ipfs://')) {
-        const cid = media.split('ipfs://')[1];
+        cid = media.split('ipfs://')[1];
         const { result: getCidResult } = await rpcClient('ipfs_get', [cid], true);
 
         if (!getCidResult) {
             image = ErrorLoadingMedia;
-            return { postId, image, video, mediaType, blob };
+            return { postId, image, video, mediaType, blob, cid };
         }
 
         const bytes = hexToUint8Array(getCidResult);
@@ -550,7 +558,7 @@ export const getMedia = async (postId: string, media: string, rpcClient: RpcClie
         ({ image, video, mediaType, blob } = await getMediaFromHex(bytes));
     }
 
-    return { postId, image, video, mediaType, blob };
+    return { postId, image, video, mediaType, blob, cid };
 };
 
 const getMediaFromHex = async (bytes: Uint8Array) => {
@@ -643,15 +651,31 @@ export const processTip = async (
 
     const preV9 = timestamp < breakingChanges.v9.timestamp;
     const preV10 = timestamp < breakingChanges.v10.timestamp;
+    const preV11 = timestamp < breakingChanges.v11.timestamp;
 
     const tipper = eventArgs[0];
 
     const postIdEventArg = preV9 ? eventArgs[1] : eventArgs[2];
     const postIdRaw = hexToDecimal(postIdEventArg);
-    const postId = preV9 ? breakingChanges.v9.postIdPrefix + postIdRaw : preV10 ? breakingChanges.v10.postIdPrefix + postIdRaw : postIdRaw;
+    let postId;
+
+    if (preV9) {
+        postId = breakingChanges.v9.postIdPrefix + postIdRaw;
+    } else if (preV10) {
+        postId = breakingChanges.v10.postIdPrefix + postIdRaw;
+    } else if (preV11) {
+        postId = breakingChanges.v11.postIdPrefix + postIdRaw;
+    } else {
+        postId = postIdRaw;
+    }
 
     const amountEventArg = preV9 ? eventArgs[2] : eventArgs[3];
     const amount = parseInt(amountEventArg, 16);
+
+    const sentAmountEventArg = preV11 ? eventArgs[3] : eventArgs[4];
+    const sentAmount = parseInt(sentAmountEventArg, 16);
+
+    const burnAmount = sentAmount - amount;
 
     const tipperDetails_atTimeOfTip = !preV9 ? {
         stake: eventArgs2nd[1] === '0x' ? 0 : Number(dna2num(parseInt(eventArgs2nd[1], 16)).toFixed(0)),
@@ -670,6 +694,7 @@ export const processTip = async (
         tipper,
         tipperDetails_atTimeOfTip,
         amount,
+        burnAmount,
     };
 
     const updatedPostTips = {
@@ -784,13 +809,12 @@ export const copyPostTx = async (
     replyToPostId: string | null,
     channelId: string | null,
     rpcClient: RpcClient,
-    lastUsedNonceSavedRef: React.RefObject<number>,
 ) => {
     const { txAmount, payload } = getMakePostTransactionPayload(makePostMethod, inputPost, replyToPostId, channelId, media, mediaType);
     const inputPostLength = inputPost.length + JSON.stringify(media).length;
     const maxFeeResult = await getMaxFee(rpcClient, { from: postersAddress, to: contractAddress, type: transactionType.CallContractTx, amount: txAmount.toNumber(), payload });
     const { maxFeeDna } = calculateMaxFee(maxFeeResult, inputPostLength);
-    const { nonce, epoch } = await getNonceAndEpoch(rpcClient, lastUsedNonceSavedRef, postersAddress, false);
+    const { nonce, epoch } = await getNonceAndEpoch(rpcClient, postersAddress);
     const txHex = getCallTransaction(contractAddress, txAmount, nonce, epoch, maxFeeDna, payload);
 
     try {
@@ -813,7 +837,6 @@ export const submitPost = async (
     channelId: string | null,
     makePostsWith: string,
     rpcClient: RpcClient,
-    lastUsedNonceSavedRef: React.RefObject<number>,
     callbackUrl: string,
 ) => {
     const { txAmount, args, payload } = getMakePostTransactionPayload(makePostMethod, inputPost, replyToPostId, channelId, media, mediaType);
@@ -825,7 +848,6 @@ export const submitPost = async (
         makePostMethod,
         makePostsWith,
         rpcClient,
-        lastUsedNonceSavedRef,
         callbackUrl,
         txAmount,
         args,
@@ -842,7 +864,6 @@ export const submitSendTip = async (
     amount: string,
     makePostsWith: string,
     rpcClient: RpcClient,
-    lastUsedNonceSavedRef: React.RefObject<number>,
     callbackUrl: string,
 ) => {
     const txAmount = new Decimal(amount);
@@ -850,7 +871,7 @@ export const submitSendTip = async (
         {
             format: contractArgumentFormat.String,
             index: 0,
-            value: JSON.stringify({ postId }),
+            value: JSON.stringify({ postId, tipAmount: amount }),
         }
     ];
     const payload = new CallContractAttachment();
@@ -863,7 +884,6 @@ export const submitSendTip = async (
         sendTipMethod,
         makePostsWith,
         rpcClient,
-        lastUsedNonceSavedRef,
         callbackUrl,
         txAmount,
         args,
@@ -882,7 +902,6 @@ export const makeCallTransaction = async (
     method: string,
     makePostsWith: string,
     rpcClient: RpcClient,
-    lastUsedNonceSavedRef: React.RefObject<number>,
     callbackUrl: string,
     txAmount: Decimal,
     args: CallContractArg[],
@@ -913,7 +932,7 @@ export const makeCallTransaction = async (
     }
 
     if (makePostsWith === 'idena-app') {
-        const { nonce, epoch } = await getNonceAndEpoch(rpcClient, lastUsedNonceSavedRef, from, true);
+        const { nonce, epoch } = await getNonceAndEpoch(rpcClient, from);
 
         const txHex = getCallTransaction(to, txAmount, nonce, epoch, maxFeeDna, payload);
 
@@ -922,22 +941,16 @@ export const makeCallTransaction = async (
     }
 };
 
-export const getNonceAndEpoch = async (rpcClient: RpcClient, lastUsedNonceSavedRef: React.RefObject<number>, address: string, save?: boolean) => {
+export const getNonceAndEpoch = async (rpcClient: RpcClient, address: string) => {
     const responses = await Promise.all([rpcClient('dna_getBalance', [address]), rpcClient('dna_epoch', [])]);
 
     const { result: getBalanceResult } = responses[0];
     const { result: epochResult } = responses[1];
 
-    const calculatedNextNonce = calculateNextNonce(lastUsedNonceSavedRef.current, getBalanceResult.nonce);
-
-    if (save) {
-        lastUsedNonceSavedRef.current = calculatedNextNonce;
-    }
-
-    return { nonce: calculatedNextNonce, epoch: epochResult.epoch as number };
+    return { nonce: getBalanceResult.mempoolNonce + 1, epoch: epochResult.epoch as number };
 }
 
-export const storeFileToIpfs = async (rpcClient: RpcClient, lastUsedNonceSavedRef: React.RefObject<number>, bytes: Uint8Array, address: string) => {
+export const storeFileToIpfs = async (rpcClient: RpcClient, bytes: Uint8Array, address: string) => {
     const fileHexData = toHexString(bytes);
 
     const { result: cid } = await rpcClient('ipfs_add', [fileHexData, true], true);
@@ -946,7 +959,7 @@ export const storeFileToIpfs = async (rpcClient: RpcClient, lastUsedNonceSavedRe
         return;
     };
 
-    const { nonce, epoch } = await getNonceAndEpoch(rpcClient, lastUsedNonceSavedRef, address, true);
+    const { nonce, epoch } = await getNonceAndEpoch(rpcClient, address);
     const { result: storeToIpfsResult } = await rpcClient('dna_storeToIpfs', [{ cid, nonce, epoch }]);
 
     if (!storeToIpfsResult) return;
@@ -957,8 +970,20 @@ export const storeFileToIpfs = async (rpcClient: RpcClient, lastUsedNonceSavedRe
 export const getPostIdFromChannelId = (timestamp: number, channelId: string, discussPrefix: string) => {
     const preV9 = timestamp < breakingChanges.v9.timestamp;
     const preV10 = timestamp < breakingChanges.v10.timestamp;
+    const preV11 = timestamp < breakingChanges.v11.timestamp;
     const discussionPostIdRaw = channelId.split(discussPrefix)[1];
-    const discussionPostId = preV9 ? breakingChanges.v9.postIdPrefix + discussionPostIdRaw : preV10 ? breakingChanges.v10.postIdPrefix + discussionPostIdRaw: discussionPostIdRaw;
+
+    let discussionPostId;
+
+    if (preV9) {
+        discussionPostId = breakingChanges.v9.postIdPrefix + discussionPostIdRaw;
+    } else if (preV10) {
+        discussionPostId = breakingChanges.v10.postIdPrefix + discussionPostIdRaw;
+    } else if (preV11) {
+        discussionPostId = breakingChanges.v11.postIdPrefix + discussionPostIdRaw;
+    } else {
+        discussionPostId = discussionPostIdRaw;
+    }
 
     return discussionPostId;
 }
