@@ -170,7 +170,7 @@ describe('idena.social.wasm', () => {
                     {
                         index: 0,
                         format: ContractArgumentFormat.String,
-                        value: JSON.stringify({ postId: '1' }),
+                        value: JSON.stringify({ postId: '1', tipAmount: '10' }),
                     },
                 ]
             );
@@ -182,14 +182,39 @@ describe('idena.social.wasm', () => {
 
             expect(receipt.events.length).toBe(2);
             expect(receipt.events[0].event).toBe('sendTip');
-            expect(receipt.events[0].args.length).toBe(4);
+            expect(receipt.events[0].args.length).toBe(5);
             expect(receipt.events[0].args[0]).toBe(sender);
             expect(receipt.events[0].args[1]).toBe(sender);
             expect(parseInt(rmZeros(receipt.events[0].args[2]), 16)).toBe(1);
             expect(parseInt(receipt.events[0].args[3], 16)).toBe(10e18);
+            expect(parseInt(receipt.events[0].args[4], 16)).toBe(10e18);
 
             expect(receipt.events[1].event).toBe('_identity');
             expect(receipt.events[1].args.length).toBe(4);
+        });
+
+        it('should send tip amount specified in args', async () => {
+            const tx = await provider.Contract.call(
+                deployReceipt.contract,
+                'sendTip',
+                '10',
+                '9999',
+                [
+                    {
+                        index: 0,
+                        format: ContractArgumentFormat.String,
+                        value: JSON.stringify({ postId: '1', tipAmount: '9' }),
+                    },
+                ]
+            );
+
+            await provider.Chain.generateBlocks(1);
+
+            const receipt = await provider.Chain.receipt(tx);
+            expect(receipt.success).toBe(true);
+
+            expect(parseInt(receipt.events[0].args[3], 16)).toBe(9e18);
+            expect(parseInt(receipt.events[0].args[4], 16)).toBe(10e18);
         });
 
         it('should error when post does not exist', async () => {
@@ -202,7 +227,7 @@ describe('idena.social.wasm', () => {
                     {
                         index: 0,
                         format: ContractArgumentFormat.String,
-                        value: JSON.stringify({ postId: '2' }),
+                        value: JSON.stringify({ postId: '2', tipAmount: '10' }),
                     },
                 ]
             );
@@ -218,13 +243,13 @@ describe('idena.social.wasm', () => {
             const tx = await provider.Contract.call(
                 deployReceipt.contract,
                 'sendTip',
-                '0',
+                '10',
                 '9999',
                 [
                     {
                         index: 0,
                         format: ContractArgumentFormat.String,
-                        value: JSON.stringify({ postId: '1' }),
+                        value: JSON.stringify({ postId: '1', tipAmount: '0' }),
                     },
                 ]
             );
@@ -234,6 +259,28 @@ describe('idena.social.wasm', () => {
             const receipt = await provider.Chain.receipt(tx);
             expect(receipt.success).toBe(false);
             expect(receipt.error.includes('cannot tip nothing')).toBe(true);
+        });
+
+        it('should error when tip amount more than sent', async () => {
+            const tx = await provider.Contract.call(
+                deployReceipt.contract,
+                'sendTip',
+                '10',
+                '9999',
+                [
+                    {
+                        index: 0,
+                        format: ContractArgumentFormat.String,
+                        value: JSON.stringify({ postId: '1', tipAmount: '11' }),
+                    },
+                ]
+            );
+
+            await provider.Chain.generateBlocks(1);
+
+            const receipt = await provider.Chain.receipt(tx);
+            expect(receipt.success).toBe(false);
+            expect(receipt.error.includes('cannot tip more than sent')).toBe(true);
         });
     });
 

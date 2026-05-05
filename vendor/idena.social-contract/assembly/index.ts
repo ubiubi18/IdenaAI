@@ -1,5 +1,6 @@
 import {
     Address,
+    BASE_IDNA,
     Bytes,
     Context,
     Host, 
@@ -41,6 +42,7 @@ class MakePostArgs {
 
 class SendTipArgs {
     postId: string = '0';
+    tipAmount: string = '0';
     _getIdentityGasLimit: u32 = defaultGetIdentityGasLimit;
 }
 
@@ -66,13 +68,16 @@ export class IdenaSocial {
 
     @mutateState
     makePost(args: MakePostArgs): void {
+        const caller = Context.caller();
+        const callerBytes = caller.toBytes();
+
         const postId = u128.add(this.currentPostId, u128.fromString('1'));
-        this.posts.set(postId, util.toHexString(Context.caller(), true));
+        this.posts.set(postId, util.toHexString(caller, true));
 
         this.currentPostId = postId;
 
         Host.emitEvent('makePost', [
-            Context.caller().toBytes(),
+            callerBytes,
             Bytes.fromu128(postId),
             Bytes.fromString(args.channelId),
             Bytes.fromString(args.message),
@@ -85,12 +90,12 @@ export class IdenaSocial {
         ]);
 
         const currentEpoch = Context.epoch();
-        const posterDetails: IdentityDetails = this.identities.get(Context.caller(), new IdentityDetails());
+        const posterDetails: IdentityDetails = this.identities.get(caller, new IdentityDetails());
 
         if (posterDetails.epoch === currentEpoch) {
-            Host.emitEvent('_identity', [Context.caller().toBytes(), Bytes.fromBytes(posterDetails.stake), Bytes.fromU32(posterDetails.state), Bytes.fromU32(posterDetails.age)]);
+            Host.emitEvent('_identity', [callerBytes, Bytes.fromBytes(posterDetails.stake), Bytes.fromU32(posterDetails.state), Bytes.fromU32(posterDetails.age)]);
         } else {
-            Host.createGetIdentityPromise(Context.caller(), createGetIdentityPromiseGasLimit).then('_getIdentity', [Context.caller().toBytes()], Balance.Zero, args._getIdentityGasLimit);
+            Host.createGetIdentityPromise(caller, createGetIdentityPromiseGasLimit).then('_getIdentity', [callerBytes], Balance.Zero, args._getIdentityGasLimit);
         }
     }
 
@@ -99,29 +104,39 @@ export class IdenaSocial {
         const postId = u128.fromString(args.postId);
         util.assert(postId > u128.Zero && postId <= this.currentPostId, 'non-existent post');
 
-        const tipAmount: Balance = Context.payAmount();
+        const tipAmount: Balance = new Balance(u128.mul(u128.fromString(args.tipAmount), BASE_IDNA.value));
         util.assert(tipAmount > Balance.Zero, 'cannot tip nothing');
+
+        const payAmount = Context.payAmount();
+
+        util.assert(tipAmount <= payAmount, 'cannot tip more than sent');
 
         const posterHex: string = this.posts.get(postId, '');
         const poster = Address.fromBytes(util.decodeFromHex(posterHex));
 
+        const caller = Context.caller();
+        const callerBytes = caller.toBytes();
+
         Host.createTransferPromise(poster, tipAmount);
-        Host.emitEvent('sendTip', [Context.caller().toBytes(), poster.toBytes(), Bytes.fromu128(postId), Bytes.fromBytes(tipAmount.toBytes())]);
+        Host.emitEvent('sendTip', [callerBytes, poster.toBytes(), Bytes.fromu128(postId), Bytes.fromBytes(tipAmount.toBytes()), Bytes.fromBytes(payAmount.toBytes())]);
 
         const currentEpoch = Context.epoch();
-        const posterDetails: IdentityDetails = this.identities.get(Context.caller(), new IdentityDetails());
+        const posterDetails: IdentityDetails = this.identities.get(caller, new IdentityDetails());
 
         if (posterDetails.epoch === currentEpoch) {
-            Host.emitEvent('_identity', [Context.caller().toBytes(), Bytes.fromBytes(posterDetails.stake), Bytes.fromU32(posterDetails.state), Bytes.fromU32(posterDetails.age)]);
+            Host.emitEvent('_identity', [callerBytes, Bytes.fromBytes(posterDetails.stake), Bytes.fromU32(posterDetails.state), Bytes.fromU32(posterDetails.age)]);
         } else {
-            Host.createGetIdentityPromise(Context.caller(), createGetIdentityPromiseGasLimit).then('_getIdentity', [Context.caller().toBytes()], Balance.Zero, args._getIdentityGasLimit);
+            Host.createGetIdentityPromise(caller, createGetIdentityPromiseGasLimit).then('_getIdentity', [callerBytes], Balance.Zero, args._getIdentityGasLimit);
         }
     }
 
     @mutateState
     sendMessage(args: SendMessageArgs): void {
+        const caller = Context.caller();
+        const callerBytes = caller.toBytes();
+
         Host.emitEvent('sendMessage', [
-            Context.caller().toBytes(),
+            callerBytes,
             Bytes.fromString(args.recipient),
             Bytes.fromString(args.channelId),
             Bytes.fromString(args.message),
@@ -131,12 +146,12 @@ export class IdenaSocial {
         ]);
         
         const currentEpoch = Context.epoch();
-        const posterDetails: IdentityDetails = this.identities.get(Context.caller(), new IdentityDetails());
+        const posterDetails: IdentityDetails = this.identities.get(caller, new IdentityDetails());
 
         if (posterDetails.epoch === currentEpoch) {
-            Host.emitEvent('_identity', [Context.caller().toBytes(), Bytes.fromBytes(posterDetails.stake), Bytes.fromU32(posterDetails.state), Bytes.fromU32(posterDetails.age)]);
+            Host.emitEvent('_identity', [callerBytes, Bytes.fromBytes(posterDetails.stake), Bytes.fromU32(posterDetails.state), Bytes.fromU32(posterDetails.age)]);
         } else {
-            Host.createGetIdentityPromise(Context.caller(), createGetIdentityPromiseGasLimit).then('_getIdentity', [Context.caller().toBytes()], Balance.Zero, args._getIdentityGasLimit);
+            Host.createGetIdentityPromise(caller, createGetIdentityPromiseGasLimit).then('_getIdentity', [callerBytes], Balance.Zero, args._getIdentityGasLimit);
         }
     }
 

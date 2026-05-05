@@ -11,6 +11,7 @@ import ModalLikesTipsComponent from './components/ModalLikesTipsComponent';
 import ModalSendTipComponent from './components/ModalSendTipComponent';
 import ModalAddMediaComponent from './components/ModalAddMediaComponent';
 import ModalRpcMakePostComponent from './components/ModalRpcMakePostComponent';
+import ModalExpandImageComponent from './components/ModalExpandImageComponent';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
 
@@ -18,7 +19,8 @@ const initialDesktopBootstrap = readDesktopBootstrap();
 const defaultNodeUrl = 'http://localhost:9119';
 const defaultNodeApiKey = '';
 const initIndexerApiUrl = officialIndexerApiUrl;
-const contractAddressCurrent = '0xa1c5c1A8c6a1Af596078A5c9653F24c216fE1cb2';
+const contractAddressCurrent = '0x18b0a55eb99AcA113f50eEBbdeAf6f96E789277f';
+const contractAddress4 = '0xa1c5c1A8c6a1Af596078A5c9653F24c216fE1cb2';
 const contractAddress3 = '0xc0324f3Cf8158D6E27dc0A07c221636056174718';
 const contractAddress2 = '0xC5B35B4Dc4359Cc050D502564E789A374f634fA9';
 const contractAddress1 = '0x8d318630eB62A032d2f8073d74f05cbF7c6C87Ae';
@@ -100,7 +102,6 @@ const customModalStyles = {
         marginRight: '-50%',
         transform: 'translate(-50%, -50%)',
         padding: '5px 0px 5px 0px',
-        width: '500px',
     },
 };
 
@@ -174,7 +175,6 @@ function App() {
     const browserStateHistoryRef = useRef<Record<string, BrowserStateHistorySettings>>({});
     const postMediaAttachmentsRef = useRef<Record<string, PostMediaAttachment | undefined>>({});
     const copyTxHandlerEnabledRef = useRef<boolean>(true);
-    const lastUsedNonceSavedRef = useRef<number>(0);
     const tipsRef = useRef<Record<string, { totalAmount: number, tips: Tip[] }>>({});
     const [idenaWalletBalance, setIdenaWalletBalance] = useState<string>('0');
     const postLatestActivityRef = useRef({} as Record<string, number>);
@@ -187,6 +187,7 @@ function App() {
     const modalSendTipRef = useRef<Post>(undefined);
     const [modalAddMediaLocation, setModalAddMediaLocation] = useState<string>('');
     const modalRpcMakePostRef = useRef<{ location: string, replyToPostId?: string, channelId?: string }>({ location: '' });
+    const modalExpandImageRef = useRef<{ dataUrl?: string, cid?: string}>({});
     const [mainComposerCostEstimate, setMainComposerCostEstimate] = useState<RpcPostCostEstimate | null>(null);
     const [mainComposerCostEstimateError, setMainComposerCostEstimateError] = useState<string>('');
     const [mainComposerCostEstimateLoading, setMainComposerCostEstimateLoading] = useState<boolean>(false);
@@ -574,6 +575,8 @@ function App() {
                                 pastContractAddressRef!.current = contractAddress2;
                             } else if (getBlockByHeightResult.timestamp < breakingChanges.v10.timestamp) {
                                 pastContractAddressRef!.current = contractAddress3;
+                            } else if (getBlockByHeightResult.timestamp < breakingChanges.v11.timestamp) {
+                                pastContractAddressRef!.current = contractAddress4;
                             }
                         }
                         throw 'no transactions';
@@ -603,7 +606,7 @@ function App() {
                     }
 
                     transactions = getblockTxsResult
-                        ?.filter((transaction: any) => transaction.type === 'CallContract' && allMethods.includes(transaction.txReceipt?.method) && transaction.txReceipt?.success === true)
+                        ?.filter((transaction: any) => transaction.type === 'CallContract' && allMethods.includes(transaction.txReceipt?.method) && transaction.to === contractAddressCurrent && transaction.txReceipt?.success === true)
                         .map((transaction: any) => ({ txHash: transaction.hash, timestamp: getTimestampFromIndexerApi(transaction.timestamp), blockHeight: pendingBlock }))
                     ?? [];
                 } else if (isRecurseBackwardWithIndexerApi) {
@@ -626,11 +629,14 @@ function App() {
                     }
 
                     const isCurrentContract = pastContractAddressRef!.current === contractAddressCurrent;
+                    const isContractAddress4 = pastContractAddressRef!.current === contractAddress4;
                     const isContractAddress3 = pastContractAddressRef!.current === contractAddress3;
                     const isContractAddress2 = pastContractAddressRef!.current === contractAddress2;
                     const isContractAddress1 = pastContractAddressRef!.current === contractAddress1;
 
-                    if (isContractAddress3) {
+                    if (isContractAddress4) {
+                        transactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < breakingChanges.v11.timestamp);
+                    } else if (isContractAddress3) {
                         transactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < breakingChanges.v10.timestamp);
                     } else if (isContractAddress2) {
                         transactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < breakingChanges.v9.timestamp);
@@ -642,6 +648,9 @@ function App() {
                         continuationTokenRef!.current = continuationToken;
                     } else {
                         if (isCurrentContract) {
+                            pastContractAddressRef!.current = contractAddress4;
+                            continuationTokenRef!.current = undefined;
+                        } else if (isContractAddress4) {
                             pastContractAddressRef!.current = contractAddress3;
                             continuationTokenRef!.current = undefined;
                         } else if (isContractAddress3) {
@@ -852,9 +861,9 @@ function App() {
 
                 const media = await Promise.all(mediaPromises);
                 for (let index = 0; index < media.length; index++) {
-                    const mediaProps = media[index];
-                    const updatedPost = { ...postsRef.current[mediaProps!.postId], ...mediaProps };
-                    postsRef.current = { ...postsRef.current, [mediaProps!.postId]: updatedPost };
+                    const { blob, ...mediaPropsWithoutBlob } = media[index];
+                    const updatedPost = { ...postsRef.current[mediaPropsWithoutBlob!.postId], ...mediaPropsWithoutBlob };
+                    postsRef.current = { ...postsRef.current, [mediaPropsWithoutBlob!.postId]: updatedPost };
                 }
 
                 setLatestPosts((currentLatestPosts) => {
@@ -1025,7 +1034,6 @@ function App() {
                 replyToPostId ?? null,
                 channelId ?? null,
                 rpcClientRef.current!,
-                lastUsedNonceSavedRef,
             ).then((res) => {
 
                 if (res?.success) {
@@ -1060,7 +1068,7 @@ function App() {
 
         if (inputSendingTxs === 'rpc' && storeTextIpfs && inputText) {
             const fileBytes = str2bytes(inputText);
-            const cidAddress = await storeFileToIpfs(rpcClientRef.current!, lastUsedNonceSavedRef, fileBytes, postersAddressRef.current);
+            const cidAddress = await storeFileToIpfs(rpcClientRef.current!, fileBytes, postersAddressRef.current);
 
             if (!cidAddress) {
                 showFlashNotice('error', 'Failed to store the post text on IPFS. You may have insufficient iDNA.');
@@ -1079,7 +1087,7 @@ function App() {
 
                 const fileBytes = new Uint8Array(await postMediaAttachment.file.arrayBuffer());
 
-                const cidAddress = await storeFileToIpfs(rpcClientRef.current!, lastUsedNonceSavedRef, fileBytes, postersAddressRef.current);
+                const cidAddress = await storeFileToIpfs(rpcClientRef.current!, fileBytes, postersAddressRef.current);
 
                 if (!cidAddress) {
                     showFlashNotice('error', 'Failed to store the media on IPFS. You may have insufficient iDNA.');
@@ -1106,7 +1114,7 @@ function App() {
 
         setSubmittingPost(location);
 
-        await submitPost(postersAddress, contractAddressCurrent, makePostMethod, inputText, media, mediaType, replyToPostId ?? null, channelId ?? null, inputSendingTxs, rpcClientRef.current!, lastUsedNonceSavedRef, callbackUrl);
+        await submitPost(postersAddress, contractAddressCurrent, makePostMethod, inputText, media, mediaType, replyToPostId ?? null, channelId ?? null, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const submitLikeHandler = async (emoji: string, location: string, replyToPostId?: string, channelId?: string) => {
@@ -1117,7 +1125,7 @@ function App() {
 
         setSubmittingLike(location);
 
-        await submitPost(postersAddress, contractAddressCurrent, makePostMethod, emoji, [], [], replyToPostId ?? null, channelId ?? null, inputSendingTxs, rpcClientRef.current!, lastUsedNonceSavedRef, callbackUrl);
+        await submitPost(postersAddress, contractAddressCurrent, makePostMethod, emoji, [], [], replyToPostId ?? null, channelId ?? null, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const submitSendTipHandler = async (location: string, tipToPostId: string, tipAmount: string) => {
@@ -1128,7 +1136,7 @@ function App() {
 
         setSubmittingTip(location);
 
-        await submitSendTip(postersAddress, contractAddressCurrent, sendTipMethod, tipToPostId, tipAmount, inputSendingTxs, rpcClientRef.current!, lastUsedNonceSavedRef, callbackUrl);
+        await submitSendTip(postersAddress, contractAddressCurrent, sendTipMethod, tipToPostId, tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const handleOpenLikesModal = (e: MouseEventLocal, likePosts: Post[]) => {
@@ -1146,7 +1154,7 @@ function App() {
     const handleOpenSendTipModal = (e: MouseEventLocal, tipToPost: Post) => {
         e.stopPropagation();
 
-        const isBreakingChangeDisabled = tipToPost.timestamp <= breakingChanges.v10.timestamp;
+        const isBreakingChangeDisabled = tipToPost.timestamp <= breakingChanges.v11.timestamp;
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
@@ -1168,7 +1176,7 @@ function App() {
         e.stopPropagation();
 
         const replyToPost = location !== 'main' && postsRef.current[location];
-        const isBreakingChangeDisabled = replyToPost && replyToPost.timestamp <= breakingChanges.v10.timestamp;
+        const isBreakingChangeDisabled = replyToPost && replyToPost.timestamp <= breakingChanges.v11.timestamp;
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
@@ -1187,7 +1195,7 @@ function App() {
         }
 
         const replyToPost = location !== 'main' && postsRef.current[location];
-        const isBreakingChangeDisabled = replyToPost && replyToPost.timestamp <= breakingChanges.v10.timestamp;
+        const isBreakingChangeDisabled = replyToPost && replyToPost.timestamp <= breakingChanges.v11.timestamp;
 
         if (inputPostDisabled || isBreakingChangeDisabled) {
             return;
@@ -1195,6 +1203,12 @@ function App() {
 
         modalRpcMakePostRef.current = { location, replyToPostId, channelId };
         setModalOpen('rpcMakePost');
+    };
+
+    const handleExpandImageModal = (e: MouseEventLocal, dataUrl: string, cid?: string) => {
+        e.stopPropagation();
+        modalExpandImageRef.current = { dataUrl, cid };
+        setModalOpen('expandImage');
     };
 
     const addMediaHandler = async (location: string, file: File, ipfsUrl?: string) => {
@@ -1311,9 +1325,9 @@ function App() {
                     <div className="mb-3 text-gray-500">
                         <hr />
                         <div className="flex flex-row gap-1">
-                            <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank">Terms of Service</a></p>
+                            <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
                             <p className="text-[14px]/7">|</p>
-                            <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank">Attributions</a></p>
+                            <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank" rel="noopener noreferrer">Attributions</a></p>
                         </div>
                     </div>
                 </div>
@@ -1375,6 +1389,7 @@ function App() {
                         handleOpenSendTipModal,
                         handleOpenAddMediaModal,
                         handleOpenRpcMakePostModal,
+                        handleExpandImageModal,
                         tipsRef,
                         setPostMediaAttachmentHandler,
                         postMediaAttachmentsRef,
@@ -1399,13 +1414,13 @@ function App() {
                     <div className="flex flex-col h-[90px] justify-center">
                         <div className="px-1 font-[700] text-gray-400"><p>{currentAd?.title ?? defaultAd.title}</p></div>
                         <div className="px-1"><p>{currentAd?.desc ?? defaultAd.desc}</p></div>
-                        <div className="px-1 text-blue-400"><a className="hover:underline" href={currentAd?.url ?? defaultAd.url} target="_blank">{currentAd?.url ?? defaultAd.url}</a></div>
+                        <div className="px-1 text-blue-400"><a className="hover:underline" href={currentAd?.url ?? defaultAd.url} target="_blank" rel="noopener noreferrer">{currentAd?.url ?? defaultAd.url}</a></div>
                     </div>
-                    <div className="my-3 h-[320px] w-[320px]"><a href={currentAd?.url ?? defaultAd.url} target="_blank"><img className="rounded-md" src={currentAd?.media ?? defaultAd.media} /></a></div>
+                    <div className="my-3 h-[320px] w-[320px]"><a href={currentAd?.url ?? defaultAd.url} target="_blank" rel="noopener noreferrer"><img className="rounded-md" src={currentAd?.media ?? defaultAd.media} /></a></div>
                     <div className="flex flex-row px-1">
                         <div className="w-16 flex-auto">
                             <div className="font-[600] text-gray-400"><p>Sponsored by</p></div>
-                            <div><a className="flex flex-row items-center" href={`https://scan.idena.io/address/${currentAd?.author}`} target="_blank"><img className="-mt-0.5 -ml-1.5 h-5 w-5" src={`https://robohash.org/${currentAd?.author}?set=set1`} /><span>{getDisplayAddress(currentAd?.author || '')}</span></a></div>
+                            <div><a className="flex flex-row items-center" href={`https://scan.idena.io/address/${currentAd?.author}`} target="_blank" rel="noopener noreferrer"><img className="-mt-0.5 -ml-1.5 h-5 w-5" src={`https://robohash.org/${currentAd?.author}?set=set1`} /><span>{getDisplayAddress(currentAd?.author || '')}</span></a></div>
                         </div>
                         <div className="flex-1" />
                         <div className="w-16 flex-auto">
@@ -1425,8 +1440,9 @@ function App() {
                     {modalOpen === 'likes' && <ModalLikesTipsComponent heading={'Likes'} modalItemsRef={modalLikePostsRef} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'tips' && <ModalLikesTipsComponent heading={'Tips'} modalItemsRef={modalTipsRef} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'sendTip' && <ModalSendTipComponent modalSendTipRef={modalSendTipRef} idenaWalletBalance={idenaWalletBalance} submitSendTipHandler={submitSendTipHandler} closeModal={() => setModalOpen('')} />}
-                    {modalOpen === 'addMedia' && <ModalAddMediaComponent modalAddMediaLocation={modalAddMediaLocation} addMediaHandler={addMediaHandler} rpcClient={rpcClientRef.current!} lastUsedNonceSavedRef={lastUsedNonceSavedRef} postersAddress={postersAddress} makePostsWith={inputSendingTxs} closeModal={() => setModalOpen('')} />}
+                    {modalOpen === 'addMedia' && <ModalAddMediaComponent modalAddMediaLocation={modalAddMediaLocation} addMediaHandler={addMediaHandler} rpcClient={rpcClientRef.current!} postersAddress={postersAddress} makePostsWith={inputSendingTxs} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'rpcMakePost' && <ModalRpcMakePostComponent modalRpcMakePostRef={modalRpcMakePostRef} submitPostHandler={submitPostHandler} closeModal={() => setModalOpen('')} />}
+                    {modalOpen === 'expandImage' && <ModalExpandImageComponent modalExpandImageRef={modalExpandImageRef} />}
                     <div className="text-center"><button className="h-7 w-15 my-1 px-2 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => setModalOpen('')}>Close</button></div>
                 </Modal>
             </div>
