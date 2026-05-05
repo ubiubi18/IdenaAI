@@ -42,6 +42,7 @@ type PostComponentProps = {
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
+    activeContractAddress: string,
     isPostOutlet?: boolean,
 };
 
@@ -75,6 +76,7 @@ function PostComponent(props: PostComponentProps) {
         tipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
+        activeContractAddress,
         isPostOutlet,
     } = props;
 
@@ -126,7 +128,11 @@ function PostComponent(props: PostComponentProps) {
     const repliesToThisPost = [ ...getChildPostIds(post.postId, replyPostsTreeRef.current).reverse(), ...getChildPostIds(post.postId, deOrphanedReplyPostsTreeRef.current) ];
     const showReplies = !postDomSettingsItem.repliesHidden;
     const showReplyInput = !postDomSettingsItem.replyInputHidden;
-    const isBreakingChangeDisabled = post.timestamp <= breakingChanges.v11.timestamp;
+    const isLegacyPostWithoutContract = !post.contractAddress && post.timestamp <= breakingChanges.v11.timestamp;
+    const isDifferentContractTarget = !!post.contractAddress &&
+        post.contractAddress.toLowerCase() !== activeContractAddress.toLowerCase();
+    const isBreakingChangeDisabled = isLegacyPostWithoutContract || isDifferentContractTarget;
+    const postActionDisabled = inputPostDisabled || isBreakingChangeDisabled;
 
     const replyPosts = repliesToThisPost.map(replyPostId => postsRef.current[replyPostId]);
     const replyLikes = replyPosts.filter(replyPost => replyPost.message === likeEmoji);
@@ -149,7 +155,7 @@ function PostComponent(props: PostComponentProps) {
         const newReplyInputHidden = !browserStateHistoryRef.current[locationKey].postDomSettings?.[postId][post.postId].replyInputHidden;
         setPostDomSettings(post.postId, { replyInputHidden: newReplyInputHidden }, true);
 
-        if (inputPostDisabled || isBreakingChangeDisabled) {
+        if (postActionDisabled) {
             return;
         }
 
@@ -176,7 +182,7 @@ function PostComponent(props: PostComponentProps) {
     };
 
     const toggleReplyDiscussionHandler = (post: Post) => {
-        if (isBreakingChangeDisabled) {
+        if (postActionDisabled) {
             return;
         }
 
@@ -204,7 +210,7 @@ function PostComponent(props: PostComponentProps) {
     const setDiscussReplyToPostIdHandler = (post: Post, discussReplyToPostId?: string) => {
         setPostDomSettings(post.postId, { discussReplyToPostId }, true);
 
-        if (inputPostDisabled || isBreakingChangeDisabled) {
+        if (postActionDisabled) {
             return;
         }
 
@@ -240,7 +246,7 @@ function PostComponent(props: PostComponentProps) {
     const localCopyPostTxHandler = async (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => {
         e.stopPropagation();
 
-        if (inputPostDisabled || isBreakingChangeDisabled) {
+        if (postActionDisabled) {
             return;
         }
 
@@ -266,7 +272,7 @@ function PostComponent(props: PostComponentProps) {
     const localSubmitLikeHandler = async (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => {
         e.stopPropagation();
 
-        if (inputPostDisabled || isBreakingChangeDisabled) {
+        if (postActionDisabled) {
             return;
         }
 
@@ -359,14 +365,14 @@ function PostComponent(props: PostComponentProps) {
                                 rows={1}
                                 className="w-full field-sizing-content max-w-[408px] min-h-[29px] max-h-[520px] py-1 px-2 outline-1 bg-stone-900 placeholder:text-gray-500 text-[14px] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500 [&::-webkit-scrollbar-corner]:bg-neutral-500"
                                 placeholder="Reply here..."
-                                disabled={inputPostDisabled}
+                                disabled={postActionDisabled}
                                 onFocus={replyInputOnFocusHandler}
                                 onBlur={replyInputOnBlurHandler}
                                 onClick={(e) => e.stopPropagation()}
                             />
                         </div>
                         <div>
-                            <button className="h-8 w-17 mb-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={inputPostDisabled} onClick={(e) => localSubmitPostHandler(e, post.postId, post.postId)}>{submittingPost === post.postId ? '...' : 'Post!'}</button>
+                            <button className="h-8 w-17 mb-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={postActionDisabled} onClick={(e) => localSubmitPostHandler(e, post.postId, post.postId)}>{submittingPost === post.postId ? '...' : 'Post!'}</button>
                         </div>
                     </div>
                     {postMediaAttachment && <div className="my-1">
@@ -556,11 +562,11 @@ function PostComponent(props: PostComponentProps) {
                                                         rows={2}
                                                         className="w-full field-sizing-content max-w-[385px] min-h-[26px] max-h-[312px] py-1 px-2 outline-1 bg-stone-900 placeholder:text-gray-500 text-[12px] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500 [&::-webkit-scrollbar-corner]:bg-neutral-500"
                                                         placeholder="Comment here..."
-                                                        disabled={inputPostDisabled}
+                                                        disabled={postActionDisabled}
                                                     />
                                                 </div>
                                                 <div>
-                                                    <button className="h-7 w-16 mb-1 px-4 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={inputPostDisabled} onClick={(e) => localSubmitPostHandler(e, replyPost.postId, discussReplyToPostId, discussParentId)}>{submittingPost === replyPost.postId ? '...' : 'Post!'}</button>
+                                                    <button className="h-7 w-16 mb-1 px-4 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={postActionDisabled} onClick={(e) => localSubmitPostHandler(e, replyPost.postId, discussReplyToPostId, discussParentId)}>{submittingPost === replyPost.postId ? '...' : 'Post!'}</button>
                                                 </div>
                                             </div>
                                         </div>

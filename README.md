@@ -197,9 +197,10 @@ tab. Do not use `cmd.exe`, Git Bash, or the MSYS2 shell for these steps. Run
 each code block in order. The final `npm start` command opens IdenaAI inside
 Electron from the source checkout.
 
-The correct window usually shows a prompt like `PS C:\Users\YourName>`. Some
-installers may ask for administrator permission in a separate Windows dialog;
-approve only if you trust the source checkout and the command you just ran.
+The correct window usually shows a PowerShell prompt that starts with `PS` and
+ends with `>`. Some installers may ask for administrator permission in a
+separate Windows dialog; approve only if you trust the source checkout and the
+command you just ran.
 
 Experimental safety warning: there are no warranties. This code can be buggy,
 unsafe, or wrong, and autosolve can affect a real validation session. Run it
