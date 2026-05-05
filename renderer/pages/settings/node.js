@@ -25,14 +25,19 @@ import {
   useNodeDispatch,
 } from '../../shared/providers/node-context'
 import {useChainState} from '../../shared/providers/chain-context'
-import {HDivider, Input, Toast} from '../../shared/components/components'
+import {
+  HDivider,
+  Input,
+  Toast,
+  Tooltip,
+} from '../../shared/components/components'
 import {
   SettingsFormControl,
   SettingsFormLabel,
   SettingsSection,
 } from '../../screens/settings/components'
 import SettingsLayout from '../../screens/settings/layout'
-import {EyeIcon, EyeOffIcon} from '../../shared/components/icons'
+import {CopyIcon, EyeIcon, EyeOffIcon} from '../../shared/components/icons'
 import {getNodeBridge} from '../../shared/utils/node-bridge'
 import {
   buildRehearsalNetworkPayload,
@@ -48,6 +53,94 @@ import {
 } from '../../screens/validation/hooks/use-start-validation'
 
 const NODE_SETTINGS_TOAST_ID = 'node-settings-status-toast'
+const LOCAL_RPC_KEY_TOAST_ID = 'local-rpc-key-toast'
+const APP_NAME = 'IdenaAI'
+
+async function writeClipboardText(text) {
+  const value = String(text || '')
+  const appClipboard =
+    typeof global !== 'undefined' && global.clipboard ? global.clipboard : null
+
+  if (appClipboard && typeof appClipboard.writeText === 'function') {
+    try {
+      return appClipboard.writeText(value) !== false
+    } catch {
+      // Fall through to the browser Clipboard API.
+    }
+  }
+
+  if (typeof document !== 'undefined' && document.body) {
+    const textArea = document.createElement('textarea')
+    textArea.value = value
+    textArea.setAttribute('readonly', '')
+    textArea.style.position = 'fixed'
+    textArea.style.left = '-9999px'
+    textArea.style.top = '0'
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+    textArea.setSelectionRange(0, textArea.value.length)
+
+    try {
+      if (document.execCommand('copy')) {
+        return true
+      }
+    } catch {
+      // Fall through to navigator.clipboard.
+    } finally {
+      document.body.removeChild(textArea)
+    }
+  }
+
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.clipboard ||
+    typeof navigator.clipboard.writeText !== 'function'
+  ) {
+    return false
+  }
+
+  try {
+    await navigator.clipboard.writeText(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// eslint-disable-next-line react/prop-types
+function LocalRpcKeyHelp({label}) {
+  return (
+    <Tooltip
+      label={label}
+      hasArrow
+      placement="top"
+      openDelay={150}
+      maxW="sm"
+      px={3}
+      py={2}
+      fontSize="sm"
+    >
+      <Box
+        as="span"
+        display="inline-flex"
+        alignItems="center"
+        justifyContent="center"
+        w="20px"
+        h="20px"
+        borderRadius="full"
+        borderWidth="1px"
+        borderColor="gray.300"
+        color="gray.500"
+        fontSize="12px"
+        fontWeight={700}
+        cursor="help"
+      >
+        ?
+      </Box>
+    </Tooltip>
+  )
+}
 
 function hasNodeBridge() {
   return !getNodeBridge().__idenaFallback
@@ -448,6 +541,7 @@ function NodeSettings() {
   }
 
   const [revealApiKey, setRevealApiKey] = useState(false)
+  const [revealInternalApiKey, setRevealInternalApiKey] = useState(false)
   const emptyLogMessage = (() => {
     if (!canUseIpcRenderer) {
       return t(
@@ -594,6 +688,59 @@ function NodeSettings() {
     Number(rehearsalSolverLanes?.participantCount || 0) > 1
   const canRunRehearsalSolverLanes =
     devnetStatus.active && devnetStatus.stage === 'running'
+  const localRpcKeyHelpText = t(
+    'The local RPC key lives as internalApiKey in settings.json inside the current {{appName}} profile. Real app profiles: macOS ~/Library/Application Support/{{appName}}/settings.json, Windows %APPDATA%\\{{appName}}\\settings.json, Linux ~/.config/{{appName}}/settings.json. Edit it only while {{appName}} and its node are stopped, then restart. Rehearsal networks use a different temporary API key managed by the rehearsal node.',
+    {appName: APP_NAME}
+  )
+  let localRpcKeyStatusText = t(
+    'This window is using the built-in local node. Real validation, idena.social posting, and local desktop RPC calls use this key through the desktop proxy.'
+  )
+
+  if (rehearsalNodeConnected) {
+    localRpcKeyStatusText = t(
+      'This window is connected to a rehearsal RPC. The rehearsal API key is temporary and managed by the rehearsal node; the local key shown here belongs to the built-in node profile and is not the rehearsal key.'
+    )
+  } else if (settings.useExternalNode) {
+    localRpcKeyStatusText = t(
+      'This window is using an external node. The local key shown here belongs to the built-in node profile and is not used until you switch back to the built-in node.'
+    )
+  }
+
+  const copyLocalRpcKey = async () => {
+    if (!settings.internalApiKey) {
+      return
+    }
+
+    const copied = await writeClipboardText(settings.internalApiKey)
+
+    if (
+      typeof toast.isActive === 'function' &&
+      typeof toast.close === 'function' &&
+      toast.isActive(LOCAL_RPC_KEY_TOAST_ID)
+    ) {
+      toast.close(LOCAL_RPC_KEY_TOAST_ID)
+    }
+
+    toast({
+      id: LOCAL_RPC_KEY_TOAST_ID,
+      duration: 4000,
+      // eslint-disable-next-line react/display-name
+      render: () => (
+        <Toast
+          title={
+            copied
+              ? t('Local RPC key copied')
+              : t('Unable to copy local RPC key')
+          }
+          description={
+            copied
+              ? t('Paste it only into tools you trust.')
+              : t('Select and copy the local RPC key manually.')
+          }
+        />
+      ),
+    })
+  }
 
   const startRehearsalNetwork = ({connectApp = false} = {}) =>
     getNodeBridge().startValidationDevnet(
@@ -651,6 +798,81 @@ function NodeSettings() {
                 'Built-in node is off. IdenaAI will not start or sync a local node on launch until you enable it.'
               )}
             </Text>
+          )}
+
+          {(settings.runInternalNode || settings.internalApiKey) && (
+            <Stack spacing={3}>
+              <SettingsFormControl>
+                <SettingsFormLabel htmlFor="internal-url">
+                  {t('Local built-in node address')}
+                </SettingsFormLabel>
+                <Box w="full" minW={0}>
+                  <Input
+                    id="internal-url"
+                    value={`http://127.0.0.1:${settings.internalPort}`}
+                    isReadOnly
+                  />
+                </Box>
+              </SettingsFormControl>
+              <SettingsFormControl>
+                <SettingsFormLabel htmlFor="internal-key">
+                  <Flex as="span" align="center">
+                    <Box as="span">{t('Local built-in RPC key')}</Box>
+                    <Box as="span" ml={2}>
+                      <LocalRpcKeyHelp label={localRpcKeyHelpText} />
+                    </Box>
+                  </Flex>
+                </SettingsFormLabel>
+                <Box w="full" minW={0}>
+                  <Stack isInline spacing={2} align="center">
+                    <InputGroup flex={1}>
+                      <Input
+                        id="internal-key"
+                        value={settings.internalApiKey || ''}
+                        type={revealInternalApiKey ? 'text' : 'password'}
+                        isReadOnly
+                      />
+                      <InputRightElement w="6" h="6" m="1">
+                        <IconButton
+                          size="xs"
+                          aria-label={
+                            revealInternalApiKey
+                              ? t('Hide local RPC key')
+                              : t('Show local RPC key')
+                          }
+                          icon={
+                            revealInternalApiKey ? <EyeOffIcon /> : <EyeIcon />
+                          }
+                          bg={revealInternalApiKey ? 'gray.300' : 'white'}
+                          fontSize={20}
+                          _hover={{
+                            bg: revealInternalApiKey ? 'gray.300' : 'white',
+                          }}
+                          onClick={() =>
+                            setRevealInternalApiKey(!revealInternalApiKey)
+                          }
+                        />
+                      </InputRightElement>
+                    </InputGroup>
+                    <SecondaryButton
+                      type="button"
+                      leftIcon={<CopyIcon boxSize="4" />}
+                      isDisabled={!settings.internalApiKey}
+                      onClick={copyLocalRpcKey}
+                    >
+                      {t('Copy')}
+                    </SecondaryButton>
+                  </Stack>
+                  <Text
+                    color={rehearsalNodeConnected ? 'orange.500' : 'muted'}
+                    fontSize="sm"
+                    mt={2}
+                  >
+                    {localRpcKeyStatusText}
+                  </Text>
+                </Box>
+              </SettingsFormControl>
+            </Stack>
           )}
 
           <Stack isInline spacing={3} align="center">

@@ -156,6 +156,7 @@ function syncLegacyBridgeGlobals(bridge = {}) {
   if (!global.clipboard) {
     global.clipboard = {
       readText: () => '',
+      writeText: () => false,
       readImageDataUrl: () => null,
       writeImageDataUrl: () => false,
     }
