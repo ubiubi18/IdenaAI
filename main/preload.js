@@ -1774,6 +1774,14 @@ const bridge = {
   storage: storageBridge,
   clipboard: {
     readText: () => clipboard.readText(),
+    writeText(value) {
+      if (typeof value !== 'string') {
+        return false
+      }
+
+      clipboard.writeText(value)
+      return true
+    },
     readImageDataUrl(options) {
       const image = clipboard.readImage()
 
