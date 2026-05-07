@@ -142,6 +142,27 @@ describe('openai provider adapter', () => {
     )
   })
 
+  test('strips query and fragment components from provider endpoints', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({data: {choices: []}}),
+    }
+
+    await testOpenAiProvider({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'gpt-4.1-mini',
+      profile: {requestTimeoutMs: 5000},
+      providerConfig: {
+        baseUrl: 'https://example.test/v1?key=leaked#fragment',
+        chatPath: 'chat/completions?api_key=leaked#fragment',
+      },
+    })
+
+    expect(httpClient.post.mock.calls[0][0]).toBe(
+      'https://example.test/v1/chat/completions'
+    )
+  })
+
   test('removes response_format and temperature when unsupported', async () => {
     const httpClient = {
       post: jest
