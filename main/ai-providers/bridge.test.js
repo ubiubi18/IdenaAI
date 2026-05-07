@@ -320,6 +320,39 @@ describe('createAiProviderBridge', () => {
     })
   })
 
+  it('preserves planned strict profile budgets in solveFlipBatch provider calls', async () => {
+    const invokeProvider = jest
+      .fn()
+      .mockResolvedValue('{"answer":"right","confidence":0.8}')
+
+    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'strict',
+      deadlineMs: 95000,
+      requestTimeoutMs: 30000,
+      maxConcurrency: 1,
+      maxRetries: 0,
+      uncertaintyConfidenceThreshold: 0.68,
+      uncertaintyRepromptMinRemainingMs: 35000,
+      forceDecision: true,
+      flips: [{hash: 'flip-short-budget'}],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(invokeProvider.mock.calls[0][0].profile).toMatchObject({
+      benchmarkProfile: 'strict',
+      deadlineMs: 95000,
+      requestTimeoutMs: 30000,
+      maxRetries: 0,
+      uncertaintyConfidenceThreshold: 0.68,
+      uncertaintyRepromptMinRemainingMs: 35000,
+    })
+  })
+
   it('exposes fast-mode fallback diagnostics on solved flips', async () => {
     const invokeProvider = jest.fn().mockResolvedValue({
       rawText: '{"answer":"left","confidence":0.9}',
