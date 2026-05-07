@@ -82,4 +82,22 @@ describe('gemini provider adapter', () => {
     )
     expect(httpClient.post).not.toHaveBeenCalled()
   })
+  test('rejects unsafe API version path segments', async () => {
+    const httpClient = {
+      post: jest.fn(),
+    }
+
+    await expect(
+      testGeminiProvider({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gemini-2.0-flash',
+        profile: {requestTimeoutMs: 5000},
+        providerConfig: {
+          apiVersion: 'v1beta?key=leaked',
+        },
+      })
+    ).rejects.toThrow('Gemini API version must be a simple path segment')
+    expect(httpClient.post).not.toHaveBeenCalled()
+  })
 })

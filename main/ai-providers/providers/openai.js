@@ -26,9 +26,18 @@ function normalizeOpenAiUsage(usage = {}) {
 }
 
 function normalizePath(value, fallback) {
-  const path = stripControlCharacters(value || fallback || '').trim()
-  if (!path) return fallback
-  return path.startsWith('/') ? path : `/${path}`
+  const raw = stripControlCharacters(value || fallback || '').trim()
+  if (!raw) return fallback
+
+  try {
+    const parsed = new URL(
+      raw.startsWith('/') ? raw : `/${raw}`,
+      'https://provider.local'
+    )
+    return parsed.pathname || fallback
+  } catch {
+    return fallback
+  }
 }
 
 function normalizeProviderBaseUrl(value, fallback) {

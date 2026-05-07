@@ -154,7 +154,7 @@ describe('createAiProviderBridge', () => {
           status: 401,
           data: {
             error: {
-              code: 'invalid_api_key',
+              code: 'sk-live-secret12345678',
               message:
                 'Incorrect API key: customSecret12345678 and sk-live-secret12345678 at https://example.test/v1/chat/completions?key=AIzaSecretSecretSecretSecretSecret',
             },
