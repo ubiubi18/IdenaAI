@@ -120,7 +120,7 @@ const CUSTOM_LIMITS = {
   interFlipDelayMs: [0, 5000],
   temperature: [0, 2],
   uncertaintyConfidenceThreshold: [0, 1],
-  uncertaintyRepromptMinRemainingMs: [500, 30 * 1000],
+  uncertaintyRepromptMinRemainingMs: [500, 120 * 1000],
 }
 
 module.exports = {
