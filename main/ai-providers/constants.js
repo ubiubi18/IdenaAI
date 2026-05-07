@@ -109,6 +109,16 @@ const STRICT_PROFILE = {
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
+  probabilityEnsembleEnabled: false,
+  probabilityRuns: 3,
+  probabilityPasses: [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ],
+  probabilityDecisionDelta: 0.08,
+  probabilityUseSwappedOrder: true,
+  probabilityReasoningEffort: 'medium',
 }
 
 const CUSTOM_LIMITS = {
@@ -121,6 +131,8 @@ const CUSTOM_LIMITS = {
   temperature: [0, 2],
   uncertaintyConfidenceThreshold: [0, 1],
   uncertaintyRepromptMinRemainingMs: [500, 30 * 1000],
+  probabilityRuns: [1, 5],
+  probabilityDecisionDelta: [0, 0.5],
 }
 
 module.exports = {

@@ -10,10 +10,16 @@ const {
   PROVIDER_CONFIG_DEFAULTS,
   OPENAI_COMPATIBLE_PROVIDERS,
 } = require('./constants')
-const {promptTemplate, systemPromptTemplate} = require('./prompt')
+const {
+  probabilityPromptTemplate,
+  promptTemplate,
+  systemPromptTemplate,
+} = require('./prompt')
 const {sanitizeBenchmarkProfile} = require('./profile')
 const {
+  aggregateProbabilityEnsembleRuns,
   extractJsonBlock,
+  hasUsableProbabilityJudgePayload,
   normalizeAnswer,
   normalizeConfidence,
   normalizeDecision,
@@ -4692,16 +4698,56 @@ function createProviderErrorMessage({provider, model, operation, error}) {
     marker.push(String(error.code))
   }
 
-  const reason =
+  const reason = sanitizeProviderDiagnosticMessage(
     String(remote.message || '').trim() ||
-    String(statusText || '').trim() ||
-    String((error && error.message) || '').trim() ||
-    String(error || 'Unknown error')
+      String(statusText || '').trim() ||
+      String((error && error.message) || '').trim() ||
+      String(error || 'Unknown error')
+  )
 
   const markerText = marker.length ? ` (${marker.join(' ')})` : ''
-  return `${String(provider || 'provider')} ${String(
+  return `${sanitizeProviderDiagnosticField(
+    provider || 'provider'
+  )} ${sanitizeProviderDiagnosticField(
     operation || 'request'
-  )} failed${markerText} for model ${String(model || '').trim()}: ${reason}`
+  )} failed${markerText} for model ${sanitizeProviderDiagnosticField(
+    model || ''
+  )}: ${reason}`
+}
+
+function stripControlCharacters(value) {
+  return String(value || '')
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      return code < 32 || code === 127 ? ' ' : char
+    })
+    .join('')
+}
+
+function sanitizeProviderDiagnosticField(value) {
+  return stripControlCharacters(value).trim().slice(0, 160)
+}
+
+function sanitizeProviderDiagnosticMessage(value) {
+  return stripControlCharacters(value)
+    .replace(/data:[^,\s]+;base64,[A-Za-z0-9+/=]+/g, '[data-url-redacted]')
+    .replace(
+      /([?&](?:key|api_key|api-key|token|access_token)=)[^&\s]+/gi,
+      '$1[redacted]'
+    )
+    .replace(
+      /\b(Bearer|Api-Key|x-api-key)\s+[A-Za-z0-9._~+/=-]+/gi,
+      '$1 [redacted]'
+    )
+    .replace(
+      /\b(api[-_\s]?key|token|secret)\s*(?:[:=]\s*|['"])[A-Za-z0-9._~+/=-]{8,}/gi,
+      '$1 [redacted]'
+    )
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-[redacted]')
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, 'AIza[redacted]')
+    .trim()
+    .slice(0, 600)
 }
 
 function getResponseStatus(error) {
@@ -9557,11 +9603,11 @@ Flip hash: ${hash}
   async function writeBenchmarkLogDefault(entry) {
     try {
       const dir = path.join(getUserDataPath(), 'ai-benchmark')
+      const logFile = path.join(dir, 'session-metrics.jsonl')
       await fs.ensureDir(dir)
-      await fs.appendFile(
-        path.join(dir, 'session-metrics.jsonl'),
-        `${JSON.stringify(entry)}\n`
-      )
+      await fs.chmod(dir, 0o700).catch(() => {})
+      await fs.appendFile(logFile, `${JSON.stringify(entry)}\n`, {mode: 0o600})
+      await fs.chmod(logFile, 0o600).catch(() => {})
     } catch (error) {
       logger.error('Unable to write AI benchmark log', {
         error: error.toString(),
@@ -9586,7 +9632,6 @@ Flip hash: ${hash}
           ? null
           : getApiKey(consultant.provider),
     }))
-
     if (!flips.length) {
       throw new Error('No flips provided')
     }
@@ -9595,6 +9640,13 @@ Flip hash: ${hash}
     }
 
     const profile = sanitizeBenchmarkProfile(payload)
+    const probabilityEnsembleProviderActive =
+      profile.probabilityEnsembleEnabled &&
+      consultProvidersWithKeys.some(
+        (consultant) =>
+          consultant.internalStrategy !== LEGACY_HEURISTIC_STRATEGY &&
+          !isLocalAiProvider(consultant.provider)
+      )
     const basePromptOptions =
       payload &&
       payload.promptOptions &&
@@ -9733,8 +9785,21 @@ Flip hash: ${hash}
           ? 'frames_two_pass'
           : vision.applied
         const passFlip = useFrameReasoning ? deepFrameReviewFlip : providerFlip
+        const passLeftFrames =
+          useFrameReasoning && deepFrameReview
+            ? availableLeftFrames
+            : vision.leftFrames
+        const passRightFrames =
+          useFrameReasoning && deepFrameReview
+            ? availableRightFrames
+            : vision.rightFrames
 
-        const invokeConsultantOnce = async (consultant, promptOptions) =>
+        const invokeConsultantOnce = async (
+          consultant,
+          promptOptions,
+          requestFlip = passFlip,
+          promptText = ''
+        ) =>
           withRetries(profile.maxRetries, async (attempt) => {
             try {
               const remainingDeadlineMs = deadlineAt - now()
@@ -9754,10 +9819,11 @@ Flip hash: ${hash}
               return await invokeProvider({
                 provider: consultant.provider,
                 model: consultant.model,
-                flip: passFlip,
+                flip: requestFlip,
                 profile: requestProfile,
                 apiKey: consultant.apiKey,
                 providerConfig: consultant.providerConfig || providerConfig,
+                promptText,
                 promptOptions,
               })
             } catch (error) {
@@ -9770,6 +9836,210 @@ Flip hash: ${hash}
               throw error
             }
           })
+
+        const shouldSwapProbabilityRun = (runIndex, totalRuns) => {
+          if (!profile.probabilityUseSwappedOrder) {
+            return false
+          }
+          if (totalRuns <= 1) {
+            return hashScore(`${flip.hash}|probability|${runIndex}`) % 2 === 0
+          }
+          if (runIndex === 0) {
+            return false
+          }
+          if (runIndex === 1) {
+            return true
+          }
+          return hashScore(`${flip.hash}|probability|${runIndex}`) % 2 === 0
+        }
+
+        const solveProbabilityEnsembleConsultant = async (consultant) => {
+          const probabilityRunCount = Math.max(
+            1,
+            Math.min(5, Number(profile.probabilityRuns) || 3)
+          )
+          let combinedTokenUsage = createEmptyTokenUsage()
+          const runs = []
+          const runErrors = []
+          const providerMetaEntries = []
+
+          for (
+            let runIndex = 0;
+            runIndex < probabilityRunCount;
+            runIndex += 1
+          ) {
+            const runSwapped = shouldSwapProbabilityRun(
+              runIndex,
+              probabilityRunCount
+            )
+            const runNumber = runIndex + 1
+            const runFlip = buildProviderFlipForVision({
+              flip,
+              swapped: runSwapped,
+              visionMode: passFlipVisionMode,
+              leftFrames: passLeftFrames,
+              rightFrames: passRightFrames,
+            })
+            const promptText = probabilityPromptTemplate({
+              hash: flip.hash,
+              flipVisionMode: passFlipVisionMode,
+              runIndex: runNumber,
+              totalRuns: probabilityRunCount,
+              candidateOrder: `bias-calibration variant ${runNumber}`,
+              probabilityPasses: profile.probabilityPasses,
+            })
+            const structuredOutput =
+              basePromptOptions.structuredOutput &&
+              typeof basePromptOptions.structuredOutput === 'object'
+                ? basePromptOptions.structuredOutput
+                : {}
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              const response = await invokeConsultantOnce(
+                consultant,
+                {
+                  ...basePromptOptions,
+                  secondPass,
+                  forceDecision: false,
+                  flipVisionMode: passFlipVisionMode,
+                  promptPhase: 'probability_ensemble',
+                  structuredOutput: {
+                    ...structuredOutput,
+                    responseFormat:
+                      structuredOutput.responseFormat &&
+                      typeof structuredOutput.responseFormat === 'object'
+                        ? structuredOutput.responseFormat
+                        : {type: 'json_object'},
+                  },
+                  openAiReasoningEffort:
+                    basePromptOptions.openAiReasoningEffort &&
+                    basePromptOptions.openAiReasoningEffort !== 'none'
+                      ? basePromptOptions.openAiReasoningEffort
+                      : profile.probabilityReasoningEffort,
+                },
+                runFlip,
+                promptText
+              )
+              const normalizedResponse = normalizeProviderResponse(response)
+              combinedTokenUsage = addTokenUsage(
+                combinedTokenUsage,
+                normalizedResponse.tokenUsage
+              )
+              if (normalizedResponse.providerMeta) {
+                providerMetaEntries.push(normalizedResponse.providerMeta)
+              }
+              const parsedPayload = extractJsonBlock(normalizedResponse.rawText)
+              if (
+                !parsedPayload ||
+                typeof parsedPayload !== 'object' ||
+                !(
+                  parsedPayload.optionA ||
+                  parsedPayload.option_a ||
+                  parsedPayload.a
+                ) ||
+                !(
+                  parsedPayload.optionB ||
+                  parsedPayload.option_b ||
+                  parsedPayload.b
+                )
+              ) {
+                throw new Error(
+                  'probability response missing optionA or optionB'
+                )
+              }
+              if (!hasUsableProbabilityJudgePayload(parsedPayload)) {
+                throw new Error(
+                  'probability response missing required numeric probability fields'
+                )
+              }
+              runs.push({
+                runIndex: runNumber,
+                swapped: runSwapped,
+                payload: parsedPayload,
+              })
+            } catch (error) {
+              runErrors.push(
+                `run ${runNumber}: ${sanitizeProviderDiagnosticMessage(
+                  (error && error.message) || String(error)
+                )}`
+              )
+            }
+          }
+
+          if (!runs.length) {
+            throw new Error(
+              runErrors.length
+                ? `probability ensemble failed: ${runErrors.join(' | ')}`
+                : 'probability ensemble failed: no valid runs'
+            )
+          }
+
+          const probabilityAggregate = aggregateProbabilityEnsembleRuns(runs, {
+            forceDecision: profile.forceDecision || !allowSkip,
+            probabilityDecisionDelta: profile.probabilityDecisionDelta,
+          })
+          const answer = normalizeAnswer(probabilityAggregate.answer)
+          const providerMeta = providerMetaEntries.length
+            ? {
+                ...providerMetaEntries[0],
+                probabilityEnsemble: {
+                  runCount: probabilityAggregate.runCount,
+                  requestedRuns: probabilityRunCount,
+                  failedRuns: runErrors.length,
+                  useSwappedOrder: profile.probabilityUseSwappedOrder,
+                },
+              }
+            : {
+                probabilityEnsemble: {
+                  runCount: probabilityAggregate.runCount,
+                  requestedRuns: probabilityRunCount,
+                  failedRuns: runErrors.length,
+                  useSwappedOrder: profile.probabilityUseSwappedOrder,
+                },
+              }
+
+          return {
+            provider: consultant.provider,
+            model: consultant.model,
+            weight: normalizeConsultantWeight(consultant.weight, 1),
+            answer,
+            confidence: normalizeConfidence(probabilityAggregate.confidence),
+            reasoning: runErrors.length
+              ? `${probabilityAggregate.reasoning}; ${runErrors.join('; ')}`
+              : probabilityAggregate.reasoning,
+            rawAnswerBeforeRemap: answer,
+            finalAnswerAfterRemap: answer,
+            probabilities: probabilityAggregate.probabilities,
+            probabilityEnsemble: {
+              probabilities: probabilityAggregate.probabilities,
+              avgLeft: probabilityAggregate.avgLeft,
+              avgRight: probabilityAggregate.avgRight,
+              delta: probabilityAggregate.delta,
+              runCount: probabilityAggregate.runCount,
+              requestedRuns: probabilityRunCount,
+              skippedByRisk: probabilityAggregate.skippedByRisk,
+              skippedByDelta: probabilityAggregate.skippedByDelta,
+              runs: probabilityAggregate.runs.map((run) => ({
+                runIndex: run.runIndex,
+                swapped: run.swapped,
+                optionATo: run.optionATo,
+                optionBTo: run.optionBTo,
+                leftScore: run.leftScore,
+                rightScore: run.rightScore,
+              })),
+              errors: runErrors,
+            },
+            error: null,
+            tokenUsage: combinedTokenUsage,
+            costs: estimateProviderTextCostSummary(
+              consultant.provider,
+              consultant.model,
+              combinedTokenUsage
+            ),
+            frameReasoningUsed: false,
+            providerMeta,
+          }
+        }
 
         const solveConsultant = async (consultant) => {
           try {
@@ -9800,6 +10070,13 @@ Flip hash: ${hash}
                 costs: createEmptyCostSummary(),
                 frameReasoningUsed: false,
               }
+            }
+
+            if (
+              profile.probabilityEnsembleEnabled &&
+              !isLocalAiProvider(consultant.provider)
+            ) {
+              return await solveProbabilityEnsembleConsultant(consultant)
             }
 
             let decisionResponse
@@ -9947,12 +10224,36 @@ Flip hash: ${hash}
               item && item.providerMeta && item.providerMeta.modelFallback
           )
           .filter(Boolean)
+        const probabilityEnsembles = consultantDecisions
+          .map((item) =>
+            item && item.probabilityEnsemble
+              ? {
+                  provider: item.provider,
+                  model: item.model,
+                  weight: normalizeConsultantWeight(item.weight, 1),
+                  ...item.probabilityEnsemble,
+                }
+              : null
+          )
+          .filter(Boolean)
+        let probabilityEnsemble = null
+        if (singleConsultantDecision) {
+          probabilityEnsemble =
+            singleConsultantDecision.probabilityEnsemble || null
+        } else if (probabilityEnsembles.length) {
+          probabilityEnsemble = {consultants: probabilityEnsembles}
+        }
+        const probabilities =
+          singleConsultantDecision && singleConsultantDecision.probabilities
+            ? singleConsultantDecision.probabilities
+            : aggregate.probabilities
 
         return {
           hash: flip.hash,
           answer: aggregate.answer,
           confidence: aggregate.confidence,
           reasoning: aggregate.reasoning,
+          probabilities,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
           error:
@@ -9981,6 +10282,7 @@ Flip hash: ${hash}
           ensembleConsulted: consultantDecisions.length,
           ensembleTieBreakApplied: aggregate.tieBreakApplied,
           ensembleTieBreakCandidates: aggregate.tieBreakCandidates,
+          probabilityEnsemble,
           fastMode,
           modelFallback: modelFallbacks[0] || null,
           modelFallbacks,
@@ -10008,6 +10310,7 @@ Flip hash: ${hash}
       )
 
       const shouldReprompt =
+        !probabilityEnsembleProviderActive &&
         profile.uncertaintyRepromptEnabled &&
         !firstPassProviderFailed &&
         deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs &&
@@ -10170,6 +10473,7 @@ Flip hash: ${hash}
           latencyMs,
           error,
           reasoning,
+          probabilities,
           sideSwapped,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
@@ -10190,6 +10494,7 @@ Flip hash: ${hash}
           ensembleContributors,
           ensembleTotalWeight,
           ensembleConsulted,
+          probabilityEnsemble,
         }) => ({
           hash,
           answer,
@@ -10197,6 +10502,7 @@ Flip hash: ${hash}
           latencyMs,
           error,
           reasoning,
+          probabilities,
           sideSwapped,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
@@ -10217,6 +10523,7 @@ Flip hash: ${hash}
           ensembleContributors,
           ensembleTotalWeight,
           ensembleConsulted,
+          probabilityEnsemble,
         })
       ),
     })
