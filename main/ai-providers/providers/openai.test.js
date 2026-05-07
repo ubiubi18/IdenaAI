@@ -72,6 +72,97 @@ describe('openai provider adapter', () => {
     expect(result.usage.totalTokens).toBe(135)
   })
 
+  test('rejects unsafe provider base URLs', async () => {
+    const httpClient = {
+      post: jest.fn(),
+    }
+
+    await expect(
+      testOpenAiProvider({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gpt-4.1-mini',
+        profile: {requestTimeoutMs: 5000},
+        providerConfig: {
+          baseUrl: 'file:///tmp/provider',
+        },
+      })
+    ).rejects.toThrow(
+      'Provider base URL must be an http(s) URL without embedded credentials'
+    )
+
+    await expect(
+      testOpenAiProvider({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gpt-4.1-mini',
+        profile: {requestTimeoutMs: 5000},
+        providerConfig: {
+          baseUrl: 'https://user:pass@example.test/v1',
+        },
+      })
+    ).rejects.toThrow(
+      'Provider base URL must be an http(s) URL without embedded credentials'
+    )
+    expect(httpClient.post).not.toHaveBeenCalled()
+  })
+
+  test('does not let extra headers override provider auth headers', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({data: {choices: []}}),
+    }
+
+    await testOpenAiProvider({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'gpt-4.1-mini',
+      profile: {requestTimeoutMs: 5000},
+      providerConfig: {
+        baseUrl: 'https://example.test/v1',
+        authHeader: 'X-API-Key',
+        authPrefix: '',
+        extraHeaders: {
+          Authorization: 'Bearer attacker',
+          'X-API-Key': 'attacker',
+          'X-Title': 'IdenaAI',
+          'Bad Header': 'bad',
+        },
+      },
+    })
+
+    expect(httpClient.post).toHaveBeenCalledWith(
+      'https://example.test/v1/chat/completions',
+      expect.any(Object),
+      expect.objectContaining({
+        headers: {
+          'X-API-Key': 'test-key',
+          'X-Title': 'IdenaAI',
+        },
+      })
+    )
+  })
+
+  test('strips query and fragment components from provider endpoints', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({data: {choices: []}}),
+    }
+
+    await testOpenAiProvider({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'gpt-4.1-mini',
+      profile: {requestTimeoutMs: 5000},
+      providerConfig: {
+        baseUrl: 'https://example.test/v1?key=leaked#fragment',
+        chatPath: 'chat/completions?api_key=leaked#fragment',
+      },
+    })
+
+    expect(httpClient.post.mock.calls[0][0]).toBe(
+      'https://example.test/v1/chat/completions'
+    )
+  })
+
   test('removes response_format and temperature when unsupported', async () => {
     const httpClient = {
       post: jest

@@ -4,6 +4,7 @@ import {choose, log, send} from 'xstate/lib/actions'
 import dayjs from 'dayjs'
 import {
   fetchFlipHashes,
+  isDuplicateSubmitTxError,
   submitShortAnswers,
   submitLongAnswers,
 } from '../../shared/api/validation'
@@ -52,9 +53,7 @@ function getSubmitErrorMessage(error) {
 }
 
 function isSameHashSubmitError(_, {data}) {
-  return getSubmitErrorMessage(data)
-    .toLowerCase()
-    .includes('tx with same hash already exists')
+  return isDuplicateSubmitTxError(data)
 }
 
 function deterministicAnswerFallback(hash) {
