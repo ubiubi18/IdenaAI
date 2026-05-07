@@ -56,7 +56,11 @@ function normalizeProviderBaseUrl(value, fallback) {
 
 function normalizeApiVersion(value) {
   const text = stripControlCharacters(value || 'v1beta').trim()
-  return text.replace(/^\/+/, '').replace(/\/+$/, '') || 'v1beta'
+  const normalized = text.replace(/^\/+/, '').replace(/\/+$/, '') || 'v1beta'
+  if (!/^[0-9A-Za-z._-]+$/.test(normalized)) {
+    throw new Error('Gemini API version must be a simple path segment')
+  }
+  return normalized
 }
 
 function resolveGeminiEndpoint({model, apiKey, providerConfig = {}}) {
