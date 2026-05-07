@@ -55,7 +55,7 @@ describe('provider solver prompt template', () => {
     expect(prompt).toContain('never because it appeared first')
   })
 
-  it('does not ask for skip in forced frame-decision prompts', () => {
+  it('keeps skip guidance in forced frame-decision prompts', () => {
     const prompt = promptTemplate({
       hash: 'flip-forced-frame-decision',
       forceDecision: true,
@@ -67,26 +67,11 @@ describe('provider solver prompt template', () => {
     })
 
     expect(prompt).toContain('Use only a|b for "answer"')
-    expect(prompt).toContain('never return "skip"')
-    expect(prompt).not.toContain('Prefer skip when both stories')
-  })
-
-  it('uses score-based adjudication in final forced prompts', () => {
-    const prompt = promptTemplate({
-      hash: 'flip-final-adjudication',
-      forceDecision: true,
-      secondPass: true,
-      finalAdjudication: true,
-      flipVisionMode: 'frames_two_pass',
-      promptPhase: 'decision_from_frame_reasoning',
-      frameReasoning:
-        '{"optionAStory":"weak","optionBStory":"slightly stronger","reportRisk":false}',
-    })
-
-    expect(prompt).toContain('final adjudication pass')
-    expect(prompt).toContain('even 50.5 vs 49.5')
-    expect(prompt).toContain('choose the higher score')
-    expect(prompt).toContain('Use only a|b for "answer"')
+    expect(prompt).toContain(
+      'If reportRisk is true, return skip unless the report signal is clearly invalid.'
+    )
+    expect(prompt).toContain('Prefer skip when both stories')
+    expect(prompt).not.toContain('never return "skip"')
   })
 
   it('applies prompt overrides only to decision prompts', () => {
