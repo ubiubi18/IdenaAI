@@ -23,14 +23,49 @@ function trimTrailingSlash(value) {
   return String(value || '').replace(/\/+$/, '')
 }
 
+function stripControlCharacters(value) {
+  return String(value || '')
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      return code < 32 || code === 127 ? '' : char
+    })
+    .join('')
+}
+
+function normalizeProviderBaseUrl(value, fallback) {
+  const raw = stripControlCharacters(value || fallback || '').trim()
+
+  try {
+    const parsed = new URL(raw)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('unsupported protocol')
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error('embedded credentials are not allowed')
+    }
+    parsed.search = ''
+    parsed.hash = ''
+    return trimTrailingSlash(parsed.toString())
+  } catch {
+    throw new Error(
+      'Provider base URL must be an http(s) URL without embedded credentials'
+    )
+  }
+}
+
 function normalizeApiVersion(value) {
-  const text = String(value || 'v1beta').trim()
-  return text.replace(/^\/+/, '').replace(/\/+$/, '') || 'v1beta'
+  const text = stripControlCharacters(value || 'v1beta').trim()
+  const normalized = text.replace(/^\/+/, '').replace(/\/+$/, '') || 'v1beta'
+  if (!/^[0-9A-Za-z._-]+$/.test(normalized)) {
+    throw new Error('Gemini API version must be a simple path segment')
+  }
+  return normalized
 }
 
 function resolveGeminiEndpoint({model, apiKey, providerConfig = {}}) {
   const config = providerConfig || {}
-  const baseUrl = trimTrailingSlash(
+  const baseUrl = normalizeProviderBaseUrl(
     config.baseUrl || 'https://generativelanguage.googleapis.com'
   )
   const apiVersion = normalizeApiVersion(config.apiVersion || 'v1beta')
@@ -345,9 +380,15 @@ async function callGeminiImage({
   }
 }
 
-async function testGeminiProvider({httpClient, apiKey, model, profile}) {
+async function testGeminiProvider({
+  httpClient,
+  apiKey,
+  model,
+  profile,
+  providerConfig,
+}) {
   await httpClient.post(
-    resolveGeminiEndpoint({model, apiKey}),
+    resolveGeminiEndpoint({model, apiKey, providerConfig}),
     {
       contents: [
         {role: 'user', parts: [{text: 'Reply with JSON: {"ok":true}'}]},
@@ -365,7 +406,7 @@ async function testGeminiProvider({httpClient, apiKey, model, profile}) {
 
 async function listGeminiModels({httpClient, apiKey, profile, providerConfig}) {
   const config = providerConfig || {}
-  const baseUrl = trimTrailingSlash(
+  const baseUrl = normalizeProviderBaseUrl(
     config.baseUrl || 'https://generativelanguage.googleapis.com'
   )
   const apiVersion = normalizeApiVersion(config.apiVersion || 'v1beta')

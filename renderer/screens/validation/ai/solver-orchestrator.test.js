@@ -125,7 +125,7 @@ describe('solver-orchestrator planning', () => {
     ).toBeGreaterThanOrEqual(35000)
   })
 
-  it('uses a more deliberate strict profile for long-session OpenAI solving', () => {
+  it('uses a timeout-padded strict profile for long-session OpenAI solving', () => {
     const comparisonFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`comparison-${index + 1}`)
     )
@@ -156,7 +156,7 @@ describe('solver-orchestrator planning', () => {
     expect(
       shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
     ).toBeGreaterThanOrEqual(0.68)
-    expect(longBudget.effectiveProfile.flipVisionMode).toBe('frames_two_pass')
+    expect(longBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(longBudget.solveConcurrency).toBe(1)
     expect(longBudget.effectiveProfile.requestTimeoutMs).toBe(180000)
     expect(longBudget.estimatedMs).toBeGreaterThan(shortBudget.estimatedMs)
@@ -772,7 +772,7 @@ describe('solver-orchestrator planning', () => {
         inFlight += 1
         maxInFlight = Math.max(maxInFlight, inFlight)
         await new Promise((resolve) => {
-          setTimeout(resolve, 5)
+          setTimeout(resolve, 50)
         })
         inFlight -= 1
 
@@ -782,7 +782,7 @@ describe('solver-orchestrator planning', () => {
               hash: flips[0].hash,
               answer: flips[0].hash === 'long-stagger-1' ? 'left' : 'right',
               confidence: 0.84,
-              latencyMs: 5,
+              latencyMs: 50,
               reasoning: 'story is more coherent',
               rawAnswerBeforeRemap:
                 flips[0].hash === 'long-stagger-1' ? 'left' : 'right',
@@ -858,6 +858,152 @@ describe('solver-orchestrator planning', () => {
         {stage: 'solved', hash: 'long-stagger-2'},
         {stage: 'completed', hash: null},
       ])
+    } finally {
+      createElementSpy.mockRestore()
+      global.Image = originalImage
+      global.aiSolver = originalAiSolver
+    }
+  })
+
+  it('retries long-session OpenAI frame provider errors with composite payloads', async () => {
+    const originalImage = global.Image
+    const originalAiSolver = global.aiSolver
+    const originalCreateElement = document.createElement.bind(document)
+    const createElementSpy = jest.spyOn(document, 'createElement')
+
+    function ReadyImage() {
+      this.width = 100
+      this.height = 100
+      this.naturalWidth = 100
+      this.naturalHeight = 100
+    }
+
+    Object.defineProperty(ReadyImage.prototype, 'src', {
+      set() {
+        setTimeout(() => {
+          this.onload?.()
+        }, 0)
+      },
+    })
+
+    global.Image = ReadyImage
+    global.aiSolver = {
+      solveFlipBatch: jest
+        .fn()
+        .mockResolvedValueOnce({
+          results: [
+            {
+              hash: 'long-frame-fallback-1',
+              answer: 'right',
+              confidence: 0,
+              error:
+                'openai request failed (ECONNABORTED) for model gpt-5.5: timeout of 9000ms exceeded',
+              reasoning: 'provider error; deterministic random fallback right',
+              rawAnswerBeforeRemap: 'skip',
+              finalAnswerAfterRemap: 'right',
+              sideSwapped: false,
+              forcedDecision: true,
+              forcedDecisionPolicy: 'random',
+              forcedDecisionReason: 'provider_error',
+              secondPassStrategy: 'annotated_frame_review',
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          results: [
+            {
+              hash: 'long-frame-fallback-1',
+              answer: 'left',
+              confidence: 0.83,
+              error: null,
+              reasoning: 'composite view is enough to choose left',
+              rawAnswerBeforeRemap: 'left',
+              finalAnswerAfterRemap: 'left',
+              sideSwapped: false,
+              flipVisionModeRequested: 'composite',
+              flipVisionModeApplied: 'composite',
+            },
+          ],
+        }),
+    }
+    createElementSpy.mockImplementation((tagName, ...args) => {
+      if (tagName === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({
+            fillStyle: '#000000',
+            fillRect: jest.fn(),
+            drawImage: jest.fn(),
+          }),
+          toDataURL: jest.fn(() => 'data:image/png;base64,MOCK'),
+        }
+      }
+
+      return originalCreateElement(tagName, ...args)
+    })
+
+    try {
+      const result = await solveValidationSessionWithAi({
+        sessionType: 'long',
+        longFlips: [createDecodedFlip('long-frame-fallback-1')],
+        maxFlips: 1,
+        aiSolver: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          benchmarkProfile: 'custom',
+          flipVisionMode: 'frames_two_pass',
+          uncertaintyRepromptEnabled: true,
+          interFlipDelayMs: 0,
+          longSessionOpenAiStaggerIntervalMs: 0,
+        },
+        hardDeadlineAt: Date.now() + 400 * 1000,
+      })
+
+      expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(2)
+      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0]).toMatchObject({
+        model: 'gpt-5.5',
+        flipVisionMode: 'frames_two_pass',
+        uncertaintyRepromptEnabled: true,
+      })
+      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0].flips[0]).toEqual(
+        expect.objectContaining({
+          leftImage: null,
+          rightImage: null,
+          leftFrames: expect.any(Array),
+          rightFrames: expect.any(Array),
+        })
+      )
+      expect(global.aiSolver.solveFlipBatch.mock.calls[1][0]).toMatchObject({
+        model: 'gpt-5.5',
+        flipVisionMode: 'composite',
+        uncertaintyRepromptEnabled: false,
+      })
+      expect(global.aiSolver.solveFlipBatch.mock.calls[1][0].flips[0]).toEqual(
+        expect.objectContaining({
+          leftImage: 'data:image/png;base64,MOCK',
+          rightImage: 'data:image/png;base64,MOCK',
+          leftFrames: expect.any(Array),
+          rightFrames: expect.any(Array),
+        })
+      )
+      expect(result.answers).toEqual([
+        expect.objectContaining({
+          hash: 'long-frame-fallback-1',
+          option: AnswerType.Left,
+        }),
+      ])
+      expect(result.results[0]).toMatchObject({
+        answer: 'left',
+        error: null,
+        flipVisionModeRequested: 'frames_two_pass',
+        flipVisionModeApplied: 'composite',
+        flipVisionModeFallback: 'provider_error_frame_mode',
+        firstPass: expect.objectContaining({
+          error:
+            'openai request failed (ECONNABORTED) for model gpt-5.5: timeout of 9000ms exceeded',
+        }),
+      })
     } finally {
       createElementSpy.mockRestore()
       global.Image = originalImage
