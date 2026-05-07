@@ -549,6 +549,28 @@ real-session test on the research branch, use the real-profile startup command
 from the Mac or Windows walkthrough after switching branches, and confirm the
 startup log points to the real app-data folder before enabling autosolve.
 
+If startup stops with `Renderer dev port 8000 is already in use`, another
+source dev runtime is still using the default renderer port. Close the existing
+IdenaAI/Electron window first, then rerun `npm start`. On macOS you can inspect
+the holder with:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+```
+
+If it is clearly an old IdenaAI/Next/Node dev process, stop it with:
+
+```bash
+kill <PID>
+```
+
+If you deliberately need two source checkouts open, start the second one on a
+different renderer port:
+
+```bash
+IDENA_DESKTOP_RENDERER_PORT=8001 npm start
+```
+
 On the research branch only, configure it in `Settings -> AI` as an advanced
 experimental option:
 
