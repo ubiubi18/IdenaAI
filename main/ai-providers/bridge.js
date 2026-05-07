@@ -4705,7 +4705,12 @@ function createProviderErrorMessage({provider, model, operation, error}) {
       String(error || 'Unknown error')
   )
 
-  const markerText = marker.length ? ` (${marker.join(' ')})` : ''
+  const sanitizedMarker = marker
+    .map((item) => sanitizeProviderDiagnosticField(item))
+    .filter(Boolean)
+  const markerText = sanitizedMarker.length
+    ? ` (${sanitizedMarker.join(' ')})`
+    : ''
   return `${sanitizeProviderDiagnosticField(
     provider || 'provider'
   )} ${sanitizeProviderDiagnosticField(
@@ -4726,11 +4731,19 @@ function stripControlCharacters(value) {
 }
 
 function sanitizeProviderDiagnosticField(value) {
-  return stripControlCharacters(value).trim().slice(0, 160)
+  return redactProviderDiagnosticSecrets(stripControlCharacters(value))
+    .trim()
+    .slice(0, 160)
 }
 
 function sanitizeProviderDiagnosticMessage(value) {
-  return stripControlCharacters(value)
+  return redactProviderDiagnosticSecrets(stripControlCharacters(value))
+    .trim()
+    .slice(0, 600)
+}
+
+function redactProviderDiagnosticSecrets(value) {
+  return String(value || '')
     .replace(/data:[^,\s]+;base64,[A-Za-z0-9+/=]+/g, '[data-url-redacted]')
     .replace(
       /([?&](?:key|api_key|api-key|token|access_token)=)[^&\s]+/gi,
@@ -4746,8 +4759,6 @@ function sanitizeProviderDiagnosticMessage(value) {
     )
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-[redacted]')
     .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, 'AIza[redacted]')
-    .trim()
-    .slice(0, 600)
 }
 
 function getResponseStatus(error) {
