@@ -2,6 +2,16 @@ function trimTrailingSlash(value) {
   return String(value || '').replace(/\/+$/, '')
 }
 
+function stripControlCharacters(value) {
+  return String(value || '')
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      return code < 32 || code === 127 ? '' : char
+    })
+    .join('')
+}
+
 function toTokenNumber(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
@@ -16,14 +26,35 @@ function normalizeOpenAiUsage(usage = {}) {
 }
 
 function normalizePath(value, fallback) {
-  const path = String(value || fallback || '').trim()
+  const path = stripControlCharacters(value || fallback || '').trim()
   if (!path) return fallback
   return path.startsWith('/') ? path : `/${path}`
 }
 
+function normalizeProviderBaseUrl(value, fallback) {
+  const raw = stripControlCharacters(value || fallback || '').trim()
+
+  try {
+    const parsed = new URL(raw)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('unsupported protocol')
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error('embedded credentials are not allowed')
+    }
+    parsed.search = ''
+    parsed.hash = ''
+    return trimTrailingSlash(parsed.toString())
+  } catch {
+    throw new Error(
+      'Provider base URL must be an http(s) URL without embedded credentials'
+    )
+  }
+}
+
 function resolveOpenAiEndpoint(providerConfig = {}) {
   const config = providerConfig || {}
-  const baseUrl = trimTrailingSlash(
+  const baseUrl = normalizeProviderBaseUrl(
     config.baseUrl || 'https://api.openai.com/v1'
   )
   const chatPath = normalizePath(config.chatPath, '/chat/completions')
@@ -32,7 +63,7 @@ function resolveOpenAiEndpoint(providerConfig = {}) {
 
 function resolveOpenAiModelsEndpoint(providerConfig = {}) {
   const config = providerConfig || {}
-  const baseUrl = trimTrailingSlash(
+  const baseUrl = normalizeProviderBaseUrl(
     config.baseUrl || 'https://api.openai.com/v1'
   )
   const modelsPath = normalizePath(config.modelsPath, '/models')
@@ -41,7 +72,7 @@ function resolveOpenAiModelsEndpoint(providerConfig = {}) {
 
 function resolveOpenAiImagesEndpoint(providerConfig = {}) {
   const config = providerConfig || {}
-  const baseUrl = trimTrailingSlash(
+  const baseUrl = normalizeProviderBaseUrl(
     config.baseUrl || 'https://api.openai.com/v1'
   )
   const imagesPath = normalizePath(config.imagesPath, '/images/generations')
@@ -73,9 +104,12 @@ function normalizeOpenAiModelList(data) {
 
 function createAuthHeaders(apiKey, providerConfig = {}) {
   const config = providerConfig || {}
-  const headerName = String(config.authHeader || 'Authorization').trim()
+  const headerName = normalizeHeaderName(
+    config.authHeader || 'Authorization',
+    'Authorization'
+  )
   const prefix = config.authPrefix == null ? 'Bearer' : config.authPrefix
-  const normalizedPrefix = String(prefix || '').trim()
+  const normalizedPrefix = stripControlCharacters(prefix || '').trim()
   const headerValue = normalizedPrefix
     ? `${normalizedPrefix} ${apiKey}`
     : String(apiKey || '')
@@ -94,12 +128,37 @@ function createAuthHeaders(apiKey, providerConfig = {}) {
 
   return Object.keys(extraHeaders).reduce(
     (acc, key) => {
-      const headerKey = String(key || '').trim()
+      const headerKey = normalizeHeaderName(key, '')
       if (!headerKey) return acc
-      acc[headerKey] = String(extraHeaders[key] || '')
+      if (isReservedAuthHeader(headerKey, headerName)) return acc
+      acc[headerKey] = stripControlCharacters(extraHeaders[key] || '')
       return acc
     },
     {...baseHeaders}
+  )
+}
+
+function normalizeHeaderName(value, fallback) {
+  const headerName = stripControlCharacters(value || fallback || '').trim()
+  if (!headerName) {
+    return fallback
+  }
+  if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(headerName)) {
+    if (fallback) {
+      return fallback
+    }
+    return ''
+  }
+  return headerName
+}
+
+function isReservedAuthHeader(headerName, authHeaderName) {
+  const normalized = String(headerName || '').toLowerCase()
+  const auth = String(authHeaderName || '').toLowerCase()
+  return (
+    normalized === auth ||
+    normalized === 'authorization' ||
+    normalized === 'x-api-key'
   )
 }
 

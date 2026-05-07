@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 
+const fs = require('fs')
 const path = require('path')
 const {execFileSync, spawnSync} = require('child_process')
 
 const ROOT = path.join(__dirname, '..')
 const ELECTRON_BUILDER_CLI = require.resolve('electron-builder/out/cli/cli')
 const PREPARE_BUNDLED_NODE = path.join(__dirname, 'prepare-bundled-node.js')
+const MIN_NODE_BINARY_SIZE = 1024 * 1024
+const WINDOWS_BUNDLED_NODE = path.join(
+  ROOT,
+  'build',
+  'node',
+  'current',
+  'idena-go.exe'
+)
 
 const MAC_PLATFORM_FLAGS = new Set(['--mac', '-m'])
 const WIN_PLATFORM_FLAGS = new Set(['--win', '-w'])
@@ -99,6 +108,46 @@ function shouldPreparePlatformBundle(argv) {
   return false
 }
 
+function isLikelyWindowsNodeBinary(filePath) {
+  let fd = null
+  try {
+    const stats = fs.statSync(filePath)
+    if (!stats || stats.size < MIN_NODE_BINARY_SIZE) {
+      return false
+    }
+
+    fd = fs.openSync(filePath, 'r')
+    const header = Buffer.alloc(2)
+    fs.readSync(fd, header, 0, header.length, 0)
+    return header[0] === 0x4d && header[1] === 0x5a
+  } catch {
+    return false
+  } finally {
+    if (fd !== null) {
+      fs.closeSync(fd)
+    }
+  }
+}
+
+function ensureWindowsBundleForTarget(argv) {
+  if (!includesAny(argv, WIN_PLATFORM_FLAGS)) {
+    return
+  }
+
+  if (isLikelyWindowsNodeBinary(WINDOWS_BUNDLED_NODE)) {
+    return
+  }
+
+  console.error(
+    [
+      '[electron-builder-wrapper] Windows packaging needs a prepared bundled node at:',
+      `  ${WINDOWS_BUNDLED_NODE}`,
+      'Build on Windows, or place a pinned idena-go.exe there before running --win from another platform.',
+    ].join('\n')
+  )
+  process.exit(1)
+}
+
 const args = process.argv.slice(2)
 
 if (shouldAppendMacArch(args)) {
@@ -127,6 +176,8 @@ if (shouldPreparePlatformBundle(args)) {
     process.exit(prepareResult.status || 1)
   }
 }
+
+ensureWindowsBundleForTarget(args)
 
 const result = spawnSync(process.execPath, [ELECTRON_BUILDER_CLI, ...args], {
   cwd: ROOT,
