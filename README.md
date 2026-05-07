@@ -490,6 +490,100 @@ Windows walkthrough.
 Rehearsal and off-chain queue runs stay local and do not submit mainnet answers.
 Mainnet validation, reporting, wallet, and identity use remain at your own risk.
 
+## Current Autosolver Status And Probability Ensemble Research
+
+The `main` branch is the conservative integration line. It currently keeps the
+normal autosolver decision path as the default, with recent hardening focused on
+Windows validation reliability and hosted provider safety:
+
+- OpenAI/Gemini provider URLs are restricted to `http` or `https`, without
+  embedded credentials.
+- provider endpoint query strings, fragments, unsafe headers, and diagnostic
+  secret leaks are stripped or rejected where possible.
+- validation submit RPC calls use a more Windows-tolerant timeout and more
+  precise duplicate-transaction detection.
+- long-session OpenAI solving uses the more stable composite image route by
+  default, and frame-mode provider errors can retry once with a composite
+  payload before falling back.
+- short-session submit and long-session report states now give clearer UI
+  feedback, especially when no report slots are available.
+
+The larger GPT-5.5 flip-judging redesign is intentionally not enabled on
+`main`. It lives on the research branch:
+
+```bash
+vibe/gpt55-probability-ensemble-research
+```
+
+That branch adds an experimental `probability_ensemble` mode. Instead of asking
+the model to choose left or right immediately, it asks for independent
+probability scores for both candidate stories, optionally swaps candidate order
+between runs, and lets application code aggregate the result. The goal is to
+reduce early side anchoring and position bias. It does not eliminate model
+errors, provider outages, API cost, or validation risk.
+
+To start the probability ensemble research branch from an existing checkout:
+
+```bash
+git fetch origin
+git switch vibe/gpt55-probability-ensemble-research
+npm ci
+npm run setup:sources
+npm start
+```
+
+On Windows, keep using the Windows walkthrough prerequisites and build the
+source node before the first Electron start:
+
+```powershell
+git fetch origin
+git switch vibe/gpt55-probability-ensemble-research
+npm ci
+npm run setup:sources
+npm run build:node
+npm start
+```
+
+Those startup commands open the normal source-run practice profile. For any
+real-session test on the research branch, use the real-profile startup command
+from the Mac or Windows walkthrough after switching branches, and confirm the
+startup log points to the real app-data folder before enabling autosolve.
+
+If startup stops with `Renderer dev port 8000 is already in use`, another
+source dev runtime is still using the default renderer port. Close the existing
+IdenaAI/Electron window first, then rerun `npm start`. On macOS you can inspect
+the holder with:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+```
+
+If it is clearly an old IdenaAI/Next/Node dev process, stop it with:
+
+```bash
+kill <PID>
+```
+
+If you deliberately need two source checkouts open, start the second one on a
+different renderer port:
+
+```bash
+IDENA_DESKTOP_RENDERER_PORT=8001 npm start
+```
+
+On the research branch only, configure it in `Settings -> AI` as an advanced
+experimental option:
+
+- enable the probability ensemble setting
+- keep `probabilityRuns` at `3` unless benchmarking shows a reason to change it
+- keep swapped candidate order enabled
+- benchmark on rehearsal or off-chain datasets before using it near a valuable
+  identity
+
+Do not treat this branch as a production validation strategy. It is a test lane
+for measuring whether independent scoring plus aggregation improves FLIP
+judging under real provider timing and Windows route conditions.
+
 ## Experimental Warning
 
 Read this part first. `v0.0.4` is not production ready.
