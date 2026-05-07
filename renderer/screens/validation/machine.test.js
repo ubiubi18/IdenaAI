@@ -7,6 +7,13 @@ import {
 
 jest.mock('../../shared/api/validation', () => ({
   fetchFlipHashes: jest.fn(() => new Promise(() => {})),
+  isDuplicateSubmitTxError: jest.fn((error) => {
+    const message = String(error?.message || error || '').toLowerCase()
+    return (
+      /\b(tx|transaction)\b/.test(message) &&
+      /same hash|already known|known|duplicate/.test(message)
+    )
+  }),
   submitShortAnswers: jest.fn(() => Promise.resolve('0xtx')),
   submitLongAnswers: jest.fn(() => Promise.resolve('0xtx')),
 }))
@@ -280,7 +287,7 @@ describe('validation machine', () => {
 
   it('treats duplicate short-answer tx errors as already submitted', async () => {
     submitShortAnswers.mockRejectedValueOnce(
-      new Error('tx with same hash already exists')
+      new Error('already known transaction')
     )
 
     const machine = createValidationMachine({
@@ -516,9 +523,7 @@ describe('validation machine', () => {
   })
 
   it('treats duplicate long-answer tx errors as validation success', async () => {
-    submitLongAnswers.mockRejectedValueOnce(
-      new Error('tx with same hash already exists')
-    )
+    submitLongAnswers.mockRejectedValueOnce(new Error('duplicate transaction'))
 
     const machine = createValidationMachine({
       epoch: 1,

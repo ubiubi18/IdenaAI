@@ -214,6 +214,16 @@ const DEFAULT_AI_SETTINGS = {
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
   shortSessionFlipVisionMode: 'composite',
+  probabilityEnsembleEnabled: false,
+  probabilityRuns: 3,
+  probabilityPasses: [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ],
+  probabilityDecisionDelta: 0.08,
+  probabilityUseSwappedOrder: true,
+  probabilityReasoningEffort: 'medium',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -5476,6 +5486,131 @@ export default function AiSettingsPage() {
                         )}
                       </Text>
                     </SettingsFormControl>
+
+                    {!isLocalAiPrimaryProvider && (
+                      <Stack spacing={3}>
+                        <Flex align="center" justify="space-between">
+                          <Box>
+                            <Text fontWeight={500}>
+                              {t('Probability ensemble')}
+                            </Text>
+                            <Text color="muted" fontSize="sm">
+                              {t(
+                                'Experimental GPT-5.5-style scoring: score both candidates independently over multiple runs, then let the app choose.'
+                              )}
+                            </Text>
+                          </Box>
+                          <Switch
+                            isChecked={!!aiSolver.probabilityEnsembleEnabled}
+                            onChange={() =>
+                              updateAiSolverSettings({
+                                probabilityEnsembleEnabled:
+                                  !aiSolver.probabilityEnsembleEnabled,
+                              })
+                            }
+                          />
+                        </Flex>
+
+                        {aiSolver.probabilityEnsembleEnabled && (
+                          <Stack spacing={3}>
+                            <SettingsFormControl>
+                              <SettingsFormLabel>
+                                {t('Probability runs')}
+                              </SettingsFormLabel>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={5}
+                                value={aiSolver.probabilityRuns ?? 3}
+                                onChange={(e) =>
+                                  updateNumberField(
+                                    'probabilityRuns',
+                                    e.target.value
+                                  )
+                                }
+                                w="xs"
+                              />
+                            </SettingsFormControl>
+
+                            <SettingsFormControl>
+                              <SettingsFormLabel>
+                                {t('Decision delta')}
+                              </SettingsFormLabel>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                max={0.5}
+                                value={
+                                  aiSolver.probabilityDecisionDelta ?? 0.08
+                                }
+                                onChange={(e) =>
+                                  updateFloatField(
+                                    'probabilityDecisionDelta',
+                                    e.target.value
+                                  )
+                                }
+                                w="xs"
+                              />
+                              <Text color="muted" fontSize="sm" mt={1}>
+                                {t(
+                                  'When force decision is off, scores closer than this become skip.'
+                                )}
+                              </Text>
+                            </SettingsFormControl>
+
+                            <Flex align="center" justify="space-between">
+                              <Box>
+                                <Text fontWeight={500}>
+                                  {t('Swap candidate order')}
+                                </Text>
+                                <Text color="muted" fontSize="sm">
+                                  {t(
+                                    'Alternate option A/B presentation across probability runs to reduce side bias.'
+                                  )}
+                                </Text>
+                              </Box>
+                              <Switch
+                                isChecked={
+                                  aiSolver.probabilityUseSwappedOrder !== false
+                                }
+                                onChange={() =>
+                                  updateAiSolverSettings({
+                                    probabilityUseSwappedOrder:
+                                      aiSolver.probabilityUseSwappedOrder ===
+                                      false,
+                                  })
+                                }
+                              />
+                            </Flex>
+
+                            <SettingsFormControl>
+                              <SettingsFormLabel>
+                                {t('Reasoning effort')}
+                              </SettingsFormLabel>
+                              <Select
+                                value={
+                                  aiSolver.probabilityReasoningEffort ||
+                                  'medium'
+                                }
+                                onChange={(e) =>
+                                  updateAiSolverSettings({
+                                    probabilityReasoningEffort: e.target.value,
+                                  })
+                                }
+                                w="xs"
+                              >
+                                <option value="medium">{t('Medium')}</option>
+                                <option value="high">{t('High')}</option>
+                                <option value="low">{t('Low')}</option>
+                                <option value="minimal">{t('Minimal')}</option>
+                                <option value="xhigh">{t('Extra high')}</option>
+                              </Select>
+                            </SettingsFormControl>
+                          </Stack>
+                        )}
+                      </Stack>
+                    )}
 
                     {!isLocalAiPrimaryProvider && (
                       <SettingsFormControl>

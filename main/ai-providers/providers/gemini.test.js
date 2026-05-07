@@ -1,4 +1,4 @@
-const {callGemini} = require('./gemini')
+const {callGemini, testGeminiProvider} = require('./gemini')
 
 describe('gemini provider adapter', () => {
   test('omits maxOutputTokens in auto mode', async () => {
@@ -46,5 +46,40 @@ describe('gemini provider adapter', () => {
     expect(
       httpClient.post.mock.calls[0][1].generationConfig.maxOutputTokens
     ).toBeUndefined()
+  })
+
+  test('rejects unsafe provider base URLs', async () => {
+    const httpClient = {
+      post: jest.fn(),
+    }
+
+    await expect(
+      testGeminiProvider({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gemini-2.0-flash',
+        profile: {requestTimeoutMs: 5000},
+        providerConfig: {
+          baseUrl: 'data:text/plain,provider',
+        },
+      })
+    ).rejects.toThrow(
+      'Provider base URL must be an http(s) URL without embedded credentials'
+    )
+
+    await expect(
+      testGeminiProvider({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gemini-2.0-flash',
+        profile: {requestTimeoutMs: 5000},
+        providerConfig: {
+          baseUrl: 'https://user:pass@example.test',
+        },
+      })
+    ).rejects.toThrow(
+      'Provider base URL must be an http(s) URL without embedded credentials'
+    )
+    expect(httpClient.post).not.toHaveBeenCalled()
   })
 })

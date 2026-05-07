@@ -50,10 +50,72 @@ function normalizeVisionMode(value, fallback) {
   return fallback
 }
 
+function normalizeReasoningEffort(value, fallback) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+  if (['minimal', 'low', 'medium', 'high', 'xhigh'].includes(normalized)) {
+    return normalized
+  }
+  return fallback
+}
+
+function normalizeProbabilityPasses(value, fallback) {
+  const allowed = [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ]
+  const source = Array.isArray(value) ? value : fallback
+  const normalized = source
+    .map((item) =>
+      String(item || '')
+        .trim()
+        .toLowerCase()
+    )
+    .filter((item) => allowed.includes(item))
+  const unique = Array.from(new Set(normalized))
+
+  return unique.length ? unique : fallback.slice()
+}
+
+function sanitizeProbabilityProfile(payload = {}, fallback = STRICT_PROFILE) {
+  return {
+    probabilityEnsembleEnabled: toBool(
+      payload.probabilityEnsembleEnabled,
+      fallback.probabilityEnsembleEnabled
+    ),
+    probabilityRuns: clamp(
+      toInt(payload.probabilityRuns, fallback.probabilityRuns),
+      CUSTOM_LIMITS.probabilityRuns
+    ),
+    probabilityPasses: normalizeProbabilityPasses(
+      payload.probabilityPasses,
+      fallback.probabilityPasses
+    ),
+    probabilityDecisionDelta: clamp(
+      toFloat(
+        payload.probabilityDecisionDelta,
+        fallback.probabilityDecisionDelta
+      ),
+      CUSTOM_LIMITS.probabilityDecisionDelta
+    ),
+    probabilityUseSwappedOrder: toBool(
+      payload.probabilityUseSwappedOrder,
+      fallback.probabilityUseSwappedOrder
+    ),
+    probabilityReasoningEffort: normalizeReasoningEffort(
+      payload.probabilityReasoningEffort,
+      fallback.probabilityReasoningEffort
+    ),
+  }
+}
+
 function sanitizeBenchmarkProfile(payload = {}) {
   if (payload.benchmarkProfile !== 'custom') {
     return {
       ...STRICT_PROFILE,
+      ...sanitizeProbabilityProfile(payload, STRICT_PROFILE),
       promptTemplateOverride: toShortText(
         payload.promptTemplateOverride,
         STRICT_PROFILE.promptTemplateOverride,
@@ -129,6 +191,7 @@ function sanitizeBenchmarkProfile(payload = {}) {
       payload.flipVisionMode,
       STRICT_PROFILE.flipVisionMode
     ),
+    ...sanitizeProbabilityProfile(payload, STRICT_PROFILE),
   }
 }
 
@@ -138,6 +201,8 @@ module.exports = {
   toFloat,
   toBool,
   toShortText,
+  normalizeProbabilityPasses,
+  normalizeReasoningEffort,
   normalizeVisionMode,
   sanitizeBenchmarkProfile,
 }

@@ -1,4 +1,8 @@
-const {promptTemplate, systemPromptTemplate} = require('./prompt')
+const {
+  probabilityPromptTemplate,
+  promptTemplate,
+  systemPromptTemplate,
+} = require('./prompt')
 
 describe('provider solver prompt template', () => {
   it('uses anti-slot-bias guidance in composite decision mode', () => {
@@ -93,6 +97,29 @@ describe('provider solver prompt template', () => {
     expect(frameReasoningPrompt).toContain(
       'You are solving an Idena flip benchmark in analysis mode.'
     )
+  })
+
+  it('builds probability prompts without asking for a side choice', () => {
+    const prompt = probabilityPromptTemplate({
+      hash: 'flip-probability',
+      flipVisionMode: 'frames_single_pass',
+      runIndex: 2,
+      totalRuns: 3,
+      candidateOrder: 'swapped',
+    })
+
+    expect(prompt).toContain(
+      'This flip is independent. Do not infer patterns from other flips in the session. Previous flips give no information about this flip.'
+    )
+    expect(prompt).toContain('visual_observation')
+    expect(prompt).toContain('adversarial_recheck')
+    expect(prompt).toContain('OPTION A and OPTION B independently')
+    expect(prompt).toContain('Do not choose a side inside the model response.')
+    expect(prompt).toContain('chronology_probability')
+    expect(prompt).toContain('cause_effect_probability')
+    expect(prompt).toContain('Candidate order is never evidence.')
+    expect(prompt).not.toMatch(/which side is correct/i)
+    expect(prompt).not.toMatch(/"answer"/)
   })
 
   it('provides a system prompt that bans positional bias', () => {

@@ -59,6 +59,38 @@ describe('sanitizeBenchmarkProfile', () => {
       uncertaintyRepromptInstruction: '',
       promptTemplateOverride: '',
       flipVisionMode: 'composite',
+      probabilityEnsembleEnabled: false,
+      probabilityRuns: 3,
+      probabilityPasses: [
+        'visual_observation',
+        'independent_scores',
+        'adversarial_recheck',
+      ],
+      probabilityDecisionDelta: 0.08,
+      probabilityUseSwappedOrder: true,
+      probabilityReasoningEffort: 'medium',
+    })
+  })
+
+  it('preserves probability ensemble overrides in strict profile mode', () => {
+    expect(
+      sanitizeBenchmarkProfile({
+        benchmarkProfile: 'strict',
+        probabilityEnsembleEnabled: true,
+        probabilityRuns: 4,
+        probabilityPasses: ['independent_scores', 'adversarial_recheck'],
+        probabilityDecisionDelta: 0.12,
+        probabilityUseSwappedOrder: false,
+        probabilityReasoningEffort: 'high',
+      })
+    ).toStrictEqual({
+      ...STRICT_PROFILE,
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 4,
+      probabilityPasses: ['independent_scores', 'adversarial_recheck'],
+      probabilityDecisionDelta: 0.12,
+      probabilityUseSwappedOrder: false,
+      probabilityReasoningEffort: 'high',
     })
   })
 

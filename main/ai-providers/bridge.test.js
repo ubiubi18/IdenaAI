@@ -146,6 +146,37 @@ describe('createAiProviderBridge', () => {
     expect(logger.error).toHaveBeenCalled()
   })
 
+  it('redacts provider secrets from diagnostic errors', async () => {
+    const logger = mockLogger()
+    const httpClient = {
+      post: jest.fn().mockRejectedValue({
+        response: {
+          status: 401,
+          data: {
+            error: {
+              code: 'invalid_api_key',
+              message:
+                'Incorrect API key: customSecret12345678 and sk-live-secret12345678 at https://example.test/v1/chat/completions?key=AIzaSecretSecretSecretSecretSecret',
+            },
+          },
+        },
+      }),
+    }
+
+    const bridge = createAiProviderBridge(logger, {httpClient})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.testProvider({provider: 'openai', model: 'gpt-4o-mini'})
+    ).rejects.toThrow(/sk-\[redacted\]/)
+    await expect(
+      bridge.testProvider({provider: 'openai', model: 'gpt-4o-mini'})
+    ).rejects.not.toThrow(/sk-live-secret12345678/)
+    await expect(
+      bridge.testProvider({provider: 'openai', model: 'gpt-4o-mini'})
+    ).rejects.not.toThrow(/customSecret12345678/)
+  })
+
   it('falls back from unavailable GPT-5.5 provider tests to GPT-5.4', async () => {
     const logger = mockLogger()
     const httpClient = {
@@ -988,6 +1019,39 @@ describe('createAiProviderBridge', () => {
     })
   })
 
+  it('keeps uncertainty second pass for Local AI when probability flag is enabled', async () => {
+    const invokeProvider = jest
+      .fn()
+      .mockResolvedValueOnce('{"answer":"skip","confidence":0.15}')
+      .mockResolvedValueOnce('{"answer":"left","confidence":0.82}')
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'local-ai',
+      model: 'local-vision',
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      forceDecision: true,
+      uncertaintyRepromptEnabled: true,
+      uncertaintyConfidenceThreshold: 0.7,
+      uncertaintyRepromptMinRemainingMs: 500,
+      flips: [{hash: 'flip-local-probability-flag'}],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(result.results[0]).toMatchObject({
+      rawAnswerBeforeRemap: 'left',
+      uncertaintyRepromptUsed: true,
+    })
+    expect(invokeProvider.mock.calls[0][0].promptOptions).toMatchObject({
+      promptPhase: 'decision',
+    })
+  })
+
   it('does not run an uncertainty second pass after provider errors', async () => {
     const timeoutError = new Error('timeout of 75000ms exceeded')
     timeoutError.code = 'ECONNABORTED'
@@ -1361,6 +1425,133 @@ describe('createAiProviderBridge', () => {
       frameReasoningUsed: true,
       flipVisionModeApplied: 'frames_two_pass',
     })
+  })
+
+  it('runs probability ensemble and maps swapped candidate scores to original sides', async () => {
+    const invokeProvider = jest.fn().mockImplementation(({flip}) => {
+      const firstImage = Array.isArray(flip.images) ? flip.images[0] : ''
+      const swapped = firstImage === 'right-image'
+      const high = {
+        chronology_probability: 0.82,
+        cause_effect_probability: 0.84,
+        entity_continuity_probability: 0.8,
+        final_state_probability: 0.78,
+        overall_story_probability: 0.82,
+      }
+      const low = {
+        chronology_probability: 0.38,
+        cause_effect_probability: 0.34,
+        entity_continuity_probability: 0.42,
+        final_state_probability: 0.4,
+        overall_story_probability: 0.38,
+      }
+      return Promise.resolve(
+        JSON.stringify({
+          optionA: swapped ? low : high,
+          optionB: swapped ? high : low,
+          report_risk_probability: 0,
+          text_or_order_label_risk_probability: 0,
+          uncertainty_probability: 0.1,
+        })
+      )
+    })
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 3,
+      probabilityDecisionDelta: 0.08,
+      probabilityUseSwappedOrder: true,
+      probabilityReasoningEffort: 'high',
+      promptOptions: {
+        openAiReasoningEffort: 'none',
+      },
+      forceDecision: true,
+      uncertaintyRepromptEnabled: true,
+      flips: [
+        {
+          hash: 'flip-probability-ensemble',
+          leftImage: 'left-image',
+          rightImage: 'right-image',
+        },
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(3)
+    expect(
+      invokeProvider.mock.calls.every(
+        ([call]) => call.promptOptions.promptPhase === 'probability_ensemble'
+      )
+    ).toBe(true)
+    expect(
+      invokeProvider.mock.calls.every(
+        ([call]) => call.promptOptions.openAiReasoningEffort === 'high'
+      )
+    ).toBe(true)
+    expect(invokeProvider.mock.calls[0][0].promptText).toContain(
+      'This flip is independent. Do not infer patterns from other flips in the session. Previous flips give no information about this flip.'
+    )
+    expect(invokeProvider.mock.calls[0][0].promptText).not.toMatch(
+      /which side is correct/i
+    )
+    expect(result.results[0].answer).toBe('left')
+    expect(result.results[0].probabilities.left).toBeGreaterThan(
+      result.results[0].probabilities.right
+    )
+    expect(result.results[0].probabilityEnsemble.runs).toHaveLength(3)
+    expect(result.results[0].probabilityEnsemble.runs[1]).toMatchObject({
+      swapped: true,
+      optionATo: 'right',
+      optionBTo: 'left',
+    })
+    expect(result.results[0].uncertaintyRepromptUsed).not.toBe(true)
+  })
+
+  it('does not aggregate malformed probability ensemble payloads', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        optionA: {chronology_probability: 0.9},
+        optionB: {chronology_probability: 0.1},
+      })
+    )
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 1,
+      forceDecision: true,
+      flips: [
+        {
+          hash: 'flip-probability-malformed',
+          leftImage: 'left-image',
+          rightImage: 'right-image',
+        },
+      ],
+    })
+
+    expect(result.results[0]).toMatchObject({
+      forcedDecision: true,
+      forcedDecisionReason: 'provider_error',
+    })
+    expect(result.results[0].error).toContain(
+      'probability response missing required numeric probability fields'
+    )
   })
 
   it('aggregates up to three consultant models with averaged probabilities', async () => {
