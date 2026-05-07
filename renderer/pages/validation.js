@@ -1513,6 +1513,14 @@ function ValidationSession({
       rehearsalDevnetStatus.seedFlipMetaByHash,
     ]
   )
+  const longSessionReportQuota = availableReportsNumber(
+    longFlipsWithReportKeywords
+  )
+  const hasLongSessionReportQuota = longSessionReportQuota > 0
+  const remainingLongSessionReports = Math.max(
+    0,
+    longSessionReportQuota - reports.size
+  )
   const currentReportFlip = useMemo(() => {
     if (!currentFlip || !isLongSessionKeywords(state)) {
       return currentFlip
@@ -2235,6 +2243,9 @@ function ValidationSession({
               forcedDecisionPolicy: event.forcedDecisionPolicy,
               forcedDecisionReason: event.forcedDecisionReason,
               secondPassStrategy: event.secondPassStrategy,
+              flipVisionModeRequested: event.flipVisionModeRequested,
+              flipVisionModeApplied: event.flipVisionModeApplied,
+              flipVisionModeFallback: event.flipVisionModeFallback,
               firstPass: event.firstPass,
               modelFallback: event.modelFallback,
               modelFallbacks: event.modelFallbacks,
@@ -2271,6 +2282,9 @@ function ValidationSession({
               forcedDecisionPolicy: event.forcedDecisionPolicy,
               forcedDecisionReason: event.forcedDecisionReason,
               secondPassStrategy: event.secondPassStrategy,
+              flipVisionModeRequested: event.flipVisionModeRequested,
+              flipVisionModeApplied: event.flipVisionModeApplied,
+              flipVisionModeFallback: event.flipVisionModeFallback,
               firstPass: event.firstPass,
               modelFallback: event.modelFallback,
               modelFallbacks: event.modelFallbacks,
@@ -3646,6 +3660,7 @@ function ValidationSession({
     peersCount,
     t,
   })
+  const submitStatusNotice = getSubmitStatusNotice(state, t)
   const isAutoManagedValidation = isSessionAutoMode && !forceAiPreview
   const submitActionLabel = t(
     isAutoManagedValidation ? 'Submit now' : 'Submit answers'
@@ -3741,6 +3756,32 @@ function ValidationSession({
           {validationConnectionAlertMessage || t('Offline')}
         </OfflineValidationAlert>
       )}
+
+      {submitStatusNotice ? (
+        <Box
+          mx={4}
+          mt={4}
+          px={4}
+          py={3}
+          borderWidth="1px"
+          borderColor={isShortSession(state) ? 'whiteAlpha.300' : 'green.050'}
+          bg={isShortSession(state) ? 'whiteAlpha.200' : 'green.012'}
+          borderRadius="md"
+        >
+          <Text
+            fontWeight={600}
+            color={isShortSession(state) ? 'white' : 'brandGray.500'}
+          >
+            {submitStatusNotice.title}
+          </Text>
+          <Text
+            color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
+            fontSize="sm"
+          >
+            {submitStatusNotice.description}
+          </Text>
+        </Box>
+      ) : null}
 
       {shortSessionFastModeNotice ? (
         <Box
@@ -3895,10 +3936,20 @@ function ValidationSession({
                     </QualificationButton>
 
                     <Tooltip
-                      label={t(
-                        'All available reports are used. You can skip this flip or remove Report status from other flips.'
-                      )}
-                      isOpen={isExceededTooltipOpen}
+                      label={
+                        hasLongSessionReportQuota
+                          ? t(
+                              'All available reports are used. You can skip this flip or remove Report status from other flips.'
+                            )
+                          : t(
+                              'No report slots are available in this validation round. Submit answers directly.'
+                            )
+                      }
+                      isOpen={
+                        hasLongSessionReportQuota
+                          ? isExceededTooltipOpen
+                          : undefined
+                      }
                       placement="top"
                       zIndex="tooltip"
                     >
@@ -3925,18 +3976,18 @@ function ValidationSession({
                           boxShadow: '0 0 0 3px rgb(255 102 102 /0.50)',
                           outline: 'none',
                         }}
-                        isDisabled={isSubmitting(state)}
+                        isDisabled={
+                          isSubmitting(state) || !hasLongSessionReportQuota
+                        }
                         onClick={() =>
                           handleReportWords(currentReportFlip.hash)
                         }
                       >
-                        {t('Report')}{' '}
-                        {t('({{count}} left)', {
-                          count:
-                            availableReportsNumber(
-                              longFlipsWithReportKeywords
-                            ) - reports.size,
-                        })}
+                        {hasLongSessionReportQuota
+                          ? `${t('Report')} ${t('({{count}} left)', {
+                              count: remainingLongSessionReports,
+                            })}`
+                          : t('No reports')}
                       </QualificationButton>
                     </Tooltip>
                   </QualificationActions>
@@ -4090,7 +4141,8 @@ function ValidationSession({
               {t('Open local stats & audit')}
             </SecondaryButton>
           )}
-          {(isShortSession(state) || isLongSessionKeywords(state)) &&
+          {((isShortSession(state) && !isShortSessionSubmitted(state)) ||
+            isLongSessionKeywords(state)) &&
             (hasAllRelevanceMarks(state, longFlipsWithReportKeywords) ||
             isLastFlip(state) ? (
               <PrimaryButton
@@ -4115,15 +4167,29 @@ function ValidationSession({
             ))}
           {isLongSessionFlips(state) && (
             <Stack isInline spacing={2}>
-              <SecondaryButton
-                isDisabled={isSubmitting(state) || !canReviewLongSessionReports}
-                onClick={() => {
-                  beginManualReporting()
-                  send('FINISH_FLIPS')
-                }}
-              >
-                {keywordActionLabel}
-              </SecondaryButton>
+              {hasLongSessionReportQuota ? (
+                <SecondaryButton
+                  isDisabled={
+                    isSubmitting(state) || !canReviewLongSessionReports
+                  }
+                  onClick={() => {
+                    beginManualReporting()
+                    send('FINISH_FLIPS')
+                  }}
+                >
+                  {keywordActionLabel}
+                </SecondaryButton>
+              ) : (
+                <Text
+                  alignSelf="center"
+                  color="muted"
+                  fontSize="xs"
+                  maxW={44}
+                  textAlign="right"
+                >
+                  {t('No report slots available. Submit answers directly.')}
+                </Text>
+              )}
               <PrimaryButton
                 isDisabled={
                   !canSubmit(state) ||
@@ -4214,9 +4280,7 @@ function ValidationSession({
       <ReviewValidationDialog
         flips={flips.filter(solvableFlips)}
         reportedFlipsCount={reports.size}
-        availableReportsCount={availableReportsNumber(
-          longFlipsWithReportKeywords
-        )}
+        availableReportsCount={longSessionReportQuota}
         isOpen={state.matches('longSession.solve.answer.review')}
         isSubmitting={isSubmitting(state)}
         onSubmit={handleSubmit}
@@ -4337,6 +4401,10 @@ function formatAiDecisionTrace(item = {}) {
     parts.push('final adjudication')
   }
 
+  if (item.flipVisionModeFallback === 'provider_error_frame_mode') {
+    parts.push('composite retry')
+  }
+
   if (item.forcedDecision) {
     if (item.forcedDecisionPolicy === 'random') {
       parts.push(
@@ -4379,7 +4447,15 @@ function formatAiDecisionTrace(item = {}) {
   }
 
   if (item.error) {
-    parts.push('provider error')
+    const errorText = String(item.error || '')
+    const timeoutMatch = errorText.match(/timeout of (\d+)ms exceeded/i)
+    if (timeoutMatch) {
+      parts.push(`provider timeout ${formatLatency(timeoutMatch[1])}`)
+    } else if (/fetch failed/i.test(errorText)) {
+      parts.push('provider network error')
+    } else {
+      parts.push('provider error')
+    }
   }
 
   return parts.join(' | ')
@@ -4853,6 +4929,10 @@ function isShortSession(state) {
   return state.matches('shortSession')
 }
 
+function isShortSessionSubmitted(state) {
+  return state.matches('shortSession.solve.answer.submitShortSession.submitted')
+}
+
 function isLongSessionFlips(state) {
   return ['flips', 'finishFlips']
     .map((substate) => `longSession.solve.answer.${substate}`)
@@ -4875,6 +4955,39 @@ function isSubmitting(state) {
     'longSession.solve.answer.finishFlips',
     'longSession.solve.answer.submitLongSession',
   ].some(state.matches)
+}
+
+function getSubmitStatusNotice(state, t) {
+  if (
+    state.matches('shortSession.solve.answer.submitShortSession.submitting')
+  ) {
+    return {
+      title: t('Submitting short-session answers'),
+      description: t(
+        'Keep the app open. The local Windows node can take a few seconds to accept the transaction.'
+      ),
+    }
+  }
+
+  if (isShortSessionSubmitted(state)) {
+    return {
+      title: t('Short-session answers submitted'),
+      description: t(
+        'Waiting for the long session to start. The screen will advance automatically when the node switches phase.'
+      ),
+    }
+  }
+
+  if (state.matches('longSession.solve.answer.submitLongSession')) {
+    return {
+      title: t('Submitting long-session answers'),
+      description: t(
+        'Keep the app open until the node confirms the validation transaction.'
+      ),
+    }
+  }
+
+  return null
 }
 
 function getLongSessionAnswerStats(longFlips = []) {

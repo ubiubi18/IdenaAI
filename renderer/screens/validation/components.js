@@ -1069,6 +1069,7 @@ export function ReviewValidationDialog({
     (flip) =>
       (flip.relevance ?? RelevanceType.Abstained) === RelevanceType.Abstained
   ).length
+  const hasReportSlots = availableReportsCount > 0
 
   return (
     <Dialog title={t('Submit the answers')} onClose={onCancel} {...props}>
@@ -1091,7 +1092,8 @@ export function ReviewValidationDialog({
                 label={t('Reported')}
                 value={reportedFlipsCount}
               />
-              {availableReportsCount - reportedFlipsCount > 0 ? (
+              {hasReportSlots &&
+              availableReportsCount - reportedFlipsCount > 0 ? (
                 <ReviewValidationDialog.Stat
                   label={t('Unused reports')}
                   value={availableReportsCount - reportedFlipsCount}
@@ -1112,6 +1114,13 @@ export function ReviewValidationDialog({
                   </ReviewValidationDialog.LinkButton>{' '}
                   otherwise you may fail the validation.
                 </Trans>
+              </Text>
+            )}
+            {!hasReportSlots && (
+              <Text color="muted">
+                {t(
+                  'No report slots are available in this validation round. Submit answers directly.'
+                )}
               </Text>
             )}
           </Stack>

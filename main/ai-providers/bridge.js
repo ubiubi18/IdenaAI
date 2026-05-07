@@ -4692,16 +4692,67 @@ function createProviderErrorMessage({provider, model, operation, error}) {
     marker.push(String(error.code))
   }
 
-  const reason =
+  const reason = sanitizeProviderDiagnosticMessage(
     String(remote.message || '').trim() ||
-    String(statusText || '').trim() ||
-    String((error && error.message) || '').trim() ||
-    String(error || 'Unknown error')
+      String(statusText || '').trim() ||
+      String((error && error.message) || '').trim() ||
+      String(error || 'Unknown error')
+  )
 
-  const markerText = marker.length ? ` (${marker.join(' ')})` : ''
-  return `${String(provider || 'provider')} ${String(
+  const sanitizedMarker = marker
+    .map((item) => sanitizeProviderDiagnosticField(item))
+    .filter(Boolean)
+  const markerText = sanitizedMarker.length
+    ? ` (${sanitizedMarker.join(' ')})`
+    : ''
+  return `${sanitizeProviderDiagnosticField(
+    provider || 'provider'
+  )} ${sanitizeProviderDiagnosticField(
     operation || 'request'
-  )} failed${markerText} for model ${String(model || '').trim()}: ${reason}`
+  )} failed${markerText} for model ${sanitizeProviderDiagnosticField(
+    model || ''
+  )}: ${reason}`
+}
+
+function stripControlCharacters(value) {
+  return String(value || '')
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0)
+      return code < 32 || code === 127 ? ' ' : char
+    })
+    .join('')
+}
+
+function sanitizeProviderDiagnosticField(value) {
+  return redactProviderDiagnosticSecrets(stripControlCharacters(value))
+    .trim()
+    .slice(0, 160)
+}
+
+function sanitizeProviderDiagnosticMessage(value) {
+  return redactProviderDiagnosticSecrets(stripControlCharacters(value))
+    .trim()
+    .slice(0, 600)
+}
+
+function redactProviderDiagnosticSecrets(value) {
+  return String(value || '')
+    .replace(/data:[^,\s]+;base64,[A-Za-z0-9+/=]+/g, '[data-url-redacted]')
+    .replace(
+      /([?&](?:key|api_key|api-key|token|access_token)=)[^&\s]+/gi,
+      '$1[redacted]'
+    )
+    .replace(
+      /\b(Bearer|Api-Key|x-api-key)\s+[A-Za-z0-9._~+/=-]+/gi,
+      '$1 [redacted]'
+    )
+    .replace(
+      /\b(api[-_\s]?key|token|secret)\s*(?:[:=]\s*|['"])[A-Za-z0-9._~+/=-]{8,}/gi,
+      '$1 [redacted]'
+    )
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-[redacted]')
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, 'AIza[redacted]')
 }
 
 function getResponseStatus(error) {
@@ -9557,11 +9608,11 @@ Flip hash: ${hash}
   async function writeBenchmarkLogDefault(entry) {
     try {
       const dir = path.join(getUserDataPath(), 'ai-benchmark')
+      const logFile = path.join(dir, 'session-metrics.jsonl')
       await fs.ensureDir(dir)
-      await fs.appendFile(
-        path.join(dir, 'session-metrics.jsonl'),
-        `${JSON.stringify(entry)}\n`
-      )
+      await fs.chmod(dir, 0o700).catch(() => {})
+      await fs.appendFile(logFile, `${JSON.stringify(entry)}\n`, {mode: 0o600})
+      await fs.chmod(logFile, 0o600).catch(() => {})
     } catch (error) {
       logger.error('Unable to write AI benchmark log', {
         error: error.toString(),

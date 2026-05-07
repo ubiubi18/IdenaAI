@@ -1,7 +1,8 @@
 /* eslint-disable import/prefer-default-export */
 import api from './api-client'
 
-const VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 4000
+const DEFAULT_VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 8000
+const MAX_VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 30000
 const VALIDATION_SUBMIT_ATTEMPTS = 3
 const VALIDATION_SUBMIT_RETRY_DELAYS_MS = [700, 1500]
 
@@ -37,10 +38,30 @@ function getErrorMessage(error) {
   )
 }
 
-function isSameHashSubmitError(error) {
-  return getErrorMessage(error)
-    .toLowerCase()
-    .includes('tx with same hash already exists')
+export function isDuplicateSubmitTxError(error) {
+  const message = getErrorMessage(error).toLowerCase()
+
+  if (!/\b(tx|transaction)\b/.test(message)) {
+    return false
+  }
+
+  return (
+    /\b(tx|transaction)\s+with\s+same\s+hash\s+already\s+(exists|known)\b/.test(
+      message
+    ) ||
+    /\bsame\s+hash\s+already\s+(exists|known)\b/.test(message) ||
+    /\b(already\s+known|known|duplicate)\s+(tx|transaction)\b/.test(message) ||
+    /\b(tx|transaction)\s+(already\s+(exists|known)|is\s+already\s+known)\b/.test(
+      message
+    )
+  )
+}
+
+function getValidationSubmitRpcTimeoutMs() {
+  const configured = Number(global.env?.VALIDATION_SUBMIT_RPC_TIMEOUT_MS)
+  return Number.isFinite(configured) && configured >= 1000
+    ? Math.min(configured, MAX_VALIDATION_SUBMIT_RPC_TIMEOUT_MS)
+    : DEFAULT_VALIDATION_SUBMIT_RPC_TIMEOUT_MS
 }
 
 function isTransientSubmitError(error) {
@@ -85,7 +106,7 @@ async function postValidationRpc(method, params) {
           id: 1,
         },
         {
-          timeout: VALIDATION_SUBMIT_RPC_TIMEOUT_MS,
+          timeout: getValidationSubmitRpcTimeoutMs(),
         }
       )
       const {result, error} = data || {}
@@ -100,7 +121,7 @@ async function postValidationRpc(method, params) {
       lastError = normalizedError
 
       if (
-        isSameHashSubmitError(normalizedError) ||
+        isDuplicateSubmitTxError(normalizedError) ||
         !isTransientSubmitError(normalizedError) ||
         attempt >= VALIDATION_SUBMIT_ATTEMPTS - 1
       ) {
