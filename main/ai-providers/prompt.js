@@ -288,6 +288,168 @@ ${truncateText(frameReasoning)}
 `.trim()
 }
 
+function buildProbabilitySchemaText() {
+  return `{
+  "optionA": {
+    "chronology_probability": 0.0,
+    "cause_effect_probability": 0.0,
+    "entity_continuity_probability": 0.0,
+    "final_state_probability": 0.0,
+    "overall_story_probability": 0.0,
+    "main_strength": "short factual note",
+    "main_weakness": "short factual note"
+  },
+  "optionB": {
+    "chronology_probability": 0.0,
+    "cause_effect_probability": 0.0,
+    "entity_continuity_probability": 0.0,
+    "final_state_probability": 0.0,
+    "overall_story_probability": 0.0,
+    "main_strength": "short factual note",
+    "main_weakness": "short factual note"
+  },
+  "report_risk_probability": 0.0,
+  "text_or_order_label_risk_probability": 0.0,
+  "uncertainty_probability": 0.0
+}`
+}
+
+function buildProbabilityTaskRules({
+  runIndex,
+  totalRuns,
+  candidateOrder,
+  probabilityPasses,
+}) {
+  const antiPositionRules = buildAntiPositionRules()
+  const reportabilityRules = buildReportabilityRules()
+  const passes =
+    Array.isArray(probabilityPasses) && probabilityPasses.length
+      ? probabilityPasses
+      : ['visual_observation', 'independent_scores', 'adversarial_recheck']
+  return `
+This flip is independent. Do not infer patterns from other flips in the session. Previous flips give no information about this flip.
+This is probability ensemble run ${runIndex} of ${totalRuns}. Run marker: ${candidateOrder}. The marker is not visual evidence.
+
+Task:
+1) Use these internal passes in order: ${passes.join(', ')}.
+2) visual_observation: describe each candidate and visible state changes internally; make no decision.
+3) independent_scores: estimate OPTION A and OPTION B independently as coherent four-panel visual stories.
+4) adversarial_recheck: note the strongest weakness for each option, then revise probabilities.
+5) Do not choose a side inside the model response.
+6) Return JSON only using the schema below.
+
+Probability rules:
+- All probabilities must be numbers from 0 to 1.
+- Do not output 1.0 unless the visual sequence is essentially unambiguous.
+- Do not output 0.0 unless the side is clearly impossible.
+- Similar weak stories should both receive middling probabilities.
+- A side can score high only if panel order, cause-effect, entity continuity, and final state are all plausible.
+- Candidate labels A/B, left/right, first/second are arbitrary placeholders.
+- Judge only chronology, cause-effect, entity continuity, and final state.
+${antiPositionRules}
+${reportabilityRules}
+`.trim()
+}
+
+function buildCompositeProbabilityPrompt({
+  hash,
+  runIndex,
+  totalRuns,
+  candidateOrder,
+  probabilityPasses,
+}) {
+  return `
+You are solving an Idena short-session flip benchmark with probability scoring.
+You are given two candidate 2x2 composite images:
+- The first attached image is OPTION A
+- The second attached image is OPTION B
+
+Each candidate image contains four panels:
+- Panel 1 = top-left
+- Panel 2 = top-right
+- Panel 3 = bottom-left
+- Panel 4 = bottom-right
+
+${buildProbabilityTaskRules({
+  runIndex,
+  totalRuns,
+  candidateOrder,
+  probabilityPasses,
+})}
+
+Allowed JSON schema:
+${buildProbabilitySchemaText()}
+
+Flip hash: ${hash}
+`.trim()
+}
+
+function buildFramesProbabilityPrompt({
+  hash,
+  runIndex,
+  totalRuns,
+  candidateOrder,
+  probabilityPasses,
+}) {
+  return `
+You are solving an Idena short-session flip benchmark with probability scoring.
+You are given 8 ordered frame images:
+- Images 1-4 belong to OPTION A in temporal order
+- Images 5-8 belong to OPTION B in temporal order
+
+${buildProbabilityTaskRules({
+  runIndex,
+  totalRuns,
+  candidateOrder,
+  probabilityPasses,
+})}
+
+Allowed JSON schema:
+${buildProbabilitySchemaText()}
+
+Flip hash: ${hash}
+`.trim()
+}
+
+function probabilityPromptTemplate({
+  hash,
+  flipVisionMode = 'composite',
+  runIndex = 1,
+  totalRuns = 3,
+  candidateOrder = 'normal',
+  probabilityPasses = null,
+}) {
+  const mode = normalizeVisionMode(flipVisionMode)
+  const normalizedRunIndex =
+    Number.isFinite(Number(runIndex)) && Number(runIndex) > 0
+      ? Number(runIndex)
+      : 1
+  const normalizedTotalRuns =
+    Number.isFinite(Number(totalRuns)) && Number(totalRuns) > 0
+      ? Number(totalRuns)
+      : 3
+  const normalizedCandidateOrder =
+    String(candidateOrder || '').trim() || 'normal'
+
+  if (mode === 'composite') {
+    return buildCompositeProbabilityPrompt({
+      hash,
+      runIndex: normalizedRunIndex,
+      totalRuns: normalizedTotalRuns,
+      candidateOrder: normalizedCandidateOrder,
+      probabilityPasses,
+    })
+  }
+
+  return buildFramesProbabilityPrompt({
+    hash,
+    runIndex: normalizedRunIndex,
+    totalRuns: normalizedTotalRuns,
+    candidateOrder: normalizedCandidateOrder,
+    probabilityPasses,
+  })
+}
+
 function promptTemplate({
   hash,
   forceDecision = false,
@@ -354,6 +516,7 @@ function promptTemplate({
 }
 
 module.exports = {
+  probabilityPromptTemplate,
   systemPromptTemplate,
   promptTemplate,
 }
