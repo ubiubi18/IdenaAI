@@ -1105,12 +1105,6 @@ describe('createAiProviderBridge', () => {
       .mockResolvedValueOnce(
         '{"answer":"skip","confidence":0.2,"reasoning":"still ambiguous after review"}'
       )
-      .mockResolvedValueOnce(
-        'Final adjudication notes: A and B remain effectively equal.'
-      )
-      .mockResolvedValueOnce(
-        '{"answer":"skip","confidence":0.2,"reasoning":"A 50.0, B 50.0"}'
-      )
 
     const bridge = createAiProviderBridge(mockLogger(), {
       invokeProvider,
@@ -1148,22 +1142,23 @@ describe('createAiProviderBridge', () => {
         ],
       })
 
+      expect(invokeProvider).toHaveBeenCalledTimes(3)
       expect(result.results[0]).toMatchObject({
         answer: 'left',
         uncertaintyRepromptUsed: true,
-        finalAdjudicationUsed: true,
         forcedDecision: true,
         forcedDecisionPolicy: 'random',
         forcedDecisionReason: 'uncertain_or_skip',
         secondPassStrategy: 'annotated_frame_review',
       })
+      expect(result.results[0].finalAdjudicationUsed).not.toBe(true)
       expect(result.results[0].reasoning).toContain('random fallback left')
     } finally {
       randomSpy.mockRestore()
     }
   })
 
-  it('uses the low-confidence first-pass lean before random fallback', async () => {
+  it('uses deterministic random fallback instead of low-confidence first-pass lean', async () => {
     const invokeProvider = jest
       .fn()
       .mockResolvedValueOnce(
@@ -1174,10 +1169,6 @@ describe('createAiProviderBridge', () => {
       )
       .mockResolvedValueOnce(
         '{"answer":"skip","confidence":0.2,"reasoning":"still close after review"}'
-      )
-      .mockResolvedValueOnce('Final adjudication notes: A 49.5, B 50.5.')
-      .mockResolvedValueOnce(
-        '{"answer":"skip","confidence":0.2,"reasoning":"A 49.5, B 50.5 but still close"}'
       )
 
     const bridge = createAiProviderBridge(mockLogger(), {
@@ -1215,22 +1206,16 @@ describe('createAiProviderBridge', () => {
       ],
     })
 
-    expect(invokeProvider).toHaveBeenCalledTimes(5)
-    expect(invokeProvider.mock.calls[4][0].promptOptions).toMatchObject({
-      finalAdjudication: true,
-      forceDecision: true,
-      promptPhase: 'decision_from_frame_reasoning',
-    })
+    expect(invokeProvider).toHaveBeenCalledTimes(3)
     expect(result.results[0]).toMatchObject({
-      answer: 'right',
       uncertaintyRepromptUsed: true,
-      finalAdjudicationUsed: true,
       forcedDecision: true,
-      forcedDecisionPolicy: 'low_confidence_lean',
-      forcedDecisionReason: 'low_confidence_lean',
+      forcedDecisionPolicy: 'random',
+      forcedDecisionReason: 'uncertain_or_skip',
     })
+    expect(result.results[0].finalAdjudicationUsed).not.toBe(true)
     expect(result.results[0].reasoning).toContain(
-      'low-confidence first-pass lean right'
+      'deterministic random fallback'
     )
   })
 
