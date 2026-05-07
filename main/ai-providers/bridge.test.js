@@ -146,6 +146,37 @@ describe('createAiProviderBridge', () => {
     expect(logger.error).toHaveBeenCalled()
   })
 
+  it('redacts provider secrets from diagnostic errors', async () => {
+    const logger = mockLogger()
+    const httpClient = {
+      post: jest.fn().mockRejectedValue({
+        response: {
+          status: 401,
+          data: {
+            error: {
+              code: 'sk-live-secret12345678',
+              message:
+                'Incorrect API key: customSecret12345678 and sk-live-secret12345678 at https://example.test/v1/chat/completions?key=AIzaSecretSecretSecretSecretSecret',
+            },
+          },
+        },
+      }),
+    }
+
+    const bridge = createAiProviderBridge(logger, {httpClient})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.testProvider({provider: 'openai', model: 'gpt-4o-mini'})
+    ).rejects.toThrow(/sk-\[redacted\]/)
+    await expect(
+      bridge.testProvider({provider: 'openai', model: 'gpt-4o-mini'})
+    ).rejects.not.toThrow(/sk-live-secret12345678/)
+    await expect(
+      bridge.testProvider({provider: 'openai', model: 'gpt-4o-mini'})
+    ).rejects.not.toThrow(/customSecret12345678/)
+  })
+
   it('falls back from unavailable GPT-5.5 provider tests to GPT-5.4', async () => {
     const logger = mockLogger()
     const httpClient = {

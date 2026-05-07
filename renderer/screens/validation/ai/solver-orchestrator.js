@@ -29,7 +29,7 @@ const LONG_SESSION_STRICT_PROFILE_OVERRIDES = {
   deadlineMs: 90 * 1000,
   requestTimeoutMs: 180 * 1000,
   interFlipDelayMs: 300,
-  flipVisionMode: 'frames_two_pass',
+  flipVisionMode: 'composite',
 }
 const MIN_SOLVE_GUARD_MS = 1500
 const SHORT_SESSION_MIN_SOLVE_GUARD_MS = 500
@@ -59,6 +59,7 @@ const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
 const LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS = 5 * 1000
+const OPENAI_FRAME_PROVIDER_ERROR_FALLBACK_REASON = 'provider_error_frame_mode'
 const IMAGE_PAYLOAD_PREP_RETRY_WAIT_MS = 2500
 const IMAGE_PAYLOAD_PREP_MAX_ATTEMPTS = 3
 const RETRY_BACKOFF_BASE_MS = 700
@@ -822,6 +823,53 @@ function getTimeRemainingMs(deadlineAt) {
   return deadlineAt - Date.now()
 }
 
+function shouldPrepareOpenAiCompositeFallback({
+  sessionType = 'short',
+  provider = 'openai',
+  flipVisionMode = 'composite',
+} = {}) {
+  return (
+    sessionType === 'long' &&
+    String(provider || '')
+      .trim()
+      .toLowerCase() === 'openai' &&
+    normalizeVisionMode(flipVisionMode) !== 'composite'
+  )
+}
+
+function isRetryableProviderErrorText(error = '') {
+  const text = String(error || '')
+    .trim()
+    .toLowerCase()
+
+  if (!text) {
+    return false
+  }
+
+  if (
+    text.includes('invalid_api_key') ||
+    text.includes('model_not_found') ||
+    text.includes('does not exist') ||
+    text.includes('do not have access') ||
+    /\b(401|403)\b/.test(text)
+  ) {
+    return false
+  }
+
+  return (
+    text.includes('timeout') ||
+    text.includes('timed out') ||
+    text.includes('econnaborted') ||
+    text.includes('deadline_exceeded') ||
+    text.includes('fetch failed') ||
+    text.includes('rate_limit') ||
+    text.includes('rate limit') ||
+    text.includes('too large') ||
+    text.includes('context length') ||
+    /\b(429|500|502|503|504)\b/.test(text)
+  )
+}
+
 function createSessionWindowError() {
   const error = new Error('Not enough time left in session for AI solve')
   error.code = 'session_window_too_small'
@@ -1440,6 +1488,9 @@ export async function solveValidationSessionWithAi({
         : null,
       secondPassStrategy: solved.secondPassStrategy || null,
       frameReasoningUsed: Boolean(solved.frameReasoningUsed),
+      flipVisionModeRequested: solved.flipVisionModeRequested || null,
+      flipVisionModeApplied: solved.flipVisionModeApplied || null,
+      flipVisionModeFallback: solved.flipVisionModeFallback || null,
       firstPass: solved.firstPass || null,
     }
   }
@@ -1514,30 +1565,34 @@ export async function solveValidationSessionWithAi({
     })
   }
 
-  async function solvePreparedPayloadFlip({payloadFlip, index}) {
-    const requestTimeoutMs = getClampedRequestTimeoutMs({
-      deadlineAt: sessionDeadlineAt,
-      guardMs: sessionSolveGuardMs,
-      requestTimeoutMs: effectiveProfile.requestTimeoutMs,
-    })
-    const remainingSessionMs = getTimeRemainingMs(sessionDeadlineAt)
-    let requestDeadlineMs = effectiveProfile.deadlineMs
-    if (
-      useLongSessionOpenAiStaggeredSolving &&
-      Number.isFinite(remainingSessionMs)
-    ) {
-      requestDeadlineMs = Math.max(
-        1000,
-        Math.min(
-          requestTimeoutMs + LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS,
-          remainingSessionMs
+  async function solvePreparedPayloadFlip({payloadFlip, sourceFlip, index}) {
+    function resolveRequestTiming() {
+      const requestTimeoutMs = getClampedRequestTimeoutMs({
+        deadlineAt: sessionDeadlineAt,
+        guardMs: sessionSolveGuardMs,
+        requestTimeoutMs: effectiveProfile.requestTimeoutMs,
+      })
+      const remainingSessionMs = getTimeRemainingMs(sessionDeadlineAt)
+      let requestDeadlineMs = effectiveProfile.deadlineMs
+      if (
+        useLongSessionOpenAiStaggeredSolving &&
+        Number.isFinite(remainingSessionMs)
+      ) {
+        requestDeadlineMs = Math.max(
+          1000,
+          Math.min(
+            requestTimeoutMs + LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS,
+            remainingSessionMs
+          )
         )
-      )
-    } else if (Number.isFinite(remainingSessionMs)) {
-      requestDeadlineMs = Math.max(
-        1000,
-        Math.min(effectiveProfile.deadlineMs, remainingSessionMs)
-      )
+      } else if (Number.isFinite(remainingSessionMs)) {
+        requestDeadlineMs = Math.max(
+          1000,
+          Math.min(effectiveProfile.deadlineMs, remainingSessionMs)
+        )
+      }
+
+      return {requestTimeoutMs, requestDeadlineMs}
     }
 
     if (
@@ -1581,44 +1636,63 @@ export async function solveValidationSessionWithAi({
       })
     }
 
-    const batchResult = await bridge.solveFlipBatch({
-      provider,
-      model,
-      providerConfig,
-      ensembleEnabled: Boolean(aiSolver.ensembleEnabled),
-      ensemblePrimaryWeight: normalizeWeight(aiSolver.ensemblePrimaryWeight, 1),
-      legacyHeuristicEnabled: Boolean(aiSolver.legacyHeuristicEnabled),
-      legacyHeuristicWeight: normalizeWeight(aiSolver.legacyHeuristicWeight, 1),
-      legacyHeuristicOnly: Boolean(aiSolver.legacyHeuristicOnly),
-      consultProviders,
-      benchmarkProfile: profile.benchmarkProfile,
-      deadlineMs: requestDeadlineMs,
-      requestTimeoutMs,
-      maxConcurrency: 1,
-      maxRetries: effectiveProfile.maxRetries,
-      maxOutputTokens: effectiveProfile.maxOutputTokens,
-      temperature: effectiveProfile.temperature,
-      forceDecision: true,
-      uncertaintyRepromptEnabled: effectiveProfile.uncertaintyRepromptEnabled,
-      uncertaintyConfidenceThreshold:
-        effectiveProfile.uncertaintyConfidenceThreshold,
-      uncertaintyRepromptMinRemainingMs:
-        effectiveProfile.uncertaintyRepromptMinRemainingMs,
-      uncertaintyRepromptInstruction:
-        effectiveProfile.uncertaintyRepromptInstruction,
-      promptTemplateOverride: effectiveProfile.promptTemplateOverride,
-      flipVisionMode: effectiveProfile.flipVisionMode,
-      promptOptions,
-      flips: [payloadFlip],
-      session: {
-        ...(sessionMeta || {}),
-        sessionType,
-        flipIndex: index + 1,
-        totalFlips,
-      },
-    })
+    async function requestSolvedFlip({
+      requestPayloadFlip = payloadFlip,
+      flipVisionMode = effectiveProfile.flipVisionMode,
+      uncertaintyRepromptEnabled = effectiveProfile.uncertaintyRepromptEnabled,
+      sessionExtra = null,
+    } = {}) {
+      const {requestTimeoutMs, requestDeadlineMs} = resolveRequestTiming()
 
-    const providerSolved =
+      return bridge.solveFlipBatch({
+        provider,
+        model,
+        providerConfig,
+        ensembleEnabled: Boolean(aiSolver.ensembleEnabled),
+        ensemblePrimaryWeight: normalizeWeight(
+          aiSolver.ensemblePrimaryWeight,
+          1
+        ),
+        legacyHeuristicEnabled: Boolean(aiSolver.legacyHeuristicEnabled),
+        legacyHeuristicWeight: normalizeWeight(
+          aiSolver.legacyHeuristicWeight,
+          1
+        ),
+        legacyHeuristicOnly: Boolean(aiSolver.legacyHeuristicOnly),
+        consultProviders,
+        benchmarkProfile: profile.benchmarkProfile,
+        deadlineMs: requestDeadlineMs,
+        requestTimeoutMs,
+        maxConcurrency: 1,
+        maxRetries: effectiveProfile.maxRetries,
+        maxOutputTokens: effectiveProfile.maxOutputTokens,
+        temperature: effectiveProfile.temperature,
+        forceDecision: true,
+        uncertaintyRepromptEnabled,
+        uncertaintyConfidenceThreshold:
+          effectiveProfile.uncertaintyConfidenceThreshold,
+        uncertaintyRepromptMinRemainingMs:
+          effectiveProfile.uncertaintyRepromptMinRemainingMs,
+        uncertaintyRepromptInstruction:
+          effectiveProfile.uncertaintyRepromptInstruction,
+        promptTemplateOverride: effectiveProfile.promptTemplateOverride,
+        flipVisionMode,
+        promptOptions,
+        flips: [requestPayloadFlip],
+        session: {
+          ...(sessionMeta || {}),
+          ...(sessionExtra || {}),
+          sessionType,
+          flipIndex: index + 1,
+          totalFlips,
+        },
+      })
+    }
+
+    const batchResult = await requestSolvedFlip()
+    let solvedPayloadFlip = payloadFlip
+
+    let providerSolved =
       (batchResult.results || [])[0] ||
       buildForcedRandomSolvedFlip({
         hash: payloadFlip.hash,
@@ -1626,6 +1700,75 @@ export async function solveValidationSessionWithAi({
         reasoning: 'provider returned no result',
         forcedDecisionReason: 'provider_no_result',
       })
+
+    const providerErrorText = String(providerSolved.error || '').trim()
+    const canRetryCompositeFallback =
+      shouldPrepareOpenAiCompositeFallback({
+        sessionType,
+        provider,
+        flipVisionMode: effectiveProfile.flipVisionMode,
+      }) &&
+      Boolean(sourceFlip) &&
+      providerSolved.forcedDecisionReason === 'provider_error' &&
+      isRetryableProviderErrorText(providerErrorText) &&
+      hasRuntimeRemaining(
+        sessionDeadlineAt,
+        sessionSolveGuardMs + MIN_PROVIDER_REQUEST_TIMEOUT_MS
+      )
+
+    if (canRetryCompositeFallback) {
+      let fallbackPayloadFlip = null
+      try {
+        fallbackPayloadFlip = await buildCompositePayloadFlipFallback({
+          sourceFlip,
+          payloadFlip,
+        })
+      } catch {
+        fallbackPayloadFlip = null
+      }
+
+      const fallbackReady =
+        Boolean(fallbackPayloadFlip) &&
+        hasRuntimeRemaining(
+          sessionDeadlineAt,
+          sessionSolveGuardMs + MIN_PROVIDER_REQUEST_TIMEOUT_MS
+        )
+      const fallbackBatchResult = fallbackReady
+        ? await requestSolvedFlip({
+            requestPayloadFlip: fallbackPayloadFlip,
+            flipVisionMode: 'composite',
+            uncertaintyRepromptEnabled: false,
+            sessionExtra: {
+              fallbackFromFlipVisionMode: effectiveProfile.flipVisionMode,
+              fallbackReason: OPENAI_FRAME_PROVIDER_ERROR_FALLBACK_REASON,
+            },
+          })
+        : null
+      const fallbackSolved = ((fallbackBatchResult || {}).results || [])[0]
+
+      if (
+        fallbackSolved &&
+        toAnswerOption(fallbackSolved.answer) > 0 &&
+        !fallbackSolved.error
+      ) {
+        providerSolved = {
+          ...fallbackSolved,
+          flipVisionModeRequested: effectiveProfile.flipVisionMode,
+          flipVisionModeApplied: 'composite',
+          flipVisionModeFallback: OPENAI_FRAME_PROVIDER_ERROR_FALLBACK_REASON,
+          firstPass: {
+            answer: providerSolved.answer,
+            confidence: providerSolved.confidence,
+            error: providerSolved.error,
+            reasoning: providerSolved.reasoning,
+            rawAnswerBeforeRemap: providerSolved.rawAnswerBeforeRemap,
+            strategy: providerSolved.secondPassStrategy,
+          },
+        }
+        solvedPayloadFlip = fallbackPayloadFlip
+      }
+    }
+
     const solved =
       toAnswerOption(providerSolved.answer) > 0
         ? providerSolved
@@ -1640,7 +1783,7 @@ export async function solveValidationSessionWithAi({
               : 'provider_skip',
           })
 
-    return {payloadFlip, index, solved}
+    return {payloadFlip: solvedPayloadFlip, index, solved}
   }
 
   async function applySolvedPayloadFlip(solvedEntry) {
@@ -1828,22 +1971,22 @@ export async function solveValidationSessionWithAi({
   }
 
   async function buildPayloadFlip(flip) {
-    const leftImage =
+    const prepareCompositePayloads =
       effectiveProfile.flipVisionMode === 'composite'
-        ? await composeFlipVariant({
-            flip,
-            variant: AnswerType.Left,
-            ...frameRenderSize,
-          })
-        : null
-    const rightImage =
-      effectiveProfile.flipVisionMode === 'composite'
-        ? await composeFlipVariant({
-            flip,
-            variant: AnswerType.Right,
-            ...frameRenderSize,
-          })
-        : null
+    const leftImage = prepareCompositePayloads
+      ? await composeFlipVariant({
+          flip,
+          variant: AnswerType.Left,
+          ...frameRenderSize,
+        })
+      : null
+    const rightImage = prepareCompositePayloads
+      ? await composeFlipVariant({
+          flip,
+          variant: AnswerType.Right,
+          ...frameRenderSize,
+        })
+      : null
     const leftFrames = prepareFramePayloads
       ? await composeFlipFrames({
           flip,
@@ -1874,6 +2017,29 @@ export async function solveValidationSessionWithAi({
       sourceDataset: flip.sourceDataset || null,
       sourceSplit: flip.sourceSplit || null,
       sourceStats: flip.sourceStats || null,
+    }
+  }
+
+  async function buildCompositePayloadFlipFallback({sourceFlip, payloadFlip}) {
+    const leftImage =
+      payloadFlip.leftImage ||
+      (await composeFlipVariant({
+        flip: sourceFlip,
+        variant: AnswerType.Left,
+        ...frameRenderSize,
+      }))
+    const rightImage =
+      payloadFlip.rightImage ||
+      (await composeFlipVariant({
+        flip: sourceFlip,
+        variant: AnswerType.Right,
+        ...frameRenderSize,
+      }))
+
+    return {
+      ...payloadFlip,
+      leftImage,
+      rightImage,
     }
   }
 
@@ -1991,9 +2157,17 @@ export async function solveValidationSessionWithAi({
     }
 
     if (useLongSessionOpenAiStaggeredSolving) {
-      await launchStaggeredPreparedFlip({payloadFlip, index: candidateIndex})
+      await launchStaggeredPreparedFlip({
+        payloadFlip,
+        sourceFlip: flip,
+        index: candidateIndex,
+      })
     } else {
-      pendingPreparedFlips.push({payloadFlip, index: candidateIndex})
+      pendingPreparedFlips.push({
+        payloadFlip,
+        sourceFlip: flip,
+        index: candidateIndex,
+      })
       await flushPreparedFlips()
     }
   }
