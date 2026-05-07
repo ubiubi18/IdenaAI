@@ -33,6 +33,28 @@ describe('sanitizeBenchmarkProfile', () => {
     })
   })
 
+  it('preserves explicit runtime overrides in strict profile mode', () => {
+    expect(
+      sanitizeBenchmarkProfile({
+        benchmarkProfile: 'strict',
+        deadlineMs: 95000,
+        requestTimeoutMs: 30000,
+        maxConcurrency: 6,
+        maxRetries: 0,
+        uncertaintyConfidenceThreshold: 0.68,
+        uncertaintyRepromptMinRemainingMs: 35000,
+      })
+    ).toStrictEqual({
+      ...STRICT_PROFILE,
+      deadlineMs: 95000,
+      requestTimeoutMs: 30000,
+      maxConcurrency: 6,
+      maxRetries: 0,
+      uncertaintyConfidenceThreshold: 0.68,
+      uncertaintyRepromptMinRemainingMs: 35000,
+    })
+  })
+
   it('clamps custom values to allowed limits', () => {
     expect(
       sanitizeBenchmarkProfile({
