@@ -333,7 +333,7 @@ describe('createAiProviderBridge', () => {
       model: 'gpt-5.5',
       benchmarkProfile: 'strict',
       deadlineMs: 95000,
-      requestTimeoutMs: 30000,
+      requestTimeoutMs: 45000,
       maxConcurrency: 1,
       maxRetries: 0,
       uncertaintyConfidenceThreshold: 0.68,
@@ -346,7 +346,7 @@ describe('createAiProviderBridge', () => {
     expect(invokeProvider.mock.calls[0][0].profile).toMatchObject({
       benchmarkProfile: 'strict',
       deadlineMs: 95000,
-      requestTimeoutMs: 30000,
+      requestTimeoutMs: 45000,
       maxRetries: 0,
       uncertaintyConfidenceThreshold: 0.68,
       uncertaintyRepromptMinRemainingMs: 35000,
