@@ -5194,7 +5194,19 @@ function aggregateConsultantDecisions(decisions = [], tieBreakerKey = '') {
   }
 }
 
-function chooseDeterministicRandomSide(seed) {
+function chooseDeterministicRandomSide(seed, options = {}) {
+  const session = options && options.session ? options.session : {}
+  const sessionType = String(session.sessionType || options.sessionType || '')
+    .trim()
+    .toLowerCase()
+  const flipIndex = Number(
+    options.flipIndex != null ? options.flipIndex : session.flipIndex
+  )
+
+  if (sessionType === 'short' && Number.isFinite(flipIndex) && flipIndex > 0) {
+    return Math.trunc(flipIndex) % 2 === 1 ? 'left' : 'right'
+  }
+
   return hashScore(`${seed || 'validation-flip'}|force`) % 2 === 0
     ? 'left'
     : 'right'
@@ -9743,7 +9755,10 @@ Flip hash: ${hash}
 
       if (flipStartedAt >= deadlineAt) {
         if (profile.forceDecision) {
-          const forcedAnswer = chooseDeterministicRandomSide(flip.hash)
+          const forcedAnswer = chooseDeterministicRandomSide(flip.hash, {
+            session: payload.session,
+            flipIndex: flipIndex + 1,
+          })
           return {
             hash: flip.hash,
             answer: forcedAnswer,
@@ -9965,6 +9980,11 @@ Flip hash: ${hash}
               typeof basePromptOptions.structuredOutput === 'object'
                 ? basePromptOptions.structuredOutput
                 : {}
+            const fallbackReasoningEffort =
+              basePromptOptions.openAiReasoningEffort &&
+              basePromptOptions.openAiReasoningEffort !== 'none'
+                ? basePromptOptions.openAiReasoningEffort
+                : undefined
             try {
               // eslint-disable-next-line no-await-in-loop
               const response = await invokeConsultantOnce(
@@ -9984,10 +10004,8 @@ Flip hash: ${hash}
                         : {type: 'json_object'},
                   },
                   openAiReasoningEffort:
-                    basePromptOptions.openAiReasoningEffort &&
-                    basePromptOptions.openAiReasoningEffort !== 'none'
-                      ? basePromptOptions.openAiReasoningEffort
-                      : profile.probabilityReasoningEffort,
+                    profile.probabilityReasoningEffort ||
+                    fallbackReasoningEffort,
                 },
                 runFlip,
                 promptText
@@ -10474,7 +10492,10 @@ Flip hash: ${hash}
       }
 
       if (profile.forceDecision && finalResult.answer === 'skip') {
-        const forcedAnswer = chooseDeterministicRandomSide(flip.hash)
+        const forcedAnswer = chooseDeterministicRandomSide(flip.hash, {
+          session: payload.session,
+          flipIndex: flipIndex + 1,
+        })
         let forcedDecisionReason = 'uncertain_or_skip'
         if (finalResult.error) {
           forcedDecisionReason = 'provider_error'
