@@ -199,3 +199,70 @@ export function shouldWaitForValidationReportKeywords({
       Number(waitedMs) < Math.max(0, Number(maxWaitMs) || 0)
   )
 }
+
+function normalizeReportReviewConfidence(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return 0
+  }
+  return Math.max(0, Math.min(1, parsed))
+}
+
+export function selectAutoReportBestFlipHash({
+  reviewResults = [],
+  reportHashes = [],
+} = {}) {
+  const reportedHashSet = new Set(
+    (Array.isArray(reportHashes) ? reportHashes : [])
+      .map((hash) => String(hash || '').trim())
+      .filter(Boolean)
+  )
+
+  return (
+    (Array.isArray(reviewResults) ? reviewResults : []).reduce(
+      (best, item, index) => {
+        const hash = String(item?.hash || '').trim()
+        const decision = String(item?.decision || '')
+          .trim()
+          .toLowerCase()
+        const confidence = normalizeReportReviewConfidence(item?.confidence)
+
+        if (
+          !hash ||
+          reportedHashSet.has(hash) ||
+          decision !== 'approve' ||
+          confidence <= 0
+        ) {
+          return best
+        }
+
+        const triggeredRulePenalty = Array.isArray(item?.triggeredRules)
+          ? Math.min(0.2, item.triggeredRules.length * 0.05)
+          : 0
+        const errorPenalty = item?.error ? 0.2 : 0
+        const score = Math.max(
+          0,
+          confidence - triggeredRulePenalty - errorPenalty
+        )
+        if (score <= 0) {
+          return best
+        }
+
+        if (
+          !best ||
+          score > best.score ||
+          (score === best.score && index < best.index)
+        ) {
+          return {
+            hash,
+            score,
+            index,
+          }
+        }
+
+        return best
+      },
+      null
+    )?.hash || ''
+  )
+}
