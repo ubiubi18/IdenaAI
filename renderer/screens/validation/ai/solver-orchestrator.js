@@ -67,8 +67,8 @@ const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 95 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.95
 const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 3
-const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'xhigh'
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 2
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'high'
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
@@ -552,7 +552,12 @@ function toAnswerOption(answer) {
   return AnswerType.None
 }
 
-function chooseDeterministicRandomAnswer(seed = '') {
+function chooseDeterministicRandomAnswer(seed = '', fallbackIndex = null) {
+  const normalizedIndex = Number(fallbackIndex)
+  if (Number.isFinite(normalizedIndex) && normalizedIndex >= 0) {
+    return Math.trunc(normalizedIndex) % 2 === 0 ? 'left' : 'right'
+  }
+
   const value = String(seed || '')
   let hash = 0
   for (let index = 0; index < value.length; index += 1) {
@@ -1177,10 +1182,8 @@ function applyShortSessionOpenAiParallelTimeout(
           SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
         )
       : SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS,
-    probabilityReasoningEffort: normalizeProbabilityReasoningEffort(
-      profile.probabilityReasoningEffort ||
-        SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT
-    ),
+    probabilityReasoningEffort:
+      SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT,
     requestTimeoutMs,
     maxRetries: 0,
     deadlineMs: Math.max(
@@ -1663,11 +1666,12 @@ export async function solveValidationSessionWithAi({
 
   function buildForcedRandomSolvedFlip({
     hash,
+    index = null,
     error,
     reasoning,
     forcedDecisionReason = 'session_fallback',
   }) {
-    const answer = chooseDeterministicRandomAnswer(hash)
+    const answer = chooseDeterministicRandomAnswer(hash, index)
 
     return {
       hash,
@@ -1705,6 +1709,7 @@ export async function solveValidationSessionWithAi({
       index,
       solved: buildForcedRandomSolvedFlip({
         hash: flip.hash,
+        index,
         error,
         reasoning,
         forcedDecisionReason,
@@ -1756,6 +1761,7 @@ export async function solveValidationSessionWithAi({
         index,
         solved: buildForcedRandomSolvedFlip({
           hash: payloadFlip.hash,
+          index,
           error: 'deadline_guard',
           reasoning: 'not enough session time remained for provider request',
           forcedDecisionReason: 'deadline_guard',
@@ -1852,6 +1858,7 @@ export async function solveValidationSessionWithAi({
       (batchResult.results || [])[0] ||
       buildForcedRandomSolvedFlip({
         hash: payloadFlip.hash,
+        index,
         error: 'no_result',
         reasoning: 'provider returned no result',
         forcedDecisionReason: 'provider_no_result',
@@ -1930,6 +1937,7 @@ export async function solveValidationSessionWithAi({
         ? providerSolved
         : buildForcedRandomSolvedFlip({
             hash: payloadFlip.hash,
+            index,
             error: providerSolved.error || 'skip_answer',
             reasoning:
               providerSolved.reasoning ||
@@ -2015,6 +2023,7 @@ export async function solveValidationSessionWithAi({
         index: preparedFlip.index,
         solved: buildForcedRandomSolvedFlip({
           hash: preparedFlip.payloadFlip.hash,
+          index: preparedFlip.index,
           error: 'safe_submit_guard',
           reasoning:
             'short-session safe-submit guard reached before provider result',
@@ -2043,6 +2052,7 @@ export async function solveValidationSessionWithAi({
             index: preparedFlip.index,
             solved: buildForcedRandomSolvedFlip({
               hash: preparedFlip.payloadFlip.hash,
+              index: preparedFlip.index,
               error: 'safe_submit_guard',
               reasoning:
                 'short-session safe-submit guard reached before provider result',
@@ -2129,6 +2139,7 @@ export async function solveValidationSessionWithAi({
         index: preparedFlip.index,
         solved: buildForcedRandomSolvedFlip({
           hash: preparedFlip.payloadFlip.hash,
+          index: preparedFlip.index,
           error: 'deadline_guard',
           reasoning:
             'not enough session time remained to launch provider request',
