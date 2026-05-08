@@ -1,4 +1,4 @@
-# IdenaAI v0.0.4
+# IdenaAI v0.0.5
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,31 +8,61 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This repository is the main app-integration line. Version `0.0.4` is a
-reference checkpoint for dependency, runtime, local AI, rehearsal, packaging,
-and autosolver work. It is research software, not a hardened wallet release and
-not a trusted installer distribution.
+This repository is the main app-integration line. Version `0.0.5` is a
+research checkpoint for rehearsal autosolver UX, hosted/local AI setup,
+short-session provider timing, benchmark review, and the first in-main startup
+path for probability-ensemble flip judging research. It is research software,
+not a hardened wallet release and not a trusted installer distribution.
+
+## IdenaAI v0.0.5 Update
+
+This update merges the rehearsal/autosolver test lane back into `main`.
+
+- `Settings -> Node -> Start autosolve rehearsal` now opens a setup dialog
+  before the rehearsal starts. It supports a remote provider API key and model
+  choice, Local AI with no provider key, or starting the rehearsal with no AI
+  armed yet.
+- The rehearsal start flow stays on the node settings page so you can watch
+  node readiness, seeded flip counts, and logs instead of being moved directly
+  into the validation wait screen.
+- GPT-5.5 is the default OpenAI model, with short-session OpenAI defaults aimed
+  at more expensive but faster/reasoned runs. The short-session path keeps a
+  deadline guard so it submits the latest available decision, or a deterministic
+  fallback if no result exists near the cutoff.
+- Benchmark telemetry and the rehearsal benchmark audit now show candidate
+  stories in the same vertical four-panel flip form as the validation session,
+  instead of flattened landscape thumbnails or a 2x2 grid.
+- The experimental `probability_ensemble` solver mode is present for research
+  startup, but remains disabled by default. It scores both candidate stories
+  independently, can swap presentation order, and aggregates in application
+  code. Benchmark it in rehearsal/off-chain mode before using it near a
+  valuable identity.
+- The Windows route shares the same JavaScript/Electron solver logic, but it
+  still needs more real Windows rehearsal history before it should be treated as
+  fully tested for valuable validation.
 
 ## Quick Rehearsal Tester Path
 
 Use this path before trying any real validation identity:
 
 1. Open the installed `IdenaAI` folder in a terminal and run `npm start`.
-2. In the app, open `Settings -> AI`.
-3. Choose `Use external API provider`.
-4. If you use OpenAI, prefer a prepaid-funded API key with no automatic top-up
+2. In the app, open `Settings -> Node`.
+3. For a clean local rehearsal, turn off `Run built-in node`.
+4. Click `Start autosolve rehearsal`.
+5. In the setup dialog choose one path:
+   - `Remote provider API`: paste a provider key and choose a model.
+   - `Local AI runtime`: use the configured local runtime; no provider key is
+     needed.
+   - `No AI yet`: start only the rehearsal network and arm AI later if needed.
+6. If you use OpenAI, prefer a prepaid-funded API key with no automatic top-up
    so a rough experimental run cannot create an unlimited provider-side bill.
    This software is experimental and does not provide warranties for provider
    spend, node behavior, or validation results.
-5. Paste the provider API key and click `Set key`.
-6. Click `Enable auto-solve next session`.
-7. Open `Settings -> Node`.
-8. For a clean local rehearsal, turn off `Run built-in node`, then click
-   `Start and use rehearsal network`.
-9. Wait until all local rehearsal nodes are ready/online/connected and the
+7. After start, stay on `Settings -> Node` and watch the node stats and log.
+8. Wait until all local rehearsal nodes are ready/online/connected and the
    seeded FLIP-Challenge flips are visible or confirmed. The default topology
    is one bootstrap node plus nine validator identities.
-10. Let the countdown reach zero, watch the solve session, then review the
+9. Let the countdown reach zero, watch the solve session, then review the
     audit/results screen at the end.
 
 ## Large Bundled Artifacts
@@ -641,21 +671,35 @@ but should still be treated as not fully tested yet for valuable real
 validation until you have a successful Windows rehearsal and smoke-test history.
 The VPS Linux route above is proposed and not fully tested yet.
 
-The larger GPT-5.5 flip-judging redesign is intentionally not enabled on
-`main`. It lives on the research branch:
+The GPT-5.5 probability-ensemble flip-judging redesign is now available on
+`main` as an advanced experimental mode, but it is not the default solver path.
+It also remains available on the separate research branch for isolated
+comparison work:
 
 ```bash
 vibe/gpt55-probability-ensemble-research
 ```
 
-That branch adds an experimental `probability_ensemble` mode. Instead of asking
-the model to choose left or right immediately, it asks for independent
-probability scores for both candidate stories, optionally swaps candidate order
-between runs, and lets application code aggregate the result. The goal is to
-reduce early side anchoring and position bias. It does not eliminate model
-errors, provider outages, API cost, or validation risk.
+The experimental `probability_ensemble` mode avoids asking the model to choose
+left or right immediately. It asks for independent probability scores for both
+candidate stories, optionally swaps candidate order between runs, and lets
+application code aggregate the result. The goal is to reduce early side
+anchoring and position bias. It does not eliminate model errors, provider
+outages, API cost, or validation risk.
 
-To start the probability ensemble research branch from an existing checkout:
+To start probability-ensemble research from current `main`:
+
+```bash
+git fetch origin
+git switch main
+git pull --ff-only origin main
+npm ci
+npm run setup:sources
+npm start
+```
+
+To compare against the separate probability ensemble research branch from an
+existing checkout:
 
 ```bash
 git fetch origin
@@ -704,8 +748,7 @@ different renderer port:
 IDENA_DESKTOP_RENDERER_PORT=8001 npm start
 ```
 
-On the research branch only, configure it in `Settings -> AI` as an advanced
-experimental option:
+Configure it in `Settings -> AI` as an advanced experimental option:
 
 - enable the probability ensemble setting
 - keep the short-session OpenAI default at two probability runs so the audit
@@ -715,13 +758,13 @@ experimental option:
 - benchmark on rehearsal or off-chain datasets before using it near a valuable
   identity
 
-Do not treat this branch as a production validation strategy. It is a test lane
-for measuring whether independent scoring plus aggregation improves FLIP
-judging under real provider timing and Windows route conditions.
+Do not treat probability ensemble as a production validation strategy. It is a
+test lane for measuring whether independent scoring plus aggregation improves
+FLIP judging under real provider timing and Windows route conditions.
 
 ## Experimental Warning
 
-Read this part first. `v0.0.4` is not production ready.
+Read this part first. `v0.0.5` is not production ready.
 
 - no warranties
 - not audited
@@ -750,10 +793,11 @@ prefer local models so capacity scales with your own hardware.
 
 ## Project Status
 
-`v0.0.4` is an auditable research checkpoint after the Node 24/Electron 41
+`v0.0.5` is an auditable research checkpoint after the Node 24/Electron 41
 runtime work, source-mirror cleanup, idena.social integration, validation
-rehearsal, local AI setup, and autosolver telemetry. It is not a production
-release and not a trusted installer distribution.
+rehearsal, local AI setup, autosolver telemetry, benchmark flip-form review,
+and the first probability-ensemble research startup path on `main`. It is not a
+production release and not a trusted installer distribution.
 
 What works today:
 
@@ -766,6 +810,9 @@ What works today:
   `npm run build:node`
 - session-auto research flow with route entry, provider-readiness retries,
   deadline checks, fallback traces, cost logs, and benchmark telemetry
+- rehearsal autosolver setup from `Settings -> Node`, including remote provider,
+  Local AI, and no-AI start modes
+- advanced probability-ensemble research mode, disabled by default
 - local benchmark and run artifacts under `userData/ai-benchmark/`
 
 Recent cleanup:
@@ -778,6 +825,8 @@ Recent cleanup:
   `idena-sdk-js` runtime dependency, upgraded Electron, and pinned source/CI
   installs to Node `24.15.0`
 - the README now documents source-first usage and the local-build trust model
+- benchmark telemetry and audit previews now use the same vertical flip form as
+  the validation session
 
 Still experimental:
 
