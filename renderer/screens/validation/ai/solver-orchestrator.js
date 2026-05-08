@@ -552,6 +552,32 @@ function toAnswerOption(answer) {
   return AnswerType.None
 }
 
+function normalizeAnswerPhaseKeywords(wordsOrKeywords = []) {
+  if (!Array.isArray(wordsOrKeywords)) {
+    return []
+  }
+
+  return wordsOrKeywords
+    .map((item, index) => {
+      if (item && typeof item === 'object') {
+        const name = String(item.name || item.keyword || '').trim()
+        const desc = String(item.desc || item.description || '').trim()
+        if (!name && !desc) {
+          return null
+        }
+        return {
+          name: name || `keyword-${index + 1}`,
+          desc,
+        }
+      }
+
+      const keywordName = String(item || '').trim()
+      return keywordName ? {name: keywordName, desc: ''} : null
+    })
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
 function chooseDeterministicRandomAnswer(seed = '', fallbackIndex = null) {
   const normalizedIndex = Number(fallbackIndex)
   if (Number.isFinite(normalizedIndex) && normalizedIndex >= 0) {
@@ -1639,6 +1665,7 @@ export async function solveValidationSessionWithAi({
       leftFrames: [],
       rightFrames: [],
       words: Array.isArray(flip.words) ? flip.words : [],
+      keywords: normalizeAnswerPhaseKeywords(flip.keywords || flip.words),
       expectedAnswer: flip.expectedAnswer || null,
       expectedStrength: flip.expectedStrength || null,
       consensusAnswer: flip.consensusAnswer || null,
@@ -1661,6 +1688,7 @@ export async function solveValidationSessionWithAi({
       rightFrames: Array.isArray(payloadFlip.rightFrames)
         ? payloadFlip.rightFrames
         : [],
+      keywords: normalizeAnswerPhaseKeywords(payloadFlip.keywords),
     }
   }
 
@@ -2229,6 +2257,7 @@ export async function solveValidationSessionWithAi({
       leftFrames,
       rightFrames,
       words: Array.isArray(flip.words) ? flip.words : [],
+      keywords: normalizeAnswerPhaseKeywords(flip.keywords || flip.words),
       expectedAnswer: flip.expectedAnswer || null,
       expectedStrength: flip.expectedStrength || null,
       consensusAnswer: flip.consensusAnswer || null,
