@@ -161,6 +161,41 @@ describe('decision helpers', () => {
     expect(result.probabilities.right).toBeCloseTo(0.45)
   })
 
+  it('tracks report risk without skipping a clear probability decision', () => {
+    const result = aggregateProbabilityEnsembleRuns(
+      [
+        {
+          payload: {
+            optionA: {
+              chronology_probability: 0.82,
+              cause_effect_probability: 0.82,
+              entity_continuity_probability: 0.82,
+              final_state_probability: 0.82,
+            },
+            optionB: {
+              chronology_probability: 0.44,
+              cause_effect_probability: 0.44,
+              entity_continuity_probability: 0.44,
+              final_state_probability: 0.44,
+            },
+            report_risk_probability: 0.99,
+            text_or_order_label_risk_probability: 0.98,
+            uncertainty_probability: 0.2,
+          },
+        },
+      ],
+      {forceDecision: false, probabilityDecisionDelta: 0.08}
+    )
+
+    expect(result.answer).toBe('left')
+    expect(result.skippedByRisk).toBe(false)
+    expect(result.probabilities.left).toBeCloseTo(0.82)
+    expect(result.probabilities.right).toBeCloseTo(0.44)
+    expect(result.probabilities.skip).toBeCloseTo(0.2)
+    expect(result.probabilities.reportRisk).toBeCloseTo(0.99)
+    expect(result.probabilities.textOrOrderLabelRisk).toBeCloseTo(0.98)
+  })
+
   it('returns skip when probability delta is below threshold and skip is allowed', () => {
     const result = aggregateProbabilityEnsembleRuns(
       [
