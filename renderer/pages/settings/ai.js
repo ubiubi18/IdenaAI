@@ -88,7 +88,7 @@ import {getSharedGlobal} from '../../shared/utils/shared-global'
 
 const DEFAULT_MODELS = {
   'local-ai': '',
-  openai: 'gpt-5.4',
+  openai: 'gpt-5.5',
   'openai-compatible': 'gpt-4o-mini',
   gemini: 'gemini-2.0-flash',
   anthropic: 'claude-3-7-sonnet-latest',
@@ -191,7 +191,7 @@ const DEFAULT_AI_SETTINGS = {
   provider: 'openai',
   model: DEFAULT_MODELS.openai,
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.4-mini',
+  shortSessionOpenAiFastModel: 'gpt-5.5',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   mode: 'manual',
@@ -208,12 +208,22 @@ const DEFAULT_AI_SETTINGS = {
   temperature: 0,
   forceDecision: true,
   uncertaintyRepromptEnabled: true,
-  uncertaintyConfidenceThreshold: 0.45,
+  uncertaintyConfidenceThreshold: 0.95,
   uncertaintyRepromptMinRemainingMs: 3500,
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
   shortSessionFlipVisionMode: 'composite',
+  probabilityEnsembleEnabled: false,
+  probabilityRuns: 3,
+  probabilityPasses: [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ],
+  probabilityDecisionDelta: 0.08,
+  probabilityUseSwappedOrder: true,
+  probabilityReasoningEffort: 'xhigh',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -3704,10 +3714,10 @@ export default function AiSettingsPage() {
     : activeProvider
   const externalAiSummary = aiSolver.enabled
     ? t(
-        'Insert one or multiple AI provider API keys here. Click Advanced if you need more settings later.'
+        'Insert one or multiple AI provider API keys here. For OpenAI testing, use a prepaid key without automatic top-up when possible.'
       )
     : t(
-        'Use this when you want an external AI provider via API instead of a local runtime.'
+        'Use this when you want an external AI provider via API instead of a local runtime. For OpenAI testing, a prepaid key without automatic top-up is recommended.'
       )
   const enableExternalProviderSetup = useCallback(() => {
     pendingProviderSetupRevealRef.current = true
@@ -4399,6 +4409,25 @@ export default function AiSettingsPage() {
 
                     {!isLocalAiPrimaryProvider ? (
                       <>
+                        <Box
+                          borderWidth="1px"
+                          borderColor="orange.200"
+                          borderRadius="md"
+                          bg="orange.012"
+                          p={3}
+                        >
+                          <Stack spacing={1}>
+                            <Text fontWeight={600} fontSize="sm">
+                              {t('API spend guardrail')}
+                            </Text>
+                            <Text color="muted" fontSize="sm">
+                              {t(
+                                'Recommended for OpenAI: use only a prepaid-funded API key with no automatic top-up, so a rough experimental run cannot create an unlimited provider-side bill. This software is experimental and does not provide warranties.'
+                              )}
+                            </Text>
+                          </Stack>
+                        </Box>
+
                         <SettingsFormControl>
                           <SettingsFormLabel>{t('API key')}</SettingsFormLabel>
                           <InputGroup w="full" maxW="xl">
@@ -4676,7 +4705,7 @@ export default function AiSettingsPage() {
                           </Text>
                           <Text color="muted" fontSize="sm">
                             {t(
-                              'Only affects validation short session. OpenAI requests use Priority processing and reasoning_effort=none for lower latency.'
+                              'Only affects validation short session. OpenAI requests use Priority processing; the parallel probability lane uses high reasoning so the audit pass can finish before submit.'
                             )}
                           </Text>
                         </Box>
@@ -4700,8 +4729,7 @@ export default function AiSettingsPage() {
                           </SettingsFormLabel>
                           <Select
                             value={
-                              aiSolver.shortSessionOpenAiFastModel ||
-                              'gpt-5.4-mini'
+                              aiSolver.shortSessionOpenAiFastModel || 'gpt-5.5'
                             }
                             onChange={(e) =>
                               updateAiSolverSettings({
@@ -5476,6 +5504,131 @@ export default function AiSettingsPage() {
                         )}
                       </Text>
                     </SettingsFormControl>
+
+                    {!isLocalAiPrimaryProvider && (
+                      <Stack spacing={3}>
+                        <Flex align="center" justify="space-between">
+                          <Box>
+                            <Text fontWeight={500}>
+                              {t('Probability ensemble')}
+                            </Text>
+                            <Text color="muted" fontSize="sm">
+                              {t(
+                                'Experimental GPT-5.5-style scoring: score both candidates independently over multiple runs, then let the app choose.'
+                              )}
+                            </Text>
+                          </Box>
+                          <Switch
+                            isChecked={!!aiSolver.probabilityEnsembleEnabled}
+                            onChange={() =>
+                              updateAiSolverSettings({
+                                probabilityEnsembleEnabled:
+                                  !aiSolver.probabilityEnsembleEnabled,
+                              })
+                            }
+                          />
+                        </Flex>
+
+                        {aiSolver.probabilityEnsembleEnabled && (
+                          <Stack spacing={3}>
+                            <SettingsFormControl>
+                              <SettingsFormLabel>
+                                {t('Probability runs')}
+                              </SettingsFormLabel>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={5}
+                                value={aiSolver.probabilityRuns ?? 3}
+                                onChange={(e) =>
+                                  updateNumberField(
+                                    'probabilityRuns',
+                                    e.target.value
+                                  )
+                                }
+                                w="xs"
+                              />
+                            </SettingsFormControl>
+
+                            <SettingsFormControl>
+                              <SettingsFormLabel>
+                                {t('Decision delta')}
+                              </SettingsFormLabel>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                max={0.5}
+                                value={
+                                  aiSolver.probabilityDecisionDelta ?? 0.08
+                                }
+                                onChange={(e) =>
+                                  updateFloatField(
+                                    'probabilityDecisionDelta',
+                                    e.target.value
+                                  )
+                                }
+                                w="xs"
+                              />
+                              <Text color="muted" fontSize="sm" mt={1}>
+                                {t(
+                                  'When force decision is off, scores closer than this become skip.'
+                                )}
+                              </Text>
+                            </SettingsFormControl>
+
+                            <Flex align="center" justify="space-between">
+                              <Box>
+                                <Text fontWeight={500}>
+                                  {t('Swap candidate order')}
+                                </Text>
+                                <Text color="muted" fontSize="sm">
+                                  {t(
+                                    'Alternate option A/B presentation across probability runs to reduce side bias.'
+                                  )}
+                                </Text>
+                              </Box>
+                              <Switch
+                                isChecked={
+                                  aiSolver.probabilityUseSwappedOrder !== false
+                                }
+                                onChange={() =>
+                                  updateAiSolverSettings({
+                                    probabilityUseSwappedOrder:
+                                      aiSolver.probabilityUseSwappedOrder ===
+                                      false,
+                                  })
+                                }
+                              />
+                            </Flex>
+
+                            <SettingsFormControl>
+                              <SettingsFormLabel>
+                                {t('Reasoning effort')}
+                              </SettingsFormLabel>
+                              <Select
+                                value={
+                                  aiSolver.probabilityReasoningEffort ||
+                                  'medium'
+                                }
+                                onChange={(e) =>
+                                  updateAiSolverSettings({
+                                    probabilityReasoningEffort: e.target.value,
+                                  })
+                                }
+                                w="xs"
+                              >
+                                <option value="medium">{t('Medium')}</option>
+                                <option value="high">{t('High')}</option>
+                                <option value="low">{t('Low')}</option>
+                                <option value="minimal">{t('Minimal')}</option>
+                                <option value="xhigh">{t('Extra high')}</option>
+                              </Select>
+                            </SettingsFormControl>
+                          </Stack>
+                        )}
+                      </Stack>
+                    )}
 
                     {!isLocalAiPrimaryProvider && (
                       <SettingsFormControl>

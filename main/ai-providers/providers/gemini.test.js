@@ -82,7 +82,6 @@ describe('gemini provider adapter', () => {
     )
     expect(httpClient.post).not.toHaveBeenCalled()
   })
-
   test('rejects unsafe API version path segments', async () => {
     const httpClient = {
       post: jest.fn(),
