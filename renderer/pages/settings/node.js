@@ -270,7 +270,7 @@ function buildRehearsalSolverLanePayload(
     forceDecision: true,
     uncertaintyRepromptEnabled: true,
     uncertaintyConfidenceThreshold:
-      Number(aiSolver.uncertaintyConfidenceThreshold) || 0.45,
+      Number(aiSolver.uncertaintyConfidenceThreshold) || 0.95,
     uncertaintyRepromptMinRemainingMs: 3000,
     flipVisionMode: 'frames_two_pass',
   }
