@@ -28,6 +28,7 @@ describe('settings-context ai solver normalization', () => {
       model: 'gpt-5.5',
       shortSessionOpenAiFastModel: 'gpt-5.5',
       probabilityReasoningEffort: 'xhigh',
+      autoReportBestFlipEnabled: false,
       memoryBudgetGiB: 32,
       systemReserveGiB: 6,
       localAiMemoryReference: 'molmo2-4b',
@@ -75,6 +76,16 @@ describe('settings-context ai solver normalization', () => {
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
       shortSessionOpenAiFastModel: 'gpt-5.5',
+    })
+  })
+
+  it('normalizes the auto-report best-flip switch', () => {
+    expect(
+      buildAiSolverSettings({
+        autoReportBestFlipEnabled: 1,
+      })
+    ).toMatchObject({
+      autoReportBestFlipEnabled: true,
     })
   })
 

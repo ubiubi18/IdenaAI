@@ -11,6 +11,7 @@ const {
   shouldAutoRunSessionForPeriod,
   shouldShowValidationAiUi,
   shouldShowValidationLocalAiUi,
+  selectAutoReportBestFlipHash,
 } = require('./validation-ai-auto')
 
 describe('validation ai auto gating', () => {
@@ -364,5 +365,35 @@ describe('validation ai auto gating', () => {
         checkerAvailable: true,
       })
     ).toBe(false)
+  })
+
+  it('selects the strongest approved report-review flip as the auto best flip', () => {
+    expect(
+      selectAutoReportBestFlipHash({
+        reviewResults: [
+          {hash: '0xreported', decision: 'report', confidence: 0.99},
+          {hash: '0xweak', decision: 'approve', confidence: 0.51},
+          {hash: '0xbest', decision: 'approve', confidence: 0.88},
+        ],
+        reportHashes: ['0xreported'],
+      })
+    ).toBe('0xbest')
+  })
+
+  it('does not select provider-error or reported flips as the auto best flip', () => {
+    expect(
+      selectAutoReportBestFlipHash({
+        reviewResults: [
+          {
+            hash: '0xerror',
+            decision: 'approve',
+            confidence: 0,
+            error: 'provider error',
+          },
+          {hash: '0xreported', decision: 'approve', confidence: 0.9},
+        ],
+        reportHashes: ['0xreported'],
+      })
+    ).toBe('')
   })
 })
