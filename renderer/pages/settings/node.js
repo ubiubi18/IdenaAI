@@ -1,4 +1,10 @@
-import React, {useEffect, useReducer, useRef, useState} from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from 'react'
 import {useTranslation} from 'react-i18next'
 import Ansi from 'ansi-to-react'
 import {useRouter} from 'next/router'
@@ -365,6 +371,7 @@ function NodeSettings() {
     setConnectionDetails,
     clearEphemeralExternalNode,
     toggleAutoActivateMining,
+    updateAiSolverSettings,
   } = useSettingsDispatch()
 
   const {nodeFailed} = useNodeState()
@@ -688,6 +695,11 @@ function NodeSettings() {
     Number(rehearsalSolverLanes?.participantCount || 0) > 1
   const canRunRehearsalSolverLanes =
     devnetStatus.active && devnetStatus.stage === 'running'
+  const rehearsalAutosolverArmed =
+    settings.aiSolver?.enabled === true &&
+    String(settings.aiSolver?.mode || '').trim() === 'session-auto'
+  const rehearsalAutosolverManualOnly =
+    settings.aiSolver?.enabled === true && !rehearsalAutosolverArmed
   const localRpcKeyHelpText = t(
     'The local RPC key lives as internalApiKey in settings.json inside the current {{appName}} profile. Real app profiles: macOS ~/Library/Application Support/{{appName}}/settings.json, Windows %APPDATA%\\{{appName}}\\settings.json, Linux ~/.config/{{appName}}/settings.json. Edit it only while {{appName}} and its node are stopped, then restart. Rehearsal networks use a different temporary API key managed by the rehearsal node.',
     {appName: APP_NAME}
@@ -742,15 +754,50 @@ function NodeSettings() {
     })
   }
 
-  const startRehearsalNetwork = ({connectApp = false} = {}) =>
-    getNodeBridge().startValidationDevnet(
-      buildRehearsalNetworkPayload({connectApp})
-    )
+  const armRehearsalAutosolver = useCallback(() => {
+    updateAiSolverSettings({
+      enabled: true,
+      mode: 'session-auto',
+    })
+  }, [updateAiSolverSettings])
 
-  const restartRehearsalNetwork = ({connectApp = true} = {}) =>
-    getNodeBridge().restartValidationDevnet(
-      buildRehearsalNetworkPayload({connectApp})
-    )
+  const startRehearsalNetwork = useCallback(
+    ({connectApp = false, armAutosolver = false} = {}) => {
+      if (armAutosolver) {
+        armRehearsalAutosolver()
+      }
+      getNodeBridge().startValidationDevnet(
+        buildRehearsalNetworkPayload({connectApp})
+      )
+    },
+    [armRehearsalAutosolver]
+  )
+
+  const restartRehearsalNetwork = useCallback(
+    ({connectApp = true, armAutosolver = false} = {}) => {
+      if (armAutosolver) {
+        armRehearsalAutosolver()
+      }
+      getNodeBridge().restartValidationDevnet(
+        buildRehearsalNetworkPayload({connectApp})
+      )
+    },
+    [armRehearsalAutosolver]
+  )
+
+  const startAutosolveRehearsal = useCallback(() => {
+    if (devnetStatus.active) {
+      restartRehearsalNetwork({connectApp: true, armAutosolver: true})
+    } else {
+      startRehearsalNetwork({connectApp: true, armAutosolver: true})
+    }
+    openValidationLottery(router, {isRehearsalNodeSession: true})
+  }, [
+    devnetStatus.active,
+    restartRehearsalNetwork,
+    router,
+    startRehearsalNetwork,
+  ])
 
   const runRehearsalSolverLanes = ({
     participantCount = REHEARSAL_DEFAULT_SOLVER_PARTICIPANT_COUNT,
@@ -1164,6 +1211,23 @@ function NodeSettings() {
                           'IdenaAI is currently connected to the rehearsal network for this app session.'
                         )}
                       </Text>
+                      {rehearsalAutosolverArmed ? (
+                        <Text color="green.500">
+                          {t(
+                            'Rehearsal autosolver is armed. The app will open validation and run the AI solver when the rehearsal session starts.'
+                          )}
+                        </Text>
+                      ) : (
+                        <Text color="orange.500">
+                          {rehearsalAutosolverManualOnly
+                            ? t(
+                                'Manual AI helper is enabled, but rehearsal autosolve is not armed. It will not start or submit by itself.'
+                              )
+                            : t(
+                                'Rehearsal autosolve is not armed. Enable it before the countdown reaches short session.'
+                              )}
+                        </Text>
+                      )}
                       {rehearsalSessionMessage && (
                         <Text
                           color={
@@ -1198,12 +1262,20 @@ function NodeSettings() {
                 {!devnetStatus.active ? (
                   <>
                     <PrimaryButton
+                      onClick={startAutosolveRehearsal}
+                      isLoading={isStartingDevnet}
+                      isDisabled={!canUseIpcRenderer || isStartingDevnet}
+                    >
+                      {t('Start autosolve rehearsal')}
+                    </PrimaryButton>
+
+                    <SecondaryButton
                       onClick={() => startRehearsalNetwork({connectApp: true})}
                       isLoading={isStartingDevnet}
                       isDisabled={!canUseIpcRenderer || isStartingDevnet}
                     >
                       {t('Start and use rehearsal network')}
-                    </PrimaryButton>
+                    </SecondaryButton>
 
                     <SecondaryButton
                       onClick={() => startRehearsalNetwork()}
@@ -1286,6 +1358,26 @@ function NodeSettings() {
                           {t('Open results')}
                         </PrimaryButton>
                       )}
+
+                    {rehearsalNodeConnected && !rehearsalAutosolverArmed && (
+                      <PrimaryButton
+                        onClick={armRehearsalAutosolver}
+                        isDisabled={!canUseIpcRenderer}
+                      >
+                        {t('Arm rehearsal autosolver')}
+                      </PrimaryButton>
+                    )}
+
+                    {(rehearsalSessionAlreadyAdvanced ||
+                      !rehearsalAutosolverArmed) && (
+                      <PrimaryButton
+                        onClick={startAutosolveRehearsal}
+                        isDisabled={!canUseIpcRenderer || isStartingDevnet}
+                        isLoading={isStartingDevnet}
+                      >
+                        {t('Restart autosolve rehearsal')}
+                      </PrimaryButton>
+                    )}
 
                     {rehearsalNeedsConnection && (
                       <PrimaryButton
