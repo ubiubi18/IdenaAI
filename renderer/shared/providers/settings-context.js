@@ -37,9 +37,9 @@ const CHANGE_LANGUAGE = 'CHANGE_LANGUAGE'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.4',
+  model: 'gpt-5.5',
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.4-mini',
+  shortSessionOpenAiFastModel: 'gpt-5.5',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   localAiMemoryReference: resolveManagedLocalRuntimeMemoryReference(
@@ -74,7 +74,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   ],
   probabilityDecisionDelta: 0.08,
   probabilityUseSwappedOrder: true,
-  probabilityReasoningEffort: 'medium',
+  probabilityReasoningEffort: 'xhigh',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -218,6 +218,14 @@ function buildAiSolverSettings(settings = {}) {
     )
       ? normalizedShortSessionOpenAiFastModel
       : DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
+  if (
+    ['gpt-5.4-mini', 'gpt-5.4'].includes(
+      nextSettings.shortSessionOpenAiFastModel
+    )
+  ) {
+    nextSettings.shortSessionOpenAiFastModel =
+      DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
+  }
   const normalizedShortSessionFlipVisionMode = String(
     nextSettings.shortSessionFlipVisionMode || ''
   ).trim()
@@ -315,9 +323,9 @@ function buildAiSolverSettings(settings = {}) {
 
   if (
     nextSettings.provider === 'openai' &&
-    nextSettings.model === 'gpt-4o-mini'
+    ['gpt-4o-mini', 'gpt-5.4'].includes(nextSettings.model)
   ) {
-    nextSettings.model = 'gpt-5.4'
+    nextSettings.model = 'gpt-5.5'
   }
 
   nextSettings.onchainAutoSubmitConsentAt = String(

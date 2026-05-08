@@ -33,13 +33,12 @@ describe('solver-orchestrator planning', () => {
       shortFlips,
       aiSolver: {
         provider: 'openai',
-        model: 'gpt-5.4',
       },
     })
 
     expect(plan.candidateFlips).toHaveLength(7)
     expect(plan.provider).toBe('openai')
-    expect(plan.model).toBe('gpt-5.4')
+    expect(plan.model).toBe('gpt-5.5')
     expect(plan.candidateFlips.some((flip) => flip.hash === 'short-2')).toBe(
       false
     )
@@ -91,7 +90,7 @@ describe('solver-orchestrator planning', () => {
     expect(shortPlan.model).toBe('gpt-5.5-mini')
     expect(shortPlan.promptOptions).toEqual({
       openAiServiceTier: 'priority',
-      openAiReasoningEffort: 'medium',
+      openAiReasoningEffort: 'xhigh',
     })
     expect(longPlan.model).toBe('gpt-5.4')
     expect(longPlan.promptOptions).toBeNull()
@@ -119,7 +118,7 @@ describe('solver-orchestrator planning', () => {
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
     expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
     expect(plan.effectiveProfile.probabilityRuns).toBe(3)
-    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('medium')
+    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('xhigh')
     expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
       plan.effectiveProfile.uncertaintyConfidenceThreshold

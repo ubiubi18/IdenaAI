@@ -26,7 +26,7 @@ const DEFAULT_PROFILE = {
   ],
   probabilityDecisionDelta: 0.08,
   probabilityUseSwappedOrder: true,
-  probabilityReasoningEffort: 'medium',
+  probabilityReasoningEffort: 'xhigh',
 }
 
 const LOCAL_AI_STRICT_PROFILE_OVERRIDES = {
@@ -68,7 +68,7 @@ const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.95
 const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 3
-const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'medium'
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'xhigh'
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
@@ -993,7 +993,7 @@ function resolveShortSessionOpenAiFastMode({
 
   const promptOptions = {
     openAiServiceTier: 'priority',
-    openAiReasoningEffort: 'medium',
+    openAiReasoningEffort: 'xhigh',
   }
 
   if (aiSolver.shortSessionOpenAiFastEnabled !== true) {
@@ -1008,7 +1008,7 @@ function resolveShortSessionOpenAiFastMode({
     .toLowerCase()
   const fastModel = SHORT_SESSION_OPENAI_FAST_MODELS.includes(requestedModel)
     ? requestedModel
-    : 'gpt-5.4-mini'
+    : 'gpt-5.5'
 
   return {
     model: fastModel,
@@ -1177,9 +1177,10 @@ function applyShortSessionOpenAiParallelTimeout(
           SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
         )
       : SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS,
-    probabilityReasoningEffort:
-      normalizeProbabilityReasoningEffort(profile.probabilityReasoningEffort) ||
-      SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT,
+    probabilityReasoningEffort: normalizeProbabilityReasoningEffort(
+      profile.probabilityReasoningEffort ||
+        SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT
+    ),
     requestTimeoutMs,
     maxRetries: 0,
     deadlineMs: Math.max(
@@ -1296,7 +1297,7 @@ export function planValidationAiSolve({
   const provider = String(aiSolver.provider || 'openai')
     .trim()
     .toLowerCase()
-  const defaultModel = String(aiSolver.model || 'gpt-5.4').trim() || 'gpt-5.4'
+  const defaultModel = String(aiSolver.model || 'gpt-5.5').trim() || 'gpt-5.5'
   const shortSessionOpenAiFastMode = resolveShortSessionOpenAiFastMode({
     sessionType,
     aiSolver,

@@ -88,7 +88,7 @@ import {getSharedGlobal} from '../../shared/utils/shared-global'
 
 const DEFAULT_MODELS = {
   'local-ai': '',
-  openai: 'gpt-5.4',
+  openai: 'gpt-5.5',
   'openai-compatible': 'gpt-4o-mini',
   gemini: 'gemini-2.0-flash',
   anthropic: 'claude-3-7-sonnet-latest',
@@ -191,7 +191,7 @@ const DEFAULT_AI_SETTINGS = {
   provider: 'openai',
   model: DEFAULT_MODELS.openai,
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.4-mini',
+  shortSessionOpenAiFastModel: 'gpt-5.5',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   mode: 'manual',
@@ -223,7 +223,7 @@ const DEFAULT_AI_SETTINGS = {
   ],
   probabilityDecisionDelta: 0.08,
   probabilityUseSwappedOrder: true,
-  probabilityReasoningEffort: 'medium',
+  probabilityReasoningEffort: 'xhigh',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -4710,8 +4710,7 @@ export default function AiSettingsPage() {
                           </SettingsFormLabel>
                           <Select
                             value={
-                              aiSolver.shortSessionOpenAiFastModel ||
-                              'gpt-5.4-mini'
+                              aiSolver.shortSessionOpenAiFastModel || 'gpt-5.5'
                             }
                             onChange={(e) =>
                               updateAiSolverSettings({

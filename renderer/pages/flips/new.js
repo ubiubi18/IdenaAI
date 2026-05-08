@@ -90,7 +90,7 @@ import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.4',
+  model: 'gpt-5.5',
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
