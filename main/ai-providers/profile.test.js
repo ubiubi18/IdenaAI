@@ -90,7 +90,7 @@ describe('sanitizeBenchmarkProfile', () => {
       ],
       probabilityDecisionDelta: 0.08,
       probabilityUseSwappedOrder: true,
-      probabilityReasoningEffort: 'medium',
+      probabilityReasoningEffort: 'xhigh',
     })
   })
 

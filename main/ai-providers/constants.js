@@ -12,7 +12,7 @@ const PROVIDERS = {
 }
 
 const DEFAULT_MODELS = {
-  [PROVIDERS.OpenAI]: 'gpt-5.4',
+  [PROVIDERS.OpenAI]: 'gpt-5.5',
   [PROVIDERS.LocalAI]: '',
   [PROVIDERS.OpenAICompatible]: 'gpt-4o-mini',
   [PROVIDERS.Gemini]: 'gemini-2.0-flash',
@@ -118,7 +118,7 @@ const STRICT_PROFILE = {
   ],
   probabilityDecisionDelta: 0.08,
   probabilityUseSwappedOrder: true,
-  probabilityReasoningEffort: 'medium',
+  probabilityReasoningEffort: 'xhigh',
 }
 
 const CUSTOM_LIMITS = {

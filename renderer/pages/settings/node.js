@@ -241,7 +241,7 @@ function buildRehearsalSolverLanePayload(
     laneStartDelayMs:
       laneCount > 1 ? REHEARSAL_SHARED_NODE_PARTICIPANT_START_DELAY_MS : 0,
     provider,
-    model: aiSolver.model || 'gpt-5.4',
+    model: aiSolver.model || 'gpt-5.5',
     providerConfig: buildRehearsalLaneProviderConfig(aiSolver),
     ensembleEnabled: Boolean(aiSolver.ensembleEnabled),
     ensemblePrimaryWeight: aiSolver.ensemblePrimaryWeight,

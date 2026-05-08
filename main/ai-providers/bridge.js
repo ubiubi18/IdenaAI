@@ -8585,7 +8585,7 @@ Flip hash: ${hash}
       typeof payload.renderFeedbackEnabled === 'boolean'
         ? payload.renderFeedbackEnabled
         : true
-    const textAuditModel = String(payload.textAuditModel || 'gpt-5.4').trim()
+    const textAuditModel = String(payload.textAuditModel || 'gpt-5.5').trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel
     ).trim()
