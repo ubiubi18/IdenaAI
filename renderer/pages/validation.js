@@ -4189,66 +4189,71 @@ function ValidationSession({
             }
           />
         </ActionBarItem>
-        <ActionBarItem justify="flex-end">
-          {isRehearsalNodeSession && !forceAiPreview && (
-            <SecondaryButton mr={3} onClick={handleLeaveRehearsalSession}>
-              {t('Leave rehearsal')}
-            </SecondaryButton>
-          )}
-          {(isShortSession(state) || isLongSessionFlips(state)) &&
-            showValidationAiUi && (
-              <Stack isInline spacing={2} align="center" mr={3}>
-                {aiProgress && (
-                  <Text
-                    fontSize="xs"
-                    color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
-                  >
-                    {aiProgress}
-                  </Text>
-                )}
-                {isSessionAutoMode &&
-                !forceAiPreview &&
-                aiLastRun?.status !== 'failed' ? (
-                  <Text
-                    fontSize="xs"
-                    color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
-                    fontWeight={600}
-                  >
-                    {autoRunStatusText}
-                  </Text>
-                ) : (
-                  <SecondaryButton
-                    isDisabled={!canRunAiSolve || aiProviderStatus.checking}
-                    isLoading={aiSolving}
-                    onClick={handleRunAiSolve}
-                  >
-                    {manualAiActionLabel}
-                  </SecondaryButton>
-                )}
-              </Stack>
+        <ActionBarItem justify="flex-end" flex="2 1 0">
+          <Flex
+            align="center"
+            justify="flex-end"
+            gap={2}
+            flexWrap="wrap"
+            minW={0}
+            maxW="full"
+            sx={{
+              '& button': {
+                whiteSpace: 'normal',
+              },
+            }}
+          >
+            {isRehearsalNodeSession && !forceAiPreview && (
+              <SecondaryButton onClick={handleLeaveRehearsalSession}>
+                {t('Leave rehearsal')}
+              </SecondaryButton>
             )}
-          {canOpenLocalResultsShortcut && (
-            <SecondaryButton
-              mr={3}
-              onClick={() => router.push('/validation/after')}
-            >
-              {t('Open local stats & audit')}
-            </SecondaryButton>
-          )}
-          {((isShortSession(state) && !isShortSessionSubmitted(state)) ||
-            isLongSessionKeywords(state)) &&
-            (hasAllRelevanceMarks(state, longFlipsWithReportKeywords) ||
-            isLastFlip(state) ? (
-              <PrimaryButton
-                isDisabled={!canSubmit(state) || isSubmitting(state)}
-                isLoading={isSubmitting(state)}
-                loadingText={t('Submitting answers...')}
-                onClick={handleSubmit}
-              >
-                {submitActionLabel}
-              </PrimaryButton>
-            ) : (
-              <Tooltip label={t('Go to last flip')}>
+            {(isShortSession(state) || isLongSessionFlips(state)) &&
+              showValidationAiUi && (
+                <Flex align="center" gap={2} flexWrap="wrap" minW={0}>
+                  {aiProgress && (
+                    <Text
+                      fontSize="xs"
+                      color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
+                      maxW="3xs"
+                      isTruncated
+                    >
+                      {aiProgress}
+                    </Text>
+                  )}
+                  {isSessionAutoMode &&
+                  !forceAiPreview &&
+                  aiLastRun?.status !== 'failed' ? (
+                    <Text
+                      fontSize="xs"
+                      color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
+                      fontWeight={600}
+                      maxW="3xs"
+                      isTruncated
+                    >
+                      {autoRunStatusText}
+                    </Text>
+                  ) : (
+                    <SecondaryButton
+                      isDisabled={!canRunAiSolve || aiProviderStatus.checking}
+                      isLoading={aiSolving}
+                      onClick={handleRunAiSolve}
+                    >
+                      {manualAiActionLabel}
+                    </SecondaryButton>
+                  )}
+                </Flex>
+              )}
+            {canOpenLocalResultsShortcut && (
+              <SecondaryButton onClick={() => router.push('/validation/after')}>
+                {t('Open local stats & audit')}
+              </SecondaryButton>
+            )}
+
+            {((isShortSession(state) && !isShortSessionSubmitted(state)) ||
+              isLongSessionKeywords(state)) &&
+              (hasAllRelevanceMarks(state, longFlipsWithReportKeywords) ||
+              isLastFlip(state) ? (
                 <PrimaryButton
                   isDisabled={!canSubmit(state) || isSubmitting(state)}
                   isLoading={isSubmitting(state)}
@@ -4257,47 +4262,58 @@ function ValidationSession({
                 >
                   {submitActionLabel}
                 </PrimaryButton>
-              </Tooltip>
-            ))}
-          {isLongSessionFlips(state) && (
-            <Stack isInline spacing={2}>
-              {hasLongSessionReportQuota ? (
-                <SecondaryButton
-                  isDisabled={
-                    isSubmitting(state) || !canReviewLongSessionReports
-                  }
-                  onClick={() => {
-                    beginManualReporting()
-                    send('FINISH_FLIPS')
-                  }}
-                >
-                  {keywordActionLabel}
-                </SecondaryButton>
               ) : (
-                <Text
-                  alignSelf="center"
-                  color="muted"
-                  fontSize="xs"
-                  maxW={44}
-                  textAlign="right"
+                <Tooltip label={t('Go to last flip')}>
+                  <PrimaryButton
+                    isDisabled={!canSubmit(state) || isSubmitting(state)}
+                    isLoading={isSubmitting(state)}
+                    loadingText={t('Submitting answers...')}
+                    onClick={handleSubmit}
+                  >
+                    {submitActionLabel}
+                  </PrimaryButton>
+                </Tooltip>
+              ))}
+            {isLongSessionFlips(state) && (
+              <Flex align="center" gap={2} flexWrap="wrap" justify="flex-end">
+                {hasLongSessionReportQuota ? (
+                  <SecondaryButton
+                    isDisabled={
+                      isSubmitting(state) || !canReviewLongSessionReports
+                    }
+                    onClick={() => {
+                      beginManualReporting()
+                      send('FINISH_FLIPS')
+                    }}
+                  >
+                    {keywordActionLabel}
+                  </SecondaryButton>
+                ) : (
+                  <Text
+                    alignSelf="center"
+                    color="muted"
+                    fontSize="xs"
+                    maxW={44}
+                    textAlign="right"
+                  >
+                    {t('No report slots available. Submit answers directly.')}
+                  </Text>
+                )}
+                <PrimaryButton
+                  isDisabled={
+                    !canSubmit(state) ||
+                    isSubmitting(state) ||
+                    !canSubmitLongSessionNow
+                  }
+                  isLoading={isSubmitting(state)}
+                  loadingText={t('Submitting answers...')}
+                  onClick={handleSubmit}
                 >
-                  {t('No report slots available. Submit answers directly.')}
-                </Text>
-              )}
-              <PrimaryButton
-                isDisabled={
-                  !canSubmit(state) ||
-                  isSubmitting(state) ||
-                  !canSubmitLongSessionNow
-                }
-                isLoading={isSubmitting(state)}
-                loadingText={t('Submitting answers...')}
-                onClick={handleSubmit}
-              >
-                {submitActionLabel}
-              </PrimaryButton>
-            </Stack>
-          )}
+                  {submitActionLabel}
+                </PrimaryButton>
+              </Flex>
+            )}
+          </Flex>
         </ActionBarItem>
       </ActionBar>
 

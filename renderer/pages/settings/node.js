@@ -575,6 +575,13 @@ function NodeSettings() {
     devnetStatus.nodes.find(({rpcPort}) => rpcPort === primaryRpcPort) ||
     devnetStatus.nodes[0] ||
     null
+  const primaryRehearsalRpcReady = Boolean(primaryDevnetNode?.rpcReady)
+  const readyDevnetNodeCount = devnetStatus.nodes.filter(
+    ({rpcReady}) => rpcReady
+  ).length
+  const onlineDevnetNodeCount = devnetStatus.nodes.filter(
+    ({online}) => online
+  ).length
   const assignedDevnetNodeCount = devnetStatus.nodes.filter(
     ({validationAssigned}) => validationAssigned
   ).length
@@ -589,7 +596,10 @@ function NodeSettings() {
     settings.ephemeralExternalNodeConnected &&
     devnetStatus.primaryRpcUrl &&
     settings.url === devnetStatus.primaryRpcUrl
-  const rehearsalNodeRpcUnavailable = rehearsalNodeConnected && chainOffline
+  const rehearsalNodeRpcPending =
+    rehearsalNodeConnected && chainOffline && primaryRehearsalRpcReady
+  const rehearsalNodeRpcUnavailable =
+    rehearsalNodeConnected && chainOffline && !primaryRehearsalRpcReady
   const rehearsalNeedsConnection =
     devnetStatus.active && devnetStatus.primaryRpcUrl && !rehearsalNodeConnected
   const rehearsalNodeConnectable =
@@ -688,6 +698,26 @@ function NodeSettings() {
     : t(
         'The validation rehearsal network is unavailable because the desktop bridge is not ready.'
       )
+  let rehearsalStatusTitle =
+    devnetStatus.message || t('Validation rehearsal network is stopped.')
+  if (devnetStatus.active && rehearsalSessionAlreadyAdvanced) {
+    rehearsalStatusTitle = t(
+      'Rehearsal session already reached {{period}}. Restart for a clean autosolve test.',
+      {period: rehearsalCurrentPeriod}
+    )
+  } else if (
+    devnetStatus.active &&
+    devnetStatus.stage === 'running' &&
+    devnetStatus.nodeCount > 0
+  ) {
+    rehearsalStatusTitle = t(
+      'Rehearsal network is running ({{online}}/{{total}} online).',
+      {
+        online: onlineDevnetNodeCount,
+        total: devnetStatus.nodeCount,
+      }
+    )
+  }
   const rehearsalSolverLanes = devnetStatus.parallelSolverLanes
   const rehearsalSolverLaneRunning = rehearsalSolverLanes?.running === true
   const rehearsalSolverLaneSummary = rehearsalSolverLanes?.summary || null
@@ -810,7 +840,7 @@ function NodeSettings() {
 
   return (
     <SettingsLayout>
-      <Stack spacing={8} mt={8}>
+      <Stack spacing={8} mt={8} w="full" maxW="5xl" minW={0}>
         <Stack spacing={4} maxW="md">
           <Stack isInline spacing={4} align="center">
             <Box>
@@ -1044,8 +1074,8 @@ function NodeSettings() {
           </SettingsSection>
         )}
 
-        <SettingsSection title={t('Validation Rehearsal Devnet')}>
-          <Stack spacing={4}>
+        <SettingsSection title={t('Validation Rehearsal Devnet')} w="full">
+          <Stack spacing={4} w="full" minW={0}>
             <Box>
               <Text fontWeight={500}>
                 {t('Private multi-node rehearsal network')}
@@ -1072,10 +1102,7 @@ function NodeSettings() {
               py={3}
               bg={devnetStatus.error ? 'red.50' : 'transparent'}
             >
-              <Text fontWeight={500}>
-                {devnetStatus.message ||
-                  t('Validation rehearsal network is stopped.')}
-              </Text>
+              <Text fontWeight={500}>{rehearsalStatusTitle}</Text>
 
               {devnetStatus.error && (
                 <Text color="red.500">{devnetStatus.error}</Text>
@@ -1173,12 +1200,14 @@ function NodeSettings() {
                   )}
                   {devnetStatus.nodes.length > 0 && (
                     <Text color="muted">
-                      {t('Ready nodes')}:{' '}
-                      {
-                        devnetStatus.nodes.filter(({rpcReady}) => rpcReady)
-                          .length
-                      }{' '}
-                      / {devnetStatus.nodeCount}
+                      {t('Ready nodes')}: {readyDevnetNodeCount} /{' '}
+                      {devnetStatus.nodeCount}
+                    </Text>
+                  )}
+                  {devnetStatus.nodes.length > 0 && (
+                    <Text color="muted">
+                      {t('Online nodes')}: {onlineDevnetNodeCount} /{' '}
+                      {devnetStatus.nodeCount}
                     </Text>
                   )}
                   {devnetStatus.nodes.length > 0 && (
@@ -1206,11 +1235,24 @@ function NodeSettings() {
                   )}
                   {rehearsalNodeConnected && !rehearsalNodeRpcUnavailable && (
                     <Stack spacing={1}>
-                      <Text color="green.500">
+                      <Text
+                        color={
+                          rehearsalNodeRpcPending ? 'orange.500' : 'green.500'
+                        }
+                      >
                         {t(
-                          'IdenaAI is currently connected to the rehearsal network for this app session.'
+                          rehearsalNodeRpcPending
+                            ? 'IdenaAI selected the rehearsal node, but the app status is still refreshing.'
+                            : 'IdenaAI is currently connected to the rehearsal network for this app session.'
                         )}
                       </Text>
+                      {rehearsalNodeRpcPending && (
+                        <Text color="muted">
+                          {t(
+                            'The rehearsal RPC is ready. Wait a moment or open the countdown; if the sidebar stays offline, restart the clean autosolve rehearsal.'
+                          )}
+                        </Text>
+                      )}
                       {rehearsalAutosolverArmed ? (
                         <Text color="green.500">
                           {t(
@@ -1258,7 +1300,18 @@ function NodeSettings() {
                 </Stack>
               )}
 
-              <Stack isInline spacing={2} flexWrap="wrap">
+              <Flex
+                align="center"
+                gap={2}
+                flexWrap="wrap"
+                maxW="full"
+                minW={0}
+                sx={{
+                  '& button': {
+                    whiteSpace: 'normal',
+                  },
+                }}
+              >
                 {!devnetStatus.active ? (
                   <>
                     <PrimaryButton
@@ -1413,8 +1466,8 @@ function NodeSettings() {
                       }
                     >
                       {rehearsalSolverLaneRunning
-                        ? t('Running rehearsal autosolve')
-                        : t('Run 1 rehearsal autosolve')}
+                        ? t('Running rehearsal')
+                        : t('Run 1-ID rehearsal')}
                     </SecondaryButton>
 
                     <SecondaryButton
@@ -1429,7 +1482,7 @@ function NodeSettings() {
                         rehearsalSolverLaneRunning
                       }
                     >
-                      {t('Run optional 9-ID parallel rehearsal')}
+                      {t('Run 9-ID rehearsal')}
                     </SecondaryButton>
 
                     <SecondaryButton
@@ -1440,7 +1493,7 @@ function NodeSettings() {
                     </SecondaryButton>
                   </>
                 )}
-              </Stack>
+              </Flex>
 
               {rehearsalSolverLanes && (
                 <Stack
@@ -1573,7 +1626,7 @@ function NodeSettings() {
               )}
             </Stack>
 
-            <Box>
+            <Box w="full" minW={0}>
               <Heading fontWeight={500} fontSize="md" mb={3}>
                 {t('Rehearsal network log')}
               </Heading>
@@ -1582,12 +1635,19 @@ function NodeSettings() {
                 height="xs"
                 overflow="auto"
                 wordBreak="break-word"
+                maxW="full"
                 borderColor="muted"
                 borderWidth="px"
                 fontSize="sm"
                 fontFamily="mono"
                 px={3}
                 py={2}
+                sx={{
+                  '& span': {
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                  },
+                }}
               >
                 {state.devnetLogs.length > 0 ? (
                   state.devnetLogs.map((log, idx) => (
@@ -1602,7 +1662,7 @@ function NodeSettings() {
         </SettingsSection>
 
         {!settings.useExternalNode && (
-          <Box>
+          <Box w="full" minW={0}>
             <Heading fontWeight={500} fontSize="lg" mb={4}>
               {t('Built-in node log')}
             </Heading>
@@ -1612,12 +1672,19 @@ function NodeSettings() {
               height="xs"
               overflow="auto"
               wordBreak="break-word"
+              maxW="full"
               borderColor="muted"
               borderWidth="px"
               fontSize="sm"
               fontFamily="mono"
               px={3}
               py={2}
+              sx={{
+                '& span': {
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                },
+              }}
             >
               {state.logs.length > 0 ? (
                 state.logs.map((log, idx) => <Ansi key={idx}>{log}</Ansi>)
