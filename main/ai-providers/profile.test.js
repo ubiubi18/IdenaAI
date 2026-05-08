@@ -38,7 +38,7 @@ describe('sanitizeBenchmarkProfile', () => {
       sanitizeBenchmarkProfile({
         benchmarkProfile: 'strict',
         deadlineMs: 95000,
-        requestTimeoutMs: 30000,
+        requestTimeoutMs: 45000,
         maxConcurrency: 6,
         maxRetries: 0,
         uncertaintyConfidenceThreshold: 0.68,
@@ -47,7 +47,7 @@ describe('sanitizeBenchmarkProfile', () => {
     ).toStrictEqual({
       ...STRICT_PROFILE,
       deadlineMs: 95000,
-      requestTimeoutMs: 30000,
+      requestTimeoutMs: 45000,
       maxConcurrency: 6,
       maxRetries: 0,
       uncertaintyConfidenceThreshold: 0.68,
