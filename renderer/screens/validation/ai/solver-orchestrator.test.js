@@ -91,13 +91,13 @@ describe('solver-orchestrator planning', () => {
     expect(shortPlan.model).toBe('gpt-5.5-mini')
     expect(shortPlan.promptOptions).toEqual({
       openAiServiceTier: 'priority',
-      openAiReasoningEffort: 'none',
+      openAiReasoningEffort: 'medium',
     })
     expect(longPlan.model).toBe('gpt-5.4')
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('enables a two-run short-session OpenAI probability ensemble on the parallel lane', () => {
+  it('enables a three-run short-session OpenAI probability ensemble on the parallel lane', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-timeout-${index + 1}`)
     )
@@ -118,12 +118,12 @@ describe('solver-orchestrator planning', () => {
     expect(plan.effectiveProfile.maxRetries).toBe(0)
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
     expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(plan.effectiveProfile.probabilityRuns).toBe(2)
+    expect(plan.effectiveProfile.probabilityRuns).toBe(3)
     expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('medium')
     expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
       plan.effectiveProfile.uncertaintyConfidenceThreshold
-    ).toBeGreaterThanOrEqual(0.68)
+    ).toBeGreaterThanOrEqual(0.95)
     expect(
       plan.effectiveProfile.uncertaintyRepromptMinRemainingMs
     ).toBeGreaterThanOrEqual(35000)
@@ -189,13 +189,16 @@ describe('solver-orchestrator planning', () => {
     expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(45000)
     expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
     expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(2)
+    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(3)
     expect(
       shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
-    ).toBeGreaterThanOrEqual(0.68)
+    ).toBeGreaterThanOrEqual(0.95)
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(longBudget.solveConcurrency).toBe(1)
     expect(longBudget.effectiveProfile.requestTimeoutMs).toBe(180000)
+    expect(
+      longBudget.effectiveProfile.uncertaintyConfidenceThreshold
+    ).toBeGreaterThanOrEqual(0.95)
     expect(longBudget.estimatedMs).toBeGreaterThan(shortBudget.estimatedMs)
   })
 
@@ -329,7 +332,7 @@ describe('solver-orchestrator planning', () => {
 
     expect(budget.flipCount).toBe(6)
     expect(budget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(budget.effectiveProfile.probabilityRuns).toBe(2)
+    expect(budget.effectiveProfile.probabilityRuns).toBe(3)
     expect(budget.uncertaintyReviewFlipCount).toBe(0)
     expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThanOrEqual(95)
   })
@@ -758,7 +761,7 @@ describe('solver-orchestrator planning', () => {
           maxRetries: 0,
           shortSessionOpenAiParallelConcurrency: 1,
         },
-        hardDeadlineAt: now + 2000,
+        hardDeadlineAt: now + 7000,
         onDecision,
       })
 
@@ -779,6 +782,10 @@ describe('solver-orchestrator planning', () => {
       })
       expect(onDecision).toHaveBeenCalledTimes(2)
       expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(1)
+      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0]).toMatchObject({
+        deadlineMs: 2000,
+        requestTimeoutMs: 2000,
+      })
     } finally {
       dateNowSpy.mockRestore()
       createElementSpy.mockRestore()
