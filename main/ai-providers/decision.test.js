@@ -215,6 +215,38 @@ describe('decision helpers', () => {
     expect(result.skippedByDelta).toBe(false)
   })
 
+  it('does not default forced equal probability ties to left', () => {
+    const payload = {
+      optionA: {
+        chronology_probability: 0.5,
+        cause_effect_probability: 0.5,
+        entity_continuity_probability: 0.5,
+        final_state_probability: 0.5,
+      },
+      optionB: {
+        chronology_probability: 0.5,
+        cause_effect_probability: 0.5,
+        entity_continuity_probability: 0.5,
+        final_state_probability: 0.5,
+      },
+    }
+
+    const resultA = aggregateProbabilityEnsembleRuns([{payload}], {
+      forceDecision: true,
+      probabilityDecisionDelta: 0.08,
+      tieBreakerKey: 'tie-seed-a',
+    })
+    const resultB = aggregateProbabilityEnsembleRuns([{payload}], {
+      forceDecision: true,
+      probabilityDecisionDelta: 0.08,
+      tieBreakerKey: 'tie-seed-b',
+    })
+
+    expect(['left', 'right']).toContain(resultA.answer)
+    expect(['left', 'right']).toContain(resultB.answer)
+    expect(new Set([resultA.answer, resultB.answer]).size).toBe(2)
+  })
+
   it('maps swapped option A/B scores back to original left/right', () => {
     const result = aggregateProbabilityEnsembleRuns(
       [

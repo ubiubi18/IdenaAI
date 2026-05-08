@@ -327,6 +327,23 @@ function mean(values) {
   )
 }
 
+function hashScore(value) {
+  const text = String(value || '')
+  let score = 17
+  for (let index = 0; index < text.length; index += 1) {
+    score = (score * 131 + text.charCodeAt(index)) % 2147483647
+  }
+  return score
+}
+
+function chooseHigherProbabilitySide(avgLeft, avgRight, tieBreakerKey = '') {
+  const delta = avgLeft - avgRight
+  if (Math.abs(delta) > 1e-9) {
+    return delta > 0 ? 'left' : 'right'
+  }
+  return hashScore(tieBreakerKey) % 2 === 0 ? 'left' : 'right'
+}
+
 function aggregateProbabilityEnsembleRuns(runs = [], options = {}) {
   const normalizedRuns = (Array.isArray(runs) ? runs : [])
     .map((run, index) => {
@@ -404,7 +421,11 @@ function aggregateProbabilityEnsembleRuns(runs = [], options = {}) {
   let answer = 'skip'
 
   if (!skippedByRisk && !skippedByDelta) {
-    answer = avgLeft >= avgRight ? 'left' : 'right'
+    answer = chooseHigherProbabilitySide(
+      avgLeft,
+      avgRight,
+      options.tieBreakerKey
+    )
   }
 
   const skipProbability =

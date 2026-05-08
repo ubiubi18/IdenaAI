@@ -319,6 +319,7 @@ function buildProbabilityTaskRules({
   totalRuns,
   candidateOrder,
   probabilityPasses,
+  previousProbabilityJson = '',
 }) {
   const antiPositionRules = buildAntiPositionRules()
   const reportabilityRules = buildReportabilityRules()
@@ -326,9 +327,22 @@ function buildProbabilityTaskRules({
     Array.isArray(probabilityPasses) && probabilityPasses.length
       ? probabilityPasses
       : ['visual_observation', 'independent_scores', 'adversarial_recheck']
+  const previousProbabilityNote = String(previousProbabilityJson || '').trim()
   return `
 This flip is independent. Do not infer patterns from other flips in the session. Previous flips give no information about this flip.
 This is probability ensemble run ${runIndex} of ${totalRuns}. Run marker: ${candidateOrder}. The marker is not visual evidence.
+${
+  previousProbabilityNote
+    ? `
+Previous probability estimate, mapped to this run's current OPTION A/B order:
+${truncateText(previousProbabilityNote, 2400)}
+
+Audit instruction:
+- Treat the previous estimate as a hypothesis to challenge, not as evidence.
+- Look for the strongest visual reason its scores could be wrong or overconfident.
+- Recompute the final probabilities from the images after the audit.`
+    : ''
+}
 
 Task:
 1) Use these internal passes in order: ${passes.join(', ')}.
@@ -357,6 +371,7 @@ function buildCompositeProbabilityPrompt({
   totalRuns,
   candidateOrder,
   probabilityPasses,
+  previousProbabilityJson,
 }) {
   return `
 You are solving an Idena short-session flip benchmark with probability scoring.
@@ -375,6 +390,7 @@ ${buildProbabilityTaskRules({
   totalRuns,
   candidateOrder,
   probabilityPasses,
+  previousProbabilityJson,
 })}
 
 Allowed JSON schema:
@@ -390,6 +406,7 @@ function buildFramesProbabilityPrompt({
   totalRuns,
   candidateOrder,
   probabilityPasses,
+  previousProbabilityJson,
 }) {
   return `
 You are solving an Idena short-session flip benchmark with probability scoring.
@@ -402,6 +419,7 @@ ${buildProbabilityTaskRules({
   totalRuns,
   candidateOrder,
   probabilityPasses,
+  previousProbabilityJson,
 })}
 
 Allowed JSON schema:
@@ -418,6 +436,7 @@ function probabilityPromptTemplate({
   totalRuns = 3,
   candidateOrder = 'normal',
   probabilityPasses = null,
+  previousProbabilityJson = '',
 }) {
   const mode = normalizeVisionMode(flipVisionMode)
   const normalizedRunIndex =
@@ -438,6 +457,7 @@ function probabilityPromptTemplate({
       totalRuns: normalizedTotalRuns,
       candidateOrder: normalizedCandidateOrder,
       probabilityPasses,
+      previousProbabilityJson,
     })
   }
 
@@ -447,6 +467,7 @@ function probabilityPromptTemplate({
     totalRuns: normalizedTotalRuns,
     candidateOrder: normalizedCandidateOrder,
     probabilityPasses,
+    previousProbabilityJson,
   })
 }
 
