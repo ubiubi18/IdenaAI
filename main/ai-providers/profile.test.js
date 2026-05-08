@@ -76,11 +76,43 @@ describe('sanitizeBenchmarkProfile', () => {
       temperature: 0,
       forceDecision: true,
       uncertaintyRepromptEnabled: true,
-      uncertaintyConfidenceThreshold: 0.45,
+      uncertaintyConfidenceThreshold: 0.95,
       uncertaintyRepromptMinRemainingMs: 3500,
       uncertaintyRepromptInstruction: '',
       promptTemplateOverride: '',
       flipVisionMode: 'composite',
+      probabilityEnsembleEnabled: false,
+      probabilityRuns: 3,
+      probabilityPasses: [
+        'visual_observation',
+        'independent_scores',
+        'adversarial_recheck',
+      ],
+      probabilityDecisionDelta: 0.08,
+      probabilityUseSwappedOrder: true,
+      probabilityReasoningEffort: 'xhigh',
+    })
+  })
+
+  it('preserves probability ensemble overrides in strict profile mode', () => {
+    expect(
+      sanitizeBenchmarkProfile({
+        benchmarkProfile: 'strict',
+        probabilityEnsembleEnabled: true,
+        probabilityRuns: 4,
+        probabilityPasses: ['independent_scores', 'adversarial_recheck'],
+        probabilityDecisionDelta: 0.12,
+        probabilityUseSwappedOrder: false,
+        probabilityReasoningEffort: 'high',
+      })
+    ).toStrictEqual({
+      ...STRICT_PROFILE,
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 4,
+      probabilityPasses: ['independent_scores', 'adversarial_recheck'],
+      probabilityDecisionDelta: 0.12,
+      probabilityUseSwappedOrder: false,
+      probabilityReasoningEffort: 'high',
     })
   })
 

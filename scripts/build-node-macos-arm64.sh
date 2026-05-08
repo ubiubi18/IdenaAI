@@ -12,6 +12,7 @@ WASM_BINDING_DIR="${IDENAAI_IDENA_WASM_BINDING_DIR:-${ROOT_DIR}/idena-wasm-bindi
 WASM_SRC_DIR="${IDENAAI_IDENA_WASM_DIR:-${ROOT_DIR}/idena-wasm}"
 OUTPUT_BIN="${1:-$HOME/Library/Application Support/IdenaAI/node/idena-go}"
 GO_TOOLCHAIN="${IDENA_GO_GOTOOLCHAIN:-go1.19.13}"
+CARGO_HOME_DIR="${CARGO_HOME:-${HOME}/.cargo}"
 USING_DEFAULT_SOURCE_DIRS=0
 SOURCES_PREPARED=0
 
@@ -77,6 +78,7 @@ fi
 echo "Building libidena_wasm for aarch64-apple-darwin..."
 (
   cd "${WASM_SRC_DIR}"
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=${HOME}=~ --remap-path-prefix=${CARGO_HOME_DIR}=CARGO_HOME --remap-path-prefix=${ROOT_DIR}=workspace --remap-path-prefix=${WASM_SRC_DIR}=idena-wasm"
   cargo build --release --target aarch64-apple-darwin
 )
 
@@ -89,7 +91,7 @@ mkdir -p "$(dirname "${OUTPUT_BIN}")"
   cd "${IDENA_GO_DIR}"
   LOCAL_WASM_BINDING="$(relative_path "${IDENA_GO_DIR}" "${WASM_BINDING_DIR}")"
   go mod edit "-replace=github.com/idena-network/idena-wasm-binding=${LOCAL_WASM_BINDING}"
-  env GOTOOLCHAIN="${GO_TOOLCHAIN}" go build -ldflags "-X main.version=1.1.2" -o "${OUTPUT_BIN}" .
+  env GOTOOLCHAIN="${GO_TOOLCHAIN}" go build -trimpath -ldflags "-X main.version=1.1.2" -o "${OUTPUT_BIN}" .
 )
 chmod 755 "${OUTPUT_BIN}"
 

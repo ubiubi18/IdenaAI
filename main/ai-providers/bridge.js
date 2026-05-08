@@ -10,10 +10,16 @@ const {
   PROVIDER_CONFIG_DEFAULTS,
   OPENAI_COMPATIBLE_PROVIDERS,
 } = require('./constants')
-const {promptTemplate, systemPromptTemplate} = require('./prompt')
+const {
+  probabilityPromptTemplate,
+  promptTemplate,
+  systemPromptTemplate,
+} = require('./prompt')
 const {sanitizeBenchmarkProfile} = require('./profile')
 const {
+  aggregateProbabilityEnsembleRuns,
   extractJsonBlock,
+  hasUsableProbabilityJudgePayload,
   normalizeAnswer,
   normalizeConfidence,
   normalizeDecision,
@@ -70,6 +76,7 @@ const {
 
 const SUPPORTED_PROVIDERS = Object.values(PROVIDERS)
 const MAX_CONSULTANTS = 4
+const UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS = [0.95, 0.8, 0.51]
 
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
@@ -5187,7 +5194,27 @@ function aggregateConsultantDecisions(decisions = [], tieBreakerKey = '') {
   }
 }
 
-function chooseDeterministicRandomSide(seed) {
+function chooseDeterministicRandomSide(seed, options = {}) {
+  const session = options && options.session ? options.session : {}
+  const sessionType = String(session.sessionType || options.sessionType || '')
+    .trim()
+    .toLowerCase()
+  const sessionFlipIndex = Number(session.flipIndex)
+  const optionFlipIndex = Number(options.flipIndex)
+  let flipIndex = sessionFlipIndex
+  const hasShortSessionFlipIndex =
+    sessionType === 'short' &&
+    Number.isFinite(sessionFlipIndex) &&
+    sessionFlipIndex > 0
+
+  if (!hasShortSessionFlipIndex && Number.isFinite(optionFlipIndex)) {
+    flipIndex = optionFlipIndex
+  }
+
+  if (sessionType === 'short' && Number.isFinite(flipIndex) && flipIndex > 0) {
+    return Math.trunc(flipIndex) % 2 === 1 ? 'left' : 'right'
+  }
+
   return hashScore(`${seed || 'validation-flip'}|force`) % 2 === 0
     ? 'left'
     : 'right'
@@ -5199,6 +5226,32 @@ function resolveSecondPassStrategy({useFrameReasoning, secondPass}) {
   }
 
   return secondPass ? 'uncertainty_recheck' : 'initial_decision'
+}
+
+function getUncertaintyRecheckConfidenceThreshold(profile, passIndex = 0) {
+  if (passIndex === 0) {
+    return normalizeConfidence(
+      profile && profile.uncertaintyConfidenceThreshold
+    )
+  }
+
+  return UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS[
+    Math.min(
+      Math.max(0, passIndex),
+      UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS.length - 1
+    )
+  ]
+}
+
+function shouldRunUncertaintyRecheck({result, threshold}) {
+  if (!result || String(result.error || '').trim()) {
+    return false
+  }
+
+  return (
+    normalizeAnswer(result.answer) === 'skip' ||
+    normalizeConfidence(result.confidence) < threshold
+  )
 }
 
 function normalizeImageList(value) {
@@ -5945,13 +5998,13 @@ Rules:
 - Use only ${forceDecision ? 'a|b' : 'a|b|skip'} for "answer"
 - "confidence" must be between 0 and 1
 - Candidate labels are runtime labels only. Do not use label identity or first-vs-second position as a hint.
-- If solving clearly requires reading text, or visible order labels/numbers/letters/arrows/captions are drawn on the images, treat the flip as report-worthy and return skip unless forceDecision forbids it.
-- If inappropriate, NSFW, or graphic violent content is present, treat the flip as report-worthy and return skip unless forceDecision forbids it.
+- Track report-worthy cues such as required readable text, watermarks, visible order labels/numbers/letters/arrows/captions, inappropriate content, NSFW content, or graphic violence separately from the side answer.
+- Do not return skip solely because a report-worthy cue exists. Choose by chronology, visible cause -> effect, and consistent entities; report review is a later step.
 - Keep reasoning concise and factual and mention one concrete visual cue
 ${
   forceDecision
-    ? '- You must choose a or b unless the flip is clearly report-worthy.'
-    : '- If both candidates are ambiguous, equally weak, or clearly report-worthy, return "skip".'
+    ? '- You must choose a or b based on the more coherent candidate story.'
+    : '- Return "skip" only when both candidate stories are ambiguous or equally weak.'
 }
 
 Flip hash: ${hash}
@@ -8552,7 +8605,7 @@ Flip hash: ${hash}
       typeof payload.renderFeedbackEnabled === 'boolean'
         ? payload.renderFeedbackEnabled
         : true
-    const textAuditModel = String(payload.textAuditModel || 'gpt-5.4').trim()
+    const textAuditModel = String(payload.textAuditModel || 'gpt-5.5').trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel
     ).trim()
@@ -9637,7 +9690,6 @@ Flip hash: ${hash}
           ? null
           : getApiKey(consultant.provider),
     }))
-
     if (!flips.length) {
       throw new Error('No flips provided')
     }
@@ -9646,6 +9698,13 @@ Flip hash: ${hash}
     }
 
     const profile = sanitizeBenchmarkProfile(payload)
+    const probabilityEnsembleProviderActive =
+      profile.probabilityEnsembleEnabled &&
+      consultProvidersWithKeys.some(
+        (consultant) =>
+          consultant.internalStrategy !== LEGACY_HEURISTIC_STRATEGY &&
+          !isLocalAiProvider(consultant.provider)
+      )
     const basePromptOptions =
       payload &&
       payload.promptOptions &&
@@ -9704,7 +9763,10 @@ Flip hash: ${hash}
 
       if (flipStartedAt >= deadlineAt) {
         if (profile.forceDecision) {
-          const forcedAnswer = chooseDeterministicRandomSide(flip.hash)
+          const forcedAnswer = chooseDeterministicRandomSide(flip.hash, {
+            session: payload.session,
+            flipIndex: flipIndex + 1,
+          })
           return {
             hash: flip.hash,
             answer: forcedAnswer,
@@ -9784,8 +9846,21 @@ Flip hash: ${hash}
           ? 'frames_two_pass'
           : vision.applied
         const passFlip = useFrameReasoning ? deepFrameReviewFlip : providerFlip
+        const passLeftFrames =
+          useFrameReasoning && deepFrameReview
+            ? availableLeftFrames
+            : vision.leftFrames
+        const passRightFrames =
+          useFrameReasoning && deepFrameReview
+            ? availableRightFrames
+            : vision.rightFrames
 
-        const invokeConsultantOnce = async (consultant, promptOptions) =>
+        const invokeConsultantOnce = async (
+          consultant,
+          promptOptions,
+          requestFlip = passFlip,
+          promptText = ''
+        ) =>
           withRetries(profile.maxRetries, async (attempt) => {
             try {
               const remainingDeadlineMs = deadlineAt - now()
@@ -9805,10 +9880,11 @@ Flip hash: ${hash}
               return await invokeProvider({
                 provider: consultant.provider,
                 model: consultant.model,
-                flip: passFlip,
+                flip: requestFlip,
                 profile: requestProfile,
                 apiKey: consultant.apiKey,
                 providerConfig: consultant.providerConfig || providerConfig,
+                promptText,
                 promptOptions,
               })
             } catch (error) {
@@ -9821,6 +9897,248 @@ Flip hash: ${hash}
               throw error
             }
           })
+
+        const shouldSwapProbabilityRun = (runIndex, totalRuns) => {
+          if (!profile.probabilityUseSwappedOrder) {
+            return false
+          }
+          if (totalRuns <= 1) {
+            return hashScore(`${flip.hash}|probability|${runIndex}`) % 2 === 0
+          }
+          if (runIndex === 0) {
+            return false
+          }
+          if (runIndex === 1) {
+            return true
+          }
+          return hashScore(`${flip.hash}|probability|${runIndex}`) % 2 === 0
+        }
+
+        const solveProbabilityEnsembleConsultant = async (consultant) => {
+          const probabilityRunCount = Math.max(
+            1,
+            Math.min(5, Number(profile.probabilityRuns) || 3)
+          )
+          let combinedTokenUsage = createEmptyTokenUsage()
+          const runs = []
+          const runErrors = []
+          const providerMetaEntries = []
+
+          const buildPreviousProbabilityAuditHint = (runSwapped) => {
+            if (!runs.length) {
+              return ''
+            }
+            const previousAggregate = aggregateProbabilityEnsembleRuns(runs, {
+              forceDecision: true,
+              probabilityDecisionDelta: profile.probabilityDecisionDelta,
+              tieBreakerKey: flip.hash,
+            })
+            const optionAMapsTo = runSwapped ? 'right' : 'left'
+            const optionBMapsTo = runSwapped ? 'left' : 'right'
+            const scoreForSide = (side) =>
+              side === 'left'
+                ? previousAggregate.avgLeft
+                : previousAggregate.avgRight
+
+            return JSON.stringify({
+              previousRunCount: previousAggregate.runCount,
+              optionA: {
+                maps_to_original_side: optionAMapsTo,
+                previous_side_score: scoreForSide(optionAMapsTo),
+              },
+              optionB: {
+                maps_to_original_side: optionBMapsTo,
+                previous_side_score: scoreForSide(optionBMapsTo),
+              },
+              previous_delta: previousAggregate.delta,
+              previous_answer: previousAggregate.answer,
+            })
+          }
+
+          for (
+            let runIndex = 0;
+            runIndex < probabilityRunCount;
+            runIndex += 1
+          ) {
+            const runSwapped = shouldSwapProbabilityRun(
+              runIndex,
+              probabilityRunCount
+            )
+            const runNumber = runIndex + 1
+            const previousProbabilityJson =
+              runIndex > 0 ? buildPreviousProbabilityAuditHint(runSwapped) : ''
+            const runFlip = buildProviderFlipForVision({
+              flip,
+              swapped: runSwapped,
+              visionMode: passFlipVisionMode,
+              leftFrames: passLeftFrames,
+              rightFrames: passRightFrames,
+            })
+            const promptText = probabilityPromptTemplate({
+              hash: flip.hash,
+              flipVisionMode: passFlipVisionMode,
+              runIndex: runNumber,
+              totalRuns: probabilityRunCount,
+              candidateOrder: `bias-calibration variant ${runNumber}`,
+              probabilityPasses: profile.probabilityPasses,
+              previousProbabilityJson,
+            })
+            const structuredOutput =
+              basePromptOptions.structuredOutput &&
+              typeof basePromptOptions.structuredOutput === 'object'
+                ? basePromptOptions.structuredOutput
+                : {}
+            const fallbackReasoningEffort =
+              basePromptOptions.openAiReasoningEffort &&
+              basePromptOptions.openAiReasoningEffort !== 'none'
+                ? basePromptOptions.openAiReasoningEffort
+                : undefined
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              const response = await invokeConsultantOnce(
+                consultant,
+                {
+                  ...basePromptOptions,
+                  secondPass,
+                  forceDecision: false,
+                  flipVisionMode: passFlipVisionMode,
+                  promptPhase: 'probability_ensemble',
+                  structuredOutput: {
+                    ...structuredOutput,
+                    responseFormat:
+                      structuredOutput.responseFormat &&
+                      typeof structuredOutput.responseFormat === 'object'
+                        ? structuredOutput.responseFormat
+                        : {type: 'json_object'},
+                  },
+                  openAiReasoningEffort:
+                    profile.probabilityReasoningEffort ||
+                    fallbackReasoningEffort,
+                },
+                runFlip,
+                promptText
+              )
+              const normalizedResponse = normalizeProviderResponse(response)
+              combinedTokenUsage = addTokenUsage(
+                combinedTokenUsage,
+                normalizedResponse.tokenUsage
+              )
+              if (normalizedResponse.providerMeta) {
+                providerMetaEntries.push(normalizedResponse.providerMeta)
+              }
+              const parsedPayload = extractJsonBlock(normalizedResponse.rawText)
+              if (
+                !parsedPayload ||
+                typeof parsedPayload !== 'object' ||
+                !(
+                  parsedPayload.optionA ||
+                  parsedPayload.option_a ||
+                  parsedPayload.a
+                ) ||
+                !(
+                  parsedPayload.optionB ||
+                  parsedPayload.option_b ||
+                  parsedPayload.b
+                )
+              ) {
+                throw new Error(
+                  'probability response missing optionA or optionB'
+                )
+              }
+              if (!hasUsableProbabilityJudgePayload(parsedPayload)) {
+                throw new Error(
+                  'probability response missing required numeric probability fields'
+                )
+              }
+              runs.push({
+                runIndex: runNumber,
+                swapped: runSwapped,
+                payload: parsedPayload,
+              })
+            } catch (error) {
+              runErrors.push(
+                `run ${runNumber}: ${sanitizeProviderDiagnosticMessage(
+                  (error && error.message) || String(error)
+                )}`
+              )
+            }
+          }
+
+          if (!runs.length) {
+            throw new Error(
+              runErrors.length
+                ? `probability ensemble failed: ${runErrors.join(' | ')}`
+                : 'probability ensemble failed: no valid runs'
+            )
+          }
+
+          const probabilityAggregate = aggregateProbabilityEnsembleRuns(runs, {
+            forceDecision: profile.forceDecision || !allowSkip,
+            probabilityDecisionDelta: profile.probabilityDecisionDelta,
+            tieBreakerKey: flip.hash,
+          })
+          const answer = normalizeAnswer(probabilityAggregate.answer)
+          const providerMeta = providerMetaEntries.length
+            ? {
+                ...providerMetaEntries[0],
+                probabilityEnsemble: {
+                  runCount: probabilityAggregate.runCount,
+                  requestedRuns: probabilityRunCount,
+                  failedRuns: runErrors.length,
+                  useSwappedOrder: profile.probabilityUseSwappedOrder,
+                },
+              }
+            : {
+                probabilityEnsemble: {
+                  runCount: probabilityAggregate.runCount,
+                  requestedRuns: probabilityRunCount,
+                  failedRuns: runErrors.length,
+                  useSwappedOrder: profile.probabilityUseSwappedOrder,
+                },
+              }
+
+          return {
+            provider: consultant.provider,
+            model: consultant.model,
+            weight: normalizeConsultantWeight(consultant.weight, 1),
+            answer,
+            confidence: normalizeConfidence(probabilityAggregate.confidence),
+            reasoning: runErrors.length
+              ? `${probabilityAggregate.reasoning}; ${runErrors.join('; ')}`
+              : probabilityAggregate.reasoning,
+            rawAnswerBeforeRemap: answer,
+            finalAnswerAfterRemap: answer,
+            probabilities: probabilityAggregate.probabilities,
+            probabilityEnsemble: {
+              probabilities: probabilityAggregate.probabilities,
+              avgLeft: probabilityAggregate.avgLeft,
+              avgRight: probabilityAggregate.avgRight,
+              delta: probabilityAggregate.delta,
+              runCount: probabilityAggregate.runCount,
+              requestedRuns: probabilityRunCount,
+              skippedByRisk: probabilityAggregate.skippedByRisk,
+              skippedByDelta: probabilityAggregate.skippedByDelta,
+              runs: probabilityAggregate.runs.map((run) => ({
+                runIndex: run.runIndex,
+                swapped: run.swapped,
+                optionATo: run.optionATo,
+                optionBTo: run.optionBTo,
+                leftScore: run.leftScore,
+                rightScore: run.rightScore,
+              })),
+              errors: runErrors,
+            },
+            error: null,
+            tokenUsage: combinedTokenUsage,
+            costs: estimateProviderTextCostSummary(
+              consultant.provider,
+              consultant.model,
+              combinedTokenUsage
+            ),
+            frameReasoningUsed: false,
+            providerMeta,
+          }
+        }
 
         const solveConsultant = async (consultant) => {
           try {
@@ -9851,6 +10169,13 @@ Flip hash: ${hash}
                 costs: createEmptyCostSummary(),
                 frameReasoningUsed: false,
               }
+            }
+
+            if (
+              profile.probabilityEnsembleEnabled &&
+              !isLocalAiProvider(consultant.provider)
+            ) {
+              return await solveProbabilityEnsembleConsultant(consultant)
             }
 
             let decisionResponse
@@ -9998,12 +10323,36 @@ Flip hash: ${hash}
               item && item.providerMeta && item.providerMeta.modelFallback
           )
           .filter(Boolean)
+        const probabilityEnsembles = consultantDecisions
+          .map((item) =>
+            item && item.probabilityEnsemble
+              ? {
+                  provider: item.provider,
+                  model: item.model,
+                  weight: normalizeConsultantWeight(item.weight, 1),
+                  ...item.probabilityEnsemble,
+                }
+              : null
+          )
+          .filter(Boolean)
+        let probabilityEnsemble = null
+        if (singleConsultantDecision) {
+          probabilityEnsemble =
+            singleConsultantDecision.probabilityEnsemble || null
+        } else if (probabilityEnsembles.length) {
+          probabilityEnsemble = {consultants: probabilityEnsembles}
+        }
+        const probabilities =
+          singleConsultantDecision && singleConsultantDecision.probabilities
+            ? singleConsultantDecision.probabilities
+            : aggregate.probabilities
 
         return {
           hash: flip.hash,
           answer: aggregate.answer,
           confidence: aggregate.confidence,
           reasoning: aggregate.reasoning,
+          probabilities,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
           error:
@@ -10032,6 +10381,7 @@ Flip hash: ${hash}
           ensembleConsulted: consultantDecisions.length,
           ensembleTieBreakApplied: aggregate.tieBreakApplied,
           ensembleTieBreakCandidates: aggregate.tieBreakCandidates,
+          probabilityEnsemble,
           fastMode,
           modelFallback: modelFallbacks[0] || null,
           modelFallbacks,
@@ -10057,15 +10407,17 @@ Flip hash: ${hash}
       const firstPassProviderFailed = Boolean(
         firstPassResult && String(firstPassResult.error || '').trim()
       )
-
-      const shouldReprompt =
+      const shouldRunFirstRecheck =
+        !probabilityEnsembleProviderActive &&
         profile.uncertaintyRepromptEnabled &&
         !firstPassProviderFailed &&
         deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs &&
-        (firstPassResult.answer === 'skip' ||
-          firstPassResult.confidence < profile.uncertaintyConfidenceThreshold)
+        shouldRunUncertaintyRecheck({
+          result: firstPassResult,
+          threshold: getUncertaintyRecheckConfidenceThreshold(profile, 0),
+        })
 
-      if (shouldReprompt) {
+      if (shouldRunFirstRecheck) {
         const secondPassResult = await callProviderPass({
           secondPass: true,
           allowSkip: false,
@@ -10090,8 +10442,68 @@ Flip hash: ${hash}
         }
       }
 
+      const shouldRunSecondRecheck =
+        shouldRunFirstRecheck &&
+        profile.uncertaintyRepromptEnabled &&
+        deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs &&
+        shouldRunUncertaintyRecheck({
+          result: finalResult,
+          threshold: getUncertaintyRecheckConfidenceThreshold(profile, 1),
+        })
+
+      if (shouldRunSecondRecheck) {
+        const thirdPassResult = await callProviderPass({
+          secondPass: true,
+          allowSkip: false,
+          deepFrameReview: true,
+        })
+        mergedTokenUsage = addTokenUsage(
+          mergedTokenUsage,
+          thirdPassResult.tokenUsage
+        )
+        mergedCosts = addCostSummary(mergedCosts, thirdPassResult.costs)
+        finalResult = {
+          ...thirdPassResult,
+          uncertaintyRepromptUsed: true,
+          finalAdjudicationUsed: true,
+          firstPass: finalResult.firstPass || {
+            answer: firstPassResult.answer,
+            confidence: firstPassResult.confidence,
+            error: firstPassResult.error,
+            reasoning: firstPassResult.reasoning,
+            rawAnswerBeforeRemap: firstPassResult.rawAnswerBeforeRemap,
+            strategy: firstPassResult.secondPassStrategy,
+          },
+        }
+      }
+
+      const finalConfidenceThreshold = getUncertaintyRecheckConfidenceThreshold(
+        profile,
+        2
+      )
+      if (
+        profile.forceDecision &&
+        normalizeAnswer(finalResult.answer) !== 'skip' &&
+        normalizeConfidence(finalResult.confidence) < finalConfidenceThreshold
+      ) {
+        finalResult = {
+          ...finalResult,
+          answer: 'skip',
+          rawAnswerBeforeRemap: normalizeAnswer(
+            finalResult.rawAnswerBeforeRemap || finalResult.answer
+          ),
+          finalAnswerAfterRemap: 'skip',
+          reasoning: finalResult.reasoning
+            ? `${finalResult.reasoning}; below final uncertainty threshold ${finalConfidenceThreshold}`
+            : `below final uncertainty threshold ${finalConfidenceThreshold}`,
+        }
+      }
+
       if (profile.forceDecision && finalResult.answer === 'skip') {
-        const forcedAnswer = chooseDeterministicRandomSide(flip.hash)
+        const forcedAnswer = chooseDeterministicRandomSide(flip.hash, {
+          session: payload.session,
+          flipIndex: flipIndex + 1,
+        })
         let forcedDecisionReason = 'uncertain_or_skip'
         if (finalResult.error) {
           forcedDecisionReason = 'provider_error'
@@ -10221,6 +10633,7 @@ Flip hash: ${hash}
           latencyMs,
           error,
           reasoning,
+          probabilities,
           sideSwapped,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
@@ -10241,6 +10654,7 @@ Flip hash: ${hash}
           ensembleContributors,
           ensembleTotalWeight,
           ensembleConsulted,
+          probabilityEnsemble,
         }) => ({
           hash,
           answer,
@@ -10248,6 +10662,7 @@ Flip hash: ${hash}
           latencyMs,
           error,
           reasoning,
+          probabilities,
           sideSwapped,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
@@ -10268,6 +10683,7 @@ Flip hash: ${hash}
           ensembleContributors,
           ensembleTotalWeight,
           ensembleConsulted,
+          probabilityEnsemble,
         })
       ),
     })

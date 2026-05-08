@@ -996,7 +996,7 @@ export function SubmitFailedDialog({errorMessage, onSubmit, ...props}) {
   )
 }
 
-export function ValidationFailedDialog(props) {
+export function ValidationFailedDialog({isRehearsalSession = false, ...props}) {
   const {t} = useTranslation()
   return (
     <ValidationDialog
@@ -1005,14 +1005,33 @@ export function ValidationFailedDialog(props) {
       {...props}
     >
       <ValidationDialogBody>
-        <Text>
-          {t(
-            `You haven't submitted your answers in time. This validation session is over.`
-          )}
-        </Text>
-        <Text>
-          {t('Come back again to participate in the next validation session.')}
-        </Text>
+        {isRehearsalSession ? (
+          <>
+            <Text>
+              {t(
+                `This rehearsal session expired before answers were submitted.`
+              )}
+            </Text>
+            <Text>
+              {t(
+                'Restart a clean autosolve rehearsal to test the automatic short-session path again.'
+              )}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text>
+              {t(
+                `You haven't submitted your answers in time. This validation session is over.`
+              )}
+            </Text>
+            <Text>
+              {t(
+                'Come back again to participate in the next validation session.'
+              )}
+            </Text>
+          </>
+        )}
       </ValidationDialogBody>
     </ValidationDialog>
   )

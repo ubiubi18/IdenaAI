@@ -37,9 +37,9 @@ const CHANGE_LANGUAGE = 'CHANGE_LANGUAGE'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.4',
+  model: 'gpt-5.5',
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.4-mini',
+  shortSessionOpenAiFastModel: 'gpt-5.5',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   localAiMemoryReference: resolveManagedLocalRuntimeMemoryReference(
@@ -59,12 +59,22 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   temperature: 0,
   forceDecision: true,
   uncertaintyRepromptEnabled: true,
-  uncertaintyConfidenceThreshold: 0.45,
+  uncertaintyConfidenceThreshold: 0.95,
   uncertaintyRepromptMinRemainingMs: 3500,
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
   shortSessionFlipVisionMode: 'composite',
+  probabilityEnsembleEnabled: false,
+  probabilityRuns: 3,
+  probabilityPasses: [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ],
+  probabilityDecisionDelta: 0.08,
+  probabilityUseSwappedOrder: true,
+  probabilityReasoningEffort: 'xhigh',
   ensembleEnabled: false,
   ensemblePrimaryWeight: 1,
   legacyHeuristicEnabled: false,
@@ -208,6 +218,14 @@ function buildAiSolverSettings(settings = {}) {
     )
       ? normalizedShortSessionOpenAiFastModel
       : DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
+  if (
+    ['gpt-5.4-mini', 'gpt-5.4'].includes(
+      nextSettings.shortSessionOpenAiFastModel
+    )
+  ) {
+    nextSettings.shortSessionOpenAiFastModel =
+      DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
+  }
   const normalizedShortSessionFlipVisionMode = String(
     nextSettings.shortSessionFlipVisionMode || ''
   ).trim()
@@ -224,6 +242,59 @@ function buildAiSolverSettings(settings = {}) {
   )
     ? normalizedFlipVisionMode
     : DEFAULT_AI_SOLVER_SETTINGS.flipVisionMode
+  nextSettings.probabilityEnsembleEnabled = Boolean(
+    nextSettings.probabilityEnsembleEnabled
+  )
+  const normalizedProbabilityRuns = Number.parseInt(
+    nextSettings.probabilityRuns,
+    10
+  )
+  nextSettings.probabilityRuns =
+    Number.isFinite(normalizedProbabilityRuns) && normalizedProbabilityRuns > 0
+      ? Math.max(1, Math.min(5, normalizedProbabilityRuns))
+      : DEFAULT_AI_SOLVER_SETTINGS.probabilityRuns
+  const probabilityPasses = Array.isArray(nextSettings.probabilityPasses)
+    ? nextSettings.probabilityPasses
+    : DEFAULT_AI_SOLVER_SETTINGS.probabilityPasses
+  const normalizedProbabilityPasses = Array.from(
+    new Set(
+      probabilityPasses
+        .map((item) =>
+          String(item || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter((item) =>
+          DEFAULT_AI_SOLVER_SETTINGS.probabilityPasses.includes(item)
+        )
+    )
+  )
+  nextSettings.probabilityPasses = normalizedProbabilityPasses.length
+    ? normalizedProbabilityPasses
+    : DEFAULT_AI_SOLVER_SETTINGS.probabilityPasses
+  const normalizedProbabilityDecisionDelta = Number.parseFloat(
+    nextSettings.probabilityDecisionDelta
+  )
+  nextSettings.probabilityDecisionDelta =
+    Number.isFinite(normalizedProbabilityDecisionDelta) &&
+    normalizedProbabilityDecisionDelta >= 0
+      ? Math.max(0, Math.min(0.5, normalizedProbabilityDecisionDelta))
+      : DEFAULT_AI_SOLVER_SETTINGS.probabilityDecisionDelta
+  nextSettings.probabilityUseSwappedOrder = Boolean(
+    nextSettings.probabilityUseSwappedOrder
+  )
+  const normalizedProbabilityReasoningEffort = String(
+    nextSettings.probabilityReasoningEffort || ''
+  ).trim()
+  nextSettings.probabilityReasoningEffort = [
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+  ].includes(normalizedProbabilityReasoningEffort)
+    ? normalizedProbabilityReasoningEffort
+    : DEFAULT_AI_SOLVER_SETTINGS.probabilityReasoningEffort
 
   const normalizedMemoryBudgetGiB = Number.parseInt(
     nextSettings.memoryBudgetGiB,
@@ -252,9 +323,9 @@ function buildAiSolverSettings(settings = {}) {
 
   if (
     nextSettings.provider === 'openai' &&
-    nextSettings.model === 'gpt-4o-mini'
+    ['gpt-4o-mini', 'gpt-5.4'].includes(nextSettings.model)
   ) {
-    nextSettings.model = 'gpt-5.4'
+    nextSettings.model = 'gpt-5.5'
   }
 
   nextSettings.onchainAutoSubmitConsentAt = String(
