@@ -13,6 +13,42 @@ reference checkpoint for dependency, runtime, local AI, rehearsal, packaging,
 and autosolver work. It is research software, not a hardened wallet release and
 not a trusted installer distribution.
 
+## Quick Rehearsal Tester Path
+
+Use this path before trying any real validation identity:
+
+1. Open the installed `IdenaAI` folder in a terminal and run `npm start`.
+2. In the app, open `Settings -> AI`.
+3. Choose `Use external API provider`.
+4. If you use OpenAI, prefer a prepaid-funded API key with no automatic top-up
+   so a rough experimental run cannot create an unlimited provider-side bill.
+   This software is experimental and does not provide warranties for provider
+   spend, node behavior, or validation results.
+5. Paste the provider API key and click `Set key`.
+6. Click `Enable auto-solve next session`.
+7. Open `Settings -> Node`.
+8. For a clean local rehearsal, turn off `Run built-in node`, then click
+   `Start and use rehearsal network`.
+9. Wait until all local rehearsal nodes are ready/online/connected and the
+   seeded FLIP-Challenge flips are visible or confirmed. The default topology
+   is one bootstrap node plus nine validator identities.
+10. Let the countdown reach zero, watch the solve session, then review the
+    audit/results screen at the end.
+
+## Large Bundled Artifacts
+
+This repo intentionally carries large static libraries in
+`idena-wasm-binding/lib/` for reproducible local node builds. The macOS arm64
+node build script remaps Rust source paths before rebuilding
+`libidena_wasm_darwin_arm64.a`, so the checked-in library can be verified
+without exposing local machine paths:
+
+```bash
+strings idena-wasm-binding/lib/libidena_wasm_darwin_arm64.a | rg '/Users/|/private/var|sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|OPENAI_API_KEY'
+```
+
+That command should print no matches.
+
 ## First Installation
 
 - [first installation on mac](#first-installation-on-mac)
