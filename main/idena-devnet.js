@@ -3452,7 +3452,7 @@ function createValidationDevnetController({
         Number(payload.uncertaintyConfidenceThreshold)
       )
         ? Number(payload.uncertaintyConfidenceThreshold)
-        : 0.45,
+        : 0.95,
     }
     const startedAt = new Date(now()).toISOString()
     const queuedLanes = validators.map((node, index) => ({

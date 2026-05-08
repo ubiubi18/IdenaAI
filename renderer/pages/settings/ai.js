@@ -208,7 +208,7 @@ const DEFAULT_AI_SETTINGS = {
   temperature: 0,
   forceDecision: true,
   uncertaintyRepromptEnabled: true,
-  uncertaintyConfidenceThreshold: 0.45,
+  uncertaintyConfidenceThreshold: 0.95,
   uncertaintyRepromptMinRemainingMs: 3500,
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
