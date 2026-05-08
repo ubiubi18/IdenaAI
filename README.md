@@ -13,10 +13,47 @@ reference checkpoint for dependency, runtime, local AI, rehearsal, packaging,
 and autosolver work. It is research software, not a hardened wallet release and
 not a trusted installer distribution.
 
+## Quick Rehearsal Tester Path
+
+Use this path before trying any real validation identity:
+
+1. Open the installed `IdenaAI` folder in a terminal and run `npm start`.
+2. In the app, open `Settings -> AI`.
+3. Choose `Use external API provider`.
+4. If you use OpenAI, prefer a prepaid-funded API key with no automatic top-up
+   so a rough experimental run cannot create an unlimited provider-side bill.
+   This software is experimental and does not provide warranties for provider
+   spend, node behavior, or validation results.
+5. Paste the provider API key and click `Set key`.
+6. Click `Enable auto-solve next session`.
+7. Open `Settings -> Node`.
+8. For a clean local rehearsal, turn off `Run built-in node`, then click
+   `Start and use rehearsal network`.
+9. Wait until all local rehearsal nodes are ready/online/connected and the
+   seeded FLIP-Challenge flips are visible or confirmed. The default topology
+   is one bootstrap node plus nine validator identities.
+10. Let the countdown reach zero, watch the solve session, then review the
+    audit/results screen at the end.
+
+## Large Bundled Artifacts
+
+This repo intentionally carries large static libraries in
+`idena-wasm-binding/lib/` for reproducible local node builds. The macOS arm64
+node build script remaps Rust source paths before rebuilding
+`libidena_wasm_darwin_arm64.a`, so the checked-in library can be verified
+without exposing local machine paths:
+
+```bash
+strings idena-wasm-binding/lib/libidena_wasm_darwin_arm64.a | rg '/Users/|/private/var|sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|OPENAI_API_KEY'
+```
+
+That command should print no matches.
+
 ## First Installation
 
 - [first installation on mac](#first-installation-on-mac)
 - [first installation on windows](#first-installation-on-windows)
+- [first installation on VPS Linux, not fully tested yet](#first-installation-on-vps-linux-not-fully-tested-yet)
 
 Use the walkthrough for your operating system only. On Mac, open the Terminal
 app. On Windows, open Windows PowerShell or Windows Terminal with a PowerShell
@@ -445,6 +482,95 @@ This can submit answers on-chain automatically. Wrong answers, missed sessions,
 provider costs, node failures, network failures, Windows sleep, or app crashes
 are your responsibility. Do not test this first on an identity you care about.
 
+## First Installation On VPS Linux, Not Fully Tested Yet
+
+This is a proposed route for an Ubuntu 22.04 or 24.04 VPS. It is not fully
+tested yet. `IdenaAI` is an Electron desktop app, so a VPS needs a real GUI
+session through VNC, RDP, or another remote desktop. Pure SSH/headless mode is
+acceptable for dependency smoke tests only, not for a real validation ceremony.
+
+Prefer Mac or Windows for your first real session until the VPS route has its
+own successful rehearsal history. If you do use a VPS, use a dedicated server,
+encrypt/back up keys yourself, keep API spending limits low, and keep the
+remote desktop open while validation is running.
+
+Step 1: install base packages, Node 24, npm 11.12, Go, and Electron runtime
+libraries.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git build-essential python3 python3-pip pkg-config
+
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs golang-go
+sudo npm install -g npm@11.12.0
+
+if apt-cache show libasound2t64 >/dev/null 2>&1; then
+  ASOUND_PACKAGE=libasound2t64
+else
+  ASOUND_PACKAGE=libasound2
+fi
+
+sudo apt-get install -y \
+  "$ASOUND_PACKAGE" \
+  libgtk-3-0 \
+  libnss3 \
+  libxss1 \
+  libxtst6 \
+  libx11-xcb1 \
+  libxkbfile1 \
+  libsecret-1-dev \
+  xdg-utils \
+  xvfb \
+  xauth
+
+node -v
+npm -v
+go version
+```
+
+Step 2: install a lightweight remote desktop if the VPS image does not already
+provide one. Secure VNC with SSH tunneling or your provider firewall; do not
+expose a VNC password prompt directly to the public internet.
+
+```bash
+sudo apt-get install -y xfce4 xfce4-goodies tigervnc-standalone-server
+vncserver
+```
+
+Step 3: open a terminal inside the remote desktop session, then clone and start
+the source app.
+
+```bash
+mkdir -p "$HOME/idena-benchmark-workspace"
+cd "$HOME/idena-benchmark-workspace"
+
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+
+npm ci
+npm run setup:sources
+npm run doctor
+npm start
+```
+
+Step 4: for a real Linux profile, close the smoke-test app first, then start
+with the Linux app-data folder explicitly selected. This real-session Linux path
+is not fully tested yet.
+
+```bash
+cd "$HOME/idena-benchmark-workspace/IdenaAI"
+
+IDENA_DESKTOP_USER_DATA_DIR="$HOME/.config/IdenaAI" \
+IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
+npm start
+```
+
+Use `Settings -> Node` for rehearsal first, then `Settings -> AI -> Test
+connection`. Do not arm a real Linux VPS validation until rehearsal, provider
+testing, remote desktop stability, time sync, networking, and restart behavior
+have all been tested on that exact server.
+
 ## Use This As A Reference
 
 Do not install or run this blindly. Clone it, inspect it, ask a coding agent or
@@ -507,6 +633,13 @@ Windows validation reliability and hosted provider safety:
   payload before falling back.
 - short-session submit and long-session report states now give clearer UI
   feedback, especially when no report slots are available.
+
+Platform status: the macOS source and rehearsal route is the route currently
+exercised during this research loop. The Windows route uses the same
+JavaScript/Electron solver logic and has a dedicated first-install walkthrough,
+but should still be treated as not fully tested yet for valuable real
+validation until you have a successful Windows rehearsal and smoke-test history.
+The VPS Linux route above is proposed and not fully tested yet.
 
 The larger GPT-5.5 flip-judging redesign is intentionally not enabled on
 `main`. It lives on the research branch:
@@ -575,7 +708,9 @@ On the research branch only, configure it in `Settings -> AI` as an advanced
 experimental option:
 
 - enable the probability ensemble setting
-- keep `probabilityRuns` at `3` unless benchmarking shows a reason to change it
+- keep the short-session OpenAI default at two probability runs so the audit
+  pass has a realistic chance to finish before submit; use three or more only
+  for off-chain or rehearsal experiments where latency is not critical
 - keep swapped candidate order enabled
 - benchmark on rehearsal or off-chain datasets before using it near a valuable
   identity

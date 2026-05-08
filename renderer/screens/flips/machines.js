@@ -1426,7 +1426,7 @@ export const imageSearchMachine = createMachine({
     query: '',
     searchMode: 'web',
     aiProvider: 'openai',
-    aiModel: 'gpt-5.4',
+    aiModel: 'gpt-5.5',
     aiProviderConfig: null,
   },
   initial: 'idle',

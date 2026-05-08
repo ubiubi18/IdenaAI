@@ -12,11 +12,21 @@ const DEFAULT_PROFILE = {
   temperature: 0,
   forceDecision: true,
   uncertaintyRepromptEnabled: true,
-  uncertaintyConfidenceThreshold: 0.45,
+  uncertaintyConfidenceThreshold: 0.95,
   uncertaintyRepromptMinRemainingMs: 3500,
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
+  probabilityEnsembleEnabled: false,
+  probabilityRuns: 3,
+  probabilityPasses: [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ],
+  probabilityDecisionDelta: 0.08,
+  probabilityUseSwappedOrder: true,
+  probabilityReasoningEffort: 'xhigh',
 }
 
 const LOCAL_AI_STRICT_PROFILE_OVERRIDES = {
@@ -31,8 +41,10 @@ const LONG_SESSION_STRICT_PROFILE_OVERRIDES = {
   interFlipDelayMs: 300,
   flipVisionMode: 'composite',
 }
+const VALIDATION_UNCERTAINTY_FIRST_RECHECK_THRESHOLD = 0.95
 const MIN_SOLVE_GUARD_MS = 1500
-const SHORT_SESSION_MIN_SOLVE_GUARD_MS = 500
+const SHORT_SESSION_SAFE_SUBMIT_GUARD_MS = 5 * 1000
+const SHORT_SESSION_MIN_SOLVE_GUARD_MS = SHORT_SESSION_SAFE_SUBMIT_GUARD_MS
 const MIN_PROVIDER_REQUEST_TIMEOUT_MS = 750
 const IMAGE_PREP_BASE_MS = 2000
 const IMAGE_PREP_PER_FLIP_MS = {
@@ -53,8 +65,10 @@ const SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS = 500
 const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 45 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 95 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.68
+const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.95
 const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 2
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'high'
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
@@ -121,6 +135,70 @@ function resolveSessionProfileInput(aiSolver = {}, sessionType = 'short') {
 function getBaseSolvePassCount({flipVisionMode = 'composite'} = {}) {
   const normalizedVisionMode = normalizeVisionMode(flipVisionMode)
   return normalizedVisionMode === 'frames_two_pass' ? 2 : 1
+}
+
+function normalizeProbabilityRuns(
+  value,
+  fallback = DEFAULT_PROFILE.probabilityRuns
+) {
+  const parsed = toNumberOrFallback(value, fallback)
+  return Math.max(1, Math.min(5, parsed))
+}
+
+function normalizeProbabilityPasses(
+  value,
+  fallback = DEFAULT_PROFILE.probabilityPasses
+) {
+  const allowed = DEFAULT_PROFILE.probabilityPasses
+  const source = Array.isArray(value) ? value : fallback
+  const normalized = Array.from(
+    new Set(
+      source
+        .map((item) =>
+          String(item || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter((item) => allowed.includes(item))
+    )
+  )
+
+  return normalized.length ? normalized : fallback
+}
+
+function normalizeProbabilityReasoningEffort(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+  if (['minimal', 'low', 'medium', 'high', 'xhigh'].includes(normalized)) {
+    return normalized
+  }
+  return DEFAULT_PROFILE.probabilityReasoningEffort
+}
+
+function normalizeProbabilityProfile(input = {}) {
+  return {
+    probabilityEnsembleEnabled: Boolean(input.probabilityEnsembleEnabled),
+    probabilityRuns: normalizeProbabilityRuns(input.probabilityRuns),
+    probabilityPasses: normalizeProbabilityPasses(input.probabilityPasses),
+    probabilityDecisionDelta: Math.max(
+      0,
+      Math.min(
+        0.5,
+        toFloatOrFallback(
+          input.probabilityDecisionDelta,
+          DEFAULT_PROFILE.probabilityDecisionDelta
+        )
+      )
+    ),
+    probabilityUseSwappedOrder:
+      input.probabilityUseSwappedOrder == null
+        ? DEFAULT_PROFILE.probabilityUseSwappedOrder
+        : Boolean(input.probabilityUseSwappedOrder),
+    probabilityReasoningEffort: normalizeProbabilityReasoningEffort(
+      input.probabilityReasoningEffort
+    ),
+  }
 }
 
 function getRetryBackoffBudgetMs(maxRetries = 0) {
@@ -201,14 +279,18 @@ function estimatePerFlipSolveRuntimeMs({
   profile = {},
   promptOptions = null,
 } = {}) {
-  const solvePassCount = getBaseSolvePassCount({
-    flipVisionMode: profile.flipVisionMode,
-  })
+  const probabilityEnsembleActive =
+    profile.probabilityEnsembleEnabled && provider !== 'local-ai'
+  const solvePassCount = probabilityEnsembleActive
+    ? normalizeProbabilityRuns(profile.probabilityRuns)
+    : getBaseSolvePassCount({
+        flipVisionMode: profile.flipVisionMode,
+      })
   const expectedPassRuntimeMs = estimateExpectedPassRuntimeMs({
     sessionType,
     provider,
     requestTimeoutMs: profile.requestTimeoutMs,
-    promptOptions,
+    promptOptions: probabilityEnsembleActive ? null : promptOptions,
   })
 
   return Math.max(
@@ -220,7 +302,10 @@ function estimatePerFlipSolveRuntimeMs({
 
 function normalizeProfile(input = {}) {
   if (input.benchmarkProfile !== 'custom') {
-    return {...DEFAULT_PROFILE}
+    return {
+      ...DEFAULT_PROFILE,
+      ...normalizeProbabilityProfile(input),
+    }
   }
 
   return {
@@ -281,6 +366,7 @@ function normalizeProfile(input = {}) {
       input.flipVisionMode,
       DEFAULT_PROFILE.flipVisionMode
     ),
+    ...normalizeProbabilityProfile(input),
   }
 }
 
@@ -306,7 +392,16 @@ function buildEffectiveProfile(profile, provider, sessionType = 'short') {
       .toLowerCase() !== 'local-ai' ||
     nextProfile.benchmarkProfile === 'custom'
   ) {
-    return nextProfile
+    return {
+      ...nextProfile,
+      uncertaintyConfidenceThreshold: Math.max(
+        toFloatOrFallback(
+          nextProfile.uncertaintyConfidenceThreshold,
+          DEFAULT_PROFILE.uncertaintyConfidenceThreshold
+        ),
+        VALIDATION_UNCERTAINTY_FIRST_RECHECK_THRESHOLD
+      ),
+    }
   }
 
   return {
@@ -318,6 +413,13 @@ function buildEffectiveProfile(profile, provider, sessionType = 'short') {
       nextProfile.flipVisionMode === 'composite'
         ? LOCAL_AI_STRICT_PROFILE_OVERRIDES.flipVisionMode
         : nextProfile.flipVisionMode,
+    uncertaintyConfidenceThreshold: Math.max(
+      toFloatOrFallback(
+        nextProfile.uncertaintyConfidenceThreshold,
+        DEFAULT_PROFILE.uncertaintyConfidenceThreshold
+      ),
+      VALIDATION_UNCERTAINTY_FIRST_RECHECK_THRESHOLD
+    ),
   }
 }
 
@@ -450,7 +552,12 @@ function toAnswerOption(answer) {
   return AnswerType.None
 }
 
-function chooseDeterministicRandomAnswer(seed = '') {
+function chooseDeterministicRandomAnswer(seed = '', fallbackIndex = null) {
+  const normalizedIndex = Number(fallbackIndex)
+  if (Number.isFinite(normalizedIndex) && normalizedIndex >= 0) {
+    return Math.trunc(normalizedIndex) % 2 === 0 ? 'left' : 'right'
+  }
+
   const value = String(seed || '')
   let hash = 0
   for (let index = 0; index < value.length; index += 1) {
@@ -882,14 +989,22 @@ function resolveShortSessionOpenAiFastMode({
   provider,
   model,
 }) {
-  if (
-    sessionType !== 'short' ||
-    provider !== 'openai' ||
-    aiSolver.shortSessionOpenAiFastEnabled !== true
-  ) {
+  if (sessionType !== 'short' || provider !== 'openai') {
     return {
       model,
       promptOptions: null,
+    }
+  }
+
+  const promptOptions = {
+    openAiServiceTier: 'priority',
+    openAiReasoningEffort: 'xhigh',
+  }
+
+  if (aiSolver.shortSessionOpenAiFastEnabled !== true) {
+    return {
+      model,
+      promptOptions,
     }
   }
 
@@ -898,14 +1013,11 @@ function resolveShortSessionOpenAiFastMode({
     .toLowerCase()
   const fastModel = SHORT_SESSION_OPENAI_FAST_MODELS.includes(requestedModel)
     ? requestedModel
-    : 'gpt-5.4-mini'
+    : 'gpt-5.5'
 
   return {
     model: fastModel,
-    promptOptions: {
-      openAiServiceTier: 'priority',
-      openAiReasoningEffort: 'none',
-    },
+    promptOptions,
   }
 }
 
@@ -1041,6 +1153,9 @@ function applyShortSessionOpenAiParallelTimeout(
   }
 
   const requestTimeoutMs = SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
+  const requestedProbabilityRuns = normalizeProbabilityRuns(
+    profile.probabilityRuns
+  )
   const uncertaintyConfidenceThreshold = Math.max(
     toFloatOrFallback(
       profile.uncertaintyConfidenceThreshold,
@@ -1060,6 +1175,15 @@ function applyShortSessionOpenAiParallelTimeout(
       ),
       SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS
     ),
+    probabilityEnsembleEnabled: true,
+    probabilityRuns: profile.probabilityEnsembleEnabled
+      ? Math.max(
+          requestedProbabilityRuns,
+          SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
+        )
+      : SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS,
+    probabilityReasoningEffort:
+      SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT,
     requestTimeoutMs,
     maxRetries: 0,
     deadlineMs: Math.max(
@@ -1176,7 +1300,7 @@ export function planValidationAiSolve({
   const provider = String(aiSolver.provider || 'openai')
     .trim()
     .toLowerCase()
-  const defaultModel = String(aiSolver.model || 'gpt-5.4').trim() || 'gpt-5.4'
+  const defaultModel = String(aiSolver.model || 'gpt-5.5').trim() || 'gpt-5.5'
   const shortSessionOpenAiFastMode = resolveShortSessionOpenAiFastMode({
     sessionType,
     aiSolver,
@@ -1237,7 +1361,8 @@ export function estimateValidationAiSolveBudget(options = {}) {
   const shouldPrepareFramePayloads =
     effectiveProfile.flipVisionMode !== 'composite' ||
     provider === 'local-ai' ||
-    effectiveProfile.uncertaintyRepromptEnabled
+    (effectiveProfile.uncertaintyRepromptEnabled &&
+      !(effectiveProfile.probabilityEnsembleEnabled && provider !== 'local-ai'))
   const prepPerFlipMs = shouldPrepareFramePayloads
     ? Math.max(
         FRAME_REVIEW_PREP_MIN_MS,
@@ -1253,13 +1378,18 @@ export function estimateValidationAiSolveBudget(options = {}) {
   const uncertaintyReviewFlipCount = estimateUncertaintyReviewFlipCount({
     sessionType,
     flipCount: candidateFlips.length,
-    uncertaintyRepromptEnabled: effectiveProfile.uncertaintyRepromptEnabled,
+    uncertaintyRepromptEnabled:
+      effectiveProfile.uncertaintyRepromptEnabled &&
+      !(effectiveProfile.probabilityEnsembleEnabled && provider !== 'local-ai'),
   })
   const expectedPassRuntimeMs = estimateExpectedPassRuntimeMs({
     sessionType,
     provider,
     requestTimeoutMs: effectiveProfile.requestTimeoutMs,
-    promptOptions,
+    promptOptions:
+      effectiveProfile.probabilityEnsembleEnabled && provider !== 'local-ai'
+        ? null
+        : promptOptions,
   })
   const uncertaintyReviewReserveMs =
     uncertaintyReviewFlipCount > 0
@@ -1363,16 +1493,21 @@ export async function solveValidationSessionWithAi({
   const sessionDeadlineAt = normalizeDeadlineAt(hardDeadlineAt)
   const sessionSolveGuardMs = getSessionSolveGuardMs(sessionType)
   ensureRuntimeRemaining(sessionDeadlineAt, sessionSolveGuardMs)
+  const safeSessionDeadlineAt = Number.isFinite(sessionDeadlineAt)
+    ? sessionDeadlineAt - sessionSolveGuardMs
+    : null
   const buildDeadlineAt = Number.isFinite(sessionDeadlineAt)
     ? Math.min(
-        sessionDeadlineAt,
+        safeSessionDeadlineAt,
         Date.now() + Math.max(effectiveProfile.deadlineMs, 15 * 1000)
       )
     : Date.now() + Math.max(effectiveProfile.deadlineMs, 15 * 1000)
   const useFrameVision =
     effectiveProfile.flipVisionMode !== 'composite' || provider === 'local-ai'
   const prepareFramePayloads =
-    useFrameVision || effectiveProfile.uncertaintyRepromptEnabled
+    useFrameVision ||
+    (effectiveProfile.uncertaintyRepromptEnabled &&
+      !(effectiveProfile.probabilityEnsembleEnabled && provider !== 'local-ai'))
   const frameRenderSize =
     provider === 'local-ai'
       ? {frameWidth: 384, frameHeight: 288}
@@ -1515,13 +1650,28 @@ export async function solveValidationSessionWithAi({
     }
   }
 
+  function buildProviderPayloadFlip(payloadFlip) {
+    return {
+      hash: payloadFlip.hash,
+      leftImage: payloadFlip.leftImage || null,
+      rightImage: payloadFlip.rightImage || null,
+      leftFrames: Array.isArray(payloadFlip.leftFrames)
+        ? payloadFlip.leftFrames
+        : [],
+      rightFrames: Array.isArray(payloadFlip.rightFrames)
+        ? payloadFlip.rightFrames
+        : [],
+    }
+  }
+
   function buildForcedRandomSolvedFlip({
     hash,
+    index = null,
     error,
     reasoning,
     forcedDecisionReason = 'session_fallback',
   }) {
-    const answer = chooseDeterministicRandomAnswer(hash)
+    const answer = chooseDeterministicRandomAnswer(hash, index)
 
     return {
       hash,
@@ -1559,6 +1709,7 @@ export async function solveValidationSessionWithAi({
       index,
       solved: buildForcedRandomSolvedFlip({
         hash: flip.hash,
+        index,
         error,
         reasoning,
         forcedDecisionReason,
@@ -1574,22 +1725,25 @@ export async function solveValidationSessionWithAi({
         requestTimeoutMs: effectiveProfile.requestTimeoutMs,
       })
       const remainingSessionMs = getTimeRemainingMs(sessionDeadlineAt)
+      const safeRemainingSessionMs = Number.isFinite(remainingSessionMs)
+        ? Math.max(0, remainingSessionMs - sessionSolveGuardMs)
+        : remainingSessionMs
       let requestDeadlineMs = effectiveProfile.deadlineMs
       if (
         useLongSessionOpenAiStaggeredSolving &&
-        Number.isFinite(remainingSessionMs)
+        Number.isFinite(safeRemainingSessionMs)
       ) {
         requestDeadlineMs = Math.max(
           1000,
           Math.min(
             requestTimeoutMs + LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS,
-            remainingSessionMs
+            safeRemainingSessionMs
           )
         )
-      } else if (Number.isFinite(remainingSessionMs)) {
+      } else if (Number.isFinite(safeRemainingSessionMs)) {
         requestDeadlineMs = Math.max(
           1000,
-          Math.min(effectiveProfile.deadlineMs, remainingSessionMs)
+          Math.min(effectiveProfile.deadlineMs, safeRemainingSessionMs)
         )
       }
 
@@ -1607,6 +1761,7 @@ export async function solveValidationSessionWithAi({
         index,
         solved: buildForcedRandomSolvedFlip({
           hash: payloadFlip.hash,
+          index,
           error: 'deadline_guard',
           reasoning: 'not enough session time remained for provider request',
           forcedDecisionReason: 'deadline_guard',
@@ -1678,8 +1833,14 @@ export async function solveValidationSessionWithAi({
           effectiveProfile.uncertaintyRepromptInstruction,
         promptTemplateOverride: effectiveProfile.promptTemplateOverride,
         flipVisionMode,
+        probabilityEnsembleEnabled: effectiveProfile.probabilityEnsembleEnabled,
+        probabilityRuns: effectiveProfile.probabilityRuns,
+        probabilityPasses: effectiveProfile.probabilityPasses,
+        probabilityDecisionDelta: effectiveProfile.probabilityDecisionDelta,
+        probabilityUseSwappedOrder: effectiveProfile.probabilityUseSwappedOrder,
+        probabilityReasoningEffort: effectiveProfile.probabilityReasoningEffort,
         promptOptions,
-        flips: [requestPayloadFlip],
+        flips: [buildProviderPayloadFlip(requestPayloadFlip)],
         session: {
           ...(sessionMeta || {}),
           ...(sessionExtra || {}),
@@ -1697,6 +1858,7 @@ export async function solveValidationSessionWithAi({
       (batchResult.results || [])[0] ||
       buildForcedRandomSolvedFlip({
         hash: payloadFlip.hash,
+        index,
         error: 'no_result',
         reasoning: 'provider returned no result',
         forcedDecisionReason: 'provider_no_result',
@@ -1775,6 +1937,7 @@ export async function solveValidationSessionWithAi({
         ? providerSolved
         : buildForcedRandomSolvedFlip({
             hash: payloadFlip.hash,
+            index,
             error: providerSolved.error || 'skip_answer',
             reasoning:
               providerSolved.reasoning ||
@@ -1849,7 +2012,62 @@ export async function solveValidationSessionWithAi({
       await waitForParallelLaunchDelay(launchIndex)
     }
 
-    return solvePreparedPayloadFlip(preparedFlip)
+    if (sessionType !== 'short' || !Number.isFinite(safeSessionDeadlineAt)) {
+      return solvePreparedPayloadFlip(preparedFlip)
+    }
+
+    const fallbackWaitMs = Math.max(0, safeSessionDeadlineAt - Date.now())
+    if (fallbackWaitMs <= 0) {
+      return {
+        payloadFlip: preparedFlip.payloadFlip,
+        index: preparedFlip.index,
+        solved: buildForcedRandomSolvedFlip({
+          hash: preparedFlip.payloadFlip.hash,
+          index: preparedFlip.index,
+          error: 'safe_submit_guard',
+          reasoning:
+            'short-session safe-submit guard reached before provider result',
+          forcedDecisionReason: 'safe_submit_guard',
+        }),
+      }
+    }
+
+    const solvePromise = solvePreparedPayloadFlip(preparedFlip)
+    let settled = false
+    const guardedSolvePromise = solvePromise.then(
+      (solvedEntry) => {
+        settled = true
+        return solvedEntry
+      },
+      (error) => {
+        settled = true
+        throw error
+      }
+    )
+    const fallbackPromise = sleep(fallbackWaitMs).then(() =>
+      settled
+        ? null
+        : {
+            payloadFlip: preparedFlip.payloadFlip,
+            index: preparedFlip.index,
+            solved: buildForcedRandomSolvedFlip({
+              hash: preparedFlip.payloadFlip.hash,
+              index: preparedFlip.index,
+              error: 'safe_submit_guard',
+              reasoning:
+                'short-session safe-submit guard reached before provider result',
+              forcedDecisionReason: 'safe_submit_guard',
+            }),
+          }
+    )
+    const result = await Promise.race([guardedSolvePromise, fallbackPromise])
+
+    if (result?.solved?.forcedDecisionReason === 'safe_submit_guard') {
+      guardedSolvePromise.catch(() => {})
+      return result
+    }
+
+    return result || guardedSolvePromise
   }
 
   function removeActiveStaggeredSolve(taskId) {
@@ -1921,6 +2139,7 @@ export async function solveValidationSessionWithAi({
         index: preparedFlip.index,
         solved: buildForcedRandomSolvedFlip({
           hash: preparedFlip.payloadFlip.hash,
+          index: preparedFlip.index,
           error: 'deadline_guard',
           reasoning:
             'not enough session time remained to launch provider request',
