@@ -90,9 +90,10 @@ function buildAntiPositionRules() {
 
 function buildReportabilityRules() {
   return [
-    '- Treat the flip as report-worthy if solving it clearly requires reading text.',
-    '- Treat the flip as report-worthy if visible order labels, letters, numbers, arrows, captions, or sequence markers are placed on top of the images.',
-    '- Treat the flip as report-worthy if it contains inappropriate, NSFW, or graphic violent content.',
+    '- Track report risk separately if solving clearly requires reading text, including visible watermarks, captions, labels, letters, numbers, arrows, or sequence markers.',
+    '- Track report risk separately if inappropriate, NSFW, or graphic violent content is present.',
+    '- Report risk is not evidence for OPTION A or OPTION B and must not by itself become "skip" during side solving.',
+    '- Keep judging chronology, cause-effect, entity continuity, and final state even when report risk is present.',
   ].join('\n')
 }
 
@@ -206,7 +207,7 @@ Task:
 2) Extract any readable text from each frame and translate it to English if needed.
 3) Build one concise story summary for OPTION A and OPTION B.
 4) Estimate one coherence score from 0 to 100 for OPTION A and OPTION B.
-5) Flag report risk if the flip is clearly report-worthy.
+5) Flag report risk separately if the flip may be report-worthy, but keep scoring both stories.
 6) Return JSON only.
 
 Allowed JSON schema:
@@ -238,9 +239,10 @@ Rules:
 - coherence scores must be integers between 0 and 100
 - Evaluate OPTION A and OPTION B independently before comparing them
 - Do not let the first listed side inherit a higher coherence score by default
-- Set reportRisk=true if reading text is required to solve the flip
+- Set reportRisk=true if reading text is required to solve the flip, including watermarks, labels, or captions
 - Set reportRisk=true if visible order labels, numbers, letters, arrows, captions, or sequence markers appear on the images
 - Set reportRisk=true if the flip contains inappropriate, NSFW, or graphic violent content
+- A watermark, text overlay, order marker, or reportRisk flag is not a side decision and must not reduce coherence scores by itself
 ${antiPositionRules}
 
 Flip hash: ${hash}
@@ -263,9 +265,9 @@ You are given pre-analysis JSON for OPTION A and OPTION B story frames.
 
 Task:
 1) Read the captions, extracted text, translations, story summaries, coherence scores, and report flags.
-2) If reportRisk is true, return skip unless the report signal is clearly invalid.
-3) Otherwise, choose the story with the better coherence and clearer causal chain.
-4) Prefer skip when both stories are similarly weak or ambiguous.
+2) Treat reportRisk as a separate report-section signal, not as an answer.
+3) Choose the story with the better coherence and clearer causal chain.
+4) Prefer skip only when both stories are similarly weak or ambiguous and skip is allowed.
 5) Return JSON only.
 
 Allowed JSON schema:
@@ -274,7 +276,8 @@ Allowed JSON schema:
 Rules:
 - Use only ${allowedAnswers} for "answer"
 - "confidence" must be between 0 and 1
-- Keep reasoning concise and factual, and cite one key caption or reportability signal
+- Do not return skip solely because reportRisk is true, a watermark/text overlay exists, or the flip may be reported later.
+- Keep reasoning concise and factual, and cite one key visual coherence cue
 ${antiPositionRules}
 ${reportabilityRules}
 ${uncertaintyRule}
@@ -360,6 +363,8 @@ Probability rules:
 - A side can score high only if panel order, cause-effect, entity continuity, and final state are all plausible.
 - Candidate labels A/B, left/right, first/second are arbitrary placeholders.
 - Judge only chronology, cause-effect, entity continuity, and final state.
+- Report/text/order-label risks are separate risk probabilities; they must not suppress chronology, cause-effect, entity-continuity, or final-state scores.
+- Watermarks or text overlays should still receive side probability scores. Reporting is handled later in the report section.
 ${antiPositionRules}
 ${reportabilityRules}
 `.trim()

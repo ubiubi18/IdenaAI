@@ -399,9 +399,6 @@ function aggregateProbabilityEnsembleRuns(runs = [], options = {}) {
       ? 0.08
       : options.probabilityDecisionDelta
   )
-  const reportRiskThreshold = normalizeConfidence(
-    options.reportRiskThreshold == null ? 0.75 : options.reportRiskThreshold
-  )
   const avgLeft = mean(normalizedRuns.map((run) => run.leftScore))
   const avgRight = mean(normalizedRuns.map((run) => run.rightScore))
   const avgReportRisk = mean(
@@ -414,13 +411,11 @@ function aggregateProbabilityEnsembleRuns(runs = [], options = {}) {
     normalizedRuns.map((run) => run.uncertaintyProbability)
   )
   const delta = Math.abs(avgLeft - avgRight)
-  const skippedByRisk =
-    !forceDecision &&
-    Math.max(avgReportRisk, avgTextOrOrderLabelRisk) >= reportRiskThreshold
+  const skippedByRisk = false
   const skippedByDelta = !forceDecision && delta < decisionDelta
   let answer = 'skip'
 
-  if (!skippedByRisk && !skippedByDelta) {
+  if (!skippedByDelta) {
     answer = chooseHigherProbabilitySide(
       avgLeft,
       avgRight,
@@ -429,22 +424,13 @@ function aggregateProbabilityEnsembleRuns(runs = [], options = {}) {
   }
 
   const skipProbability =
-    answer === 'skip'
-      ? Math.max(
-          avgReportRisk,
-          avgTextOrOrderLabelRisk,
-          avgUncertainty,
-          1 - delta
-        )
-      : Math.max(avgReportRisk, avgTextOrOrderLabelRisk, avgUncertainty)
+    answer === 'skip' ? Math.max(avgUncertainty, 1 - delta) : avgUncertainty
   const confidence =
     answer === 'skip'
       ? normalizeConfidence(Math.min(0.95, Math.max(0.5, skipProbability)))
       : normalizeConfidence(Math.min(0.95, 0.5 + delta))
   let reasoningSuffix = ''
-  if (skippedByRisk) {
-    reasoningSuffix = '; skipped by report/text risk'
-  } else if (skippedByDelta) {
+  if (skippedByDelta) {
     reasoningSuffix = '; skipped by low delta'
   }
 
@@ -460,6 +446,8 @@ function aggregateProbabilityEnsembleRuns(runs = [], options = {}) {
       left: avgLeft,
       right: avgRight,
       skip: normalizeConfidence(skipProbability),
+      reportRisk: avgReportRisk,
+      textOrOrderLabelRisk: avgTextOrOrderLabelRisk,
     },
     runs: normalizedRuns,
     runCount: normalizedRuns.length,
