@@ -548,6 +548,68 @@ describe('createAiProviderBridge', () => {
     })
   })
 
+  it('can correct the long-session answer side during keyword report review', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText:
+        '{"answer":"right","decision":"approve","confidence":0.86,"reason":"Right is the coherent keyword-matching sequence","triggeredRules":[]}',
+      usage: {
+        promptTokens: 140,
+        completionTokens: 28,
+        totalTokens: 168,
+      },
+    })
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.reviewValidationReports({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      requestTimeoutMs: 1000,
+      maxRetries: 0,
+      flips: [
+        {
+          hash: 'flip-report-side-switch',
+          images: ['selected-1', 'selected-2', 'selected-3', 'selected-4'],
+          leftImages: ['left-1', 'left-2', 'left-3', 'left-4'],
+          rightImages: ['right-1', 'right-2', 'right-3', 'right-4'],
+          selectedAnswer: 'left',
+          keywords: [
+            {name: 'lamp', desc: 'light source'},
+            {name: 'cat', desc: 'animal'},
+          ],
+        },
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(invokeProvider.mock.calls[0][0].flip.images).toEqual([
+      'left-1',
+      'left-2',
+      'left-3',
+      'left-4',
+      'right-1',
+      'right-2',
+      'right-3',
+      'right-4',
+    ])
+    expect(invokeProvider.mock.calls[0][0].promptText).toContain(
+      'Images 1-4 are the LEFT candidate in temporal order.'
+    )
+    expect(invokeProvider.mock.calls[0][0].promptText).toContain(
+      'Current selected answer before this report review: left.'
+    )
+    expect(result.results[0]).toMatchObject({
+      hash: 'flip-report-side-switch',
+      answer: 'right',
+      decision: 'approve',
+      confidence: 0.86,
+    })
+  })
+
   it('reviews validation reports with bounded parallelism for urgent mode', async () => {
     let inFlight = 0
     let maxInFlight = 0
@@ -1563,6 +1625,12 @@ describe('createAiProviderBridge', () => {
           hash: 'flip-probability-ensemble',
           leftImage: 'left-image',
           rightImage: 'right-image',
+          words: [{name: 'campaign'}, {name: 'concern'}],
+          keywords: ['campaign', 'concern'],
+          expectedAnswer: 'right',
+          consensusAnswer: 'right',
+          consensusVotes: {left: 1, right: 5, report: 0},
+          sourceStats: {leaked: true},
         },
       ],
     })
@@ -1578,8 +1646,34 @@ describe('createAiProviderBridge', () => {
         ([call]) => call.promptOptions.openAiReasoningEffort === 'high'
       )
     ).toBe(true)
+    expect(
+      invokeProvider.mock.calls.every(
+        ([call]) =>
+          !Object.prototype.hasOwnProperty.call(call.flip, 'words') &&
+          !Object.prototype.hasOwnProperty.call(call.flip, 'expectedAnswer') &&
+          !Object.prototype.hasOwnProperty.call(call.flip, 'consensusAnswer') &&
+          !Object.prototype.hasOwnProperty.call(call.flip, 'consensusVotes') &&
+          !Object.prototype.hasOwnProperty.call(call.flip, 'sourceStats')
+      )
+    ).toBe(true)
+    expect(
+      invokeProvider.mock.calls.every(
+        ([call]) =>
+          JSON.stringify(call.flip.keywords) ===
+          JSON.stringify([
+            {name: 'campaign', desc: ''},
+            {name: 'concern', desc: ''},
+          ])
+      )
+    ).toBe(true)
     expect(invokeProvider.mock.calls[0][0].promptText).toContain(
       'This flip is independent. Do not infer patterns from other flips in the session. Previous flips give no information about this flip.'
+    )
+    expect(invokeProvider.mock.calls[0][0].promptText).toContain(
+      'Official keywords may be unavailable or arrive later; do not wait for them or treat them as required.'
+    )
+    expect(invokeProvider.mock.calls[0][0].promptText).toContain(
+      'Optional official keyword context already available for this flip:'
     )
     expect(invokeProvider.mock.calls[0][0].promptText).not.toMatch(
       /which side is correct/i

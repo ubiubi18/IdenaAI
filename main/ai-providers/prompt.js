@@ -97,18 +97,69 @@ function buildReportabilityRules() {
   ].join('\n')
 }
 
+function buildAnswerPhaseKeywordRules() {
+  return [
+    '- This is the validation answer phase. Official keywords may be unavailable or arrive later; do not wait for them or treat them as required.',
+    '- If official keywords are already present in session context, treat them as optional context only. They must not override the visible story.',
+    '- Keywords are checked later only in the long-session report section, where report decisions may be reviewed separately.',
+    '- During this answer phase, side choice depends on the visible four-panel story: chronology, cause-effect, entity continuity, and final state.',
+  ].join('\n')
+}
+
+function normalizeOptionalAnswerPhaseKeywords(keywords = []) {
+  if (!Array.isArray(keywords)) {
+    return []
+  }
+
+  return keywords
+    .map((item, index) => {
+      if (item && typeof item === 'object') {
+        const name = String(item.name || item.keyword || '').trim()
+        const desc = String(item.desc || item.description || '').trim()
+        if (!name && !desc) {
+          return null
+        }
+        return `${index + 1}. ${name || `keyword-${index + 1}`}${
+          desc ? ` - ${desc}` : ''
+        }`
+      }
+
+      const keywordName = String(item || '').trim()
+      return keywordName ? `${index + 1}. ${keywordName}` : null
+    })
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
+function buildOptionalAnswerPhaseKeywordContext(keywords = []) {
+  const keywordLines = normalizeOptionalAnswerPhaseKeywords(keywords)
+  if (!keywordLines.length) {
+    return ''
+  }
+
+  return [
+    'Optional official keyword context already available for this flip:',
+    ...keywordLines,
+    'Use this only as non-blocking context. Do not wait for missing keywords, and do not let keywords override visual chronology, cause-effect, entity continuity, or final state.',
+  ].join('\n')
+}
+
 function buildCompositePrompt({
   hash,
   allowedAnswers,
   uncertaintyRule,
   passRule,
   repromptRule,
+  keywords,
 }) {
   const reportabilityRules = buildReportabilityRules()
   const antiPositionRules = buildAntiPositionRules()
+  const answerPhaseKeywordRules = buildAnswerPhaseKeywordRules()
+  const optionalKeywordContext =
+    buildOptionalAnswerPhaseKeywordContext(keywords)
   const mustChoose = allowedAnswers === 'a|b'
   return `
-You are solving an Idena short-session flip benchmark.
+You are solving an Idena validation answer-phase flip.
 You are given two candidate 2x2 composite images:
 - The first attached image is OPTION A
 - The second attached image is OPTION B
@@ -118,6 +169,7 @@ Each candidate image contains four panels:
 - Panel 2 = top-right
 - Panel 3 = bottom-left
 - Panel 4 = bottom-right
+${optionalKeywordContext ? `\n${optionalKeywordContext}` : ''}
 
 Task:
 1) Inspect each panel separately and identify the main actors, actions, and visible state.
@@ -133,6 +185,7 @@ Rules:
 - Use only ${allowedAnswers} for "answer"
 - "confidence" must be between 0 and 1
 ${antiPositionRules}
+${answerPhaseKeywordRules}
 - Keep reasoning concise and factual, and mention one concrete visual cue when possible.
 ${reportabilityRules}
 ${
@@ -154,15 +207,20 @@ function buildFramesSinglePassPrompt({
   uncertaintyRule,
   passRule,
   repromptRule,
+  keywords,
 }) {
   const reportabilityRules = buildReportabilityRules()
   const antiPositionRules = buildAntiPositionRules()
+  const answerPhaseKeywordRules = buildAnswerPhaseKeywordRules()
+  const optionalKeywordContext =
+    buildOptionalAnswerPhaseKeywordContext(keywords)
   const mustChoose = allowedAnswers === 'a|b'
   return `
-You are solving an Idena short-session flip benchmark.
+You are solving an Idena validation answer-phase flip.
 You are given 8 ordered frame images:
 - Images 1-4 belong to OPTION A (in temporal order)
 - Images 5-8 belong to OPTION B (in temporal order)
+${optionalKeywordContext ? `\n${optionalKeywordContext}` : ''}
 
 Task:
 1) Inspect each frame separately and identify actors, actions, and visible state changes.
@@ -180,6 +238,7 @@ Rules:
 - "confidence" must be between 0 and 1
 - Keep reasoning concise and factual, and mention one concrete visual cue when possible.
 ${antiPositionRules}
+${answerPhaseKeywordRules}
 ${reportabilityRules}
 ${
   mustChoose
@@ -194,13 +253,17 @@ Flip hash: ${hash}
 `.trim()
 }
 
-function buildFramesReasoningPrompt({hash}) {
+function buildFramesReasoningPrompt({hash, keywords}) {
   const antiPositionRules = buildAntiPositionRules()
+  const answerPhaseKeywordRules = buildAnswerPhaseKeywordRules()
+  const optionalKeywordContext =
+    buildOptionalAnswerPhaseKeywordContext(keywords)
   return `
-You are solving an Idena flip benchmark in analysis mode.
+You are solving an Idena validation answer-phase flip in analysis mode.
 You are given 8 ordered frame images:
 - Images 1-4 belong to OPTION A (in temporal order)
 - Images 5-8 belong to OPTION B (in temporal order)
+${optionalKeywordContext ? `\n${optionalKeywordContext}` : ''}
 
 Task:
 1) For each frame, write one short factual caption.
@@ -244,6 +307,7 @@ Rules:
 - Set reportRisk=true if the flip contains inappropriate, NSFW, or graphic violent content
 - A watermark, text overlay, order marker, or reportRisk flag is not a side decision and must not reduce coherence scores by itself
 ${antiPositionRules}
+${answerPhaseKeywordRules}
 
 Flip hash: ${hash}
 `.trim()
@@ -256,12 +320,17 @@ function buildFramesDecisionPrompt({
   uncertaintyRule,
   passRule,
   repromptRule,
+  keywords,
 }) {
   const reportabilityRules = buildReportabilityRules()
   const antiPositionRules = buildAntiPositionRules()
+  const answerPhaseKeywordRules = buildAnswerPhaseKeywordRules()
+  const optionalKeywordContext =
+    buildOptionalAnswerPhaseKeywordContext(keywords)
   return `
-You are solving an Idena short-session flip benchmark.
+You are solving an Idena validation answer-phase flip.
 You are given pre-analysis JSON for OPTION A and OPTION B story frames.
+${optionalKeywordContext ? `\n${optionalKeywordContext}` : ''}
 
 Task:
 1) Read the captions, extracted text, translations, story summaries, coherence scores, and report flags.
@@ -279,6 +348,7 @@ Rules:
 - Do not return skip solely because reportRisk is true, a watermark/text overlay exists, or the flip may be reported later.
 - Keep reasoning concise and factual, and cite one key visual coherence cue
 ${antiPositionRules}
+${answerPhaseKeywordRules}
 ${reportabilityRules}
 ${uncertaintyRule}
 ${passRule}
@@ -323,9 +393,13 @@ function buildProbabilityTaskRules({
   candidateOrder,
   probabilityPasses,
   previousProbabilityJson = '',
+  keywords,
 }) {
   const antiPositionRules = buildAntiPositionRules()
   const reportabilityRules = buildReportabilityRules()
+  const answerPhaseKeywordRules = buildAnswerPhaseKeywordRules()
+  const optionalKeywordContext =
+    buildOptionalAnswerPhaseKeywordContext(keywords)
   const passes =
     Array.isArray(probabilityPasses) && probabilityPasses.length
       ? probabilityPasses
@@ -334,6 +408,7 @@ function buildProbabilityTaskRules({
   return `
 This flip is independent. Do not infer patterns from other flips in the session. Previous flips give no information about this flip.
 This is probability ensemble run ${runIndex} of ${totalRuns}. Run marker: ${candidateOrder}. The marker is not visual evidence.
+${optionalKeywordContext ? `\n${optionalKeywordContext}` : ''}
 ${
   previousProbabilityNote
     ? `
@@ -366,6 +441,7 @@ Probability rules:
 - Report/text/order-label risks are separate risk probabilities; they must not suppress chronology, cause-effect, entity-continuity, or final-state scores.
 - Watermarks or text overlays should still receive side probability scores. Reporting is handled later in the report section.
 ${antiPositionRules}
+${answerPhaseKeywordRules}
 ${reportabilityRules}
 `.trim()
 }
@@ -377,9 +453,10 @@ function buildCompositeProbabilityPrompt({
   candidateOrder,
   probabilityPasses,
   previousProbabilityJson,
+  keywords,
 }) {
   return `
-You are solving an Idena short-session flip benchmark with probability scoring.
+You are solving an Idena validation answer-phase flip with probability scoring.
 You are given two candidate 2x2 composite images:
 - The first attached image is OPTION A
 - The second attached image is OPTION B
@@ -396,6 +473,7 @@ ${buildProbabilityTaskRules({
   candidateOrder,
   probabilityPasses,
   previousProbabilityJson,
+  keywords,
 })}
 
 Allowed JSON schema:
@@ -412,9 +490,10 @@ function buildFramesProbabilityPrompt({
   candidateOrder,
   probabilityPasses,
   previousProbabilityJson,
+  keywords,
 }) {
   return `
-You are solving an Idena short-session flip benchmark with probability scoring.
+You are solving an Idena validation answer-phase flip with probability scoring.
 You are given 8 ordered frame images:
 - Images 1-4 belong to OPTION A in temporal order
 - Images 5-8 belong to OPTION B in temporal order
@@ -425,6 +504,7 @@ ${buildProbabilityTaskRules({
   candidateOrder,
   probabilityPasses,
   previousProbabilityJson,
+  keywords,
 })}
 
 Allowed JSON schema:
@@ -442,6 +522,7 @@ function probabilityPromptTemplate({
   candidateOrder = 'normal',
   probabilityPasses = null,
   previousProbabilityJson = '',
+  keywords,
 }) {
   const mode = normalizeVisionMode(flipVisionMode)
   const normalizedRunIndex =
@@ -463,6 +544,7 @@ function probabilityPromptTemplate({
       candidateOrder: normalizedCandidateOrder,
       probabilityPasses,
       previousProbabilityJson,
+      keywords,
     })
   }
 
@@ -473,6 +555,7 @@ function probabilityPromptTemplate({
     candidateOrder: normalizedCandidateOrder,
     probabilityPasses,
     previousProbabilityJson,
+    keywords,
   })
 }
 
@@ -485,6 +568,7 @@ function promptTemplate({
   flipVisionMode = 'composite',
   promptPhase = 'decision',
   frameReasoning = '',
+  keywords,
 }) {
   const mode = normalizeVisionMode(flipVisionMode)
   const phase = normalizePromptPhase(promptPhase)
@@ -508,7 +592,7 @@ function promptTemplate({
   }
 
   if (phase === 'frame_reasoning') {
-    return buildFramesReasoningPrompt({hash})
+    return buildFramesReasoningPrompt({hash, keywords})
   }
 
   if (phase === 'decision_from_frame_reasoning') {
@@ -519,6 +603,7 @@ function promptTemplate({
       uncertaintyRule,
       passRule,
       repromptRule,
+      keywords,
     })
   }
 
@@ -529,6 +614,7 @@ function promptTemplate({
       uncertaintyRule,
       passRule,
       repromptRule,
+      keywords,
     })
   }
 
@@ -538,6 +624,7 @@ function promptTemplate({
     uncertaintyRule,
     passRule,
     repromptRule,
+    keywords,
   })
 }
 

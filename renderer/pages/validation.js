@@ -558,6 +558,34 @@ function pickLongSessionReviewOrder(flip) {
   return Array.isArray(flip?.orders?.[0]) ? flip.orders[0] : []
 }
 
+function normalizeAutoReportAnswerOption(answer) {
+  const value = String(answer || '')
+    .trim()
+    .toLowerCase()
+
+  if (['left', 'l', '1', 'a', 'option a', 'candidate a'].includes(value)) {
+    return AnswerType.Left
+  }
+
+  if (['right', 'r', '2', 'b', 'option b', 'candidate b'].includes(value)) {
+    return AnswerType.Right
+  }
+
+  return null
+}
+
+function formatAutoReportSelectedAnswer(option) {
+  if (option === AnswerType.Right) {
+    return 'right'
+  }
+
+  if (option === AnswerType.Left) {
+    return 'left'
+  }
+
+  return ''
+}
+
 function normalizeAutoReportKeywords(words = []) {
   return Array.isArray(words)
     ? words
@@ -2805,14 +2833,29 @@ function ValidationSession({
       }
 
       const candidateFlips = await Promise.all(
-        candidateSourceFlips.map(async (flip) => ({
-          hash: flip.hash,
-          images: await buildOrderedLocalAiImages(
-            flip.images,
-            pickLongSessionReviewOrder(flip)
-          ),
-          keywords: normalizeAutoReportKeywords(flip.words),
-        }))
+        candidateSourceFlips.map(async (flip) => {
+          const selectedOrder = pickLongSessionReviewOrder(flip)
+          const leftOrder = Array.isArray(flip?.orders?.[0])
+            ? flip.orders[0]
+            : []
+          const rightOrder = Array.isArray(flip?.orders?.[1])
+            ? flip.orders[1]
+            : []
+          const [images, leftImages, rightImages] = await Promise.all([
+            buildOrderedLocalAiImages(flip.images, selectedOrder),
+            buildOrderedLocalAiImages(flip.images, leftOrder),
+            buildOrderedLocalAiImages(flip.images, rightOrder),
+          ])
+
+          return {
+            hash: flip.hash,
+            images,
+            leftImages,
+            rightImages,
+            selectedAnswer: formatAutoReportSelectedAnswer(flip.option),
+            keywords: normalizeAutoReportKeywords(flip.words),
+          }
+        })
       )
 
       if (manualReportingStartedRef.current) {
@@ -2918,6 +2961,12 @@ function ValidationSession({
         .slice(0, reportQuota)
         .map((item) => item.hash)
       const reportHashSet = new Set(reportHashes)
+      const reviewResultByHash = new Map(
+        (Array.isArray(reviewResult?.results) ? reviewResult.results : [])
+          .filter((item) => item && item.hash)
+          .map((item) => [item.hash, item])
+      )
+      const switchedAnswerHashes = []
       const autoBestFlipHash =
         aiSolverSettings.autoReportBestFlipEnabled === true &&
         Object.keys(bestFlipHashes || {}).length < 1
@@ -2928,6 +2977,18 @@ function ValidationSession({
           : ''
 
       candidateSourceFlips.forEach((flip) => {
+        const reviewedAnswerOption = normalizeAutoReportAnswerOption(
+          reviewResultByHash.get(flip.hash)?.answer
+        )
+        if (reviewedAnswerOption && reviewedAnswerOption !== flip.option) {
+          switchedAnswerHashes.push(flip.hash)
+          send({
+            type: 'ANSWER',
+            hash: flip.hash,
+            option: reviewedAnswerOption,
+          })
+        }
+
         send({
           type: reportHashSet.has(flip.hash) ? 'REPORT_WORDS' : 'APPROVE_WORDS',
           hash: flip.hash,
@@ -2964,8 +3025,8 @@ function ValidationSession({
         keywordStatus.missingKeywordFlipCount > 0
           ? t(
               autoBestFlipHash
-                ? 'Applied {{reported}} report decisions and {{approved}} approvals, then marked the strongest approved flip as best. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.'
-                : 'Applied {{reported}} report decisions and {{approved}} approvals. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.',
+                ? 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s), then marked the strongest approved flip as best. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.'
+                : 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s). Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.',
               {
                 reported: reportHashSet.size,
                 approved: Math.max(
@@ -2973,18 +3034,20 @@ function ValidationSession({
                   candidateSourceFlips.length - reportHashSet.size
                 ),
                 skipped: keywordStatus.missingKeywordFlipCount,
+                switched: switchedAnswerHashes.length,
               }
             )
           : t(
               autoBestFlipHash
-                ? 'Applied {{reported}} report decisions and {{approved}} approvals, then marked the strongest approved flip as best. Long session answers will be submitted automatically.'
-                : 'Applied {{reported}} report decisions and {{approved}} approvals. Long session answers will be submitted automatically.',
+                ? 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s), then marked the strongest approved flip as best. Long session answers will be submitted automatically.'
+                : 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s). Long session answers will be submitted automatically.',
               {
                 reported: reportHashSet.size,
                 approved: Math.max(
                   0,
                   candidateSourceFlips.length - reportHashSet.size
                 ),
+                switched: switchedAnswerHashes.length,
               }
             )
       )
