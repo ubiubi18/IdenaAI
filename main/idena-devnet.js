@@ -15,6 +15,7 @@ const {
   getCurrentVersion,
   downloadNode,
   updateNode,
+  isNodeBinaryOlderThanLocalSource,
 } = require('./idena-node')
 
 const VALIDATION_DEVNET_NODE_COUNT = 10
@@ -1953,36 +1954,50 @@ function createValidationDevnetController({
   }
 
   async function defaultEnsureNodeBinary(onProgress) {
+    let progressMessage =
+      'Downloading bundled Idena node binary for the rehearsal network.'
+
     try {
-      return await getCurrentVersion(false)
+      const version = await getCurrentVersion(false)
+      const binaryIsStale = await isNodeBinaryOlderThanLocalSource(
+        nodeBinaryPath || getNodeFile()
+      )
+
+      if (!binaryIsStale) {
+        return version
+      }
+
+      progressMessage =
+        'Rebuilding bundled Idena node binary from the local rehearsal source.'
+      appendLog(
+        '[devnet] bundled node binary predates local rehearsal source, rebuilding pinned build'
+      )
     } catch (error) {
       appendLog(
         `[devnet] bundled node binary not ready, downloading latest pinned build`
       )
+    }
 
+    if (onProgress) {
+      onProgress({
+        stage: VALIDATION_DEVNET_PHASE.DOWNLOADING_BINARY,
+        message: progressMessage,
+        progress: null,
+      })
+    }
+
+    await downloadNode((progress) => {
       if (onProgress) {
         onProgress({
           stage: VALIDATION_DEVNET_PHASE.DOWNLOADING_BINARY,
-          message:
-            'Downloading bundled Idena node binary for the rehearsal network.',
-          progress: null,
+          message: progressMessage,
+          progress,
         })
       }
+    })
+    await updateNode()
 
-      await downloadNode((progress) => {
-        if (onProgress) {
-          onProgress({
-            stage: VALIDATION_DEVNET_PHASE.DOWNLOADING_BINARY,
-            message:
-              'Downloading bundled Idena node binary for the rehearsal network.',
-            progress,
-          })
-        }
-      })
-      await updateNode()
-
-      return getCurrentVersion(false)
-    }
+    return getCurrentVersion(false)
   }
 
   function createRpcClient(node) {
@@ -2702,12 +2717,15 @@ function createValidationDevnetController({
         VALIDATION_DEVNET_RETRY_INTERVAL_MS
       )
 
-    const confirmedPrimaryFlipCount = await waitForNodeSeedConfirmation({
-      node: primaryNode,
-      nodeName: primaryNodeName,
-      targetFlipCount: primaryTargetFlipCount,
-      updatePrimaryStatus: true,
-    })
+    const confirmedPrimaryFlipCount =
+      primaryTargetFlipCount > 0
+        ? await waitForNodeSeedConfirmation({
+            node: primaryNode,
+            nodeName: primaryNodeName,
+            targetFlipCount: primaryTargetFlipCount,
+            updatePrimaryStatus: true,
+          })
+        : initialPrimaryConfirmedCount
 
     if (primaryTargetFlipCount > 0 && !confirmedPrimaryFlipCount) {
       throw new Error(
@@ -2912,6 +2930,24 @@ function createValidationDevnetController({
           appendLog(
             '[devnet] rehearsal seed flips confirmed across all validator identities'
           )
+          publishStatus({
+            stage: state.status.stage,
+            message:
+              state.status.stage === VALIDATION_DEVNET_PHASE.RUNNING
+                ? `Validation rehearsal network is running with ${submittedCount} FLIP-Challenge seed flips confirmed.`
+                : 'Rehearsal seed flips are confirmed across validator identities.',
+            seedSource: seedSet.source,
+            seedSourceFile: seedSet.sourceFile,
+            seedRequestedCount: requestedCount,
+            seedSubmittedCount: submittedCount,
+            seedConfirmedCount:
+              confirmedSnapshot.identities[primaryNodeName] ||
+              confirmedSnapshot.primaryConfirmedCount ||
+              run.seed.confirmed,
+            seedConfirmedNodeCount: seedAuthorNames.length,
+            seedExpectedNodeCount: seedAuthorNames.length,
+            seedPendingNodeNames: [],
+          })
         } else {
           const latestSnapshot = await collectSeedConfirmationSnapshot().catch(
             () => null
