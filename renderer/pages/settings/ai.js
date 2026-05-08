@@ -4686,7 +4686,7 @@ export default function AiSettingsPage() {
                           </Text>
                           <Text color="muted" fontSize="sm">
                             {t(
-                              'Only affects validation short session. OpenAI requests use Priority processing and reasoning_effort=none for lower latency.'
+                              'Only affects validation short session. OpenAI requests use Priority processing; the parallel probability lane uses high reasoning so the audit pass can finish before submit.'
                             )}
                           </Text>
                         </Box>

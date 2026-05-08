@@ -96,7 +96,7 @@ describe('solver-orchestrator planning', () => {
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('enables a three-run short-session OpenAI probability ensemble on the parallel lane', () => {
+  it('enables a two-run short-session OpenAI probability ensemble on the parallel lane', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-timeout-${index + 1}`)
     )
@@ -117,8 +117,8 @@ describe('solver-orchestrator planning', () => {
     expect(plan.effectiveProfile.maxRetries).toBe(0)
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
     expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(plan.effectiveProfile.probabilityRuns).toBe(3)
-    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('xhigh')
+    expect(plan.effectiveProfile.probabilityRuns).toBe(2)
+    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('high')
     expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
       plan.effectiveProfile.uncertaintyConfidenceThreshold
@@ -188,7 +188,7 @@ describe('solver-orchestrator planning', () => {
     expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(45000)
     expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
     expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(3)
+    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(2)
     expect(
       shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
     ).toBeGreaterThanOrEqual(0.95)
@@ -331,7 +331,7 @@ describe('solver-orchestrator planning', () => {
 
     expect(budget.flipCount).toBe(6)
     expect(budget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(budget.effectiveProfile.probabilityRuns).toBe(3)
+    expect(budget.effectiveProfile.probabilityRuns).toBe(2)
     expect(budget.uncertaintyReviewFlipCount).toBe(0)
     expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThanOrEqual(95)
   })
