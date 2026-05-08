@@ -1415,16 +1415,34 @@ function ValidationSession({
     validationStateScope,
   ])
 
-  const handleRestartRehearsalNetwork = useCallback(() => {
-    rememberCurrentRehearsalDismissal()
-    clearValidationState(validationStateScope)
-    getNodeBridge().restartValidationDevnet(
-      buildRehearsalNetworkPayload({
-        connectApp: true,
-      })
-    )
-    router.push('/settings/node')
-  }, [rememberCurrentRehearsalDismissal, router, validationStateScope])
+  const handleRestartRehearsalNetwork = useCallback(
+    ({armAutosolver = false} = {}) => {
+      if (armAutosolver) {
+        updateAiSolverSettings({
+          enabled: true,
+          mode: 'session-auto',
+        })
+      }
+      rememberCurrentRehearsalDismissal()
+      clearValidationState(validationStateScope)
+      getNodeBridge().restartValidationDevnet(
+        buildRehearsalNetworkPayload({
+          connectApp: true,
+        })
+      )
+      router.push('/settings/node')
+    },
+    [
+      rememberCurrentRehearsalDismissal,
+      router,
+      updateAiSolverSettings,
+      validationStateScope,
+    ]
+  )
+
+  const handleRestartRehearsalAutosolve = useCallback(() => {
+    handleRestartRehearsalNetwork({armAutosolver: true})
+  }, [handleRestartRehearsalNetwork])
 
   const handleLeaveRehearsalSession = useCallback(() => {
     rememberCurrentRehearsalDismissal()
@@ -1718,6 +1736,24 @@ function ValidationSession({
     router.push('/settings/ai')
   }, [isRealSessionAutoBlockedInDev, router, t, toast, updateAiSolverSettings])
 
+  const enableRehearsalAutosolver = useCallback(() => {
+    updateAiSolverSettings({
+      enabled: true,
+      mode: 'session-auto',
+    })
+    autoSolveStartedRef.current.short = false
+    autoSolveStartedRef.current.long = false
+    autoSolveLongSignatureRef.current = ''
+    clearAutoSolveRetry('short')
+    clearAutoSolveRetry('long')
+    notifyAi(
+      t('Rehearsal autosolver armed'),
+      t(
+        'This rehearsal session can now start AI solving automatically without real on-chain autosolve consent.'
+      )
+    )
+  }, [clearAutoSolveRetry, notifyAi, t, updateAiSolverSettings])
+
   const aiSessionType = getValidationAiSessionType({
     state,
     submitting: isSubmitting(state),
@@ -1748,6 +1784,10 @@ function ValidationSession({
     aiSolverSettings.enabled &&
     aiSolverSettings.mode === 'session-auto' &&
     hasSessionAutoSubmitConsent
+  const rehearsalAutosolverManualOnly =
+    isRehearsalNodeSession &&
+    aiSolverSettings.enabled &&
+    aiSolverSettings.mode !== 'session-auto'
   const autoReportDelayMinutes = Math.max(
     1,
     Number(aiSolverSettings.autoReportDelayMinutes) ||
@@ -3676,6 +3716,26 @@ function ValidationSession({
     manualAiActionLabel = t('AI solve short session')
   }
 
+  let validationAiModeBannerText = t(
+    'Classic validation flow active. Optional AI solver is off.'
+  )
+  let validationAiModeBannerBg = 'blue.500'
+
+  if (showValidationAiUi && isAutoManagedValidation) {
+    validationAiModeBannerText = isRehearsalNodeSession
+      ? t('Rehearsal autosolver is armed.')
+      : t('Automatic AI solver is armed.')
+    validationAiModeBannerBg = 'green.500'
+  } else if (showValidationAiUi && rehearsalAutosolverManualOnly) {
+    validationAiModeBannerText = t(
+      'Manual AI helper is enabled. Rehearsal autosolve is not armed.'
+    )
+    validationAiModeBannerBg = 'orange.500'
+  } else if (showValidationAiUi) {
+    validationAiModeBannerText = t('Optional AI solver mode is enabled.')
+    validationAiModeBannerBg = 'orange.500'
+  }
+
   if (isValidationSucceeded && !forceAiPreview) {
     return (
       <ValidationScene bg="white">
@@ -3703,16 +3763,50 @@ function ValidationSession({
       <Flex
         align="center"
         justify="center"
-        bg={showValidationAiUi ? 'orange.500' : 'blue.500'}
+        bg={validationAiModeBannerBg}
         color="white"
         py={1}
         fontSize="xs"
         fontWeight={600}
       >
-        {showValidationAiUi
-          ? t('Optional AI solver mode is enabled.')
-          : t('Classic validation flow active. Optional AI solver is off.')}
+        {validationAiModeBannerText}
       </Flex>
+
+      {rehearsalAutosolverManualOnly && !forceAiPreview && (
+        <Box
+          bg="orange.50"
+          borderBottomWidth="1px"
+          borderBottomColor="orange.100"
+          px={4}
+          py={3}
+        >
+          <Flex
+            align={['flex-start', 'center']}
+            justify="space-between"
+            direction={['column', 'row']}
+            gap={3}
+          >
+            <Box>
+              <Text fontWeight={600}>
+                {t('Rehearsal autosolve is not armed')}
+              </Text>
+              <Text color="muted" fontSize="sm">
+                {t(
+                  'Manual AI helper can solve only after you press the AI button. Arm rehearsal autosolve before short session if you want a reliable automatic test.'
+                )}
+              </Text>
+            </Box>
+            <Stack isInline spacing={2}>
+              <PrimaryButton onClick={enableRehearsalAutosolver}>
+                {t('Arm autosolver')}
+              </PrimaryButton>
+              <SecondaryButton onClick={handleRestartRehearsalAutosolve}>
+                {t('Restart clean test')}
+              </SecondaryButton>
+            </Stack>
+          </Flex>
+        </Box>
+      )}
 
       {forceAiPreview ? (
         <Box bg="blue.012" borderBottomWidth="1px" borderBottomColor="blue.050">
@@ -4257,7 +4351,20 @@ function ValidationSession({
       )}
 
       {state.matches('validationFailed') && (
-        <ValidationFailedDialog isOpen onSubmit={() => router.push('/home')} />
+        <ValidationFailedDialog
+          isOpen
+          isRehearsalSession={isRehearsalNodeSession}
+          submitText={
+            isRehearsalNodeSession
+              ? t('Restart autosolve rehearsal')
+              : t('Go to My Idena')
+          }
+          onSubmit={
+            isRehearsalNodeSession
+              ? handleRestartRehearsalAutosolve
+              : () => router.push('/home')
+          }
+        />
       )}
 
       <BadFlipDialog
