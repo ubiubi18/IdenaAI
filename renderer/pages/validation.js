@@ -14,6 +14,7 @@ import {
   Button,
   Divider,
   SlideFade,
+  Image,
   useDisclosure,
   useToast,
 } from '@chakra-ui/react'
@@ -2202,6 +2203,8 @@ function ValidationSession({
               hash: event.hash,
               leftImage: event.leftImage,
               rightImage: event.rightImage,
+              leftFrames: event.leftFrames,
+              rightFrames: event.rightFrames,
               words: event.words,
               expectedAnswer: event.expectedAnswer,
               expectedStrength: event.expectedStrength,
@@ -2229,6 +2232,8 @@ function ValidationSession({
               hash: event.hash,
               leftImage: event.leftImage,
               rightImage: event.rightImage,
+              leftFrames: event.leftFrames,
+              rightFrames: event.rightFrames,
               words: event.words,
               expectedAnswer: event.expectedAnswer,
               expectedStrength: event.expectedStrength,
@@ -2262,6 +2267,8 @@ function ValidationSession({
               hash: event.hash,
               leftImage: event.leftImage,
               rightImage: event.rightImage,
+              leftFrames: event.leftFrames,
+              rightFrames: event.rightFrames,
               words: event.words,
               expectedAnswer: event.expectedAnswer,
               expectedStrength: event.expectedStrength,
@@ -2328,6 +2335,8 @@ function ValidationSession({
               firstPass: event.firstPass,
               modelFallback: event.modelFallback,
               modelFallbacks: event.modelFallbacks,
+              leftFrames: event.leftFrames,
+              rightFrames: event.rightFrames,
             }
             liveEntries.push(entry)
             setAiLiveTimeline((prev) => prev.concat(entry).slice(-24))
@@ -4882,33 +4891,21 @@ function AiTelemetryPanel({
                   activeFlip.total || '-'
                 } ${shortenHash(activeFlip.hash)}`}
               </Text>
-              <Flex gap={2}>
-                {activeFlip.leftImage ? (
-                  <img
-                    src={activeFlip.leftImage}
-                    alt="ai-current-left"
-                    style={{
-                      width: 84,
-                      height: 64,
-                      objectFit: 'cover',
-                      borderRadius: 6,
-                      border: '1px solid rgba(128,128,128,0.35)',
-                    }}
-                  />
-                ) : null}
-                {activeFlip.rightImage ? (
-                  <img
-                    src={activeFlip.rightImage}
-                    alt="ai-current-right"
-                    style={{
-                      width: 84,
-                      height: 64,
-                      objectFit: 'cover',
-                      borderRadius: 6,
-                      border: '1px solid rgba(128,128,128,0.35)',
-                    }}
-                  />
-                ) : null}
+              <Flex gap={3} align="flex-start" flexWrap="wrap">
+                <AiTelemetryFlipPreview
+                  label="left"
+                  image={activeFlip.leftImage}
+                  frames={activeFlip.leftFrames}
+                  borderColor={cardBorder}
+                  mutedColor={bodyColor}
+                />
+                <AiTelemetryFlipPreview
+                  label="right"
+                  image={activeFlip.rightImage}
+                  frames={activeFlip.rightFrames}
+                  borderColor={cardBorder}
+                  mutedColor={bodyColor}
+                />
               </Flex>
               {activeFlip.answer && (
                 <Stack spacing={1} mt={1}>
@@ -5045,6 +5042,98 @@ function AiTelemetryPanel({
         </Stack>
       )}
     </Stack>
+  )
+}
+
+function AiTelemetryFlipPreview({
+  label,
+  image,
+  frames = [],
+  borderColor = 'gray.100',
+  mutedColor = 'muted',
+}) {
+  const normalizedFrames = Array.isArray(frames)
+    ? frames
+        .map((src) => String(src || '').trim())
+        .filter(Boolean)
+        .slice(0, 4)
+    : []
+  const normalizedImage = String(image || '').trim()
+
+  if (!normalizedFrames.length && !normalizedImage) {
+    return null
+  }
+
+  return (
+    <Box>
+      <Text fontSize="10px" color={mutedColor} mb={1} textTransform="uppercase">
+        {label}
+      </Text>
+      <Flex
+        direction="column"
+        w="72px"
+        h="216px"
+        p="2px"
+        borderWidth="1px"
+        borderColor={borderColor}
+        borderRadius="md"
+        bg="blackAlpha.500"
+        overflow="hidden"
+      >
+        {normalizedFrames.length ? (
+          normalizedFrames.map((src, index) => (
+            <AiTelemetryFlipFrame
+              key={`${label}-${index}`}
+              src={src}
+              alt={`ai-current-${label}-${index + 1}`}
+            />
+          ))
+        ) : (
+          <Image
+            src={normalizedImage}
+            alt={`ai-current-${label}`}
+            objectFit="cover"
+            w="full"
+            h="full"
+            borderRadius="sm"
+            ignoreFallback
+          />
+        )}
+      </Flex>
+    </Box>
+  )
+}
+
+function AiTelemetryFlipFrame({src, alt}) {
+  return (
+    <Box
+      flex="1"
+      minH={0}
+      position="relative"
+      overflow="hidden"
+      bg="black"
+      _notLast={{
+        mb: '2px',
+      }}
+    >
+      <Box
+        position="absolute"
+        inset={0}
+        background={`center center / cover no-repeat url(${src})`}
+        filter="blur(6px)"
+        opacity={0.75}
+      />
+      <Image
+        src={src}
+        alt={alt}
+        objectFit="contain"
+        w="full"
+        h="full"
+        position="relative"
+        zIndex={1}
+        ignoreFallback
+      />
+    </Box>
   )
 }
 

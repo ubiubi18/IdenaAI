@@ -32,8 +32,12 @@ import {
 } from '../../shared/providers/node-context'
 import {useChainState} from '../../shared/providers/chain-context'
 import {
+  Dialog,
+  DialogBody,
+  DialogFooter,
   HDivider,
   Input,
+  Select,
   Toast,
   Tooltip,
 } from '../../shared/components/components'
@@ -57,10 +61,86 @@ import {
   getRehearsalValidationBlockedReason,
   openValidationLottery,
 } from '../../screens/validation/hooks/use-start-validation'
+import {buildLocalAiRuntimePayload} from '../../shared/utils/ai-provider-readiness'
 
 const NODE_SETTINGS_TOAST_ID = 'node-settings-status-toast'
 const LOCAL_RPC_KEY_TOAST_ID = 'local-rpc-key-toast'
+const REHEARSAL_AI_TOAST_ID = 'rehearsal-ai-setup-toast'
 const APP_NAME = 'IdenaAI'
+
+const REHEARSAL_AI_SETUP_MODES = {
+  Remote: 'remote',
+  Local: 'local',
+  None: 'none',
+}
+
+const REHEARSAL_AI_PROVIDER_OPTIONS = [
+  {value: 'openai', label: 'OpenAI'},
+  {value: 'anthropic', label: 'Anthropic Claude'},
+  {value: 'gemini', label: 'Google Gemini'},
+  {value: 'xai', label: 'xAI (Grok)'},
+  {value: 'mistral', label: 'Mistral'},
+  {value: 'groq', label: 'Groq'},
+  {value: 'deepseek', label: 'DeepSeek'},
+  {value: 'openrouter', label: 'OpenRouter'},
+  {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
+]
+
+const REHEARSAL_AI_DEFAULT_MODELS = {
+  openai: 'gpt-5.5',
+  anthropic: 'claude-3-7-sonnet-latest',
+  gemini: 'gemini-2.0-flash',
+  xai: 'grok-2-vision-latest',
+  mistral: 'mistral-large-latest',
+  groq: 'llama-3.2-90b-vision-preview',
+  deepseek: 'deepseek-chat',
+  openrouter: 'openai/gpt-4o-mini',
+  'openai-compatible': 'gpt-5.5',
+}
+
+const REHEARSAL_AI_MODEL_PRESETS = {
+  openai: [
+    'gpt-5.5',
+    'gpt-5.5-mini',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-chat-latest',
+    'gpt-5.3-codex',
+    'gpt-5-mini',
+    'gpt-4.1',
+    'gpt-4.1-mini',
+    'gpt-4o',
+    'gpt-4o-mini',
+    'o4-mini',
+  ],
+  anthropic: [
+    'claude-3-7-sonnet-latest',
+    'claude-3-5-sonnet-latest',
+    'claude-3-5-haiku-latest',
+  ],
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  xai: ['grok-2-vision-latest', 'grok-2-latest'],
+  mistral: ['mistral-large-latest', 'pixtral-large-latest', 'pixtral-12b'],
+  groq: [
+    'llama-3.2-90b-vision-preview',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+  ],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  openrouter: [
+    'openai/gpt-4o-mini',
+    'openai/gpt-4.1-mini',
+    'anthropic/claude-3.7-sonnet',
+    'google/gemini-2.0-flash-001',
+  ],
+  'openai-compatible': [
+    'gpt-5.5',
+    'gpt-5.5-mini',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-4.1-mini',
+    'gpt-4o-mini',
+  ],
+}
 
 async function writeClipboardText(text) {
   const value = String(text || '')
@@ -150,6 +230,44 @@ function LocalRpcKeyHelp({label}) {
 
 function hasNodeBridge() {
   return !getNodeBridge().__idenaFallback
+}
+
+function getAiSolverBridge() {
+  if (!global.aiSolver) {
+    throw new Error('AI bridge is not available in this build')
+  }
+
+  return global.aiSolver
+}
+
+function getLocalAiBridge() {
+  if (!global.localAi) {
+    throw new Error('Local AI bridge is not available in this build')
+  }
+
+  return global.localAi
+}
+
+function resolveRehearsalAiSetupMode(aiSolver = {}) {
+  return aiSolver?.provider === 'local-ai'
+    ? REHEARSAL_AI_SETUP_MODES.Local
+    : REHEARSAL_AI_SETUP_MODES.Remote
+}
+
+function resolveRehearsalAiProvider(aiSolver = {}) {
+  const configuredProvider = String(aiSolver.provider || '').trim()
+
+  return REHEARSAL_AI_PROVIDER_OPTIONS.some(
+    ({value}) => value === configuredProvider
+  )
+    ? configuredProvider
+    : 'openai'
+}
+
+function resolveRehearsalAiModel(provider, model = '') {
+  const value = String(model || '').trim()
+
+  return value || REHEARSAL_AI_DEFAULT_MODELS[provider] || 'gpt-5.5'
 }
 
 function normalizeLogs(value) {
@@ -292,6 +410,10 @@ function normalizeDevnetStatus(value) {
       seedRequestedCount: null,
       seedSubmittedCount: null,
       seedConfirmedCount: null,
+      seedConfirmedNodeCount: null,
+      seedExpectedNodeCount: null,
+      seedPrimaryVisibleNodeCount: null,
+      seedPrimaryExpectedNodeCount: null,
       primaryValidationAssigned: false,
       primaryShortHashCount: null,
       primaryShortHashReadyCount: null,
@@ -330,6 +452,22 @@ function normalizeDevnetStatus(value) {
     seedConfirmedCount:
       typeof value.seedConfirmedCount === 'number'
         ? value.seedConfirmedCount
+        : null,
+    seedConfirmedNodeCount:
+      typeof value.seedConfirmedNodeCount === 'number'
+        ? value.seedConfirmedNodeCount
+        : null,
+    seedExpectedNodeCount:
+      typeof value.seedExpectedNodeCount === 'number'
+        ? value.seedExpectedNodeCount
+        : null,
+    seedPrimaryVisibleNodeCount:
+      typeof value.seedPrimaryVisibleNodeCount === 'number'
+        ? value.seedPrimaryVisibleNodeCount
+        : null,
+    seedPrimaryExpectedNodeCount:
+      typeof value.seedPrimaryExpectedNodeCount === 'number'
+        ? value.seedPrimaryExpectedNodeCount
         : null,
     primaryValidationAssigned: value.primaryValidationAssigned === true,
     primaryShortHashCount:
@@ -372,6 +510,7 @@ function NodeSettings() {
     clearEphemeralExternalNode,
     toggleAutoActivateMining,
     updateAiSolverSettings,
+    updateLocalAiSettings,
   } = useSettingsDispatch()
 
   const {nodeFailed} = useNodeState()
@@ -549,6 +688,23 @@ function NodeSettings() {
 
   const [revealApiKey, setRevealApiKey] = useState(false)
   const [revealInternalApiKey, setRevealInternalApiKey] = useState(false)
+  const [isRehearsalAiDialogOpen, setIsRehearsalAiDialogOpen] = useState(false)
+  const [isPreparingRehearsalAi, setIsPreparingRehearsalAi] = useState(false)
+  const [rehearsalAiSetupMode, setRehearsalAiSetupMode] = useState(() =>
+    resolveRehearsalAiSetupMode(settings.aiSolver)
+  )
+  const [rehearsalAiProvider, setRehearsalAiProvider] = useState(() =>
+    resolveRehearsalAiProvider(settings.aiSolver)
+  )
+  const [rehearsalAiModel, setRehearsalAiModel] = useState(() =>
+    resolveRehearsalAiModel(
+      resolveRehearsalAiProvider(settings.aiSolver),
+      settings.aiSolver?.model
+    )
+  )
+  const [rehearsalApiKey, setRehearsalApiKey] = useState('')
+  const [isRehearsalApiKeyVisible, setIsRehearsalApiKeyVisible] =
+    useState(false)
   const emptyLogMessage = (() => {
     if (!canUseIpcRenderer) {
       return t(
@@ -578,6 +734,9 @@ function NodeSettings() {
   const primaryRehearsalRpcReady = Boolean(primaryDevnetNode?.rpcReady)
   const readyDevnetNodeCount = devnetStatus.nodes.filter(
     ({rpcReady}) => rpcReady
+  ).length
+  const connectedDevnetNodeCount = devnetStatus.nodes.filter(
+    ({peerCount}) => Number(peerCount) > 0
   ).length
   const onlineDevnetNodeCount = devnetStatus.nodes.filter(
     ({online}) => online
@@ -730,6 +889,24 @@ function NodeSettings() {
     String(settings.aiSolver?.mode || '').trim() === 'session-auto'
   const rehearsalAutosolverManualOnly =
     settings.aiSolver?.enabled === true && !rehearsalAutosolverArmed
+  const rehearsalAiModelPresets =
+    REHEARSAL_AI_MODEL_PRESETS[rehearsalAiProvider] || []
+  const rehearsalAiModelPresetValue = rehearsalAiModelPresets.includes(
+    rehearsalAiModel
+  )
+    ? rehearsalAiModel
+    : 'custom'
+  const trimmedRehearsalApiKey = String(rehearsalApiKey || '').trim()
+  const isRehearsalRemoteAiMode =
+    rehearsalAiSetupMode === REHEARSAL_AI_SETUP_MODES.Remote
+  const isRehearsalLocalAiMode =
+    rehearsalAiSetupMode === REHEARSAL_AI_SETUP_MODES.Local
+  const isRehearsalNoAiMode =
+    rehearsalAiSetupMode === REHEARSAL_AI_SETUP_MODES.None
+  const rehearsalAiProviderLabel =
+    REHEARSAL_AI_PROVIDER_OPTIONS.find(
+      ({value}) => value === rehearsalAiProvider
+    )?.label || rehearsalAiProvider
   const localRpcKeyHelpText = t(
     'The local RPC key lives as internalApiKey in settings.json inside the current {{appName}} profile. Real app profiles: macOS ~/Library/Application Support/{{appName}}/settings.json, Windows %APPDATA%\\{{appName}}\\settings.json, Linux ~/.config/{{appName}}/settings.json. Edit it only while {{appName}} and its node are stopped, then restart. Rehearsal networks use a different temporary API key managed by the rehearsal node.',
     {appName: APP_NAME}
@@ -815,19 +992,219 @@ function NodeSettings() {
     [armRehearsalAutosolver]
   )
 
-  const startAutosolveRehearsal = useCallback(() => {
-    if (devnetStatus.active) {
-      restartRehearsalNetwork({connectApp: true, armAutosolver: true})
-    } else {
-      startRehearsalNetwork({connectApp: true, armAutosolver: true})
+  const showRehearsalAiToast = useCallback(
+    (title, description, status = 'info') => {
+      if (
+        typeof toast.isActive === 'function' &&
+        typeof toast.close === 'function' &&
+        toast.isActive(REHEARSAL_AI_TOAST_ID)
+      ) {
+        toast.close(REHEARSAL_AI_TOAST_ID)
+      }
+
+      toast({
+        id: REHEARSAL_AI_TOAST_ID,
+        duration: 7000,
+        render: () => (
+          <Toast title={title} description={description} status={status} />
+        ),
+      })
+    },
+    [toast]
+  )
+
+  const openRehearsalAiDialog = useCallback(() => {
+    const provider = 'openai'
+    setRehearsalAiSetupMode(resolveRehearsalAiSetupMode(settings.aiSolver))
+    setRehearsalAiProvider(provider)
+    setRehearsalAiModel(resolveRehearsalAiModel(provider))
+    setRehearsalApiKey('')
+    setIsRehearsalApiKeyVisible(false)
+    setIsRehearsalAiDialogOpen(true)
+  }, [settings.aiSolver])
+
+  const closeRehearsalAiDialog = useCallback(() => {
+    if (!isPreparingRehearsalAi) {
+      setIsRehearsalAiDialogOpen(false)
     }
-    openValidationLottery(router, {isRehearsalNodeSession: true})
+  }, [isPreparingRehearsalAi])
+
+  const updateRehearsalAiProvider = useCallback((provider) => {
+    const nextProvider = resolveRehearsalAiProvider({provider})
+    setRehearsalAiProvider(nextProvider)
+    setRehearsalAiModel(resolveRehearsalAiModel(nextProvider))
+  }, [])
+
+  const startRehearsalNetworkForDialog = useCallback(
+    ({armAutosolver = false} = {}) => {
+      if (devnetStatus.active) {
+        restartRehearsalNetwork({connectApp: true, armAutosolver})
+      } else {
+        startRehearsalNetwork({connectApp: true, armAutosolver})
+      }
+    },
+    [devnetStatus.active, restartRehearsalNetwork, startRehearsalNetwork]
+  )
+
+  const startRehearsalWithoutAi = useCallback(async () => {
+    setIsPreparingRehearsalAi(true)
+
+    try {
+      updateAiSolverSettings({
+        enabled: false,
+        mode: 'manual',
+      })
+
+      startRehearsalNetworkForDialog()
+      setIsRehearsalAiDialogOpen(false)
+      showRehearsalAiToast(
+        t('Rehearsal started without AI'),
+        t(
+          'The rehearsal network is connected to this app, but autosolver mode is off. You can arm AI later from this page before the short session starts.'
+        ),
+        'info'
+      )
+    } catch (error) {
+      showRehearsalAiToast(
+        t('Unable to start rehearsal'),
+        String((error && error.message) || error || '').trim() ||
+          t('Unknown rehearsal setup error'),
+        'error'
+      )
+    } finally {
+      setIsPreparingRehearsalAi(false)
+    }
   }, [
-    devnetStatus.active,
-    restartRehearsalNetwork,
-    router,
-    startRehearsalNetwork,
+    showRehearsalAiToast,
+    startRehearsalNetworkForDialog,
+    t,
+    updateAiSolverSettings,
   ])
+
+  const startAutosolveRehearsalWithLocalAi = useCallback(async () => {
+    setIsPreparingRehearsalAi(true)
+
+    try {
+      const nextLocalAi = {
+        ...(settings.localAi || {}),
+        enabled: true,
+      }
+      const runtimePayload = buildLocalAiRuntimePayload(nextLocalAi)
+
+      updateLocalAiSettings({enabled: true})
+      updateAiSolverSettings({
+        enabled: true,
+        mode: 'session-auto',
+        provider: 'local-ai',
+      })
+
+      await getLocalAiBridge().start(runtimePayload)
+
+      startRehearsalNetworkForDialog({armAutosolver: true})
+      setIsRehearsalAiDialogOpen(false)
+      showRehearsalAiToast(
+        t('Rehearsal autosolver armed with Local AI'),
+        t(
+          'Local AI mode is enabled without a provider API key. This page will keep showing node stats and logs until you open the countdown or validation manually.'
+        ),
+        'success'
+      )
+    } catch (error) {
+      showRehearsalAiToast(
+        t('Unable to start Local AI'),
+        String((error && error.message) || error || '').trim() ||
+          t('Unknown local AI setup error'),
+        'error'
+      )
+    } finally {
+      setIsPreparingRehearsalAi(false)
+    }
+  }, [
+    settings.localAi,
+    showRehearsalAiToast,
+    startRehearsalNetworkForDialog,
+    t,
+    updateAiSolverSettings,
+    updateLocalAiSettings,
+  ])
+
+  const startAutosolveRehearsalWithAi = useCallback(
+    async ({loadApiKey = false} = {}) => {
+      const provider = resolveRehearsalAiProvider({
+        provider: rehearsalAiProvider,
+      })
+      const model = resolveRehearsalAiModel(provider, rehearsalAiModel)
+
+      setIsPreparingRehearsalAi(true)
+
+      try {
+        if (loadApiKey) {
+          await getAiSolverBridge().setProviderKey({
+            provider,
+            apiKey: trimmedRehearsalApiKey,
+          })
+          setRehearsalApiKey('')
+          setIsRehearsalApiKeyVisible(false)
+        }
+
+        updateAiSolverSettings(
+          loadApiKey
+            ? {
+                enabled: true,
+                mode: 'session-auto',
+                provider,
+                model,
+              }
+            : {
+                enabled: true,
+                mode: 'session-auto',
+              }
+        )
+
+        startRehearsalNetworkForDialog({armAutosolver: true})
+
+        setIsRehearsalAiDialogOpen(false)
+        showRehearsalAiToast(
+          t('Rehearsal autosolver armed'),
+          loadApiKey
+            ? t(
+                '{{provider}} {{model}} key loaded. Autosolver mode is enabled for the rehearsal session; this page will keep showing node stats and logs until you open the countdown or validation manually.',
+                {
+                  provider: rehearsalAiProviderLabel,
+                  model,
+                }
+              )
+            : t(
+                'Autosolver mode is enabled with the already configured AI settings. This page will keep showing node stats and logs until you open the countdown or validation manually.'
+              ),
+          loadApiKey ? 'success' : 'warning'
+        )
+      } catch (error) {
+        showRehearsalAiToast(
+          t('Unable to prepare rehearsal AI'),
+          String((error && error.message) || error || '').trim() ||
+            t('Unknown provider setup error'),
+          'error'
+        )
+      } finally {
+        setIsPreparingRehearsalAi(false)
+      }
+    },
+    [
+      rehearsalAiModel,
+      rehearsalAiProvider,
+      rehearsalAiProviderLabel,
+      showRehearsalAiToast,
+      startRehearsalNetworkForDialog,
+      t,
+      trimmedRehearsalApiKey,
+      updateAiSolverSettings,
+    ]
+  )
+
+  const startAutosolveRehearsal = useCallback(() => {
+    openRehearsalAiDialog()
+  }, [openRehearsalAiDialog])
 
   const runRehearsalSolverLanes = ({
     participantCount = REHEARSAL_DEFAULT_SOLVER_PARTICIPANT_COUNT,
@@ -837,6 +1214,44 @@ function NodeSettings() {
         participantCount,
       })
     )
+
+  let rehearsalDialogActions = (
+    <>
+      <SecondaryButton
+        onClick={() => startAutosolveRehearsalWithAi()}
+        isLoading={isPreparingRehearsalAi}
+      >
+        {t('Start with configured AI')}
+      </SecondaryButton>
+      <PrimaryButton
+        isDisabled={!trimmedRehearsalApiKey || isPreparingRehearsalAi}
+        isLoading={isPreparingRehearsalAi}
+        onClick={() => startAutosolveRehearsalWithAi({loadApiKey: true})}
+      >
+        {t('Set key and start')}
+      </PrimaryButton>
+    </>
+  )
+
+  if (isRehearsalNoAiMode) {
+    rehearsalDialogActions = (
+      <PrimaryButton
+        onClick={startRehearsalWithoutAi}
+        isLoading={isPreparingRehearsalAi}
+      >
+        {t('Start without AI')}
+      </PrimaryButton>
+    )
+  } else if (isRehearsalLocalAiMode) {
+    rehearsalDialogActions = (
+      <PrimaryButton
+        onClick={startAutosolveRehearsalWithLocalAi}
+        isLoading={isPreparingRehearsalAi}
+      >
+        {t('Start Local AI autosolver')}
+      </PrimaryButton>
+    )
+  }
 
   return (
     <SettingsLayout>
@@ -1093,6 +1508,40 @@ function NodeSettings() {
               </Text>
             </Box>
 
+            <Box
+              borderWidth="1px"
+              borderColor="blue.050"
+              borderRadius="md"
+              px={4}
+              py={3}
+            >
+              <Stack spacing={2}>
+                <Text fontWeight={500}>{t('Before clicking start here')}</Text>
+                <Stack as="ol" spacing={1} pl={4} color="muted" fontSize="sm">
+                  <Text as="li">
+                    {t(
+                      'Use Settings -> AI first: choose an external provider if needed, paste the provider API key, click Set key, then enable auto-solve for the next session.'
+                    )}
+                  </Text>
+                  <Text as="li">
+                    {t(
+                      'For a clean local rehearsal, turn off Run built-in node in this panel before starting the rehearsal network.'
+                    )}
+                  </Text>
+                  <Text as="li">
+                    {t(
+                      'After start, wait until the local nodes are ready, online, connected, and the seeded FLIP-Challenge flips are visible or confirmed.'
+                    )}
+                  </Text>
+                  <Text as="li">
+                    {t(
+                      'When the countdown reaches zero, stay in the validation screen, watch the solve session, then review the audit/results screen.'
+                    )}
+                  </Text>
+                </Stack>
+              </Stack>
+            </Box>
+
             <Stack
               spacing={3}
               borderWidth="1px"
@@ -1199,10 +1648,16 @@ function NodeSettings() {
                     </Text>
                   )}
                   {devnetStatus.nodes.length > 0 && (
-                    <Text color="muted">
-                      {t('Ready nodes')}: {readyDevnetNodeCount} /{' '}
-                      {devnetStatus.nodeCount}
-                    </Text>
+                    <Stack spacing={1}>
+                      <Text color="muted">
+                        {t('Ready nodes')}: {readyDevnetNodeCount} /{' '}
+                        {devnetStatus.nodeCount}
+                      </Text>
+                      <Text color="muted">
+                        {t('Connected local nodes')}: {connectedDevnetNodeCount}{' '}
+                        / {devnetStatus.nodeCount}
+                      </Text>
+                    </Stack>
                   )}
                   {devnetStatus.nodes.length > 0 && (
                     <Text color="muted">
@@ -1233,6 +1688,24 @@ function NodeSettings() {
                       </Text>
                     </Stack>
                   )}
+                  {typeof devnetStatus.seedPrimaryVisibleNodeCount ===
+                    'number' &&
+                    typeof devnetStatus.seedPrimaryExpectedNodeCount ===
+                      'number' && (
+                      <Text color="muted">
+                        {t('Seed authors visible on primary node')}:{' '}
+                        {devnetStatus.seedPrimaryVisibleNodeCount} /{' '}
+                        {devnetStatus.seedPrimaryExpectedNodeCount}
+                      </Text>
+                    )}
+                  {typeof devnetStatus.seedConfirmedNodeCount === 'number' &&
+                    typeof devnetStatus.seedExpectedNodeCount === 'number' && (
+                      <Text color="muted">
+                        {t('Seed authors confirmed locally')}:{' '}
+                        {devnetStatus.seedConfirmedNodeCount} /{' '}
+                        {devnetStatus.seedExpectedNodeCount}
+                      </Text>
+                    )}
                   {rehearsalNodeConnected && !rehearsalNodeRpcUnavailable && (
                     <Stack spacing={1}>
                       <Text
@@ -1695,6 +2168,211 @@ function NodeSettings() {
           </Box>
         )}
       </Stack>
+
+      <Dialog
+        isOpen={isRehearsalAiDialogOpen}
+        onClose={closeRehearsalAiDialog}
+        size="lg"
+        title={t('Prepare rehearsal autosolver')}
+        shouldShowCloseButton={!isPreparingRehearsalAi}
+      >
+        <DialogBody>
+          <Stack spacing={4}>
+            <Text color="muted" fontSize="sm">
+              {t(
+                'Choose how this rehearsal should start. Remote providers need an API key, Local AI uses the configured local runtime without a provider key, and No AI starts only the rehearsal network.'
+              )}
+            </Text>
+
+            <Box
+              borderWidth="1px"
+              borderColor="orange.200"
+              borderRadius="md"
+              bg="orange.012"
+              p={3}
+            >
+              <Stack spacing={1}>
+                <Text fontWeight={600} fontSize="sm">
+                  {t('Autosolver mode by default')}
+                </Text>
+                <Text color="muted" fontSize="sm">
+                  {t(
+                    'Saving a remote provider key or starting Local AI from this dialog sets AI mode to session-auto for the rehearsal. It will solve automatically once the rehearsal session starts.'
+                  )}
+                </Text>
+              </Stack>
+            </Box>
+
+            <SettingsFormControl>
+              <SettingsFormLabel>{t('Rehearsal start mode')}</SettingsFormLabel>
+              <Select
+                value={rehearsalAiSetupMode}
+                onChange={(event) =>
+                  setRehearsalAiSetupMode(event.target.value)
+                }
+                isDisabled={isPreparingRehearsalAi}
+              >
+                <option value={REHEARSAL_AI_SETUP_MODES.Remote}>
+                  {t('Remote provider API')}
+                </option>
+                <option value={REHEARSAL_AI_SETUP_MODES.Local}>
+                  {t('Local AI runtime')}
+                </option>
+                <option value={REHEARSAL_AI_SETUP_MODES.None}>
+                  {t('No AI yet')}
+                </option>
+              </Select>
+            </SettingsFormControl>
+
+            {isRehearsalRemoteAiMode && (
+              <SettingsFormControl>
+                <SettingsFormLabel>{t('External provider')}</SettingsFormLabel>
+                <Select
+                  value={rehearsalAiProvider}
+                  onChange={(event) =>
+                    updateRehearsalAiProvider(event.target.value)
+                  }
+                  isDisabled={isPreparingRehearsalAi}
+                >
+                  {REHEARSAL_AI_PROVIDER_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </Select>
+              </SettingsFormControl>
+            )}
+
+            {isRehearsalRemoteAiMode && (
+              <SettingsFormControl>
+                <SettingsFormLabel>{t('Model choice')}</SettingsFormLabel>
+                <Stack spacing={2}>
+                  <Select
+                    value={rehearsalAiModelPresetValue}
+                    onChange={(event) => {
+                      const {value} = event.target
+                      if (value === 'custom') {
+                        return
+                      }
+                      setRehearsalAiModel(value)
+                    }}
+                    isDisabled={isPreparingRehearsalAi}
+                  >
+                    {rehearsalAiModelPresets.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                    <option value="custom">{t('Custom model id')}</option>
+                  </Select>
+                  <Input
+                    value={rehearsalAiModel}
+                    onChange={(event) =>
+                      setRehearsalAiModel(event.target.value)
+                    }
+                    placeholder={
+                      REHEARSAL_AI_DEFAULT_MODELS[rehearsalAiProvider] ||
+                      'gpt-5.5'
+                    }
+                    isDisabled={isPreparingRehearsalAi}
+                  />
+                </Stack>
+              </SettingsFormControl>
+            )}
+
+            {isRehearsalRemoteAiMode && (
+              <SettingsFormControl>
+                <SettingsFormLabel>{t('Provider API key')}</SettingsFormLabel>
+                <InputGroup w="full">
+                  <Input
+                    value={rehearsalApiKey}
+                    type={isRehearsalApiKeyVisible ? 'text' : 'password'}
+                    placeholder={t('Paste provider API key')}
+                    onChange={(event) => setRehearsalApiKey(event.target.value)}
+                    isDisabled={isPreparingRehearsalAi}
+                  />
+                  <InputRightElement w="6" h="6" m="1">
+                    <IconButton
+                      size="xs"
+                      aria-label={
+                        isRehearsalApiKeyVisible
+                          ? t('Hide provider API key')
+                          : t('Show provider API key')
+                      }
+                      icon={
+                        isRehearsalApiKeyVisible ? <EyeOffIcon /> : <EyeIcon />
+                      }
+                      bg={isRehearsalApiKeyVisible ? 'gray.300' : 'white'}
+                      fontSize={20}
+                      _hover={{
+                        bg: isRehearsalApiKeyVisible ? 'gray.300' : 'white',
+                      }}
+                      onClick={() =>
+                        setIsRehearsalApiKeyVisible(!isRehearsalApiKeyVisible)
+                      }
+                      isDisabled={isPreparingRehearsalAi}
+                    />
+                  </InputRightElement>
+                </InputGroup>
+                <Text color="muted" fontSize="sm" mt={2}>
+                  {t(
+                    'The key is loaded into memory for this desktop run. For OpenAI tests, prefer a prepaid key without automatic top-up.'
+                  )}
+                </Text>
+              </SettingsFormControl>
+            )}
+
+            {isRehearsalLocalAiMode && (
+              <Box
+                borderWidth="1px"
+                borderColor="muted"
+                borderRadius="md"
+                p={3}
+              >
+                <Stack spacing={1}>
+                  <Text fontWeight={600} fontSize="sm">
+                    {t('Local AI does not need a provider API key')}
+                  </Text>
+                  <Text color="muted" fontSize="sm">
+                    {t(
+                      'IdenaAI will enable the configured Local AI runtime and use it for rehearsal autosolver mode. If the local runtime is not installed or reachable yet, start will show the Local AI error instead of silently falling back to a remote key.'
+                    )}
+                  </Text>
+                </Stack>
+              </Box>
+            )}
+
+            {isRehearsalNoAiMode && (
+              <Box
+                borderWidth="1px"
+                borderColor="muted"
+                borderRadius="md"
+                p={3}
+              >
+                <Stack spacing={1}>
+                  <Text fontWeight={600} fontSize="sm">
+                    {t('Start the rehearsal network only')}
+                  </Text>
+                  <Text color="muted" fontSize="sm">
+                    {t(
+                      'This disables session-auto for the current app profile and connects the rehearsal node without starting an AI solver. You can arm AI later before the short session starts.'
+                    )}
+                  </Text>
+                </Stack>
+              </Box>
+            )}
+          </Stack>
+        </DialogBody>
+        <DialogFooter>
+          <SecondaryButton
+            onClick={closeRehearsalAiDialog}
+            isDisabled={isPreparingRehearsalAi}
+          >
+            {t('Cancel')}
+          </SecondaryButton>
+          {rehearsalDialogActions}
+        </DialogFooter>
+      </Dialog>
     </SettingsLayout>
   )
 }

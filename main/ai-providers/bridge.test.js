@@ -1122,6 +1122,39 @@ describe('createAiProviderBridge', () => {
     expect(result.results[0].error).toContain('openai request failed')
   })
 
+  it('uses the real short-session flip index for provider-error fallback', async () => {
+    const timeoutError = new Error('timeout of 45000ms exceeded')
+    timeoutError.code = 'ECONNABORTED'
+    const invokeProvider = jest.fn().mockRejectedValue(timeoutError)
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      forceDecision: true,
+      maxRetries: 0,
+      flips: [{hash: 'short-session-provider-timeout'}],
+      session: {
+        sessionType: 'short',
+        flipIndex: 2,
+        totalFlips: 6,
+      },
+    })
+
+    expect(result.results[0]).toMatchObject({
+      answer: 'right',
+      forcedDecision: true,
+      forcedDecisionPolicy: 'random',
+      forcedDecisionReason: 'provider_error',
+    })
+  })
+
   it('escalates uncertain skips into annotated frame review before deciding', async () => {
     const invokeProvider = jest
       .fn()

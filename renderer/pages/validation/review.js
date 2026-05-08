@@ -1,7 +1,6 @@
 /* eslint-disable react/prop-types */
 import React from 'react'
 import {
-  AspectRatio,
   Badge,
   Box,
   Button,
@@ -767,37 +766,76 @@ function StoryPreviewCard({
           </Stack>
         </Flex>
 
-        <SimpleGrid columns={2} spacing="3">
-          {imageSlots.map((src, index) => (
-            <AspectRatio key={`${title}-${index}`} ratio={4 / 3}>
-              <Box
-                borderRadius="md"
-                overflow="hidden"
-                bg="whiteAlpha.200"
-                borderWidth="1px"
-                borderColor="whiteAlpha.200"
-              >
-                {src ? (
-                  <Image
-                    src={src}
-                    alt={`${title}-${index + 1}`}
-                    objectFit="cover"
-                    w="full"
-                    h="full"
-                    ignoreFallback
-                  />
-                ) : (
-                  <Center h="full">
-                    <Text color="xwhite.050" fontSize="sm">
-                      No image
-                    </Text>
-                  </Center>
-                )}
-              </Box>
-            </AspectRatio>
-          ))}
-        </SimpleGrid>
+        <Flex justify="center">
+          <BenchmarkReviewFlipPanel title={title} imageSlots={imageSlots} />
+        </Flex>
       </Stack>
+    </Box>
+  )
+}
+
+function BenchmarkReviewFlipPanel({title, imageSlots}) {
+  return (
+    <Flex
+      direction="column"
+      w="clamp(120px, 18vw, 220px)"
+      h="calc(clamp(120px, 18vw, 220px) * 3)"
+      p="4px"
+      borderRadius="lg"
+      borderWidth="2px"
+      borderColor="brandGray.005"
+      bg="blackAlpha.500"
+      overflow="hidden"
+    >
+      {imageSlots.map((src, index) => (
+        <BenchmarkReviewFlipFrame
+          key={`${title}-${index}`}
+          src={src}
+          alt={`${title}-${index + 1}`}
+          isLast={index === imageSlots.length - 1}
+        />
+      ))}
+    </Flex>
+  )
+}
+
+function BenchmarkReviewFlipFrame({src, alt, isLast = false}) {
+  return (
+    <Box
+      flex="1"
+      minH={0}
+      mb={isLast ? 0 : '4px'}
+      position="relative"
+      overflow="hidden"
+      bg="whiteAlpha.200"
+    >
+      {src ? (
+        <>
+          <Box
+            position="absolute"
+            inset={0}
+            background={`center center / cover no-repeat url(${src})`}
+            filter="blur(6px)"
+            opacity={0.75}
+          />
+          <Image
+            src={src}
+            alt={alt}
+            objectFit="contain"
+            w="full"
+            h="full"
+            position="relative"
+            zIndex={1}
+            ignoreFallback
+          />
+        </>
+      ) : (
+        <Center h="full">
+          <Text color="xwhite.050" fontSize="sm">
+            No image
+          </Text>
+        </Center>
+      )}
     </Box>
   )
 }

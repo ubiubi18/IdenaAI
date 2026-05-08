@@ -5199,9 +5199,17 @@ function chooseDeterministicRandomSide(seed, options = {}) {
   const sessionType = String(session.sessionType || options.sessionType || '')
     .trim()
     .toLowerCase()
-  const flipIndex = Number(
-    options.flipIndex != null ? options.flipIndex : session.flipIndex
-  )
+  const sessionFlipIndex = Number(session.flipIndex)
+  const optionFlipIndex = Number(options.flipIndex)
+  let flipIndex = sessionFlipIndex
+  const hasShortSessionFlipIndex =
+    sessionType === 'short' &&
+    Number.isFinite(sessionFlipIndex) &&
+    sessionFlipIndex > 0
+
+  if (!hasShortSessionFlipIndex && Number.isFinite(optionFlipIndex)) {
+    flipIndex = optionFlipIndex
+  }
 
   if (sessionType === 'short' && Number.isFinite(flipIndex) && flipIndex > 0) {
     return Math.trunc(flipIndex) % 2 === 1 ? 'left' : 'right'
