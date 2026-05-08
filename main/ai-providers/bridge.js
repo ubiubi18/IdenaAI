@@ -76,6 +76,7 @@ const {
 
 const SUPPORTED_PROVIDERS = Object.values(PROVIDERS)
 const MAX_CONSULTANTS = 4
+const UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS = [0.95, 0.8, 0.51]
 
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
@@ -5205,6 +5206,32 @@ function resolveSecondPassStrategy({useFrameReasoning, secondPass}) {
   }
 
   return secondPass ? 'uncertainty_recheck' : 'initial_decision'
+}
+
+function getUncertaintyRecheckConfidenceThreshold(profile, passIndex = 0) {
+  if (passIndex === 0) {
+    return normalizeConfidence(
+      profile && profile.uncertaintyConfidenceThreshold
+    )
+  }
+
+  return UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS[
+    Math.min(
+      Math.max(0, passIndex),
+      UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS.length - 1
+    )
+  ]
+}
+
+function shouldRunUncertaintyRecheck({result, threshold}) {
+  if (!result || String(result.error || '').trim()) {
+    return false
+  }
+
+  return (
+    normalizeAnswer(result.answer) === 'skip' ||
+    normalizeConfidence(result.confidence) < threshold
+  )
 }
 
 function normalizeImageList(value) {
@@ -10354,16 +10381,17 @@ Flip hash: ${hash}
       const firstPassProviderFailed = Boolean(
         firstPassResult && String(firstPassResult.error || '').trim()
       )
-
-      const shouldReprompt =
+      const shouldRunFirstRecheck =
         !probabilityEnsembleProviderActive &&
         profile.uncertaintyRepromptEnabled &&
         !firstPassProviderFailed &&
         deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs &&
-        (firstPassResult.answer === 'skip' ||
-          firstPassResult.confidence < profile.uncertaintyConfidenceThreshold)
+        shouldRunUncertaintyRecheck({
+          result: firstPassResult,
+          threshold: getUncertaintyRecheckConfidenceThreshold(profile, 0),
+        })
 
-      if (shouldReprompt) {
+      if (shouldRunFirstRecheck) {
         const secondPassResult = await callProviderPass({
           secondPass: true,
           allowSkip: false,
@@ -10385,6 +10413,63 @@ Flip hash: ${hash}
             rawAnswerBeforeRemap: firstPassResult.rawAnswerBeforeRemap,
             strategy: firstPassResult.secondPassStrategy,
           },
+        }
+      }
+
+      const shouldRunSecondRecheck =
+        shouldRunFirstRecheck &&
+        profile.uncertaintyRepromptEnabled &&
+        deadlineAt - now() >= profile.uncertaintyRepromptMinRemainingMs &&
+        shouldRunUncertaintyRecheck({
+          result: finalResult,
+          threshold: getUncertaintyRecheckConfidenceThreshold(profile, 1),
+        })
+
+      if (shouldRunSecondRecheck) {
+        const thirdPassResult = await callProviderPass({
+          secondPass: true,
+          allowSkip: false,
+          deepFrameReview: true,
+        })
+        mergedTokenUsage = addTokenUsage(
+          mergedTokenUsage,
+          thirdPassResult.tokenUsage
+        )
+        mergedCosts = addCostSummary(mergedCosts, thirdPassResult.costs)
+        finalResult = {
+          ...thirdPassResult,
+          uncertaintyRepromptUsed: true,
+          finalAdjudicationUsed: true,
+          firstPass: finalResult.firstPass || {
+            answer: firstPassResult.answer,
+            confidence: firstPassResult.confidence,
+            error: firstPassResult.error,
+            reasoning: firstPassResult.reasoning,
+            rawAnswerBeforeRemap: firstPassResult.rawAnswerBeforeRemap,
+            strategy: firstPassResult.secondPassStrategy,
+          },
+        }
+      }
+
+      const finalConfidenceThreshold = getUncertaintyRecheckConfidenceThreshold(
+        profile,
+        2
+      )
+      if (
+        profile.forceDecision &&
+        normalizeAnswer(finalResult.answer) !== 'skip' &&
+        normalizeConfidence(finalResult.confidence) < finalConfidenceThreshold
+      ) {
+        finalResult = {
+          ...finalResult,
+          answer: 'skip',
+          rawAnswerBeforeRemap: normalizeAnswer(
+            finalResult.rawAnswerBeforeRemap || finalResult.answer
+          ),
+          finalAnswerAfterRemap: 'skip',
+          reasoning: finalResult.reasoning
+            ? `${finalResult.reasoning}; below final uncertainty threshold ${finalConfidenceThreshold}`
+            : `below final uncertainty threshold ${finalConfidenceThreshold}`,
         }
       }
 

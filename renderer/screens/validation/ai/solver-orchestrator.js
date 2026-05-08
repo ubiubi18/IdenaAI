@@ -12,7 +12,7 @@ const DEFAULT_PROFILE = {
   temperature: 0,
   forceDecision: true,
   uncertaintyRepromptEnabled: true,
-  uncertaintyConfidenceThreshold: 0.45,
+  uncertaintyConfidenceThreshold: 0.95,
   uncertaintyRepromptMinRemainingMs: 3500,
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
@@ -41,8 +41,10 @@ const LONG_SESSION_STRICT_PROFILE_OVERRIDES = {
   interFlipDelayMs: 300,
   flipVisionMode: 'composite',
 }
+const VALIDATION_UNCERTAINTY_FIRST_RECHECK_THRESHOLD = 0.95
 const MIN_SOLVE_GUARD_MS = 1500
-const SHORT_SESSION_MIN_SOLVE_GUARD_MS = 500
+const SHORT_SESSION_SAFE_SUBMIT_GUARD_MS = 5 * 1000
+const SHORT_SESSION_MIN_SOLVE_GUARD_MS = SHORT_SESSION_SAFE_SUBMIT_GUARD_MS
 const MIN_PROVIDER_REQUEST_TIMEOUT_MS = 750
 const IMAGE_PREP_BASE_MS = 2000
 const IMAGE_PREP_PER_FLIP_MS = {
@@ -63,9 +65,9 @@ const SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS = 500
 const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 45 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 95 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.68
+const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.95
 const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 2
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 3
 const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'medium'
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
@@ -390,7 +392,16 @@ function buildEffectiveProfile(profile, provider, sessionType = 'short') {
       .toLowerCase() !== 'local-ai' ||
     nextProfile.benchmarkProfile === 'custom'
   ) {
-    return nextProfile
+    return {
+      ...nextProfile,
+      uncertaintyConfidenceThreshold: Math.max(
+        toFloatOrFallback(
+          nextProfile.uncertaintyConfidenceThreshold,
+          DEFAULT_PROFILE.uncertaintyConfidenceThreshold
+        ),
+        VALIDATION_UNCERTAINTY_FIRST_RECHECK_THRESHOLD
+      ),
+    }
   }
 
   return {
@@ -402,6 +413,13 @@ function buildEffectiveProfile(profile, provider, sessionType = 'short') {
       nextProfile.flipVisionMode === 'composite'
         ? LOCAL_AI_STRICT_PROFILE_OVERRIDES.flipVisionMode
         : nextProfile.flipVisionMode,
+    uncertaintyConfidenceThreshold: Math.max(
+      toFloatOrFallback(
+        nextProfile.uncertaintyConfidenceThreshold,
+        DEFAULT_PROFILE.uncertaintyConfidenceThreshold
+      ),
+      VALIDATION_UNCERTAINTY_FIRST_RECHECK_THRESHOLD
+    ),
   }
 }
 
@@ -966,14 +984,22 @@ function resolveShortSessionOpenAiFastMode({
   provider,
   model,
 }) {
-  if (
-    sessionType !== 'short' ||
-    provider !== 'openai' ||
-    aiSolver.shortSessionOpenAiFastEnabled !== true
-  ) {
+  if (sessionType !== 'short' || provider !== 'openai') {
     return {
       model,
       promptOptions: null,
+    }
+  }
+
+  const promptOptions = {
+    openAiServiceTier: 'priority',
+    openAiReasoningEffort: 'medium',
+  }
+
+  if (aiSolver.shortSessionOpenAiFastEnabled !== true) {
+    return {
+      model,
+      promptOptions,
     }
   }
 
@@ -986,10 +1012,7 @@ function resolveShortSessionOpenAiFastMode({
 
   return {
     model: fastModel,
-    promptOptions: {
-      openAiServiceTier: 'priority',
-      openAiReasoningEffort: 'none',
-    },
+    promptOptions,
   }
 }
 
@@ -1466,9 +1489,12 @@ export async function solveValidationSessionWithAi({
   const sessionDeadlineAt = normalizeDeadlineAt(hardDeadlineAt)
   const sessionSolveGuardMs = getSessionSolveGuardMs(sessionType)
   ensureRuntimeRemaining(sessionDeadlineAt, sessionSolveGuardMs)
+  const safeSessionDeadlineAt = Number.isFinite(sessionDeadlineAt)
+    ? sessionDeadlineAt - sessionSolveGuardMs
+    : null
   const buildDeadlineAt = Number.isFinite(sessionDeadlineAt)
     ? Math.min(
-        sessionDeadlineAt,
+        safeSessionDeadlineAt,
         Date.now() + Math.max(effectiveProfile.deadlineMs, 15 * 1000)
       )
     : Date.now() + Math.max(effectiveProfile.deadlineMs, 15 * 1000)
@@ -1693,22 +1719,25 @@ export async function solveValidationSessionWithAi({
         requestTimeoutMs: effectiveProfile.requestTimeoutMs,
       })
       const remainingSessionMs = getTimeRemainingMs(sessionDeadlineAt)
+      const safeRemainingSessionMs = Number.isFinite(remainingSessionMs)
+        ? Math.max(0, remainingSessionMs - sessionSolveGuardMs)
+        : remainingSessionMs
       let requestDeadlineMs = effectiveProfile.deadlineMs
       if (
         useLongSessionOpenAiStaggeredSolving &&
-        Number.isFinite(remainingSessionMs)
+        Number.isFinite(safeRemainingSessionMs)
       ) {
         requestDeadlineMs = Math.max(
           1000,
           Math.min(
             requestTimeoutMs + LONG_SESSION_OPENAI_STAGGER_DEADLINE_PADDING_MS,
-            remainingSessionMs
+            safeRemainingSessionMs
           )
         )
-      } else if (Number.isFinite(remainingSessionMs)) {
+      } else if (Number.isFinite(safeRemainingSessionMs)) {
         requestDeadlineMs = Math.max(
           1000,
-          Math.min(effectiveProfile.deadlineMs, remainingSessionMs)
+          Math.min(effectiveProfile.deadlineMs, safeRemainingSessionMs)
         )
       }
 
@@ -1974,7 +2003,60 @@ export async function solveValidationSessionWithAi({
       await waitForParallelLaunchDelay(launchIndex)
     }
 
-    return solvePreparedPayloadFlip(preparedFlip)
+    if (sessionType !== 'short' || !Number.isFinite(safeSessionDeadlineAt)) {
+      return solvePreparedPayloadFlip(preparedFlip)
+    }
+
+    const fallbackWaitMs = Math.max(0, safeSessionDeadlineAt - Date.now())
+    if (fallbackWaitMs <= 0) {
+      return {
+        payloadFlip: preparedFlip.payloadFlip,
+        index: preparedFlip.index,
+        solved: buildForcedRandomSolvedFlip({
+          hash: preparedFlip.payloadFlip.hash,
+          error: 'safe_submit_guard',
+          reasoning:
+            'short-session safe-submit guard reached before provider result',
+          forcedDecisionReason: 'safe_submit_guard',
+        }),
+      }
+    }
+
+    const solvePromise = solvePreparedPayloadFlip(preparedFlip)
+    let settled = false
+    const guardedSolvePromise = solvePromise.then(
+      (solvedEntry) => {
+        settled = true
+        return solvedEntry
+      },
+      (error) => {
+        settled = true
+        throw error
+      }
+    )
+    const fallbackPromise = sleep(fallbackWaitMs).then(() =>
+      settled
+        ? null
+        : {
+            payloadFlip: preparedFlip.payloadFlip,
+            index: preparedFlip.index,
+            solved: buildForcedRandomSolvedFlip({
+              hash: preparedFlip.payloadFlip.hash,
+              error: 'safe_submit_guard',
+              reasoning:
+                'short-session safe-submit guard reached before provider result',
+              forcedDecisionReason: 'safe_submit_guard',
+            }),
+          }
+    )
+    const result = await Promise.race([guardedSolvePromise, fallbackPromise])
+
+    if (result?.solved?.forcedDecisionReason === 'safe_submit_guard') {
+      guardedSolvePromise.catch(() => {})
+      return result
+    }
+
+    return result || guardedSolvePromise
   }
 
   function removeActiveStaggeredSolve(taskId) {
