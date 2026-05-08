@@ -114,7 +114,8 @@ describe('solver-orchestrator planning', () => {
       },
     })
 
-    expect(plan.effectiveProfile.requestTimeoutMs).toBe(30000)
+    expect(plan.effectiveProfile.requestTimeoutMs).toBe(45000)
+    expect(plan.effectiveProfile.maxRetries).toBe(0)
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
     expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
@@ -151,7 +152,8 @@ describe('solver-orchestrator planning', () => {
 
     expect(shortBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(shortBudget.solveConcurrency).toBe(6)
-    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(30000)
+    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(45000)
+    expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
     expect(shortBudget.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
       shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
