@@ -631,6 +631,8 @@ describe('solver-orchestrator planning', () => {
         shortFlips: [
           {
             ...createDecodedFlip('short-probability-forward-1'),
+            words: [{name: 'raid'}, {name: 'step'}],
+            keywords: ['raid', 'step'],
             expectedAnswer: 'left',
             expectedStrength: 'Strong',
             consensusAnswer: 'left',
@@ -670,6 +672,11 @@ describe('solver-orchestrator planning', () => {
           rightFrames: [],
         })
       )
+      expect(forwardedFlip).not.toHaveProperty('words')
+      expect(forwardedFlip.keywords).toEqual([
+        {name: 'raid', desc: ''},
+        {name: 'step', desc: ''},
+      ])
       expect(forwardedFlip).not.toHaveProperty('expectedAnswer')
       expect(forwardedFlip).not.toHaveProperty('expectedStrength')
       expect(forwardedFlip).not.toHaveProperty('consensusAnswer')
