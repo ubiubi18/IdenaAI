@@ -1372,7 +1372,7 @@ function normalizeValidationDevnetSolverProvider(value, fallback = 'openai') {
   return normalized || fallback
 }
 
-function normalizeValidationDevnetSolverModel(value, fallback = 'gpt-5.4') {
+function normalizeValidationDevnetSolverModel(value, fallback = 'gpt-5.5') {
   const normalized = String(value || '').trim()
 
   return normalized || fallback
