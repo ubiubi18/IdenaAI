@@ -12,7 +12,7 @@ const PROVIDERS = {
 }
 
 const DEFAULT_MODELS = {
-  [PROVIDERS.OpenAI]: 'gpt-5.4',
+  [PROVIDERS.OpenAI]: 'gpt-5.5',
   [PROVIDERS.LocalAI]: '',
   [PROVIDERS.OpenAICompatible]: 'gpt-4o-mini',
   [PROVIDERS.Gemini]: 'gemini-2.0-flash',
@@ -104,11 +104,21 @@ const STRICT_PROFILE = {
   temperature: 0,
   forceDecision: true,
   uncertaintyRepromptEnabled: true,
-  uncertaintyConfidenceThreshold: 0.45,
+  uncertaintyConfidenceThreshold: 0.95,
   uncertaintyRepromptMinRemainingMs: 3500,
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
+  probabilityEnsembleEnabled: false,
+  probabilityRuns: 3,
+  probabilityPasses: [
+    'visual_observation',
+    'independent_scores',
+    'adversarial_recheck',
+  ],
+  probabilityDecisionDelta: 0.08,
+  probabilityUseSwappedOrder: true,
+  probabilityReasoningEffort: 'xhigh',
 }
 
 const CUSTOM_LIMITS = {
@@ -121,6 +131,8 @@ const CUSTOM_LIMITS = {
   temperature: [0, 2],
   uncertaintyConfidenceThreshold: [0, 1],
   uncertaintyRepromptMinRemainingMs: [500, 120 * 1000],
+  probabilityRuns: [1, 5],
+  probabilityDecisionDelta: [0, 0.5],
 }
 
 module.exports = {

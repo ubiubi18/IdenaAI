@@ -33,13 +33,12 @@ describe('solver-orchestrator planning', () => {
       shortFlips,
       aiSolver: {
         provider: 'openai',
-        model: 'gpt-5.4',
       },
     })
 
     expect(plan.candidateFlips).toHaveLength(7)
     expect(plan.provider).toBe('openai')
-    expect(plan.model).toBe('gpt-5.4')
+    expect(plan.model).toBe('gpt-5.5')
     expect(plan.candidateFlips.some((flip) => flip.hash === 'short-2')).toBe(
       false
     )
@@ -91,13 +90,13 @@ describe('solver-orchestrator planning', () => {
     expect(shortPlan.model).toBe('gpt-5.5-mini')
     expect(shortPlan.promptOptions).toEqual({
       openAiServiceTier: 'priority',
-      openAiReasoningEffort: 'none',
+      openAiReasoningEffort: 'xhigh',
     })
     expect(longPlan.model).toBe('gpt-5.4')
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('reserves short-session OpenAI parallel budget for uncertainty reprompts', () => {
+  it('enables a two-run short-session OpenAI probability ensemble on the parallel lane', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-timeout-${index + 1}`)
     )
@@ -117,13 +116,47 @@ describe('solver-orchestrator planning', () => {
     expect(plan.effectiveProfile.requestTimeoutMs).toBe(45000)
     expect(plan.effectiveProfile.maxRetries).toBe(0)
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
+    expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
+    expect(plan.effectiveProfile.probabilityRuns).toBe(2)
+    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('high')
     expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
       plan.effectiveProfile.uncertaintyConfidenceThreshold
-    ).toBeGreaterThanOrEqual(0.68)
+    ).toBeGreaterThanOrEqual(0.95)
     expect(
       plan.effectiveProfile.uncertaintyRepromptMinRemainingMs
     ).toBeGreaterThanOrEqual(35000)
+  })
+
+  it('plans probability ensemble settings as multi-run solving without uncertainty reserve', () => {
+    const shortFlips = Array.from({length: 2}, (_, index) =>
+      createDecodedFlip(`short-probability-plan-${index + 1}`)
+    )
+
+    const budget = estimateValidationAiSolveBudget({
+      sessionType: 'short',
+      shortFlips,
+      aiSolver: {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        benchmarkProfile: 'strict',
+        probabilityEnsembleEnabled: true,
+        probabilityRuns: 4,
+        probabilityDecisionDelta: 0.12,
+        probabilityUseSwappedOrder: false,
+        probabilityReasoningEffort: 'high',
+      },
+    })
+
+    expect(budget.effectiveProfile).toMatchObject({
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 4,
+      probabilityDecisionDelta: 0.12,
+      probabilityUseSwappedOrder: false,
+      probabilityReasoningEffort: 'high',
+    })
+    expect(budget.perFlipSolveMs).toBeGreaterThanOrEqual(4 * 3500)
+    expect(budget.uncertaintyReviewFlipCount).toBe(0)
   })
 
   it('uses a timeout-padded strict profile for long-session OpenAI solving', () => {
@@ -154,13 +187,17 @@ describe('solver-orchestrator planning', () => {
     expect(shortBudget.solveConcurrency).toBe(6)
     expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(45000)
     expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
-    expect(shortBudget.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
+    expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
+    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(2)
     expect(
       shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
-    ).toBeGreaterThanOrEqual(0.68)
+    ).toBeGreaterThanOrEqual(0.95)
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(longBudget.solveConcurrency).toBe(1)
     expect(longBudget.effectiveProfile.requestTimeoutMs).toBe(180000)
+    expect(
+      longBudget.effectiveProfile.uncertaintyConfidenceThreshold
+    ).toBeGreaterThanOrEqual(0.95)
     expect(longBudget.estimatedMs).toBeGreaterThan(shortBudget.estimatedMs)
   })
 
@@ -272,7 +309,7 @@ describe('solver-orchestrator planning', () => {
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('frames_two_pass')
   })
 
-  it('keeps short-session preflight budgeting on the fast path for most flips', () => {
+  it('keeps short-session preflight budgeting below the reliable submit window', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-fast-budget-${index + 1}`)
     )
@@ -293,8 +330,10 @@ describe('solver-orchestrator planning', () => {
     })
 
     expect(budget.flipCount).toBe(6)
-    expect(budget.uncertaintyReviewFlipCount).toBe(2)
-    expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThan(90)
+    expect(budget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
+    expect(budget.effectiveProfile.probabilityRuns).toBe(2)
+    expect(budget.uncertaintyReviewFlipCount).toBe(0)
+    expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThanOrEqual(95)
   })
 
   it('budgets retry attempts and backoff into the preflight estimate', () => {
@@ -531,6 +570,119 @@ describe('solver-orchestrator planning', () => {
     }
   })
 
+  it('forwards probability ensemble settings into validation solve requests', async () => {
+    const originalImage = global.Image
+    const originalAiSolver = global.aiSolver
+    const originalCreateElement = document.createElement.bind(document)
+    const createElementSpy = jest.spyOn(document, 'createElement')
+
+    function ReadyImage() {
+      this.width = 100
+      this.height = 100
+      this.naturalWidth = 100
+      this.naturalHeight = 100
+    }
+
+    Object.defineProperty(ReadyImage.prototype, 'src', {
+      set() {
+        setTimeout(() => {
+          this.onload?.()
+        }, 0)
+      },
+    })
+
+    global.Image = ReadyImage
+    global.aiSolver = {
+      solveFlipBatch: jest.fn(async ({flips}) => ({
+        results: [
+          {
+            hash: flips[0].hash,
+            answer: 'left',
+            confidence: 0.84,
+            latencyMs: 1200,
+            reasoning: 'probability ensemble chose left',
+            rawAnswerBeforeRemap: 'left',
+            finalAnswerAfterRemap: 'left',
+            sideSwapped: false,
+          },
+        ],
+      })),
+    }
+    createElementSpy.mockImplementation((tagName, ...args) => {
+      if (tagName === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext: () => ({
+            fillStyle: '#000000',
+            fillRect: jest.fn(),
+            drawImage: jest.fn(),
+          }),
+          toDataURL: jest.fn(() => 'data:image/png;base64,MOCK'),
+        }
+      }
+
+      return originalCreateElement(tagName, ...args)
+    })
+
+    try {
+      await solveValidationSessionWithAi({
+        sessionType: 'short',
+        shortFlips: [
+          {
+            ...createDecodedFlip('short-probability-forward-1'),
+            expectedAnswer: 'left',
+            expectedStrength: 'Strong',
+            consensusAnswer: 'left',
+            consensusVotes: {left: 6, right: 0, report: 0},
+            sourceDataset: 'rehearsal-seed',
+            sourceStats: {benchmark: true},
+          },
+        ],
+        aiSolver: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          benchmarkProfile: 'strict',
+          probabilityEnsembleEnabled: true,
+          probabilityRuns: 4,
+          probabilityDecisionDelta: 0.12,
+          probabilityUseSwappedOrder: false,
+          probabilityReasoningEffort: 'high',
+        },
+        hardDeadlineAt: Date.now() + 120 * 1000,
+      })
+
+      expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(1)
+      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0]).toMatchObject({
+        probabilityEnsembleEnabled: true,
+        probabilityRuns: 4,
+        probabilityDecisionDelta: 0.12,
+        probabilityUseSwappedOrder: false,
+        probabilityReasoningEffort: 'high',
+      })
+      const forwardedFlip =
+        global.aiSolver.solveFlipBatch.mock.calls[0][0].flips[0]
+      expect(forwardedFlip).toEqual(
+        expect.objectContaining({
+          leftImage: 'data:image/png;base64,MOCK',
+          rightImage: 'data:image/png;base64,MOCK',
+          leftFrames: [],
+          rightFrames: [],
+        })
+      )
+      expect(forwardedFlip).not.toHaveProperty('expectedAnswer')
+      expect(forwardedFlip).not.toHaveProperty('expectedStrength')
+      expect(forwardedFlip).not.toHaveProperty('consensusAnswer')
+      expect(forwardedFlip).not.toHaveProperty('consensusVotes')
+      expect(forwardedFlip).not.toHaveProperty('sourceDataset')
+      expect(forwardedFlip).not.toHaveProperty('sourceStats')
+    } finally {
+      createElementSpy.mockRestore()
+      global.Image = originalImage
+      global.aiSolver = originalAiSolver
+    }
+  })
+
   it('fills remaining short-session answers randomly when the safe deadline stops AI calls', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
@@ -608,7 +760,7 @@ describe('solver-orchestrator planning', () => {
           maxRetries: 0,
           shortSessionOpenAiParallelConcurrency: 1,
         },
-        hardDeadlineAt: now + 2000,
+        hardDeadlineAt: now + 7000,
         onDecision,
       })
 
@@ -629,6 +781,10 @@ describe('solver-orchestrator planning', () => {
       })
       expect(onDecision).toHaveBeenCalledTimes(2)
       expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(1)
+      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0]).toMatchObject({
+        deadlineMs: 2000,
+        requestTimeoutMs: 2000,
+      })
     } finally {
       dateNowSpy.mockRestore()
       createElementSpy.mockRestore()
