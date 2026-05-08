@@ -58,6 +58,10 @@ Use this path before trying any real validation identity:
    so a rough experimental run cannot create an unlimited provider-side bill.
    This software is experimental and does not provide warranties for provider
    spend, node behavior, or validation results.
+   Take care: the rehearsal topology can exercise one primary identity plus
+   nine optional participant identities. A remote-provider rehearsal can
+   therefore multiply cost up to 10 identities, roughly 10x a single-identity
+   run depending on model, reasoning effort, retries, and provider pricing.
 7. After start, stay on `Settings -> Node` and watch the node stats and log.
 8. Wait until all local rehearsal nodes are ready/online/connected and the
    seeded FLIP-Challenge flips are visible or confirmed. The default topology
@@ -1023,6 +1027,9 @@ Behavior notes:
 - the optional nine-participant rehearsal uses the same AI provider/model,
   staggers provider request starts, records compact per-participant telemetry,
   and does not submit answers or touch mainnet identities
+- take care with remote providers: one primary plus nine optional rehearsal
+  participants means a full rehearsal can spend provider budget for up to 10
+  identities, roughly 10x a single-identity run depending on model and settings
 - this is still experimental and can still break in edge cases
 
 ## Local AI Preparations
