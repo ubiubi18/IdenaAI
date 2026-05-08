@@ -198,6 +198,7 @@ const DEFAULT_AI_SETTINGS = {
   onchainAutoSubmitConsentAt: '',
   autoReportEnabled: false,
   autoReportDelayMinutes: 10,
+  autoReportBestFlipEnabled: false,
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -5422,25 +5423,54 @@ export default function AiSettingsPage() {
                             </Flex>
 
                             {aiSolver.autoReportEnabled && (
-                              <SettingsFormControl>
-                                <SettingsFormLabel>
-                                  {t('Manual reporting grace period (minutes)')}
-                                </SettingsFormLabel>
-                                <Input
-                                  type="number"
-                                  min="1"
-                                  max="60"
-                                  step="1"
-                                  value={aiSolver.autoReportDelayMinutes ?? 10}
-                                  onChange={(e) =>
-                                    updateNumberField(
-                                      'autoReportDelayMinutes',
-                                      e.target.value
-                                    )
-                                  }
-                                  w="xs"
-                                />
-                              </SettingsFormControl>
+                              <Stack spacing={3}>
+                                <SettingsFormControl>
+                                  <SettingsFormLabel>
+                                    {t(
+                                      'Manual reporting grace period (minutes)'
+                                    )}
+                                  </SettingsFormLabel>
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    max="60"
+                                    step="1"
+                                    value={
+                                      aiSolver.autoReportDelayMinutes ?? 10
+                                    }
+                                    onChange={(e) =>
+                                      updateNumberField(
+                                        'autoReportDelayMinutes',
+                                        e.target.value
+                                      )
+                                    }
+                                    w="xs"
+                                  />
+                                </SettingsFormControl>
+                                <Flex align="center" justify="space-between">
+                                  <Box maxW="lg" mr={4}>
+                                    <Text fontWeight={500}>
+                                      {t('Auto-mark best approved flip')}
+                                    </Text>
+                                    <Text color="muted" fontSize="sm">
+                                      {t(
+                                        'After AI report review, mark one approved flip as the best when it has the strongest approve confidence and no report decision.'
+                                      )}
+                                    </Text>
+                                  </Box>
+                                  <Switch
+                                    isChecked={Boolean(
+                                      aiSolver.autoReportBestFlipEnabled
+                                    )}
+                                    onChange={(e) =>
+                                      updateAiSolverSettings({
+                                        autoReportBestFlipEnabled:
+                                          e.target.checked,
+                                      })
+                                    }
+                                  />
+                                </Flex>
+                              </Stack>
                             )}
                           </Stack>
                         </SettingsFormControl>

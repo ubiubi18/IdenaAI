@@ -130,6 +130,7 @@ import {
   shouldAutoRunSessionForPeriod,
   shouldShowValidationAiUi,
   shouldShowValidationLocalAiUi,
+  selectAutoReportBestFlipHash,
 } from '../shared/utils/validation-ai-auto'
 import {
   computeRehearsalBenchmarkSummary,
@@ -163,6 +164,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   mode: 'manual',
   autoReportEnabled: false,
   autoReportDelayMinutes: AUTO_REPORT_DEFAULT_DELAY_MINUTES,
+  autoReportBestFlipEnabled: false,
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -2916,6 +2918,14 @@ function ValidationSession({
         .slice(0, reportQuota)
         .map((item) => item.hash)
       const reportHashSet = new Set(reportHashes)
+      const autoBestFlipHash =
+        aiSolverSettings.autoReportBestFlipEnabled === true &&
+        Object.keys(bestFlipHashes || {}).length < 1
+          ? selectAutoReportBestFlipHash({
+              reviewResults: reviewResult?.results,
+              reportHashes,
+            })
+          : ''
 
       candidateSourceFlips.forEach((flip) => {
         send({
@@ -2923,6 +2933,13 @@ function ValidationSession({
           hash: flip.hash,
         })
       })
+
+      if (autoBestFlipHash) {
+        send({
+          type: 'FAVORITE',
+          hash: autoBestFlipHash,
+        })
+      }
 
       if (!forceAiPreview && validationStateScope) {
         appendValidationAiCostLedgerEntry(validationStateScope, {
@@ -2946,7 +2963,9 @@ function ValidationSession({
         t('AI auto-report completed'),
         keywordStatus.missingKeywordFlipCount > 0
           ? t(
-              'Applied {{reported}} report decisions and {{approved}} approvals. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.',
+              autoBestFlipHash
+                ? 'Applied {{reported}} report decisions and {{approved}} approvals, then marked the strongest approved flip as best. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.'
+                : 'Applied {{reported}} report decisions and {{approved}} approvals. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.',
               {
                 reported: reportHashSet.size,
                 approved: Math.max(
@@ -2957,7 +2976,9 @@ function ValidationSession({
               }
             )
           : t(
-              'Applied {{reported}} report decisions and {{approved}} approvals. Long session answers will be submitted automatically.',
+              autoBestFlipHash
+                ? 'Applied {{reported}} report decisions and {{approved}} approvals, then marked the strongest approved flip as best. Long session answers will be submitted automatically.'
+                : 'Applied {{reported}} report decisions and {{approved}} approvals. Long session answers will be submitted automatically.',
               {
                 reported: reportHashSet.size,
                 approved: Math.max(
@@ -2988,6 +3009,7 @@ function ValidationSession({
     aiSolverSettings,
     autoReportEnabled,
     autoReportRunning,
+    bestFlipHashes,
     canRunAutomaticReportReview,
     epoch,
     forceAiPreview,

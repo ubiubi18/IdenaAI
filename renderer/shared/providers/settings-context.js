@@ -49,6 +49,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   onchainAutoSubmitConsentAt: '',
   autoReportEnabled: false,
   autoReportDelayMinutes: 10,
+  autoReportBestFlipEnabled: false,
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -295,6 +296,9 @@ function buildAiSolverSettings(settings = {}) {
   ].includes(normalizedProbabilityReasoningEffort)
     ? normalizedProbabilityReasoningEffort
     : DEFAULT_AI_SOLVER_SETTINGS.probabilityReasoningEffort
+  nextSettings.autoReportBestFlipEnabled = Boolean(
+    nextSettings.autoReportBestFlipEnabled
+  )
 
   const normalizedMemoryBudgetGiB = Number.parseInt(
     nextSettings.memoryBudgetGiB,
