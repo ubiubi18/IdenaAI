@@ -5951,13 +5951,13 @@ Rules:
 - Use only ${forceDecision ? 'a|b' : 'a|b|skip'} for "answer"
 - "confidence" must be between 0 and 1
 - Candidate labels are runtime labels only. Do not use label identity or first-vs-second position as a hint.
-- If solving clearly requires reading text, or visible order labels/numbers/letters/arrows/captions are drawn on the images, treat the flip as report-worthy and return skip unless forceDecision forbids it.
-- If inappropriate, NSFW, or graphic violent content is present, treat the flip as report-worthy and return skip unless forceDecision forbids it.
+- Track report-worthy cues such as required readable text, watermarks, visible order labels/numbers/letters/arrows/captions, inappropriate content, NSFW content, or graphic violence separately from the side answer.
+- Do not return skip solely because a report-worthy cue exists. Choose by chronology, visible cause -> effect, and consistent entities; report review is a later step.
 - Keep reasoning concise and factual and mention one concrete visual cue
 ${
   forceDecision
-    ? '- You must choose a or b unless the flip is clearly report-worthy.'
-    : '- If both candidates are ambiguous, equally weak, or clearly report-worthy, return "skip".'
+    ? '- You must choose a or b based on the more coherent candidate story.'
+    : '- Return "skip" only when both candidate stories are ambiguous or equally weak.'
 }
 
 Flip hash: ${hash}

@@ -59,7 +59,7 @@ describe('provider solver prompt template', () => {
     expect(prompt).toContain('never because it appeared first')
   })
 
-  it('keeps skip guidance in forced frame-decision prompts', () => {
+  it('keeps report risk separate in forced frame-decision prompts', () => {
     const prompt = promptTemplate({
       hash: 'flip-forced-frame-decision',
       forceDecision: true,
@@ -72,9 +72,13 @@ describe('provider solver prompt template', () => {
 
     expect(prompt).toContain('Use only a|b for "answer"')
     expect(prompt).toContain(
-      'If reportRisk is true, return skip unless the report signal is clearly invalid.'
+      'Treat reportRisk as a separate report-section signal, not as an answer.'
     )
-    expect(prompt).toContain('Prefer skip when both stories')
+    expect(prompt).toContain(
+      'Do not return skip solely because reportRisk is true'
+    )
+    expect(prompt).toContain('Prefer skip only when both stories')
+    expect(prompt).not.toContain('If reportRisk is true, return skip')
     expect(prompt).not.toContain('never return "skip"')
   })
 
@@ -118,6 +122,9 @@ describe('provider solver prompt template', () => {
     expect(prompt).toContain('chronology_probability')
     expect(prompt).toContain('cause_effect_probability')
     expect(prompt).toContain('Candidate order is never evidence.')
+    expect(prompt).toContain(
+      'Watermarks or text overlays should still receive side probability scores.'
+    )
     expect(prompt).not.toMatch(/which side is correct/i)
     expect(prompt).not.toMatch(/"answer"/)
   })
