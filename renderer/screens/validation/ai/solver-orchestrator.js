@@ -65,6 +65,8 @@ const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 95 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_PADDING_MS = 5 * 1000
 const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.68
 const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 2
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'medium'
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
@@ -1123,6 +1125,9 @@ function applyShortSessionOpenAiParallelTimeout(
   }
 
   const requestTimeoutMs = SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
+  const requestedProbabilityRuns = normalizeProbabilityRuns(
+    profile.probabilityRuns
+  )
   const uncertaintyConfidenceThreshold = Math.max(
     toFloatOrFallback(
       profile.uncertaintyConfidenceThreshold,
@@ -1142,6 +1147,16 @@ function applyShortSessionOpenAiParallelTimeout(
       ),
       SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS
     ),
+    probabilityEnsembleEnabled: true,
+    probabilityRuns: profile.probabilityEnsembleEnabled
+      ? Math.max(
+          requestedProbabilityRuns,
+          SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
+        )
+      : SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS,
+    probabilityReasoningEffort:
+      normalizeProbabilityReasoningEffort(profile.probabilityReasoningEffort) ||
+      SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT,
     requestTimeoutMs,
     maxRetries: 0,
     deadlineMs: Math.max(
@@ -1605,6 +1620,20 @@ export async function solveValidationSessionWithAi({
     }
   }
 
+  function buildProviderPayloadFlip(payloadFlip) {
+    return {
+      hash: payloadFlip.hash,
+      leftImage: payloadFlip.leftImage || null,
+      rightImage: payloadFlip.rightImage || null,
+      leftFrames: Array.isArray(payloadFlip.leftFrames)
+        ? payloadFlip.leftFrames
+        : [],
+      rightFrames: Array.isArray(payloadFlip.rightFrames)
+        ? payloadFlip.rightFrames
+        : [],
+    }
+  }
+
   function buildForcedRandomSolvedFlip({
     hash,
     error,
@@ -1775,7 +1804,7 @@ export async function solveValidationSessionWithAi({
         probabilityUseSwappedOrder: effectiveProfile.probabilityUseSwappedOrder,
         probabilityReasoningEffort: effectiveProfile.probabilityReasoningEffort,
         promptOptions,
-        flips: [requestPayloadFlip],
+        flips: [buildProviderPayloadFlip(requestPayloadFlip)],
         session: {
           ...(sessionMeta || {}),
           ...(sessionExtra || {}),

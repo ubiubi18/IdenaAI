@@ -97,7 +97,7 @@ describe('solver-orchestrator planning', () => {
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('reserves short-session OpenAI parallel budget for uncertainty reprompts', () => {
+  it('enables a two-run short-session OpenAI probability ensemble on the parallel lane', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-timeout-${index + 1}`)
     )
@@ -117,6 +117,9 @@ describe('solver-orchestrator planning', () => {
     expect(plan.effectiveProfile.requestTimeoutMs).toBe(45000)
     expect(plan.effectiveProfile.maxRetries).toBe(0)
     expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
+    expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
+    expect(plan.effectiveProfile.probabilityRuns).toBe(2)
+    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('medium')
     expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
     expect(
       plan.effectiveProfile.uncertaintyConfidenceThreshold
@@ -185,7 +188,8 @@ describe('solver-orchestrator planning', () => {
     expect(shortBudget.solveConcurrency).toBe(6)
     expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(45000)
     expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
-    expect(shortBudget.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
+    expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
+    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(2)
     expect(
       shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
     ).toBeGreaterThanOrEqual(0.68)
@@ -303,7 +307,7 @@ describe('solver-orchestrator planning', () => {
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('frames_two_pass')
   })
 
-  it('keeps short-session preflight budgeting on the fast path for most flips', () => {
+  it('keeps short-session preflight budgeting below the reliable submit window', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-fast-budget-${index + 1}`)
     )
@@ -324,8 +328,10 @@ describe('solver-orchestrator planning', () => {
     })
 
     expect(budget.flipCount).toBe(6)
-    expect(budget.uncertaintyReviewFlipCount).toBe(2)
-    expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThan(90)
+    expect(budget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
+    expect(budget.effectiveProfile.probabilityRuns).toBe(2)
+    expect(budget.uncertaintyReviewFlipCount).toBe(0)
+    expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThanOrEqual(95)
   })
 
   it('budgets retry attempts and backoff into the preflight estimate', () => {
@@ -620,7 +626,17 @@ describe('solver-orchestrator planning', () => {
     try {
       await solveValidationSessionWithAi({
         sessionType: 'short',
-        shortFlips: [createDecodedFlip('short-probability-forward-1')],
+        shortFlips: [
+          {
+            ...createDecodedFlip('short-probability-forward-1'),
+            expectedAnswer: 'left',
+            expectedStrength: 'Strong',
+            consensusAnswer: 'left',
+            consensusVotes: {left: 6, right: 0, report: 0},
+            sourceDataset: 'rehearsal-seed',
+            sourceStats: {benchmark: true},
+          },
+        ],
         aiSolver: {
           provider: 'openai',
           model: 'gpt-5.5',
@@ -642,7 +658,9 @@ describe('solver-orchestrator planning', () => {
         probabilityUseSwappedOrder: false,
         probabilityReasoningEffort: 'high',
       })
-      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0].flips[0]).toEqual(
+      const forwardedFlip =
+        global.aiSolver.solveFlipBatch.mock.calls[0][0].flips[0]
+      expect(forwardedFlip).toEqual(
         expect.objectContaining({
           leftImage: 'data:image/png;base64,MOCK',
           rightImage: 'data:image/png;base64,MOCK',
@@ -650,6 +668,12 @@ describe('solver-orchestrator planning', () => {
           rightFrames: [],
         })
       )
+      expect(forwardedFlip).not.toHaveProperty('expectedAnswer')
+      expect(forwardedFlip).not.toHaveProperty('expectedStrength')
+      expect(forwardedFlip).not.toHaveProperty('consensusAnswer')
+      expect(forwardedFlip).not.toHaveProperty('consensusVotes')
+      expect(forwardedFlip).not.toHaveProperty('sourceDataset')
+      expect(forwardedFlip).not.toHaveProperty('sourceStats')
     } finally {
       createElementSpy.mockRestore()
       global.Image = originalImage
