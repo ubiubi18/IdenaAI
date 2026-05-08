@@ -62,6 +62,7 @@ import {
   openValidationLottery,
 } from '../../screens/validation/hooks/use-start-validation'
 import {buildLocalAiRuntimePayload} from '../../shared/utils/ai-provider-readiness'
+import {shouldBlockSessionAutoInDev} from '../../shared/utils/validation-ai-auto'
 
 const NODE_SETTINGS_TOAST_ID = 'node-settings-status-toast'
 const LOCAL_RPC_KEY_TOAST_ID = 'local-rpc-key-toast'
@@ -72,6 +73,11 @@ const REHEARSAL_AI_SETUP_MODES = {
   Remote: 'remote',
   Local: 'local',
   None: 'none',
+}
+
+const AI_SETUP_TARGETS = {
+  Rehearsal: 'rehearsal',
+  Real: 'real',
 }
 
 const REHEARSAL_AI_PROVIDER_OPTIONS = [
@@ -520,6 +526,14 @@ function NodeSettings() {
 
   const logsRef = useRef(null)
   const canUseIpcRenderer = hasNodeBridge()
+  const isRealSessionAutoBlockedInDev = shouldBlockSessionAutoInDev({
+    isDev: global.isDev,
+    allowDevSessionAuto:
+      String(global.env?.IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO || '').trim() ===
+      '1',
+    forceAiPreview: false,
+    isRehearsalNodeSession: false,
+  })
 
   const [state, dispatch] = useReducer(
     (prevState, action) => {
@@ -690,6 +704,7 @@ function NodeSettings() {
   const [revealInternalApiKey, setRevealInternalApiKey] = useState(false)
   const [isRehearsalAiDialogOpen, setIsRehearsalAiDialogOpen] = useState(false)
   const [isPreparingRehearsalAi, setIsPreparingRehearsalAi] = useState(false)
+  const [aiSetupTarget, setAiSetupTarget] = useState(AI_SETUP_TARGETS.Rehearsal)
   const [rehearsalAiSetupMode, setRehearsalAiSetupMode] = useState(() =>
     resolveRehearsalAiSetupMode(settings.aiSolver)
   )
@@ -903,6 +918,11 @@ function NodeSettings() {
     rehearsalAiSetupMode === REHEARSAL_AI_SETUP_MODES.Local
   const isRehearsalNoAiMode =
     rehearsalAiSetupMode === REHEARSAL_AI_SETUP_MODES.None
+  const isRealAutosolverDialog = aiSetupTarget === AI_SETUP_TARGETS.Real
+  const realAutosolverArmed =
+    settings.aiSolver?.enabled === true &&
+    String(settings.aiSolver?.mode || '').trim() === 'session-auto' &&
+    Boolean(String(settings.aiSolver?.onchainAutoSubmitConsentAt || '').trim())
   const rehearsalAiProviderLabel =
     REHEARSAL_AI_PROVIDER_OPTIONS.find(
       ({value}) => value === rehearsalAiProvider
@@ -1013,15 +1033,42 @@ function NodeSettings() {
     [toast]
   )
 
-  const openRehearsalAiDialog = useCallback(() => {
+  const resetAiSetupDialogState = useCallback(() => {
     const provider = 'openai'
     setRehearsalAiSetupMode(resolveRehearsalAiSetupMode(settings.aiSolver))
     setRehearsalAiProvider(provider)
     setRehearsalAiModel(resolveRehearsalAiModel(provider))
     setRehearsalApiKey('')
     setIsRehearsalApiKeyVisible(false)
-    setIsRehearsalAiDialogOpen(true)
   }, [settings.aiSolver])
+
+  const openRehearsalAiDialog = useCallback(() => {
+    resetAiSetupDialogState()
+    setAiSetupTarget(AI_SETUP_TARGETS.Rehearsal)
+    setIsRehearsalAiDialogOpen(true)
+  }, [resetAiSetupDialogState])
+
+  const openRealAutosolverDialog = useCallback(() => {
+    if (isRealSessionAutoBlockedInDev) {
+      showRehearsalAiToast(
+        t('Automatic session solving is blocked in dev mode'),
+        t(
+          'For real validation from Terminal, restart with IDENA_DESKTOP_USER_DATA_DIR pointed at the real app profile and IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1.'
+        ),
+        'warning'
+      )
+      return
+    }
+
+    resetAiSetupDialogState()
+    setAiSetupTarget(AI_SETUP_TARGETS.Real)
+    setIsRehearsalAiDialogOpen(true)
+  }, [
+    isRealSessionAutoBlockedInDev,
+    resetAiSetupDialogState,
+    showRehearsalAiToast,
+    t,
+  ])
 
   const closeRehearsalAiDialog = useCallback(() => {
     if (!isPreparingRehearsalAi) {
@@ -1053,6 +1100,7 @@ function NodeSettings() {
       updateAiSolverSettings({
         enabled: false,
         mode: 'manual',
+        onchainAutoSubmitConsentAt: '',
       })
 
       startRehearsalNetworkForDialog()
@@ -1202,6 +1250,162 @@ function NodeSettings() {
     ]
   )
 
+  const prepareRealAutosolverWithoutAi = useCallback(async () => {
+    setIsPreparingRehearsalAi(true)
+
+    try {
+      updateAiSolverSettings({
+        enabled: false,
+        mode: 'manual',
+        onchainAutoSubmitConsentAt: '',
+      })
+      setIsRehearsalAiDialogOpen(false)
+      showRehearsalAiToast(
+        t('Real autosolver left off'),
+        t(
+          'No AI solver is armed for the real validation profile. You can come back and arm it before the next validation session.'
+        ),
+        'info'
+      )
+    } catch (error) {
+      showRehearsalAiToast(
+        t('Unable to update real autosolver'),
+        String((error && error.message) || error || '').trim() ||
+          t('Unknown real autosolver setup error'),
+        'error'
+      )
+    } finally {
+      setIsPreparingRehearsalAi(false)
+    }
+  }, [showRehearsalAiToast, t, updateAiSolverSettings])
+
+  const prepareRealAutosolverWithLocalAi = useCallback(async () => {
+    setIsPreparingRehearsalAi(true)
+
+    try {
+      const nextLocalAi = {
+        ...(settings.localAi || {}),
+        enabled: true,
+      }
+      const runtimePayload = buildLocalAiRuntimePayload(nextLocalAi)
+
+      updateLocalAiSettings({enabled: true})
+      updateAiSolverSettings({
+        enabled: true,
+        mode: 'session-auto',
+        provider: 'local-ai',
+        onchainAutoSubmitConsentAt:
+          settings.aiSolver?.onchainAutoSubmitConsentAt ||
+          new Date().toISOString(),
+      })
+
+      await getLocalAiBridge().start(runtimePayload)
+
+      setIsRehearsalAiDialogOpen(false)
+      showRehearsalAiToast(
+        t('Real autosolver armed with Local AI'),
+        t(
+          'Local AI mode is enabled without a provider API key. The next real validation session may be solved and submitted automatically from this app profile.'
+        ),
+        'warning'
+      )
+    } catch (error) {
+      showRehearsalAiToast(
+        t('Unable to start Local AI'),
+        String((error && error.message) || error || '').trim() ||
+          t('Unknown local AI setup error'),
+        'error'
+      )
+    } finally {
+      setIsPreparingRehearsalAi(false)
+    }
+  }, [
+    settings.aiSolver?.onchainAutoSubmitConsentAt,
+    settings.localAi,
+    showRehearsalAiToast,
+    t,
+    updateAiSolverSettings,
+    updateLocalAiSettings,
+  ])
+
+  const prepareRealAutosolverWithAi = useCallback(
+    async ({loadApiKey = false} = {}) => {
+      const provider = resolveRehearsalAiProvider({
+        provider: rehearsalAiProvider,
+      })
+      const model = resolveRehearsalAiModel(provider, rehearsalAiModel)
+
+      setIsPreparingRehearsalAi(true)
+
+      try {
+        if (loadApiKey) {
+          await getAiSolverBridge().setProviderKey({
+            provider,
+            apiKey: trimmedRehearsalApiKey,
+          })
+          setRehearsalApiKey('')
+          setIsRehearsalApiKeyVisible(false)
+        }
+
+        updateAiSolverSettings(
+          loadApiKey
+            ? {
+                enabled: true,
+                mode: 'session-auto',
+                provider,
+                model,
+                onchainAutoSubmitConsentAt:
+                  settings.aiSolver?.onchainAutoSubmitConsentAt ||
+                  new Date().toISOString(),
+              }
+            : {
+                enabled: true,
+                mode: 'session-auto',
+                onchainAutoSubmitConsentAt:
+                  settings.aiSolver?.onchainAutoSubmitConsentAt ||
+                  new Date().toISOString(),
+              }
+        )
+
+        setIsRehearsalAiDialogOpen(false)
+        showRehearsalAiToast(
+          t('Real autosolver armed'),
+          loadApiKey
+            ? t(
+                '{{provider}} {{model}} key loaded. Autosolver mode is enabled for the real validation profile and may submit answers on-chain automatically.',
+                {
+                  provider: rehearsalAiProviderLabel,
+                  model,
+                }
+              )
+            : t(
+                'Autosolver mode is enabled with the already configured AI settings for the real validation profile and may submit answers on-chain automatically.'
+              ),
+          'warning'
+        )
+      } catch (error) {
+        showRehearsalAiToast(
+          t('Unable to prepare real autosolver'),
+          String((error && error.message) || error || '').trim() ||
+            t('Unknown provider setup error'),
+          'error'
+        )
+      } finally {
+        setIsPreparingRehearsalAi(false)
+      }
+    },
+    [
+      rehearsalAiModel,
+      rehearsalAiProvider,
+      rehearsalAiProviderLabel,
+      settings.aiSolver?.onchainAutoSubmitConsentAt,
+      showRehearsalAiToast,
+      t,
+      trimmedRehearsalApiKey,
+      updateAiSolverSettings,
+    ]
+  )
+
   const startAutosolveRehearsal = useCallback(() => {
     openRehearsalAiDialog()
   }, [openRehearsalAiDialog])
@@ -1214,41 +1418,54 @@ function NodeSettings() {
         participantCount,
       })
     )
+  const runConfiguredAiSetup = isRealAutosolverDialog
+    ? prepareRealAutosolverWithAi
+    : startAutosolveRehearsalWithAi
+  const runKeyedAiSetup = isRealAutosolverDialog
+    ? () => prepareRealAutosolverWithAi({loadApiKey: true})
+    : () => startAutosolveRehearsalWithAi({loadApiKey: true})
+  const runLocalAiSetup = isRealAutosolverDialog
+    ? prepareRealAutosolverWithLocalAi
+    : startAutosolveRehearsalWithLocalAi
+  const runNoAiSetup = isRealAutosolverDialog
+    ? prepareRealAutosolverWithoutAi
+    : startRehearsalWithoutAi
 
   let rehearsalDialogActions = (
     <>
       <SecondaryButton
-        onClick={() => startAutosolveRehearsalWithAi()}
+        onClick={() => runConfiguredAiSetup()}
         isLoading={isPreparingRehearsalAi}
       >
-        {t('Start with configured AI')}
+        {isRealAutosolverDialog
+          ? t('Arm with configured AI')
+          : t('Start with configured AI')}
       </SecondaryButton>
       <PrimaryButton
         isDisabled={!trimmedRehearsalApiKey || isPreparingRehearsalAi}
         isLoading={isPreparingRehearsalAi}
-        onClick={() => startAutosolveRehearsalWithAi({loadApiKey: true})}
+        onClick={runKeyedAiSetup}
       >
-        {t('Set key and start')}
+        {isRealAutosolverDialog ? t('Set key and arm') : t('Set key and start')}
       </PrimaryButton>
     </>
   )
 
   if (isRehearsalNoAiMode) {
     rehearsalDialogActions = (
-      <PrimaryButton
-        onClick={startRehearsalWithoutAi}
-        isLoading={isPreparingRehearsalAi}
-      >
-        {t('Start without AI')}
+      <PrimaryButton onClick={runNoAiSetup} isLoading={isPreparingRehearsalAi}>
+        {isRealAutosolverDialog ? t('Keep AI off') : t('Start without AI')}
       </PrimaryButton>
     )
   } else if (isRehearsalLocalAiMode) {
     rehearsalDialogActions = (
       <PrimaryButton
-        onClick={startAutosolveRehearsalWithLocalAi}
+        onClick={runLocalAiSetup}
         isLoading={isPreparingRehearsalAi}
       >
-        {t('Start Local AI autosolver')}
+        {isRealAutosolverDialog
+          ? t('Arm Local AI autosolver')
+          : t('Start Local AI autosolver')}
       </PrimaryButton>
     )
   }
@@ -1488,6 +1705,50 @@ function NodeSettings() {
             </Stack>
           </SettingsSection>
         )}
+
+        <SettingsSection title={t('Real validation autosolver')} w="full">
+          <Stack spacing={3}>
+            <Text color="muted">
+              {t(
+                'Prepare the same AI autosolver setup for the real validation profile. This can auto-start solving and may submit answers on-chain automatically during a real ceremony.'
+              )}
+            </Text>
+            <Box
+              borderWidth="1px"
+              borderColor={realAutosolverArmed ? 'orange.200' : 'gray.200'}
+              bg={realAutosolverArmed ? 'orange.012' : 'gray.50'}
+              borderRadius="md"
+              p={3}
+            >
+              <Stack spacing={1}>
+                <Text fontWeight={600}>
+                  {realAutosolverArmed
+                    ? t('Real autosolver is armed')
+                    : t('Real autosolver is not armed')}
+                </Text>
+                <Text color="muted" fontSize="sm">
+                  {realAutosolverArmed
+                    ? t(
+                        'Session-auto consent is stored in this app profile. Keep this enabled only when you are ready for automatic real-session solving and submission.'
+                      )
+                    : t(
+                        'Use the setup dialog to choose Remote provider API, Local AI runtime, or no AI yet before the next real validation session.'
+                      )}
+                </Text>
+              </Stack>
+            </Box>
+            <Flex align="center" gap={2} flexWrap="wrap">
+              <PrimaryButton onClick={openRealAutosolverDialog}>
+                {realAutosolverArmed
+                  ? t('Review real autosolver setup')
+                  : t('Prepare real autosolver')}
+              </PrimaryButton>
+              <SecondaryButton onClick={() => router.push('/settings/ai')}>
+                {t('Open AI settings')}
+              </SecondaryButton>
+            </Flex>
+          </Stack>
+        </SettingsSection>
 
         <SettingsSection title={t('Validation Rehearsal Devnet')} w="full">
           <Stack spacing={4} w="full" minW={0}>
@@ -2173,15 +2434,23 @@ function NodeSettings() {
         isOpen={isRehearsalAiDialogOpen}
         onClose={closeRehearsalAiDialog}
         size="lg"
-        title={t('Prepare rehearsal autosolver')}
+        title={
+          isRealAutosolverDialog
+            ? t('Prepare real autosolver')
+            : t('Prepare rehearsal autosolver')
+        }
         shouldShowCloseButton={!isPreparingRehearsalAi}
       >
         <DialogBody>
           <Stack spacing={4}>
             <Text color="muted" fontSize="sm">
-              {t(
-                'Choose how this rehearsal should start. Remote providers need an API key, Local AI uses the configured local runtime without a provider key, and No AI starts only the rehearsal network.'
-              )}
+              {isRealAutosolverDialog
+                ? t(
+                    'Choose how real validation autosolver should be armed. Remote providers need an API key, Local AI uses the configured local runtime without a provider key, and No AI leaves real autosolver off.'
+                  )
+                : t(
+                    'Choose how this rehearsal should start. Remote providers need an API key, Local AI uses the configured local runtime without a provider key, and No AI starts only the rehearsal network.'
+                  )}
             </Text>
 
             <Box
@@ -2196,15 +2465,23 @@ function NodeSettings() {
                   {t('Autosolver mode by default')}
                 </Text>
                 <Text color="muted" fontSize="sm">
-                  {t(
-                    'Saving a remote provider key or starting Local AI from this dialog sets AI mode to session-auto for the rehearsal. It will solve automatically once the rehearsal session starts.'
-                  )}
+                  {isRealAutosolverDialog
+                    ? t(
+                        'Saving a remote provider key or starting Local AI from this dialog sets AI mode to session-auto for real validation. It may submit answers on-chain automatically.'
+                      )
+                    : t(
+                        'Saving a remote provider key or starting Local AI from this dialog sets AI mode to session-auto for the rehearsal. It will solve automatically once the rehearsal session starts.'
+                      )}
                 </Text>
               </Stack>
             </Box>
 
             <SettingsFormControl>
-              <SettingsFormLabel>{t('Rehearsal start mode')}</SettingsFormLabel>
+              <SettingsFormLabel>
+                {isRealAutosolverDialog
+                  ? t('Real autosolver mode')
+                  : t('Rehearsal start mode')}
+              </SettingsFormLabel>
               <Select
                 value={rehearsalAiSetupMode}
                 onChange={(event) =>
@@ -2351,12 +2628,18 @@ function NodeSettings() {
               >
                 <Stack spacing={1}>
                   <Text fontWeight={600} fontSize="sm">
-                    {t('Start the rehearsal network only')}
+                    {isRealAutosolverDialog
+                      ? t('Leave real autosolver off')
+                      : t('Start the rehearsal network only')}
                   </Text>
                   <Text color="muted" fontSize="sm">
-                    {t(
-                      'This disables session-auto for the current app profile and connects the rehearsal node without starting an AI solver. You can arm AI later before the short session starts.'
-                    )}
+                    {isRealAutosolverDialog
+                      ? t(
+                          'This disables session-auto for the current app profile. You can arm real autosolver later before the validation session starts.'
+                        )
+                      : t(
+                          'This disables session-auto for the current app profile and connects the rehearsal node without starting an AI solver. You can arm AI later before the short session starts.'
+                        )}
                   </Text>
                 </Stack>
               </Box>
