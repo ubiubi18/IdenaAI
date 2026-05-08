@@ -1767,6 +1767,11 @@ function NodeSettings() {
                   {count: REHEARSAL_NETWORK_VALIDATOR_COUNT}
                 )}
               </Text>
+              <Text color="orange.500" mt={2}>
+                {t(
+                  'Take care: remote-provider rehearsal can exercise up to 10 rehearsal identities. Provider cost can be roughly 10x a single-identity run depending on model, reasoning effort, retries, and provider pricing.'
+                )}
+              </Text>
             </Box>
 
             <Box
@@ -2247,7 +2252,7 @@ function NodeSettings() {
                     <Text color="muted" fontSize="sm">
                       {rehearsalSolverIsParallel
                         ? t(
-                            'Optional rehearsal-only dry run. It uses the current AI provider key in the main process, staggers participant request starts, records compact telemetry, and does not submit answers or touch mainnet identities.'
+                            'Optional rehearsal-only dry run. It uses the current AI provider key in the main process, staggers participant request starts, records compact telemetry, and does not submit answers or touch mainnet identities. Take care: this can spend provider budget across nine extra rehearsal participants.'
                           )
                         : t(
                             'Default rehearsal-only dry run. It uses the current AI provider key for one local rehearsal identity, records compact telemetry, and does not submit answers or touch mainnet identities.'
@@ -2473,6 +2478,13 @@ function NodeSettings() {
                         'Saving a remote provider key or starting Local AI from this dialog sets AI mode to session-auto for the rehearsal. It will solve automatically once the rehearsal session starts.'
                       )}
                 </Text>
+                {!isRealAutosolverDialog && (
+                  <Text color="orange.500" fontSize="sm">
+                    {t(
+                      'Provider-backed rehearsal can scale to one primary plus nine optional participant identities, so a full 10-identity run may spend about 10x a single-identity run.'
+                    )}
+                  </Text>
+                )}
               </Stack>
             </Box>
 
