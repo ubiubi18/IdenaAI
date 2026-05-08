@@ -687,6 +687,59 @@ application code aggregate the result. The goal is to reduce early side
 anchoring and position bias. It does not eliminate model errors, provider
 outages, API cost, or validation risk.
 
+### Three-Stage Probability Submission
+
+The safer mental model is: do not ask GPT-5.5 to guess left or right in one
+shot. Treat each flip like two possible four-panel stories and make the model
+earn the decision.
+
+1. First pass: observe and score both sides. The app trusts this pass only when
+   confidence is at least `0.95`. Anything below that is treated as not strong
+   enough for a first answer.
+2. Second pass: audit the weak points and re-score. The app accepts this pass
+   at `0.80` confidence or higher.
+3. Third pass: final adjudication. The minimum confidence gate is `0.51`. Below
+   that, the flip is still treated as unresolved unless the session deadline
+   forces the app to submit the best available result.
+
+For probability ensemble scores, the app compares the averaged left and right
+story scores:
+
+```text
+delta = abs(avgLeft - avgRight)
+```
+
+The default meaningful separation is `0.08`. If the sides are closer than that,
+the result is considered too close and should be rechecked when time allows. If
+one side is ahead by at least `0.08`, the app can choose the higher-probability
+side.
+
+This helps because the model first looks, then scores each side separately,
+then challenges its own answer. That reduces position bias such as preferring
+the first, left, or Option A candidate just because of where it appears. GPT-5.5
+has been strong in this structure because it is better at structured comparison
+than at a single rushed binary choice.
+
+### Why Short Session Is Still Harder
+
+Long session can use the full careful flow more reliably. The app usually has
+more time, the images are already decoded, keywords can be loaded, and report
+review is a separate checklist step. That gives GPT-5.5 enough room to solve,
+audit, and then help with reporting.
+
+Short session cannot simply copy the long-session behavior. It has to load
+images, prepare provider payloads, run model calls, parse the result, select
+answers, and submit before the safety buffer. The current guard aims to submit
+before the final risky seconds, with a hard fallback near the end of the short
+window. That means a slow provider, a late image, or a reconnect can consume the
+time that would otherwise be used for all three probability stages.
+
+So the short-session goal is not "think forever until perfect." It is "run as
+many probability and recheck stages as the clock safely allows, then submit the
+best current result before the deadline." If no model result exists by the
+deadline guard, the app records and uses a deterministic fallback instead of
+missing the session entirely.
+
 To start probability-ensemble research from current `main`:
 
 ```bash
