@@ -19,6 +19,15 @@ describe('provider solver prompt template', () => {
     )
     expect(prompt).toContain('OPTION A')
     expect(prompt).toContain('OPTION B')
+    expect(prompt).toContain(
+      'Official keywords may be unavailable or arrive later; do not wait for them or treat them as required.'
+    )
+    expect(prompt).toContain(
+      'If official keywords are already present in session context, treat them as optional context only.'
+    )
+    expect(prompt).toContain(
+      'Keywords are checked later only in the long-session report section'
+    )
     expect(prompt).not.toContain('LEFT order')
     expect(prompt).not.toContain('RIGHT order')
     expect(prompt).toContain(
@@ -99,7 +108,7 @@ describe('provider solver prompt template', () => {
       'Custom solver prompt for flip-custom'
     )
     expect(frameReasoningPrompt).toContain(
-      'You are solving an Idena flip benchmark in analysis mode.'
+      'You are solving an Idena validation answer-phase flip in analysis mode.'
     )
   })
 
@@ -124,6 +133,12 @@ describe('provider solver prompt template', () => {
     expect(prompt).toContain('Candidate order is never evidence.')
     expect(prompt).toContain(
       'Watermarks or text overlays should still receive side probability scores.'
+    )
+    expect(prompt).toContain(
+      'Official keywords may be unavailable or arrive later; do not wait for them or treat them as required.'
+    )
+    expect(prompt).toContain(
+      'If official keywords are already present in session context, treat them as optional context only.'
     )
     expect(prompt).not.toMatch(/which side is correct/i)
     expect(prompt).not.toMatch(/"answer"/)

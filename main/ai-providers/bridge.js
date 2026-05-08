@@ -5307,6 +5307,32 @@ function resolveVisionModeForFlip(profile, flip) {
   }
 }
 
+function normalizeAnswerPhaseKeywords(keywords = []) {
+  if (!Array.isArray(keywords)) {
+    return []
+  }
+
+  return keywords
+    .map((item, index) => {
+      if (item && typeof item === 'object') {
+        const name = String(item.name || item.keyword || '').trim()
+        const desc = String(item.desc || item.description || '').trim()
+        if (!name && !desc) {
+          return null
+        }
+        return {
+          name: name || `keyword-${index + 1}`,
+          desc,
+        }
+      }
+
+      const keywordName = String(item || '').trim()
+      return keywordName ? {name: keywordName, desc: ''} : null
+    })
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
 function buildProviderFlipForVision({
   flip,
   swapped,
@@ -5314,32 +5340,43 @@ function buildProviderFlipForVision({
   leftFrames,
   rightFrames,
 }) {
-  const baseFlip = swapped
-    ? {
-        ...flip,
-        leftImage: flip.rightImage,
-        rightImage: flip.leftImage,
-      }
-    : {...flip}
+  const baseFlip = {
+    hash: flip.hash,
+    leftImage: swapped ? flip.rightImage : flip.leftImage,
+    rightImage: swapped ? flip.leftImage : flip.rightImage,
+    leftFrames: Array.isArray(flip.leftFrames) ? flip.leftFrames : [],
+    rightFrames: Array.isArray(flip.rightFrames) ? flip.rightFrames : [],
+    keywords: normalizeAnswerPhaseKeywords(flip.keywords),
+  }
 
   if (visionMode === 'composite') {
     return {
-      ...baseFlip,
-      leftFrames: Array.isArray(baseFlip.leftFrames) ? baseFlip.leftFrames : [],
-      rightFrames: Array.isArray(baseFlip.rightFrames)
-        ? baseFlip.rightFrames
-        : [],
+      hash: baseFlip.hash,
+      leftImage: baseFlip.leftImage || null,
+      rightImage: baseFlip.rightImage || null,
+      leftFrames: baseFlip.leftFrames,
+      rightFrames: baseFlip.rightFrames,
+      ...(baseFlip.keywords.length ? {keywords: baseFlip.keywords} : {}),
       images: [baseFlip.leftImage, baseFlip.rightImage].filter(Boolean),
     }
   }
 
-  const effectiveLeftFrames = swapped ? rightFrames : leftFrames
-  const effectiveRightFrames = swapped ? leftFrames : rightFrames
+  const requestedLeftFrames = swapped ? rightFrames : leftFrames
+  const requestedRightFrames = swapped ? leftFrames : rightFrames
+  const effectiveLeftFrames = Array.isArray(requestedLeftFrames)
+    ? requestedLeftFrames
+    : []
+  const effectiveRightFrames = Array.isArray(requestedRightFrames)
+    ? requestedRightFrames
+    : []
 
   return {
-    ...baseFlip,
+    hash: baseFlip.hash,
+    leftImage: baseFlip.leftImage || null,
+    rightImage: baseFlip.rightImage || null,
     leftFrames: effectiveLeftFrames,
     rightFrames: effectiveRightFrames,
+    ...(baseFlip.keywords.length ? {keywords: baseFlip.keywords} : {}),
     images: effectiveLeftFrames.concat(effectiveRightFrames),
   }
 }
@@ -5637,7 +5674,16 @@ function normalizeValidationReportKeywords(keywords = []) {
     .slice(0, 2)
 }
 
-function buildValidationReportReviewPrompt({keywords = []} = {}) {
+function normalizeValidationReportAnswer(value) {
+  const answer = normalizeAnswer(value)
+  return answer === 'left' || answer === 'right' ? answer : null
+}
+
+function buildValidationReportReviewPrompt({
+  keywords = [],
+  reviewBothSides = false,
+  selectedAnswer = '',
+} = {}) {
   const normalizedKeywords = normalizeValidationReportKeywords(keywords)
   const keywordLines = normalizedKeywords.length
     ? normalizedKeywords.map((item, index) => {
@@ -5646,10 +5692,36 @@ function buildValidationReportReviewPrompt({keywords = []} = {}) {
       })
     : ['1. keyword unavailable', '2. keyword unavailable']
 
+  const selectedAnswerLine = selectedAnswer
+    ? `Current selected answer before this report review: ${selectedAnswer}.`
+    : 'Current selected answer before this report review: unknown.'
+  const inputLines = reviewBothSides
+    ? [
+        'You are reviewing one Idena validation flip during the long-session keyword check.',
+        'You will receive exactly 8 ordered frames and the 2 official keywords.',
+        '- Images 1-4 are the LEFT candidate in temporal order.',
+        '- Images 5-8 are the RIGHT candidate in temporal order.',
+        selectedAnswerLine,
+        'First choose the best answer side, then decide whether the chosen sequence should be APPROVED or REPORTED.',
+      ]
+    : [
+        'You are reviewing one already-selected Idena validation flip sequence during the long-session keyword check.',
+        'You will receive exactly 4 ordered frames for the chosen story and the 2 official keywords.',
+        'Decide whether the chosen sequence should be APPROVED or REPORTED.',
+      ]
+  const answerLines = reviewBothSides
+    ? [
+        'Answer-side rules:',
+        '- Return "answer":"left" or "answer":"right".',
+        '- You may switch the side only in this long-session keyword/report phase.',
+        '- Switch only when the alternate side is visually more coherent or materially better fits both official keywords without weaker story coherence.',
+        '- Do not switch merely because one keyword is subtle; visual chronology still has priority.',
+        '- Do not report solely because the previously selected side was wrong; choose the corrected side and then approve/report that chosen sequence.',
+      ]
+    : []
+
   return [
-    'You are reviewing one already-selected Idena validation flip sequence during the long-session keyword check.',
-    'You will receive exactly 4 ordered frames for the chosen story and the 2 official keywords.',
-    'Decide whether the chosen sequence should be APPROVED or REPORTED.',
+    ...inputLines,
     'Report only for clear rule violations:',
     '- one keyword is missing, irrelevant, or not clearly visible in the chosen sequence',
     '- the sequence depends on reading text to solve',
@@ -5664,8 +5736,11 @@ function buildValidationReportReviewPrompt({keywords = []} = {}) {
     '- do not report merely because an internet meme or recycled image contains a watermark or logo',
     'Do not report merely because the story is awkward, low quality, or hard.',
     'If you are uncertain, choose "approve".',
+    ...answerLines,
     'Return JSON only with this shape:',
-    '{"decision":"approve"|"report","confidence":0.0,"reason":"short reason","triggeredRules":["keyword_missing"|"text_dependency"|"order_labels"|"inappropriate_content"|"unrelated_stories"|"waking_template"|"answer_cue"|"keywords_only_inside_media"]}',
+    reviewBothSides
+      ? '{"answer":"left"|"right","decision":"approve"|"report","confidence":0.0,"reason":"short reason","triggeredRules":["keyword_missing"|"text_dependency"|"order_labels"|"inappropriate_content"|"unrelated_stories"|"waking_template"|"answer_cue"|"keywords_only_inside_media"]}'
+      : '{"decision":"approve"|"report","confidence":0.0,"reason":"short reason","triggeredRules":["keyword_missing"|"text_dependency"|"order_labels"|"inappropriate_content"|"unrelated_stories"|"waking_template"|"answer_cue"|"keywords_only_inside_media"]}',
     '',
     'Keywords:',
     ...keywordLines,
@@ -5809,6 +5884,9 @@ function normalizeValidationReportDecision(parsed) {
   }
 
   return {
+    answer: normalizeValidationReportAnswer(
+      parsed && (parsed.answer || parsed.side || parsed.correctAnswer)
+    ),
     decision,
     confidence: normalizeConfidence(parsed && parsed.confidence),
     reason,
@@ -5819,6 +5897,8 @@ function normalizeValidationReportDecision(parsed) {
 function aggregateValidationReportReviews(reviews = []) {
   let approveScore = 0
   let reportScore = 0
+  let leftAnswerScore = 0
+  let rightAnswerScore = 0
   let totalWeight = 0
   let bestApprove = null
   let bestApproveScore = -1
@@ -5831,6 +5911,11 @@ function aggregateValidationReportReviews(reviews = []) {
     const score = weight * confidence
 
     totalWeight += weight
+    if (item && item.answer === 'left') {
+      leftAnswerScore += score
+    } else if (item && item.answer === 'right') {
+      rightAnswerScore += score
+    }
 
     if (item && item.decision === 'report') {
       reportScore += score
@@ -5848,8 +5933,16 @@ function aggregateValidationReportReviews(reviews = []) {
     }
   })
 
+  let answer = null
+  if (leftAnswerScore > rightAnswerScore) {
+    answer = 'left'
+  } else if (rightAnswerScore > leftAnswerScore) {
+    answer = 'right'
+  }
+
   if (reportScore <= 0 && approveScore <= 0) {
     return {
+      answer,
       decision: 'approve',
       confidence: 0,
       reason: 'insufficient signal',
@@ -5863,6 +5956,7 @@ function aggregateValidationReportReviews(reviews = []) {
   const bestReview = decision === 'report' ? bestReport : bestApprove
 
   return {
+    answer,
     decision,
     confidence:
       totalWeight > 0 ? Math.max(0, Math.min(1, chosenScore / totalWeight)) : 0,
@@ -6359,6 +6453,7 @@ Flip hash: ${hash}
         flipVisionMode: promptOptions.flipVisionMode || profile.flipVisionMode,
         promptPhase: promptOptions.promptPhase || 'decision',
         frameReasoning: promptOptions.frameReasoning || '',
+        keywords: flip.keywords,
       })
     const systemPrompt = systemPromptTemplate()
 
@@ -9982,6 +10077,7 @@ Flip hash: ${hash}
               candidateOrder: `bias-calibration variant ${runNumber}`,
               probabilityPasses: profile.probabilityPasses,
               previousProbabilityJson,
+              keywords: runFlip.keywords,
             })
             const structuredOutput =
               basePromptOptions.structuredOutput &&
@@ -10748,11 +10844,22 @@ Flip hash: ${hash}
 
     async function reviewSingleFlip(flip) {
       const flipStartedAt = now()
-      const sequenceImages = normalizeImageList(flip && flip.images).slice(0, 4)
+      const leftSequenceImages = normalizeImageList(
+        flip && flip.leftImages
+      ).slice(0, 4)
+      const rightSequenceImages = normalizeImageList(
+        flip && flip.rightImages
+      ).slice(0, 4)
+      const reviewBothSides =
+        leftSequenceImages.length === 4 && rightSequenceImages.length === 4
+      const sequenceImages = reviewBothSides
+        ? leftSequenceImages.concat(rightSequenceImages)
+        : normalizeImageList(flip && flip.images).slice(0, 4)
 
       if (!sequenceImages.length) {
         return {
           hash: flip && flip.hash ? flip.hash : '',
+          answer: null,
           decision: 'approve',
           confidence: 0,
           reason: 'missing sequence images',
@@ -10767,6 +10874,10 @@ Flip hash: ${hash}
 
       const promptText = buildValidationReportReviewPrompt({
         keywords: flip && flip.keywords,
+        reviewBothSides,
+        selectedAnswer: normalizeValidationReportAnswer(
+          flip && flip.selectedAnswer
+        ),
       })
 
       const consultantReviews = await Promise.all(
@@ -10828,6 +10939,7 @@ Flip hash: ${hash}
               provider: consultant.provider,
               model: consultant.model,
               weight: normalizeConsultantWeight(consultant.weight, 1),
+              answer: review.answer,
               decision: review.decision,
               confidence: review.confidence,
               reason: review.reason,
@@ -10852,6 +10964,7 @@ Flip hash: ${hash}
               provider: consultant.provider,
               model: consultant.model,
               weight: normalizeConsultantWeight(consultant.weight, 1),
+              answer: null,
               decision: 'approve',
               confidence: 0,
               reason: 'provider error',
@@ -10879,6 +10992,7 @@ Flip hash: ${hash}
 
       return {
         hash: flip.hash,
+        answer: aggregate.answer,
         decision: aggregate.decision,
         confidence: aggregate.confidence,
         reason: aggregate.reason,
@@ -10895,6 +11009,7 @@ Flip hash: ${hash}
             provider: consultProvider,
             model: consultModel,
             weight: itemWeight,
+            answer,
             decision,
             confidence,
             error,
@@ -10902,6 +11017,7 @@ Flip hash: ${hash}
             provider: consultProvider,
             model: consultModel,
             weight: normalizeConsultantWeight(itemWeight, 1),
+            answer,
             decision,
             confidence,
             error,
