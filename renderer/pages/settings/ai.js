@@ -3714,10 +3714,10 @@ export default function AiSettingsPage() {
     : activeProvider
   const externalAiSummary = aiSolver.enabled
     ? t(
-        'Insert one or multiple AI provider API keys here. Click Advanced if you need more settings later.'
+        'Insert one or multiple AI provider API keys here. For OpenAI testing, use a prepaid key without automatic top-up when possible.'
       )
     : t(
-        'Use this when you want an external AI provider via API instead of a local runtime.'
+        'Use this when you want an external AI provider via API instead of a local runtime. For OpenAI testing, a prepaid key without automatic top-up is recommended.'
       )
   const enableExternalProviderSetup = useCallback(() => {
     pendingProviderSetupRevealRef.current = true
@@ -4409,6 +4409,25 @@ export default function AiSettingsPage() {
 
                     {!isLocalAiPrimaryProvider ? (
                       <>
+                        <Box
+                          borderWidth="1px"
+                          borderColor="orange.200"
+                          borderRadius="md"
+                          bg="orange.012"
+                          p={3}
+                        >
+                          <Stack spacing={1}>
+                            <Text fontWeight={600} fontSize="sm">
+                              {t('API spend guardrail')}
+                            </Text>
+                            <Text color="muted" fontSize="sm">
+                              {t(
+                                'Recommended for OpenAI: use only a prepaid-funded API key with no automatic top-up, so a rough experimental run cannot create an unlimited provider-side bill. This software is experimental and does not provide warranties.'
+                              )}
+                            </Text>
+                          </Stack>
+                        </Box>
+
                         <SettingsFormControl>
                           <SettingsFormLabel>{t('API key')}</SettingsFormLabel>
                           <InputGroup w="full" maxW="xl">

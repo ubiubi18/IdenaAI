@@ -31,6 +31,15 @@ const peerHintFreshnessMs = 72 * 60 * 60 * 1000
 const peerHintFailureBaseBackoffMs = 5 * 60 * 1000
 const peerHintFailureMaxBackoffMs = 60 * 60 * 1000
 const managedPeerNetwork = 'mainnet'
+const localNodeBuildFreshnessFiles = [
+  'go.mod',
+  'go.sum',
+  path.join('blockchain', 'helpers.go'),
+  path.join('blockchain', 'validation', 'validation.go'),
+  path.join('config', 'validation.go'),
+  path.join('core', 'ceremony', 'ceremony.go'),
+  path.join('core', 'flip', 'flipper.go'),
+]
 
 const execFileAsync = promisify(execFile)
 
@@ -1027,6 +1036,54 @@ function localNodeSourceBuildAvailable() {
   )
 }
 
+async function getLocalNodeSourceMtimeMs() {
+  const repoDir = findLocalNodeRepo()
+  if (!repoDir) {
+    return 0
+  }
+
+  const wasmBindingDir = findLocalWasmBindingRepo()
+  const wasmBindingLibName = getLocalWasmBindingLibName()
+  const freshnessPaths = localNodeBuildFreshnessFiles.map((relativeFile) =>
+    path.join(repoDir, relativeFile)
+  )
+
+  if (wasmBindingDir && wasmBindingLibName) {
+    freshnessPaths.push(path.join(wasmBindingDir, 'lib', wasmBindingLibName))
+  }
+
+  const mtimes = await Promise.all(
+    freshnessPaths.map(async (filePath) => {
+      try {
+        const stats = await fs.stat(filePath)
+        return stats.mtimeMs || 0
+      } catch {
+        return 0
+      }
+    })
+  )
+
+  return Math.max(0, ...mtimes)
+}
+
+async function isNodeBinaryOlderThanLocalSource(nodePath = getNodeFile()) {
+  if (!localNodeSourceBuildAvailable()) {
+    return false
+  }
+
+  const sourceMtimeMs = await getLocalNodeSourceMtimeMs()
+  if (!sourceMtimeMs) {
+    return false
+  }
+
+  try {
+    const nodeStats = await fs.stat(nodePath)
+    return (nodeStats.mtimeMs || 0) + 1000 < sourceMtimeMs
+  } catch {
+    return true
+  }
+}
+
 function getNodeReleaseRepos(env = process.env) {
   const configured = String(env.IDENAAI_NODE_RELEASE_REPOS || '')
     .split(',')
@@ -1732,6 +1789,7 @@ module.exports = {
   downloadNode,
   getCurrentVersion,
   getRemoteVersion,
+  isNodeBinaryOlderThanLocalSource,
   startNode,
   stopNode,
   updateNode,
