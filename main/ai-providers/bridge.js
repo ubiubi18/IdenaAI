@@ -9874,6 +9874,37 @@ Flip hash: ${hash}
           const runErrors = []
           const providerMetaEntries = []
 
+          const buildPreviousProbabilityAuditHint = (runSwapped) => {
+            if (!runs.length) {
+              return ''
+            }
+            const previousAggregate = aggregateProbabilityEnsembleRuns(runs, {
+              forceDecision: true,
+              probabilityDecisionDelta: profile.probabilityDecisionDelta,
+              tieBreakerKey: flip.hash,
+            })
+            const optionAMapsTo = runSwapped ? 'right' : 'left'
+            const optionBMapsTo = runSwapped ? 'left' : 'right'
+            const scoreForSide = (side) =>
+              side === 'left'
+                ? previousAggregate.avgLeft
+                : previousAggregate.avgRight
+
+            return JSON.stringify({
+              previousRunCount: previousAggregate.runCount,
+              optionA: {
+                maps_to_original_side: optionAMapsTo,
+                previous_side_score: scoreForSide(optionAMapsTo),
+              },
+              optionB: {
+                maps_to_original_side: optionBMapsTo,
+                previous_side_score: scoreForSide(optionBMapsTo),
+              },
+              previous_delta: previousAggregate.delta,
+              previous_answer: previousAggregate.answer,
+            })
+          }
+
           for (
             let runIndex = 0;
             runIndex < probabilityRunCount;
@@ -9884,6 +9915,8 @@ Flip hash: ${hash}
               probabilityRunCount
             )
             const runNumber = runIndex + 1
+            const previousProbabilityJson =
+              runIndex > 0 ? buildPreviousProbabilityAuditHint(runSwapped) : ''
             const runFlip = buildProviderFlipForVision({
               flip,
               swapped: runSwapped,
@@ -9898,6 +9931,7 @@ Flip hash: ${hash}
               totalRuns: probabilityRunCount,
               candidateOrder: `bias-calibration variant ${runNumber}`,
               probabilityPasses: profile.probabilityPasses,
+              previousProbabilityJson,
             })
             const structuredOutput =
               basePromptOptions.structuredOutput &&
@@ -9988,6 +10022,7 @@ Flip hash: ${hash}
           const probabilityAggregate = aggregateProbabilityEnsembleRuns(runs, {
             forceDecision: profile.forceDecision || !allowSkip,
             probabilityDecisionDelta: profile.probabilityDecisionDelta,
+            tieBreakerKey: flip.hash,
           })
           const answer = normalizeAnswer(probabilityAggregate.answer)
           const providerMeta = providerMetaEntries.length
