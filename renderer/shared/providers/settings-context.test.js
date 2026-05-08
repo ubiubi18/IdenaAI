@@ -25,6 +25,9 @@ describe('settings-context ai solver normalization', () => {
 
   it('keeps the default system reserve for AI sessions', () => {
     expect(buildAiSolverSettings()).toMatchObject({
+      model: 'gpt-5.5',
+      shortSessionOpenAiFastModel: 'gpt-5.5',
+      probabilityReasoningEffort: 'xhigh',
       memoryBudgetGiB: 32,
       systemReserveGiB: 6,
       localAiMemoryReference: 'molmo2-4b',
@@ -71,7 +74,7 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
-      shortSessionOpenAiFastModel: 'gpt-5.4-mini',
+      shortSessionOpenAiFastModel: 'gpt-5.5',
     })
   })
 
@@ -97,6 +100,20 @@ describe('settings-context ai solver normalization', () => {
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
       shortSessionOpenAiFastModel: 'gpt-5.5-mini',
+    })
+  })
+
+  it('migrates the old OpenAI default model to GPT-5.5', () => {
+    expect(
+      buildAiSolverSettings({
+        provider: 'openai',
+        model: 'gpt-5.4',
+        shortSessionOpenAiFastModel: 'gpt-5.4-mini',
+      })
+    ).toMatchObject({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      shortSessionOpenAiFastModel: 'gpt-5.5',
     })
   })
 
