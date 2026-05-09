@@ -91,6 +91,7 @@ import {
   SecondaryButton,
 } from '../shared/components/button'
 import {Toast, Tooltip} from '../shared/components/components'
+import {AiProviderBudgetCapDialog} from '../shared/components/ai-provider-budget-cap-dialog'
 import {useChainState} from '../shared/providers/chain-context'
 import {reorderList} from '../shared/utils/arr'
 import {
@@ -109,6 +110,10 @@ import {
   solveValidationSessionWithAi,
 } from '../screens/validation/ai/solver-orchestrator'
 import {appendValidationAiCostLedgerEntry} from '../screens/validation/ai-cost-tracker'
+import {
+  buildAiProviderDailyBudgetErrorMessage,
+  getAiProviderDailyBudgetStatus,
+} from '../shared/utils/ai-provider-budget'
 import {buildRehearsalNetworkPayload} from '../shared/utils/rehearsal-devnet'
 import {
   checkAiProviderReadiness,
@@ -165,6 +170,12 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   autoReportEnabled: false,
   autoReportDelayMinutes: AUTO_REPORT_DEFAULT_DELAY_MINUTES,
   autoReportBestFlipEnabled: false,
+  providerDailyBudgetEnabled: true,
+  providerDailyBudgetUsd: 15,
+  providerDailyBudgetOverrideDate: '',
+  providerDailyBudgetOverrideConsentAt: '',
+  providerDailyBudgetLastApprovedUsd: '',
+  providerDailyBudgetLastApprovedAt: '',
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -1002,6 +1013,10 @@ function ValidationSession({
   const [aiLastRun, setAiLastRun] = useState(null)
   const [aiLiveTimeline, setAiLiveTimeline] = useState([])
   const [aiActiveFlip, setAiActiveFlip] = useState(null)
+  const [isProviderBudgetCapDialogOpen, setIsProviderBudgetCapDialogOpen] =
+    useState(false)
+  const [providerBudgetCapDialogStatus, setProviderBudgetCapDialogStatus] =
+    useState(null)
   const [aiProviderStatus, setAiProviderStatus] = useState(() =>
     createAiProviderStatusState()
   )
@@ -1681,6 +1696,11 @@ function ValidationSession({
     [toast]
   )
 
+  const openProviderBudgetCapDialog = useCallback((status = null) => {
+    setProviderBudgetCapDialogStatus(status)
+    setIsProviderBudgetCapDialogOpen(true)
+  }, [])
+
   const isAutoSolveRetryPending = useCallback((sessionType) => {
     const retryAfter = autoSolveRetryAfterRef.current?.[sessionType] || 0
     return Number.isFinite(retryAfter) && retryAfter > Date.now()
@@ -1815,6 +1835,51 @@ function ValidationSession({
     aiSolverSettings.enabled &&
     aiSolverSettings.mode === 'session-auto' &&
     hasSessionAutoSubmitConsent
+  const approveProviderDailyBudgetCap = useCallback(
+    (nextCapUsd) => {
+      const normalizedCapUsd = Number(nextCapUsd)
+      if (!Number.isFinite(normalizedCapUsd) || normalizedCapUsd <= 0) {
+        return
+      }
+
+      updateAiSolverSettings({
+        providerDailyBudgetEnabled: true,
+        providerDailyBudgetUsd: normalizedCapUsd,
+        providerDailyBudgetOverrideDate: '',
+        providerDailyBudgetOverrideConsentAt: '',
+        providerDailyBudgetLastApprovedUsd: normalizedCapUsd,
+        providerDailyBudgetLastApprovedAt: new Date().toISOString(),
+      })
+      setIsProviderBudgetCapDialogOpen(false)
+      setProviderBudgetCapDialogStatus(null)
+      notifyAi(
+        t('Daily API budget cap raised'),
+        t(
+          'Remote-provider AI calls can continue until the newly approved local cap is reached. Keep watching provider-side limits.'
+        ),
+        'warning'
+      )
+
+      if (aiSessionType && isSessionAutoMode) {
+        autoSolveStartedRef.current[aiSessionType] = false
+        if (aiSessionType === 'long') {
+          autoSolveLongSignatureRef.current = ''
+        }
+        scheduleAutoSolveRetry({
+          sessionType: aiSessionType,
+          delayMs: 1000,
+        })
+      }
+    },
+    [
+      aiSessionType,
+      isSessionAutoMode,
+      notifyAi,
+      scheduleAutoSolveRetry,
+      t,
+      updateAiSolverSettings,
+    ]
+  )
   const rehearsalAutosolverManualOnly =
     isRehearsalNodeSession &&
     aiSolverSettings.enabled &&
@@ -1828,6 +1893,13 @@ function ValidationSession({
     isSessionAutoMode &&
     aiSolverSettings.autoReportEnabled === true &&
     !forceAiPreview
+  const providerBudgetActionStatus =
+    providerBudgetCapDialogStatus ||
+    getAiProviderDailyBudgetStatus(aiSolverSettings)
+  const canShowProviderBudgetCapAction =
+    providerBudgetActionStatus.remoteProvider &&
+    providerBudgetActionStatus.enabled &&
+    providerBudgetActionStatus.blocked
 
   useEffect(() => {
     if (!needsOnchainAutoSubmitConsent) {
@@ -2141,6 +2213,24 @@ function ValidationSession({
         longFlips: state.context.longFlips,
         aiSolver: solveAiSettings,
       })
+      const providerBudgetStatus =
+        getAiProviderDailyBudgetStatus(solveAiSettings)
+      if (providerBudgetStatus.blocked) {
+        openProviderBudgetCapDialog(providerBudgetStatus)
+        const budgetError = new Error(
+          buildAiProviderDailyBudgetErrorMessage(providerBudgetStatus)
+        )
+        budgetError.code = 'provider_budget_exceeded'
+        throw budgetError
+      }
+      const budgetLimitedSolveAiSettings =
+        providerBudgetStatus.remoteProvider && providerBudgetStatus.enabled
+          ? {
+              ...solveAiSettings,
+              providerDailyBudgetRemainingUsd:
+                providerBudgetStatus.remainingUsd,
+            }
+          : solveAiSettings
       const indexByHash = new Map(
         displayFlips.map((flip, index) => [flip.hash, index])
       )
@@ -2214,7 +2304,7 @@ function ValidationSession({
         sessionType,
         shortFlips: state.context.shortFlips,
         longFlips: state.context.longFlips,
-        aiSolver: solveAiSettings,
+        aiSolver: budgetLimitedSolveAiSettings,
         sessionMeta: {
           epoch,
           sessionType,
@@ -2507,6 +2597,20 @@ function ValidationSession({
         })
       }
 
+      if (result.providerBudgetExceeded) {
+        openProviderBudgetCapDialog(
+          getAiProviderDailyBudgetStatus(solveAiSettings)
+        )
+        clearAutoSolveRetry(sessionType)
+        notifyAi(
+          t('Remote AI daily budget reached'),
+          t(
+            'IdenaAI stopped launching more remote-provider requests for today. Approve a higher daily cap if you explicitly want to continue.'
+          ),
+          'warning'
+        )
+      }
+
       if (sessionType === 'short' && !forceAiPreview) {
         const shortFlipsAfterAi = applyAiAnswerOptionsToFlips(
           state.context.shortFlips,
@@ -2533,6 +2637,7 @@ function ValidationSession({
           send('SUBMIT')
         } else if (
           isSessionAutoMode &&
+          !result.providerBudgetExceeded &&
           !reachedSubmitCutoff &&
           !answerStats.allAnswered
         ) {
@@ -2612,6 +2717,7 @@ function ValidationSession({
           autoSolveLongSignatureRef.current = ''
         } else if (
           isSessionAutoMode &&
+          !result.providerBudgetExceeded &&
           nextLongAiSolveStatus.hasDecodedUnansweredFlips
         ) {
           scheduleAutoSolveRetry({
@@ -2633,7 +2739,8 @@ function ValidationSession({
         }
       } else if (
         isSessionAutoMode &&
-        error?.code !== 'session_window_too_small'
+        error?.code !== 'session_window_too_small' &&
+        error?.code !== 'provider_budget_exceeded'
       ) {
         scheduleAutoSolveRetry({
           sessionType,
@@ -2766,6 +2873,20 @@ function ValidationSession({
             ),
         status: 'warning',
       })
+      return
+    }
+
+    const providerBudgetStatus =
+      getAiProviderDailyBudgetStatus(aiSolverSettings)
+    if (providerBudgetStatus.blocked) {
+      openProviderBudgetCapDialog(providerBudgetStatus)
+      notifyAi(
+        t('AI report review paused by budget cap'),
+        t(
+          'The remote AI daily budget has been reached. Approve a higher cap to continue automatic report review, or submit manually if you do not want more provider calls.'
+        ),
+        'warning'
+      )
       return
     }
 
@@ -2916,6 +3037,14 @@ function ValidationSession({
             uncertaintyRepromptEnabled: false,
           }
         : aiSolverSettings
+      const budgetLimitedReviewSettings =
+        providerBudgetStatus.remoteProvider && providerBudgetStatus.enabled
+          ? {
+              ...reviewSettings,
+              providerDailyBudgetRemainingUsd:
+                providerBudgetStatus.remainingUsd,
+            }
+          : reviewSettings
 
       if (urgentAutoReport) {
         notifyAi(
@@ -2928,9 +3057,9 @@ function ValidationSession({
       }
 
       const reviewResult = await global.aiSolver.reviewValidationReports({
-        ...reviewSettings,
-        provider: reviewSettings.provider,
-        model: reviewSettings.model,
+        ...budgetLimitedReviewSettings,
+        provider: budgetLimitedReviewSettings.provider,
+        model: budgetLimitedReviewSettings.model,
         providerConfig: aiProviderConfig,
         consultProviders: aiConsultProviders,
         flips: candidateFlips,
@@ -2949,6 +3078,36 @@ function ValidationSession({
       })
 
       if (manualReportingStartedRef.current) {
+        return
+      }
+
+      if (reviewResult?.providerBudgetExceeded) {
+        if (!forceAiPreview && validationStateScope) {
+          appendValidationAiCostLedgerEntry(validationStateScope, {
+            action: 'long-session report review',
+            provider: reviewResult?.provider || aiSolverSettings.provider,
+            model: reviewResult?.model || aiSolverSettings.model,
+            sessionType: 'long-report-review',
+            mode: urgentAutoReport ? 'fast' : 'normal',
+            totalFlips:
+              reviewResult?.summary?.totalFlips || candidateFlips.length,
+            appliedAnswers: 0,
+            tokenUsage: reviewResult?.summary?.tokens,
+            estimatedUsd: reviewResult?.summary?.costs?.estimatedUsd,
+            actualUsd: reviewResult?.summary?.costs?.actualUsd,
+          })
+        }
+        openProviderBudgetCapDialog(
+          getAiProviderDailyBudgetStatus(aiSolverSettings)
+        )
+        notifyAi(
+          t('Remote AI daily budget reached'),
+          t(
+            'IdenaAI stopped launching more report-review provider requests for today. Approve a higher cap to continue report review, or submit manually without extra report decisions.'
+          ),
+          'warning'
+        )
+        autoReportSubmitPendingRef.current = false
         return
       }
 
@@ -3055,6 +3214,25 @@ function ValidationSession({
       send('SUBMIT_NOW')
     } catch (error) {
       autoReportSubmitPendingRef.current = false
+      if (
+        error?.code === 'provider_budget_exceeded' ||
+        error?.code === 'provider_budget_required' ||
+        /provider budget|budget guardrail|daily budget/i.test(
+          String((error && error.message) || error || '')
+        )
+      ) {
+        openProviderBudgetCapDialog(
+          getAiProviderDailyBudgetStatus(aiSolverSettings)
+        )
+        notifyAi(
+          t('AI auto-report paused by budget cap'),
+          t(
+            'Approve a higher remote API cap to continue automatic report review, or submit manually without more provider calls.'
+          ),
+          'warning'
+        )
+        return
+      }
       notifyAi(t('AI auto-report failed'), formatErrorForToast(error), 'error')
       submitLongSessionAutomatically({
         title: t('Long session auto-submit fallback'),
@@ -4305,6 +4483,15 @@ function ValidationSession({
             {(isShortSession(state) || isLongSessionFlips(state)) &&
               showValidationAiUi && (
                 <Flex align="center" gap={2} flexWrap="wrap" minW={0}>
+                  {canShowProviderBudgetCapAction && (
+                    <SecondaryButton
+                      onClick={() =>
+                        openProviderBudgetCapDialog(providerBudgetActionStatus)
+                      }
+                    >
+                      {t('Approve higher AI cap')}
+                    </SecondaryButton>
+                  )}
                   {aiProgress && (
                     <Text
                       fontSize="xs"
@@ -4518,6 +4705,20 @@ function ValidationSession({
       <EncourageReportDialog
         isOpen={isOpenEncourageReportDialog}
         onClose={onCloseEncourageReportDialog}
+      />
+      <AiProviderBudgetCapDialog
+        isOpen={isProviderBudgetCapDialogOpen}
+        onClose={() => {
+          setIsProviderBudgetCapDialogOpen(false)
+          setProviderBudgetCapDialogStatus(null)
+        }}
+        status={providerBudgetActionStatus}
+        contextLabel={
+          isRehearsalNodeSession
+            ? t('Rehearsal autosolver has reached the local API cap.')
+            : t('Real validation autosolver has reached the local API cap.')
+        }
+        onApprove={approveProviderDailyBudgetCap}
       />
     </ValidationScene>
   )

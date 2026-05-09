@@ -626,6 +626,28 @@ function normalizeCostSummary(costs = {}) {
   }
 }
 
+function normalizeProviderDailyBudgetRemainingUsd(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function getCostSummaryUsd(costs = {}) {
+  const normalizedCosts = normalizeCostSummary(costs)
+  if (Number.isFinite(normalizedCosts.actualUsd)) {
+    return normalizedCosts.actualUsd
+  }
+  return Number.isFinite(normalizedCosts.estimatedUsd)
+    ? normalizedCosts.estimatedUsd
+    : 0
+}
+
+function getResultsCostUsd(results = []) {
+  return (Array.isArray(results) ? results : []).reduce(
+    (total, item) => total + getCostSummaryUsd(item && item.costs),
+    0
+  )
+}
+
 function formatSolveError(error) {
   return String((error && error.message) || error || 'unknown_error').trim()
 }
@@ -1565,6 +1587,18 @@ export async function solveValidationSessionWithAi({
   const activeStaggeredSolves = []
   let nextStaggeredSolveTaskId = 0
   let nextStaggeredSolveLaunchAt = 0
+  const providerDailyBudgetRemainingUsd =
+    normalizeProviderDailyBudgetRemainingUsd(
+      aiSolver.providerDailyBudgetRemainingUsd
+    )
+  let providerBudgetExceeded = false
+
+  function hasProviderDailyBudgetAvailable() {
+    return (
+      providerDailyBudgetRemainingUsd === null ||
+      getResultsCostUsd(results) < providerDailyBudgetRemainingUsd
+    )
+  }
 
   async function emitWaitingDelay(index) {
     const delayMs = Math.max(
@@ -1832,6 +1866,10 @@ export async function solveValidationSessionWithAi({
         provider,
         model,
         providerConfig,
+        providerDailyBudgetEnabled:
+          aiSolver.providerDailyBudgetEnabled !== false,
+        providerDailyBudgetRemainingUsd:
+          aiSolver.providerDailyBudgetRemainingUsd,
         ensembleEnabled: Boolean(aiSolver.ensembleEnabled),
         ensemblePrimaryWeight: normalizeWeight(
           aiSolver.ensemblePrimaryWeight,
@@ -1999,6 +2037,10 @@ export async function solveValidationSessionWithAi({
       await onDecision(decision)
     }
 
+    if (!hasProviderDailyBudgetAvailable()) {
+      providerBudgetExceeded = true
+    }
+
     if (solveConcurrency === 1 && !useLongSessionOpenAiStaggeredSolving) {
       await emitWaitingDelay(index)
     }
@@ -2156,6 +2198,11 @@ export async function solveValidationSessionWithAi({
   async function launchStaggeredPreparedFlip(preparedFlip) {
     await waitForStaggeredLaunchSlot()
 
+    if (providerBudgetExceeded || !hasProviderDailyBudgetAvailable()) {
+      providerBudgetExceeded = true
+      return
+    }
+
     if (
       !hasRuntimeRemaining(
         sessionDeadlineAt,
@@ -2198,6 +2245,12 @@ export async function solveValidationSessionWithAi({
 
   async function flushPreparedFlips({force = false} = {}) {
     if (!pendingPreparedFlips.length) {
+      return
+    }
+
+    if (providerBudgetExceeded || !hasProviderDailyBudgetAvailable()) {
+      providerBudgetExceeded = true
+      pendingPreparedFlips.splice(0, pendingPreparedFlips.length)
       return
     }
 
@@ -2347,6 +2400,11 @@ export async function solveValidationSessionWithAi({
 
   let candidateIndex = 0
   for (; candidateIndex < candidateFlips.length; candidateIndex += 1) {
+    if (providerBudgetExceeded || !hasProviderDailyBudgetAvailable()) {
+      providerBudgetExceeded = true
+      break
+    }
+
     if (
       !hasRuntimeRemaining(sessionDeadlineAt, sessionSolveGuardMs) ||
       Date.now() >= buildDeadlineAt
@@ -2423,7 +2481,7 @@ export async function solveValidationSessionWithAi({
 
   for (
     let remainingIndex = candidateIndex;
-    remainingIndex < candidateFlips.length;
+    !providerBudgetExceeded && remainingIndex < candidateFlips.length;
     remainingIndex += 1
   ) {
     const flip = candidateFlips[remainingIndex]
@@ -2481,6 +2539,7 @@ export async function solveValidationSessionWithAi({
     summary,
     fastMode,
     modelFallback,
+    providerBudgetExceeded,
     results,
     answers,
   }

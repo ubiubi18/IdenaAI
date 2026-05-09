@@ -21,6 +21,7 @@ import {
   Switch,
 } from '@chakra-ui/react'
 import {PrimaryButton, SecondaryButton} from '../../shared/components/button'
+import {AiProviderBudgetCapDialog} from '../../shared/components/ai-provider-budget-cap-dialog'
 import {BASE_API_URL} from '../../shared/api/api-client'
 import {
   useSettingsState,
@@ -63,6 +64,11 @@ import {
 } from '../../screens/validation/hooks/use-start-validation'
 import {buildLocalAiRuntimePayload} from '../../shared/utils/ai-provider-readiness'
 import {shouldBlockSessionAutoInDev} from '../../shared/utils/validation-ai-auto'
+import {
+  appendAiProviderBudgetLedgerEntry,
+  buildAiProviderDailyBudgetErrorMessage,
+  getAiProviderDailyBudgetStatus,
+} from '../../shared/utils/ai-provider-budget'
 
 const NODE_SETTINGS_TOAST_ID = 'node-settings-status-toast'
 const LOCAL_RPC_KEY_TOAST_ID = 'local-rpc-key-toast'
@@ -720,6 +726,10 @@ function NodeSettings() {
   const [rehearsalApiKey, setRehearsalApiKey] = useState('')
   const [isRehearsalApiKeyVisible, setIsRehearsalApiKeyVisible] =
     useState(false)
+  const [isProviderBudgetCapDialogOpen, setIsProviderBudgetCapDialogOpen] =
+    useState(false)
+  const [providerBudgetCapDialogStatus, setProviderBudgetCapDialogStatus] =
+    useState(null)
   const emptyLogMessage = (() => {
     if (!canUseIpcRenderer) {
       return t(
@@ -927,6 +937,56 @@ function NodeSettings() {
     REHEARSAL_AI_PROVIDER_OPTIONS.find(
       ({value}) => value === rehearsalAiProvider
     )?.label || rehearsalAiProvider
+  const providerDailyBudgetStatus = getAiProviderDailyBudgetStatus(
+    settings.aiSolver || {}
+  )
+  const rehearsalDialogBudgetStatus = getAiProviderDailyBudgetStatus(
+    {
+      ...(settings.aiSolver || {}),
+      provider: rehearsalAiProvider,
+      model: rehearsalAiModel,
+    },
+    {provider: rehearsalAiProvider}
+  )
+  const providerDailyBudgetUsageText = t(
+    'Today: {{spent}} used of {{limit}} local daily cap',
+    {
+      spent: formatRehearsalSolverUsd(providerDailyBudgetStatus.usage.usd),
+      limit: formatRehearsalSolverUsd(providerDailyBudgetStatus.limitUsd),
+    }
+  )
+  const rehearsalDialogBudgetUsageText = t(
+    'Today: {{spent}} used of {{limit}} local daily cap',
+    {
+      spent: formatRehearsalSolverUsd(rehearsalDialogBudgetStatus.usage.usd),
+      limit: formatRehearsalSolverUsd(rehearsalDialogBudgetStatus.limitUsd),
+    }
+  )
+  let providerDailyBudgetNodeText = t(
+    'Daily API guardrail is active. {{usage}}.',
+    {
+      usage: providerDailyBudgetUsageText,
+    }
+  )
+  if (providerDailyBudgetStatus.blocked) {
+    providerDailyBudgetNodeText = t(
+      'Daily API guardrail is blocking remote-provider autosolve. {{usage}}. Approve a higher cap before continuing.',
+      {usage: providerDailyBudgetUsageText}
+    )
+  }
+  let rehearsalDialogBudgetText = t(
+    'Remote provider starts are capped by default. {{usage}}.',
+    {usage: rehearsalDialogBudgetUsageText}
+  )
+  if (rehearsalDialogBudgetStatus.blocked) {
+    rehearsalDialogBudgetText = t(
+      'Remote provider starts are blocked for today. {{usage}}.',
+      {usage: rehearsalDialogBudgetUsageText}
+    )
+  }
+  const remoteRehearsalBudgetBlocked =
+    providerDailyBudgetStatus.blocked &&
+    settings.aiSolver?.provider !== 'local-ai'
   const localRpcKeyHelpText = t(
     'The local RPC key lives as internalApiKey in settings.json inside the current {{appName}} profile. Real app profiles: macOS ~/Library/Application Support/{{appName}}/settings.json, Windows %APPDATA%\\{{appName}}\\settings.json, Linux ~/.config/{{appName}}/settings.json. Edit it only while {{appName}} and its node are stopped, then restart. Rehearsal networks use a different temporary API key managed by the rehearsal node.',
     {appName: APP_NAME}
@@ -1032,6 +1092,73 @@ function NodeSettings() {
     },
     [toast]
   )
+
+  const openProviderBudgetCapDialog = useCallback((status = null) => {
+    setProviderBudgetCapDialogStatus(status)
+    setIsProviderBudgetCapDialogOpen(true)
+  }, [])
+
+  const approveProviderDailyBudgetCap = useCallback(
+    (nextCapUsd) => {
+      const normalizedCapUsd = Number(nextCapUsd)
+      if (!Number.isFinite(normalizedCapUsd) || normalizedCapUsd <= 0) {
+        return
+      }
+
+      updateAiSolverSettings({
+        providerDailyBudgetEnabled: true,
+        providerDailyBudgetUsd: normalizedCapUsd,
+        providerDailyBudgetOverrideDate: '',
+        providerDailyBudgetOverrideConsentAt: '',
+        providerDailyBudgetLastApprovedUsd: normalizedCapUsd,
+        providerDailyBudgetLastApprovedAt: new Date().toISOString(),
+      })
+      setIsProviderBudgetCapDialogOpen(false)
+      setProviderBudgetCapDialogStatus(null)
+      showRehearsalAiToast(
+        t('Daily API budget cap raised'),
+        t(
+          'Remote-provider AI calls can continue until the newly approved local cap is reached. Keep watching provider-side limits.'
+        ),
+        'warning'
+      )
+    },
+    [showRehearsalAiToast, t, updateAiSolverSettings]
+  )
+
+  const openProviderBudgetCapApproval = useCallback(() => {
+    updateAiSolverSettings({
+      providerDailyBudgetEnabled: true,
+      providerDailyBudgetOverrideDate: '',
+      providerDailyBudgetOverrideConsentAt: '',
+    })
+    openProviderBudgetCapDialog(rehearsalDialogBudgetStatus)
+  }, [
+    openProviderBudgetCapDialog,
+    rehearsalDialogBudgetStatus,
+    updateAiSolverSettings,
+  ])
+
+  const handleProviderBudgetError = useCallback(
+    (error) => {
+      const status = error && error.budgetStatus
+      if (status) {
+        openProviderBudgetCapDialog(status)
+      }
+    },
+    [openProviderBudgetCapDialog]
+  )
+
+  const assertRemoteProviderBudgetAvailable = useCallback((aiSolver = {}) => {
+    const status = getAiProviderDailyBudgetStatus(aiSolver)
+    if (status.blocked) {
+      const error = new Error(buildAiProviderDailyBudgetErrorMessage(status))
+      error.code = 'provider_budget_exceeded'
+      error.budgetStatus = status
+      throw error
+    }
+    return status
+  }, [])
 
   const resetAiSetupDialogState = useCallback(() => {
     const provider = 'openai'
@@ -1186,6 +1313,12 @@ function NodeSettings() {
       setIsPreparingRehearsalAi(true)
 
       try {
+        assertRemoteProviderBudgetAvailable({
+          ...(settings.aiSolver || {}),
+          provider,
+          model,
+        })
+
         if (loadApiKey) {
           await getAiSolverBridge().setProviderKey({
             provider,
@@ -1228,6 +1361,7 @@ function NodeSettings() {
           loadApiKey ? 'success' : 'warning'
         )
       } catch (error) {
+        handleProviderBudgetError(error)
         showRehearsalAiToast(
           t('Unable to prepare rehearsal AI'),
           String((error && error.message) || error || '').trim() ||
@@ -1242,6 +1376,9 @@ function NodeSettings() {
       rehearsalAiModel,
       rehearsalAiProvider,
       rehearsalAiProviderLabel,
+      assertRemoteProviderBudgetAvailable,
+      handleProviderBudgetError,
+      settings.aiSolver,
       showRehearsalAiToast,
       startRehearsalNetworkForDialog,
       t,
@@ -1338,6 +1475,12 @@ function NodeSettings() {
       setIsPreparingRehearsalAi(true)
 
       try {
+        assertRemoteProviderBudgetAvailable({
+          ...(settings.aiSolver || {}),
+          provider,
+          model,
+        })
+
         if (loadApiKey) {
           await getAiSolverBridge().setProviderKey({
             provider,
@@ -1384,6 +1527,7 @@ function NodeSettings() {
           'warning'
         )
       } catch (error) {
+        handleProviderBudgetError(error)
         showRehearsalAiToast(
           t('Unable to prepare real autosolver'),
           String((error && error.message) || error || '').trim() ||
@@ -1398,7 +1542,10 @@ function NodeSettings() {
       rehearsalAiModel,
       rehearsalAiProvider,
       rehearsalAiProviderLabel,
+      assertRemoteProviderBudgetAvailable,
+      handleProviderBudgetError,
       settings.aiSolver?.onchainAutoSubmitConsentAt,
+      settings.aiSolver,
       showRehearsalAiToast,
       t,
       trimmedRehearsalApiKey,
@@ -1410,14 +1557,68 @@ function NodeSettings() {
     openRehearsalAiDialog()
   }, [openRehearsalAiDialog])
 
-  const runRehearsalSolverLanes = ({
+  const runRehearsalSolverLanes = async ({
     participantCount = REHEARSAL_DEFAULT_SOLVER_PARTICIPANT_COUNT,
-  } = {}) =>
-    getNodeBridge().runValidationDevnetSolverLanes(
-      buildRehearsalSolverLanePayload(settings.aiSolver || {}, {
+  } = {}) => {
+    const basePayload = buildRehearsalSolverLanePayload(
+      settings.aiSolver || {},
+      {
         participantCount,
-      })
+      }
     )
+    try {
+      const budgetStatus = assertRemoteProviderBudgetAvailable({
+        ...(settings.aiSolver || {}),
+        provider: basePayload.provider,
+        model: basePayload.model,
+      })
+      const payload =
+        budgetStatus.remoteProvider && budgetStatus.enabled
+          ? {
+              ...basePayload,
+              providerDailyBudgetEnabled: true,
+              providerDailyBudgetRemainingUsd: budgetStatus.remainingUsd,
+            }
+          : {
+              ...basePayload,
+              providerDailyBudgetEnabled:
+                (settings.aiSolver || {}).providerDailyBudgetEnabled !== false,
+            }
+      const result = await getNodeBridge().runValidationDevnetSolverLanes(
+        payload
+      )
+      const summary =
+        result?.parallelSolverLanes?.summary || result?.summary || null
+      const actualUsd = Number(summary?.costs?.actualUsd)
+      const estimatedUsd = Number(summary?.costs?.estimatedUsd)
+
+      if (Number.isFinite(actualUsd) || Number.isFinite(estimatedUsd)) {
+        appendAiProviderBudgetLedgerEntry({
+          source: 'rehearsal-solver-lanes',
+          action:
+            participantCount > 1
+              ? 'multi-identity rehearsal solver lanes'
+              : 'single-identity rehearsal solver lane',
+          provider: payload.provider,
+          model: payload.model,
+          tokenUsage: summary?.tokens,
+          actualUsd: Number.isFinite(actualUsd) ? actualUsd : null,
+          estimatedUsd: Number.isFinite(estimatedUsd) ? estimatedUsd : null,
+        })
+      }
+
+      return result
+    } catch (error) {
+      handleProviderBudgetError(error)
+      showRehearsalAiToast(
+        t('Rehearsal solver blocked'),
+        String((error && error.message) || error || '').trim() ||
+          t('Unknown rehearsal solver error'),
+        'error'
+      )
+      return null
+    }
+  }
   const runConfiguredAiSetup = isRealAutosolverDialog
     ? prepareRealAutosolverWithAi
     : startAutosolveRehearsalWithAi
@@ -1430,19 +1631,28 @@ function NodeSettings() {
   const runNoAiSetup = isRealAutosolverDialog
     ? prepareRealAutosolverWithoutAi
     : startRehearsalWithoutAi
+  const rehearsalDialogRemoteBudgetBlocked =
+    isRehearsalRemoteAiMode && rehearsalDialogBudgetStatus.blocked
 
   let rehearsalDialogActions = (
     <>
       <SecondaryButton
         onClick={() => runConfiguredAiSetup()}
         isLoading={isPreparingRehearsalAi}
+        isDisabled={
+          isPreparingRehearsalAi || rehearsalDialogRemoteBudgetBlocked
+        }
       >
         {isRealAutosolverDialog
           ? t('Arm with configured AI')
           : t('Start with configured AI')}
       </SecondaryButton>
       <PrimaryButton
-        isDisabled={!trimmedRehearsalApiKey || isPreparingRehearsalAi}
+        isDisabled={
+          !trimmedRehearsalApiKey ||
+          isPreparingRehearsalAi ||
+          rehearsalDialogRemoteBudgetBlocked
+        }
         isLoading={isPreparingRehearsalAi}
         onClick={runKeyedAiSetup}
       >
@@ -1740,6 +1950,14 @@ function NodeSettings() {
                     'Provider cost warning: v0.0.6 can spend up to about $10 or more for one hard identity session when flips trigger long reasoning. Use prepaid API limits; testers are responsible for provider bills.'
                   )}
                 </Text>
+                <Text
+                  color={
+                    providerDailyBudgetStatus.blocked ? 'red.500' : 'muted'
+                  }
+                  fontSize="sm"
+                >
+                  {providerDailyBudgetNodeText}
+                </Text>
               </Stack>
             </Box>
             <Flex align="center" gap={2} flexWrap="wrap">
@@ -1776,6 +1994,21 @@ function NodeSettings() {
                 {t(
                   'Take care: v0.0.6 remote-provider solving can cost about $1 to $10+ for one identity depending on flips, reasoning effort, retries, and provider pricing. A 10-identity rehearsal can multiply that. Use prepaid API limits; testers are responsible for provider bills.'
                 )}
+              </Text>
+              <Text
+                color={providerDailyBudgetStatus.blocked ? 'red.500' : 'muted'}
+                mt={2}
+                fontSize="sm"
+              >
+                {providerDailyBudgetStatus.blocked
+                  ? t(
+                      'Remote-provider rehearsal is blocked by the local daily API guardrail. {{usage}}.',
+                      {usage: providerDailyBudgetUsageText}
+                    )
+                  : t(
+                      'Local daily API guardrail: {{usage}}. Change, disable, or approve a higher cap in AI settings.',
+                      {usage: providerDailyBudgetUsageText}
+                    )}
               </Text>
             </Box>
 
@@ -2206,7 +2439,8 @@ function NodeSettings() {
                       isDisabled={
                         !canUseIpcRenderer ||
                         !canRunRehearsalSolverLanes ||
-                        rehearsalSolverLaneRunning
+                        rehearsalSolverLaneRunning ||
+                        remoteRehearsalBudgetBlocked
                       }
                     >
                       {rehearsalSolverLaneRunning
@@ -2223,7 +2457,8 @@ function NodeSettings() {
                       isDisabled={
                         !canUseIpcRenderer ||
                         !canRunRehearsalSolverLanes ||
-                        rehearsalSolverLaneRunning
+                        rehearsalSolverLaneRunning ||
+                        remoteRehearsalBudgetBlocked
                       }
                     >
                       {t('Run 9-ID rehearsal')}
@@ -2238,6 +2473,23 @@ function NodeSettings() {
                   </>
                 )}
               </Flex>
+
+              {remoteRehearsalBudgetBlocked && (
+                <Stack spacing={2} align="flex-start">
+                  <Text color="red.500" fontSize="sm">
+                    {t(
+                      'Remote-provider rehearsal buttons are disabled because the local daily API budget is reached. Approve a higher daily cap only if you intentionally accept more provider spend.'
+                    )}
+                  </Text>
+                  <SecondaryButton
+                    onClick={() =>
+                      openProviderBudgetCapDialog(providerDailyBudgetStatus)
+                    }
+                  >
+                    {t('Approve higher cap')}
+                  </SecondaryButton>
+                </Stack>
+              )}
 
               {rehearsalSolverLanes && (
                 <Stack
@@ -2493,6 +2745,44 @@ function NodeSettings() {
               </Stack>
             </Box>
 
+            {isRehearsalRemoteAiMode && (
+              <Box
+                borderWidth="1px"
+                borderColor={
+                  rehearsalDialogBudgetStatus.blocked ? 'red.300' : 'orange.200'
+                }
+                borderRadius="md"
+                bg={
+                  rehearsalDialogBudgetStatus.blocked ? 'red.010' : 'orange.012'
+                }
+                p={3}
+              >
+                <Stack spacing={2}>
+                  <Text fontWeight={600} fontSize="sm">
+                    {t('Remote API daily guardrail')}
+                  </Text>
+                  <Text
+                    color={
+                      rehearsalDialogBudgetStatus.blocked ? 'red.500' : 'muted'
+                    }
+                    fontSize="sm"
+                  >
+                    {rehearsalDialogBudgetText}
+                  </Text>
+                  <SecondaryButton
+                    alignSelf="flex-start"
+                    onClick={openProviderBudgetCapApproval}
+                    isDisabled={
+                      rehearsalDialogBudgetStatus.enabled === false ||
+                      isPreparingRehearsalAi
+                    }
+                  >
+                    {t('Approve higher cap')}
+                  </SecondaryButton>
+                </Stack>
+              </Box>
+            )}
+
             <SettingsFormControl>
               <SettingsFormLabel>
                 {isRealAutosolverDialog
@@ -2673,6 +2963,20 @@ function NodeSettings() {
           {rehearsalDialogActions}
         </DialogFooter>
       </Dialog>
+      <AiProviderBudgetCapDialog
+        isOpen={isProviderBudgetCapDialogOpen}
+        onClose={() => {
+          setIsProviderBudgetCapDialogOpen(false)
+          setProviderBudgetCapDialogStatus(null)
+        }}
+        status={providerBudgetCapDialogStatus || rehearsalDialogBudgetStatus}
+        contextLabel={
+          isRealAutosolverDialog
+            ? t('Real validation remote AI is capped for this app profile.')
+            : t('Rehearsal remote AI is capped for this app profile.')
+        }
+        onApprove={approveProviderDailyBudgetCap}
+      />
     </SettingsLayout>
   )
 }

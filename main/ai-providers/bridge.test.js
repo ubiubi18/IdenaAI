@@ -118,6 +118,125 @@ describe('createAiProviderBridge', () => {
     expect(writeBenchmarkLog).toHaveBeenCalledTimes(1)
   })
 
+  it('stops solveFlipBatch before launching more provider calls when the daily budget is consumed', async () => {
+    const writeBenchmarkLog = jest.fn().mockResolvedValue(undefined)
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: '{"answer":"left","confidence":0.9}',
+      usage: {
+        promptTokens: 120,
+        completionTokens: 24,
+        totalTokens: 144,
+      },
+    })
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      benchmarkProfile: 'custom',
+      deadlineMs: 10000,
+      requestTimeoutMs: 1000,
+      maxConcurrency: 1,
+      maxRetries: 0,
+      maxOutputTokens: 64,
+      forceDecision: false,
+      uncertaintyRepromptEnabled: false,
+      providerDailyBudgetRemainingUsd: 0.00001,
+      flips: [{hash: 'flip-budget-1'}, {hash: 'flip-budget-2'}],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(result.providerBudgetExceeded).toBe(true)
+    expect(result.summary.diagnostics.providerBudgetExceeded).toBe(true)
+    expect(result.results).toHaveLength(1)
+  })
+
+  it('requires a budget contract for remote solving when the main bridge is hardened', async () => {
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider: jest.fn(),
+      writeBenchmarkLog: jest.fn(),
+      requireProviderBudget: true,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.solveFlipBatch({
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        benchmarkProfile: 'custom',
+        deadlineMs: 10000,
+        requestTimeoutMs: 1000,
+        maxConcurrency: 1,
+        maxRetries: 0,
+        maxOutputTokens: 64,
+        forceDecision: false,
+        uncertaintyRepromptEnabled: false,
+        flips: [{hash: 'flip-budget-required'}],
+      })
+    ).rejects.toThrow(/budget guardrail is required/i)
+  })
+
+  it('requires a budget contract for remote story generation when the main bridge is hardened', async () => {
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider: jest.fn(),
+      requireProviderBudget: true,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.generateStoryOptions({
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        keywords: ['cat', 'lamp'],
+      })
+    ).rejects.toThrow(/budget guardrail is required/i)
+  })
+
+  it('uses sequential solving when a finite daily budget is supplied', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: '{"answer":"left","confidence":0.9}',
+      usage: {
+        promptTokens: 120,
+        completionTokens: 24,
+        totalTokens: 144,
+      },
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn(),
+      requireProviderBudget: true,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      benchmarkProfile: 'custom',
+      deadlineMs: 10000,
+      requestTimeoutMs: 1000,
+      maxConcurrency: 4,
+      maxRetries: 0,
+      maxOutputTokens: 64,
+      forceDecision: false,
+      uncertaintyRepromptEnabled: false,
+      providerDailyBudgetRemainingUsd: 0.00001,
+      flips: [
+        {hash: 'flip-budget-sequential-1'},
+        {hash: 'flip-budget-sequential-2'},
+        {hash: 'flip-budget-sequential-3'},
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(result.providerBudgetExceeded).toBe(true)
+    expect(result.results).toHaveLength(1)
+  })
+
   it('returns a readable provider error for failed OpenAI test calls', async () => {
     const logger = mockLogger()
     const httpClient = {
@@ -682,6 +801,60 @@ describe('createAiProviderBridge', () => {
       reported: 0,
     })
     expect(result.summary.diagnostics.maxConcurrency).toBe(2)
+  })
+
+  it('stops report review before launching more provider calls when the daily budget is consumed', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText:
+        '{"decision":"approve","confidence":0.74,"reason":"No clear report rule is violated","triggeredRules":[]}',
+      usage: {
+        promptTokens: 120,
+        completionTokens: 24,
+        totalTokens: 144,
+      },
+    })
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.reviewValidationReports({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      benchmarkProfile: 'custom',
+      requestTimeoutMs: 1000,
+      maxConcurrency: 1,
+      maxRetries: 0,
+      providerDailyBudgetRemainingUsd: 0.00001,
+      flips: [
+        {
+          hash: 'flip-report-budget-1',
+          images: [
+            'data:image/png;base64,AAA',
+            'data:image/png;base64,BBB',
+            'data:image/png;base64,CCC',
+            'data:image/png;base64,DDD',
+          ],
+          keywords: [{name: 'lamp', desc: 'light source'}],
+        },
+        {
+          hash: 'flip-report-budget-2',
+          images: [
+            'data:image/png;base64,EEE',
+            'data:image/png;base64,FFF',
+            'data:image/png;base64,GGG',
+            'data:image/png;base64,HHH',
+          ],
+          keywords: [{name: 'cat', desc: 'animal'}],
+        },
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(result.providerBudgetExceeded).toBe(true)
+    expect(result.summary.diagnostics.providerBudgetExceeded).toBe(true)
+    expect(result.results).toHaveLength(1)
   })
 
   it('ignores incidental watermark-only report suggestions during automated review', async () => {
@@ -5535,6 +5708,27 @@ describe('createAiProviderBridge', () => {
     ).rejects.toThrow(
       'AI image search is not available for provider: anthropic. Supported providers: openai-compatible and gemini.'
     )
+  })
+
+  it('requires a budget contract for remote image search when the main bridge is hardened', async () => {
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient: {
+        post: jest.fn(),
+        get: jest.fn(),
+      },
+      requireProviderBudget: true,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.generateImageSearchResults({
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        imageModel: 'gpt-image-1-mini',
+        prompt: 'draw a simple cat',
+        maxImages: 1,
+      })
+    ).rejects.toThrow(/budget guardrail is required/i)
   })
 
   it('tests anthropic provider connectivity and lists anthropic models', async () => {

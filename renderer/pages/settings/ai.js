@@ -52,6 +52,7 @@ import {
   resolveLocalAiProviderState,
 } from '../../shared/utils/ai-provider-readiness'
 import {AiEnableDialog} from '../../shared/components/ai-enable-dialog'
+import {AiProviderBudgetCapDialog} from '../../shared/components/ai-provider-budget-cap-dialog'
 import {
   DEFAULT_LOCAL_AI_SETTINGS,
   DEFAULT_LOCAL_AI_PUBLIC_MODEL_ID,
@@ -85,6 +86,7 @@ import {
 } from '../../shared/utils/local-ai-settings'
 import {shouldBlockSessionAutoInDev} from '../../shared/utils/validation-ai-auto'
 import {getSharedGlobal} from '../../shared/utils/shared-global'
+import {getAiProviderDailyBudgetStatus} from '../../shared/utils/ai-provider-budget'
 
 const DEFAULT_MODELS = {
   'local-ai': '',
@@ -199,6 +201,12 @@ const DEFAULT_AI_SETTINGS = {
   autoReportEnabled: false,
   autoReportDelayMinutes: 10,
   autoReportBestFlipEnabled: false,
+  providerDailyBudgetEnabled: true,
+  providerDailyBudgetUsd: 15,
+  providerDailyBudgetOverrideDate: '',
+  providerDailyBudgetOverrideConsentAt: '',
+  providerDailyBudgetLastApprovedUsd: '',
+  providerDailyBudgetLastApprovedAt: '',
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -1563,6 +1571,14 @@ export default function AiSettingsPage() {
     () => ({...DEFAULT_AI_SETTINGS, ...(settings.aiSolver || {})}),
     [settings.aiSolver]
   )
+  const providerDailyBudgetStatus = useMemo(
+    () => getAiProviderDailyBudgetStatus(aiSolver),
+    [aiSolver]
+  )
+  let providerDailyBudgetStateLabel = t('Budget guardrail active')
+  if (providerDailyBudgetStatus.blocked) {
+    providerDailyBudgetStateLabel = t('Remote API is blocked for today')
+  }
   const localAi = useMemo(
     () => buildLocalAiSettings(settings.localAi),
     [settings.localAi]
@@ -1601,6 +1617,8 @@ export default function AiSettingsPage() {
   const [showProviderSetup, setShowProviderSetup] = useState(false)
   const [showLocalAiSetup, setShowLocalAiSetup] = useState(false)
   const [showAdvancedAiSettings, setShowAdvancedAiSettings] = useState(false)
+  const [isProviderBudgetCapDialogOpen, setIsProviderBudgetCapDialogOpen] =
+    useState(false)
   const [
     showLocalAiCompatibilityOverrides,
     setShowLocalAiCompatibilityOverrides,
@@ -1746,6 +1764,69 @@ export default function AiSettingsPage() {
       'warning'
     )
   }, [notify, t])
+  const approveProviderDailyBudgetCap = useCallback(
+    (nextCapUsd) => {
+      const normalizedCapUsd = Number(nextCapUsd)
+      if (!Number.isFinite(normalizedCapUsd) || normalizedCapUsd <= 0) {
+        return
+      }
+
+      updateAiSolverSettings({
+        providerDailyBudgetEnabled: true,
+        providerDailyBudgetUsd: normalizedCapUsd,
+        providerDailyBudgetOverrideDate: '',
+        providerDailyBudgetOverrideConsentAt: '',
+        providerDailyBudgetLastApprovedUsd: normalizedCapUsd,
+        providerDailyBudgetLastApprovedAt: new Date().toISOString(),
+      })
+      setIsProviderBudgetCapDialogOpen(false)
+      notify(
+        t('Daily API budget cap raised'),
+        t(
+          'Remote-provider AI calls can continue until the newly approved local cap is reached. Keep watching provider-side limits.'
+        ),
+        'warning'
+      )
+    },
+    [notify, t, updateAiSolverSettings]
+  )
+  const openProviderBudgetCapDialog = useCallback(() => {
+    setIsProviderBudgetCapDialogOpen(true)
+  }, [])
+
+  const openProviderBudgetCapApproval = useCallback(() => {
+    updateAiSolverSettings({
+      providerDailyBudgetEnabled: true,
+      providerDailyBudgetOverrideDate: '',
+      providerDailyBudgetOverrideConsentAt: '',
+    })
+    openProviderBudgetCapDialog()
+  }, [openProviderBudgetCapDialog, updateAiSolverSettings])
+
+  const updateProviderDailyBudgetUsd = useCallback(
+    (value) => {
+      const nextCapUsd = Number(value)
+      const currentCapUsd = Number(providerDailyBudgetStatus.limitUsd)
+
+      if (
+        Number.isFinite(nextCapUsd) &&
+        Number.isFinite(currentCapUsd) &&
+        nextCapUsd > currentCapUsd
+      ) {
+        openProviderBudgetCapApproval()
+        return
+      }
+
+      updateAiSolverSettings({
+        providerDailyBudgetUsd: value,
+      })
+    },
+    [
+      openProviderBudgetCapApproval,
+      providerDailyBudgetStatus.limitUsd,
+      updateAiSolverSettings,
+    ]
+  )
 
   const updateNumberField = (field, value) => {
     updateAiSolverSettings({
@@ -4412,20 +4493,101 @@ export default function AiSettingsPage() {
                       <>
                         <Box
                           borderWidth="1px"
-                          borderColor="orange.200"
+                          borderColor={
+                            providerDailyBudgetStatus.blocked
+                              ? 'red.300'
+                              : 'orange.200'
+                          }
                           borderRadius="md"
-                          bg="orange.012"
+                          bg={
+                            providerDailyBudgetStatus.blocked
+                              ? 'red.010'
+                              : 'orange.012'
+                          }
                           p={3}
                         >
-                          <Stack spacing={1}>
+                          <Stack spacing={3}>
                             <Text fontWeight={600} fontSize="sm">
-                              {t('API spend guardrail')}
+                              {t('Daily API spend guardrail')}
                             </Text>
                             <Text color="muted" fontSize="sm">
                               {t(
-                                'Recommended for OpenAI: use only a prepaid-funded API key with no automatic top-up, so a rough experimental run cannot create an unlimited provider-side bill. This software is experimental and does not provide warranties.'
+                                'Remote-provider AI calls are locally capped per calendar day by default. This is a local guardrail, not a substitute for provider-side prepaid credits or hard budgets.'
                               )}
                             </Text>
+                            <Flex
+                              align="center"
+                              justify="space-between"
+                              gap={3}
+                              flexWrap="wrap"
+                            >
+                              <Stack spacing={0}>
+                                <Text fontSize="sm" fontWeight={600}>
+                                  {providerDailyBudgetStateLabel}
+                                </Text>
+                                <Text color="muted" fontSize="xs">
+                                  {t(
+                                    'Today: ~$ {{spent}} used of ~$ {{limit}} cap',
+                                    {
+                                      spent:
+                                        providerDailyBudgetStatus.usage.usd.toFixed(
+                                          2
+                                        ),
+                                      limit:
+                                        providerDailyBudgetStatus.limitUsd.toFixed(
+                                          2
+                                        ),
+                                    }
+                                  )}
+                                </Text>
+                              </Stack>
+                              <Switch
+                                isChecked={
+                                  aiSolver.providerDailyBudgetEnabled !== false
+                                }
+                                onChange={(event) =>
+                                  updateAiSolverSettings({
+                                    providerDailyBudgetEnabled:
+                                      event.target.checked,
+                                  })
+                                }
+                              />
+                            </Flex>
+                            <Flex gap={2} align="end" flexWrap="wrap">
+                              <SettingsFormControl maxW="180px">
+                                <SettingsFormLabel>
+                                  {t('Daily cap')}
+                                </SettingsFormLabel>
+                                <InputGroup size="sm">
+                                  <Input
+                                    type="number"
+                                    min={0.01}
+                                    step="0.5"
+                                    value={aiSolver.providerDailyBudgetUsd}
+                                    onChange={(event) =>
+                                      updateProviderDailyBudgetUsd(
+                                        event.target.value
+                                      )
+                                    }
+                                  />
+                                  <InputRightElement
+                                    w="9"
+                                    color="muted"
+                                    fontSize="xs"
+                                  >
+                                    USD
+                                  </InputRightElement>
+                                </InputGroup>
+                              </SettingsFormControl>
+                              <SecondaryButton
+                                onClick={openProviderBudgetCapApproval}
+                                isDisabled={
+                                  aiSolver.providerDailyBudgetEnabled === false
+                                }
+                              >
+                                {t('Approve higher cap')}
+                              </SecondaryButton>
+                            </Flex>
                           </Stack>
                         </Box>
 
@@ -7780,6 +7942,13 @@ export default function AiSettingsPage() {
           setIsEnableDialogOpen(false)
           await refreshProviderKeyStatus()
         }}
+      />
+      <AiProviderBudgetCapDialog
+        isOpen={isProviderBudgetCapDialogOpen}
+        onClose={() => setIsProviderBudgetCapDialogOpen(false)}
+        status={providerDailyBudgetStatus}
+        contextLabel={t('Remote AI calls are capped for this app profile.')}
+        onApprove={approveProviderDailyBudgetCap}
       />
     </SettingsLayout>
   )

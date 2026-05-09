@@ -29,6 +29,10 @@ import {
   checkAiProviderReadiness,
   formatMissingAiProviders,
 } from '../../../shared/utils/ai-provider-readiness'
+import {
+  buildAiProviderDailyBudgetErrorMessage,
+  getAiProviderDailyBudgetStatus,
+} from '../../../shared/utils/ai-provider-budget'
 
 const AI_IMAGE_SEARCH_KEY_REQUIRED_ERROR =
   'this option is only available for users who provide an API key for a payed AI provider'
@@ -71,6 +75,10 @@ export function ImageSearchDialog({
   })
 
   const searchInputRef = React.useRef()
+  const providerDailyBudgetStatus = React.useMemo(
+    () => getAiProviderDailyBudgetStatus(aiSolverSettings),
+    [aiSolverSettings]
+  )
 
   const [current, send] = useMachine(imageSearchMachine, {
     actions: {
@@ -87,7 +95,8 @@ export function ImageSearchDialog({
 
   const {images, query, selectedImage} = current.context
 
-  React.useEffect(() => {
+  const syncAiSearchBudgetMeta = React.useCallback(() => {
+    const budgetStatus = getAiProviderDailyBudgetStatus(aiSolverSettings)
     send('SET_AI_META', {
       provider: aiSolverSettings.provider,
       model: aiSolverSettings.model,
@@ -95,8 +104,19 @@ export function ImageSearchDialog({
         aiSolverSettings.provider,
         aiSolverSettings
       ),
+      providerDailyBudgetEnabled:
+        aiSolverSettings.providerDailyBudgetEnabled !== false,
+      providerDailyBudgetRemainingUsd:
+        budgetStatus.remoteProvider && budgetStatus.enabled
+          ? budgetStatus.remainingUsd
+          : null,
     })
+    return budgetStatus
   }, [aiSolverSettings, send])
+
+  React.useEffect(() => {
+    syncAiSearchBudgetMeta()
+  }, [syncAiSearchBudgetMeta])
 
   React.useEffect(() => {
     let cancelled = false
@@ -147,6 +167,11 @@ export function ImageSearchDialog({
         )
       }
 
+      const budgetStatus = getAiProviderDailyBudgetStatus(aiSolverSettings)
+      if (budgetStatus.blocked) {
+        throw new Error(buildAiProviderDailyBudgetErrorMessage(budgetStatus))
+      }
+
       setSearchMode('ai')
       send('SET_MODE', {mode: 'ai'})
     } catch (error) {
@@ -174,6 +199,13 @@ export function ImageSearchDialog({
             as="form"
             onSubmit={(e) => {
               e.preventDefault()
+              if (searchMode === 'ai') {
+                const budgetStatus = syncAiSearchBudgetMeta()
+                if (budgetStatus.blocked) {
+                  onError(buildAiProviderDailyBudgetErrorMessage(budgetStatus))
+                  return
+                }
+              }
               send('SEARCH')
             }}
           >
@@ -207,7 +239,8 @@ export function ImageSearchDialog({
               isDisabled={
                 aiProviderKeyStatus.checking ||
                 !aiProviderKeyStatus.checked ||
-                !aiProviderKeyStatus.allReady
+                !aiProviderKeyStatus.allReady ||
+                providerDailyBudgetStatus.blocked
               }
               onClick={activateAiMode}
             >
@@ -224,6 +257,16 @@ export function ImageSearchDialog({
                   'Web image search mode: DuckDuckGo with Openverse and Wikimedia fallbacks.'
                 )}
           </Text>
+          {searchMode === 'ai' &&
+          providerDailyBudgetStatus.remoteProvider &&
+          providerDailyBudgetStatus.enabled ? (
+            <Text fontSize="xs" color="orange.500">
+              {t('Daily remote API cap: ~$ {{spent}} / ~$ {{limit}}', {
+                spent: providerDailyBudgetStatus.usage.usd.toFixed(2),
+                limit: providerDailyBudgetStatus.limitUsd.toFixed(2),
+              })}
+            </Text>
+          ) : null}
 
           {eitherState(current, 'idle') && (
             <FillCenter>
