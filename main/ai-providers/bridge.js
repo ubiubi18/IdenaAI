@@ -5592,6 +5592,87 @@ function addCostSummary(left = {}, right = {}) {
   }
 }
 
+function normalizeProviderDailyBudgetRemainingUsd(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function createProviderBudgetError(message, code = 'provider_budget_exceeded') {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
+function hasRemoteProviderForBudget(provider, consultProviders = []) {
+  const providers = [provider]
+    .concat(
+      Array.isArray(consultProviders)
+        ? consultProviders.map(
+            (consultant) => consultant && consultant.provider
+          )
+        : []
+    )
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+
+  return providers.some(
+    (item) => item !== LEGACY_HEURISTIC_PROVIDER && !isLocalAiProvider(item)
+  )
+}
+
+function getCostSummaryUsd(costs = {}) {
+  const normalized = normalizeCostSummary(costs)
+  if (normalized.actualUsd != null) {
+    return normalized.actualUsd
+  }
+  return normalized.estimatedUsd != null ? normalized.estimatedUsd : 0
+}
+
+function getResultsCostUsd(results = []) {
+  return results.reduce(
+    (total, item) => total + getCostSummaryUsd(item && item.costs),
+    0
+  )
+}
+
+function getProviderBudgetCostUsd({
+  tokenUsage = null,
+  provider = '',
+  model = '',
+  imageModel = '',
+  imageSize = '',
+  generatedImages = 0,
+} = {}) {
+  if (
+    !provider ||
+    provider === LEGACY_HEURISTIC_PROVIDER ||
+    isLocalAiProvider(provider)
+  ) {
+    return 0
+  }
+
+  let costUsd = 0
+  if (isOpenAiCompatibleProvider(provider)) {
+    const textCostUsd = estimateTextCostUsd(tokenUsage || {}, model)
+    if (Number.isFinite(textCostUsd) && textCostUsd > 0) {
+      costUsd += textCostUsd
+    }
+
+    const unitPrice = resolveOpenAiImageUnitPrice(imageModel, imageSize)
+    const imageCount = Number(generatedImages)
+    if (
+      Number.isFinite(unitPrice) &&
+      unitPrice > 0 &&
+      Number.isFinite(imageCount) &&
+      imageCount > 0
+    ) {
+      costUsd += unitPrice * imageCount
+    }
+  }
+
+  return Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0
+}
+
 function estimateProviderTextCostSummary(provider, model, usage = {}) {
   if (
     !provider ||
@@ -5993,6 +6074,7 @@ function createAiProviderBridge(logger, dependencies = {}) {
     typeof dependencies.invokeProvider === 'function'
       ? dependencies.invokeProvider
       : runProvider
+  const requireProviderBudget = dependencies.requireProviderBudget === true
 
   const runPythonFlipStoryPipeline =
     typeof dependencies.runPythonFlipStoryPipeline === 'function'
@@ -6048,6 +6130,41 @@ function createAiProviderBridge(logger, dependencies = {}) {
       throw new Error(`API key is not set for provider: ${provider}`)
     }
     return key
+  }
+
+  function resolveProviderDailyBudgetRemainingForOperation({
+    payload = {},
+    provider,
+    consultProviders = [],
+    operation = 'remote provider call',
+  } = {}) {
+    const remainingUsd = normalizeProviderDailyBudgetRemainingUsd(
+      payload.providerDailyBudgetRemainingUsd
+    )
+    if (remainingUsd !== null) {
+      return remainingUsd
+    }
+
+    if (
+      !requireProviderBudget ||
+      payload.providerDailyBudgetEnabled === false ||
+      !hasRemoteProviderForBudget(provider, consultProviders)
+    ) {
+      return null
+    }
+
+    throw createProviderBudgetError(
+      `Remote AI provider budget guardrail is required before ${operation}. Open AI settings, keep the daily cap enabled, or explicitly turn the guardrail off if you accept uncapped provider billing.`,
+      'provider_budget_required'
+    )
+  }
+
+  function assertProviderDailyBudgetHasRoom(remainingUsd, operation) {
+    if (remainingUsd !== null && remainingUsd <= 0) {
+      throw createProviderBudgetError(
+        `Remote AI provider budget reached before ${operation}. Approve a higher daily cap or turn the budget guardrail off before launching more provider calls.`
+      )
+    }
   }
 
   function ensureLocalAiManager() {
@@ -6855,6 +6972,16 @@ Flip hash: ${hash}
     const fastStoryMode = payload.fastStoryMode === true
     const provider = normalizeProvider(payload.provider)
     const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
+    const providerDailyBudgetRemainingUsd =
+      resolveProviderDailyBudgetRemainingForOperation({
+        payload,
+        provider,
+        operation: 'story generation',
+      })
+    assertProviderDailyBudgetHasRoom(
+      providerDailyBudgetRemainingUsd,
+      'story generation'
+    )
     const providerConfig = payload.providerConfig || null
     const [keywordA, keywordB] = normalizeKeywords(payload)
     const senseSelection = getLockedSenseSelection(null, keywordA, keywordB)
@@ -8591,6 +8718,16 @@ Flip hash: ${hash}
     const imageModel = String(payload.imageModel || 'gpt-image-1-mini').trim()
     const requestedImageSize = String(payload.imageSize || '1024x1024').trim()
     const imageSize = normalizeProviderImageSize(requestedImageSize)
+    const providerDailyBudgetRemainingUsd =
+      resolveProviderDailyBudgetRemainingForOperation({
+        payload,
+        provider,
+        operation: 'flip panel generation',
+      })
+    assertProviderDailyBudgetHasRoom(
+      providerDailyBudgetRemainingUsd,
+      'flip panel generation'
+    )
     const imageQuality = String(payload.imageQuality || '').trim()
     const imageStyle = String(payload.imageStyle || '').trim()
     const providerConfig = payload.providerConfig || null
@@ -8888,6 +9025,20 @@ Flip hash: ${hash}
               requestTimeoutMs: timeoutMs,
             }
             try {
+              const projectedSheetCostUsd = getProviderBudgetCostUsd({
+                provider,
+                imageModel: profileCandidate.imageModel,
+                imageSize: profileCandidate.imageSize,
+                generatedImages: 1,
+              })
+              if (
+                providerDailyBudgetRemainingUsd !== null &&
+                projectedSheetCostUsd >= providerDailyBudgetRemainingUsd
+              ) {
+                throw createProviderBudgetError(
+                  'Remote AI provider budget reached before storyboard sheet generation.'
+                )
+              }
               // eslint-disable-next-line no-await-in-loop
               sheetResponse = await withRetries(profile.maxRetries, () =>
                 runImageProvider({
@@ -9163,6 +9314,24 @@ Flip hash: ${hash}
                 requestTimeoutMs: timeoutMs,
               }
               try {
+                const projectedPanelCostUsd =
+                  estimatedImageCostUsd +
+                  getProviderBudgetCostUsd({
+                    provider,
+                    imageModel: profileCandidate.imageModel,
+                    imageSize: profileCandidate.imageSize,
+                    generatedImages: 1,
+                  })
+                if (
+                  providerDailyBudgetRemainingUsd !== null &&
+                  projectedPanelCostUsd >= providerDailyBudgetRemainingUsd
+                ) {
+                  throw createProviderBudgetError(
+                    `Remote AI provider budget reached before panel ${
+                      panelIndex + 1
+                    } generation.`
+                  )
+                }
                 // eslint-disable-next-line no-await-in-loop
                 currentPanelResponse = await withRetries(
                   profile.maxRetries,
@@ -9597,6 +9766,16 @@ Flip hash: ${hash}
     const imageModel = String(payload.imageModel || 'gpt-image-1-mini').trim()
     const requestedImageSize = String(payload.imageSize || '1024x1024').trim()
     const imageSize = normalizeProviderImageSize(requestedImageSize)
+    const providerDailyBudgetRemainingUsd =
+      resolveProviderDailyBudgetRemainingForOperation({
+        payload,
+        provider,
+        operation: 'AI image search',
+      })
+    assertProviderDailyBudgetHasRoom(
+      providerDailyBudgetRemainingUsd,
+      'AI image search'
+    )
     const imageQuality = String(payload.imageQuality || '').trim()
     const imageStyle = String(payload.imageStyle || '').trim()
     const maxImages = Math.max(
@@ -9641,6 +9820,25 @@ Flip hash: ${hash}
     let estimatedImageCostUsd = 0
 
     for (let index = 0; index < maxImages; index += 1) {
+      const projectedImageCostUsd =
+        estimatedImageCostUsd +
+        getProviderBudgetCostUsd({
+          provider,
+          imageModel,
+          imageSize,
+          generatedImages: 1,
+        })
+      if (
+        providerDailyBudgetRemainingUsd !== null &&
+        projectedImageCostUsd >= providerDailyBudgetRemainingUsd
+      ) {
+        if (images.length > 0) {
+          break
+        }
+        throw createProviderBudgetError(
+          'Remote AI provider budget reached before AI image search.'
+        )
+      }
       const variantPrompt =
         maxImages > 1
           ? `${prompt}\n\nCreate variant ${
@@ -9814,6 +10012,28 @@ Flip hash: ${hash}
       typeof payload.onFlipStart === 'function' ? payload.onFlipStart : null
     const onFlipResult =
       typeof payload.onFlipResult === 'function' ? payload.onFlipResult : null
+    const providerDailyBudgetRemainingUsd =
+      resolveProviderDailyBudgetRemainingForOperation({
+        payload,
+        provider,
+        consultProviders: consultProvidersWithKeys,
+        operation: 'flip solving',
+      })
+    assertProviderDailyBudgetHasRoom(
+      providerDailyBudgetRemainingUsd,
+      'flip solving'
+    )
+    const solveConcurrency =
+      providerDailyBudgetRemainingUsd === null ? profile.maxConcurrency : 1
+    let providerBudgetExceeded = false
+    let results = []
+
+    function hasProviderDailyBudgetAvailable() {
+      return (
+        providerDailyBudgetRemainingUsd === null ||
+        getResultsCostUsd(results) < providerDailyBudgetRemainingUsd
+      )
+    }
 
     function emitFlipStart(event) {
       if (!onFlipStart) {
@@ -10640,13 +10860,21 @@ Flip hash: ${hash}
       }
     }
 
-    let results = []
-    if (profile.maxConcurrency <= 1) {
+    if (solveConcurrency <= 1) {
       for (let flipIndex = 0; flipIndex < flips.length; flipIndex += 1) {
+        if (providerBudgetExceeded || !hasProviderDailyBudgetAvailable()) {
+          providerBudgetExceeded = true
+          break
+        }
+
         // eslint-disable-next-line no-await-in-loop
         const result = await solveSingleFlip(flips[flipIndex], flipIndex)
         results.push(result)
         emitFlipResult(toProgressEvent(flips[flipIndex], flipIndex, result))
+
+        if (!hasProviderDailyBudgetAvailable()) {
+          providerBudgetExceeded = true
+        }
 
         if (interFlipDelayMs > 0 && flipIndex < flips.length - 1) {
           // eslint-disable-next-line no-await-in-loop
@@ -10656,13 +10884,16 @@ Flip hash: ${hash}
     } else {
       results = await mapWithConcurrency(
         flips,
-        profile.maxConcurrency,
+        solveConcurrency,
         async (flip, flipIndex) => {
           const result = await solveSingleFlip(flip, flipIndex)
           emitFlipResult(toProgressEvent(flip, flipIndex, result))
           return result
         }
       )
+      if (!hasProviderDailyBudgetAvailable()) {
+        providerBudgetExceeded = true
+      }
     }
 
     const tokenUsageSummary = summarizeTokenUsage(results)
@@ -10711,6 +10942,7 @@ Flip hash: ${hash}
           return x.rawAnswerBeforeRemap !== x.finalAnswerAfterRemap
         }).length,
         providerErrors: results.filter((x) => Boolean(x.error)).length,
+        providerBudgetExceeded,
       },
     }
 
@@ -10789,6 +11021,7 @@ Flip hash: ${hash}
       model: reportedModel,
       profile,
       summary,
+      providerBudgetExceeded,
       results,
     }
   }
@@ -10837,10 +11070,33 @@ Flip hash: ${hash}
     const startedAt = now()
     const deadlineAt = startedAt + profile.deadlineMs
     const interFlipDelayMs = Math.max(0, Number(profile.interFlipDelayMs) || 0)
-    const reviewConcurrency = Math.max(
-      1,
-      Math.min(flips.length, Number(profile.maxConcurrency) || 1)
+    const providerDailyBudgetRemainingUsd =
+      resolveProviderDailyBudgetRemainingForOperation({
+        payload,
+        provider,
+        consultProviders: consultProvidersWithKeys,
+        operation: 'validation report review',
+      })
+    assertProviderDailyBudgetHasRoom(
+      providerDailyBudgetRemainingUsd,
+      'validation report review'
     )
+    const reviewConcurrency =
+      providerDailyBudgetRemainingUsd === null
+        ? Math.max(
+            1,
+            Math.min(flips.length, Number(profile.maxConcurrency) || 1)
+          )
+        : 1
+    let providerBudgetExceeded = false
+    let results = []
+
+    function hasProviderDailyBudgetAvailable() {
+      return (
+        providerDailyBudgetRemainingUsd === null ||
+        getResultsCostUsd(results) < providerDailyBudgetRemainingUsd
+      )
+    }
 
     async function reviewSingleFlip(flip) {
       const flipStartedAt = now()
@@ -11026,12 +11282,20 @@ Flip hash: ${hash}
       }
     }
 
-    let results = []
     if (reviewConcurrency <= 1) {
       for (let flipIndex = 0; flipIndex < flips.length; flipIndex += 1) {
+        if (providerBudgetExceeded || !hasProviderDailyBudgetAvailable()) {
+          providerBudgetExceeded = true
+          break
+        }
+
         // eslint-disable-next-line no-await-in-loop
         const result = await reviewSingleFlip(flips[flipIndex])
         results.push(result)
+
+        if (!hasProviderDailyBudgetAvailable()) {
+          providerBudgetExceeded = true
+        }
 
         if (interFlipDelayMs > 0 && flipIndex < flips.length - 1) {
           // eslint-disable-next-line no-await-in-loop
@@ -11044,6 +11308,9 @@ Flip hash: ${hash}
         reviewConcurrency,
         reviewSingleFlip
       )
+      if (!hasProviderDailyBudgetAvailable()) {
+        providerBudgetExceeded = true
+      }
     }
 
     const tokenUsageSummary = summarizeTokenUsage(results)
@@ -11065,6 +11332,7 @@ Flip hash: ${hash}
       diagnostics: {
         providerErrors: results.filter((item) => Boolean(item.error)).length,
         maxConcurrency: reviewConcurrency,
+        providerBudgetExceeded,
       },
     }
 
@@ -11073,6 +11341,7 @@ Flip hash: ${hash}
       model,
       profile,
       summary,
+      providerBudgetExceeded,
       results,
     }
   }

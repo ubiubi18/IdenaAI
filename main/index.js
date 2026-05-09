@@ -162,6 +162,7 @@ const localAiManager = createLocalAiManager({
 const aiProviderBridge = createAiProviderBridge(logger, {
   localAiManager,
   getLocalAiPayload: buildLocalAiFlipJudgePayload,
+  requireProviderBudget: true,
 })
 const aiTestUnitBridge = createAiTestUnitBridge({
   logger,
