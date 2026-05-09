@@ -85,6 +85,12 @@ import {
   formatMissingAiProviders,
   isLocalAiProvider,
 } from '../../shared/utils/ai-provider-readiness'
+import {
+  appendAiProviderBudgetLedgerEntry,
+  buildAiProviderDailyBudgetErrorMessage,
+  getAiProviderDailyBudgetStatus,
+  isRemoteAiProvider,
+} from '../../shared/utils/ai-provider-budget'
 import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 
 const DEFAULT_AI_SOLVER_SETTINGS = {
@@ -1780,6 +1786,10 @@ export default function NewFlipPage() {
     () => ({...DEFAULT_AI_SOLVER_SETTINGS, ...(settings.aiSolver || {})}),
     [settings.aiSolver]
   )
+  const providerDailyBudgetStatus = useMemo(
+    () => getAiProviderDailyBudgetStatus(aiSolverSettings),
+    [aiSolverSettings, generationCostLedger]
+  )
   const enableOptionalAiFeatures = useCallback(() => {
     updateAiSolverSettings({enabled: true})
   }, [updateAiSolverSettings])
@@ -2074,6 +2084,7 @@ export default function NewFlipPage() {
       maxOutputTokens: aiSolverSettings.maxOutputTokens,
       interFlipDelayMs: aiSolverSettings.interFlipDelayMs,
       temperature: aiSolverSettings.temperature,
+      providerDailyBudgetEnabled: aiSolverSettings.providerDailyBudgetEnabled,
       forceDecision: aiSolverSettings.forceDecision,
       uncertaintyRepromptEnabled: aiSolverSettings.uncertaintyRepromptEnabled,
       uncertaintyConfidenceThreshold:
@@ -2099,6 +2110,25 @@ export default function NewFlipPage() {
     }),
     [aiSolverSettings]
   )
+
+  const getProviderBudgetRunPayload = useCallback(() => {
+    const status = getAiProviderDailyBudgetStatus(aiSolverSettings)
+    if (status.blocked) {
+      throw new Error(buildAiProviderDailyBudgetErrorMessage(status))
+    }
+
+    if (status.remoteProvider && status.enabled) {
+      return {
+        providerDailyBudgetEnabled: true,
+        providerDailyBudgetRemainingUsd: status.remainingUsd,
+      }
+    }
+
+    return {
+      providerDailyBudgetEnabled:
+        aiSolverSettings.providerDailyBudgetEnabled !== false,
+    }
+  }, [aiSolverSettings])
 
   const fullAutoNodePublishRunPayload = useMemo(
     () => ({
@@ -2618,28 +2648,31 @@ export default function NewFlipPage() {
 
   const appendGenerationLedger = useCallback(
     ({action, provider, model, tokenUsage, estimatedUsd, actualUsd}) => {
-      setGenerationCostLedger((prev) =>
-        [
-          {
-            id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-            time: new Date().toISOString(),
-            action: String(action || 'unknown'),
-            provider: String(provider || aiSolverSettings.provider),
-            model: String(model || aiReasoningModel || aiSolverSettings.model),
-            tokenUsage: tokenUsage || null,
-            estimatedUsd:
-              Number.isFinite(Number(estimatedUsd)) && Number(estimatedUsd) >= 0
-                ? Number(estimatedUsd)
-                : null,
-            actualUsd:
-              Number.isFinite(Number(actualUsd)) && Number(actualUsd) >= 0
-                ? Number(actualUsd)
-                : null,
-          },
-        ]
-          .concat(prev)
-          .slice(0, 30)
-      )
+      const entry = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        time: new Date().toISOString(),
+        action: String(action || 'unknown'),
+        provider: String(provider || aiSolverSettings.provider),
+        model: String(model || aiReasoningModel || aiSolverSettings.model),
+        tokenUsage: tokenUsage || null,
+        estimatedUsd:
+          Number.isFinite(Number(estimatedUsd)) && Number(estimatedUsd) >= 0
+            ? Number(estimatedUsd)
+            : null,
+        actualUsd:
+          Number.isFinite(Number(actualUsd)) && Number(actualUsd) >= 0
+            ? Number(actualUsd)
+            : null,
+      }
+
+      if (isRemoteAiProvider(entry.provider)) {
+        appendAiProviderBudgetLedgerEntry({
+          source: 'flip-builder',
+          ...entry,
+        })
+      }
+
+      setGenerationCostLedger((prev) => [entry].concat(prev).slice(0, 30))
     },
     [aiReasoningModel, aiSolverSettings.model, aiSolverSettings.provider]
   )
@@ -2688,10 +2721,12 @@ export default function NewFlipPage() {
             storyOptionCount,
             optimize,
           })
+        const providerBudgetRunPayload = getProviderBudgetRunPayload()
 
         const response = await global.aiSolver.generateStoryOptions({
           ...baseRunPayload,
           ...(runPayloadOverride || {}),
+          ...providerBudgetRunPayload,
           fastStoryMode: isFastMode,
           provider: aiSolverSettings.provider,
           model: reasoningModel,
@@ -2838,6 +2873,7 @@ export default function NewFlipPage() {
       ensureAiRunReady,
       ensureAiSolverBridge,
       ensureKeywordsReady,
+      getProviderBudgetRunPayload,
       keywordA,
       keywordB,
       notify,
@@ -2933,10 +2969,12 @@ export default function NewFlipPage() {
         const selectedStoryOption = effectiveStoryOptions.find(
           (item) => String(item.id) === effectiveSelectedStoryId
         )
+        const providerBudgetRunPayload = getProviderBudgetRunPayload()
 
         const response = await global.aiSolver.generateFlipPanels({
           ...baseRunPayload,
           ...(runPayloadOverride || {}),
+          ...providerBudgetRunPayload,
           fastBuild: isFastMode,
           panelRenderMode: isFastMode ? 'sheet_fast' : 'panels',
           provider: aiSolverSettings.provider,
@@ -3213,6 +3251,7 @@ export default function NewFlipPage() {
       ensureAiRunReady,
       ensureAiSolverBridge,
       ensureKeywordsReady,
+      getProviderBudgetRunPayload,
       generatedFlipPanels,
       keywordA,
       keywordB,
@@ -3618,6 +3657,7 @@ export default function NewFlipPage() {
     try {
       await ensureAiRunReady()
       ensureDraftImages()
+      const providerBudgetRunPayload = getProviderBudgetRunPayload()
 
       const result = await solveShortSessionWithAi({
         shortFlips: [
@@ -3632,7 +3672,10 @@ export default function NewFlipPage() {
             failed: false,
           },
         ],
-        aiSolver: aiSolverSettings,
+        aiSolver: {
+          ...aiSolverSettings,
+          ...providerBudgetRunPayload,
+        },
         sessionMeta: {
           type: 'draft-prepublish-test',
           startedAt: new Date().toISOString(),
@@ -3652,6 +3695,14 @@ export default function NewFlipPage() {
       }
 
       setAiDraftTestResult(nextResult)
+      appendGenerationLedger({
+        action: 'draft_prepublish_test',
+        provider: result.provider || aiSolverSettings.provider,
+        model: result.model || aiSolverSettings.model,
+        tokenUsage: result.summary && result.summary.tokens,
+        estimatedUsd: result.summary?.costs?.estimatedUsd,
+        actualUsd: result.summary?.costs?.actualUsd,
+      })
       notify(
         t('Draft AI test completed'),
         t('Decision {{answer}} in {{latency}} ms', {
@@ -6206,6 +6257,24 @@ export default function NewFlipPage() {
                                   generationTotals.actualUsd
                                 )} | tokens ${generationTotals.totalTokens}`}
                               </Text>
+                              {providerDailyBudgetStatus.remoteProvider &&
+                              providerDailyBudgetStatus.enabled ? (
+                                <Text fontSize="xs" color="orange.500">
+                                  {t(
+                                    'Daily remote API cap: ~$ {{spent}} / ~$ {{limit}}',
+                                    {
+                                      spent:
+                                        providerDailyBudgetStatus.usage.usd.toFixed(
+                                          2
+                                        ),
+                                      limit:
+                                        providerDailyBudgetStatus.limitUsd.toFixed(
+                                          2
+                                        ),
+                                    }
+                                  )}
+                                </Text>
+                              ) : null}
                               {generationCostLedger.length > 0 ? (
                                 <Stack
                                   spacing={1}

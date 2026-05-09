@@ -17,6 +17,7 @@ import {shuffle} from '../../shared/utils/arr'
 import {FlipType, FlipFilter} from '../../shared/types'
 import {deleteFlip} from '../../shared/api/dna'
 import {persistState} from '../../shared/utils/persist'
+import {appendAiProviderBudgetLedgerEntry} from '../../shared/utils/ai-provider-budget'
 import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 import {getImageSearchBridge} from '../../shared/utils/image-search-bridge'
 
@@ -1428,6 +1429,8 @@ export const imageSearchMachine = createMachine({
     aiProvider: 'openai',
     aiModel: 'gpt-5.5',
     aiProviderConfig: null,
+    aiProviderDailyBudgetEnabled: true,
+    aiProviderDailyBudgetRemainingUsd: null,
   },
   initial: 'idle',
   states: {
@@ -1436,21 +1439,46 @@ export const imageSearchMachine = createMachine({
       invoke: {
         // eslint-disable-next-line no-shadow
         src: (
-          {query, searchMode, aiProvider, aiModel, aiProviderConfig},
+          {
+            query,
+            searchMode,
+            aiProvider,
+            aiModel,
+            aiProviderConfig,
+            aiProviderDailyBudgetEnabled,
+            aiProviderDailyBudgetRemainingUsd,
+          },
           {query: queryParam}
         ) => {
           const nextQuery = query || queryParam
           if (searchMode === 'ai') {
             return withImageSearchTimeout(
-              global.aiSolver.generateImageSearchResults({
-                provider: aiProvider,
-                model: aiModel,
-                prompt: nextQuery,
-                providerConfig: aiProviderConfig,
-                maxImages: 4,
-                maxRetries: 0,
-                requestTimeoutMs: 20000,
-              }),
+              global.aiSolver
+                .generateImageSearchResults({
+                  provider: aiProvider,
+                  model: aiModel,
+                  prompt: nextQuery,
+                  providerConfig: aiProviderConfig,
+                  providerDailyBudgetEnabled:
+                    aiProviderDailyBudgetEnabled !== false,
+                  providerDailyBudgetRemainingUsd:
+                    aiProviderDailyBudgetRemainingUsd,
+                  maxImages: 4,
+                  maxRetries: 0,
+                  requestTimeoutMs: 20000,
+                })
+                .then((result) => {
+                  appendAiProviderBudgetLedgerEntry({
+                    source: 'image-search',
+                    action: 'ai-image-search',
+                    provider: result?.provider || aiProvider,
+                    model: result?.imageModel || result?.model || aiModel,
+                    tokenUsage: result?.tokenUsage,
+                    estimatedUsd: result?.costs?.estimatedUsd,
+                    actualUsd: result?.costs?.actualUsd,
+                  })
+                  return result
+                }),
               30000,
               'AI image search timed out. Try fewer words or switch to web search.'
             )
@@ -1516,6 +1544,17 @@ export const imageSearchMachine = createMachine({
             providerConfig && typeof providerConfig === 'object'
               ? providerConfig
               : null,
+          aiProviderDailyBudgetEnabled: (_, {providerDailyBudgetEnabled}) =>
+            providerDailyBudgetEnabled !== false,
+          aiProviderDailyBudgetRemainingUsd: (
+            _,
+            {providerDailyBudgetRemainingUsd}
+          ) => {
+            const remainingUsd = Number(providerDailyBudgetRemainingUsd)
+            return Number.isFinite(remainingUsd) && remainingUsd >= 0
+              ? remainingUsd
+              : null
+          },
         }),
       ],
     },

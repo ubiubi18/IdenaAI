@@ -45,6 +45,16 @@ This update merges the rehearsal/autosolver test lane back into `main`.
   should make limits clearer and more controllable; for now, use prepaid API
   keys or hard provider budgets and treat all provider spend as your own
   responsibility.
+- Remote-provider spend is now guarded locally by a daily API budget cap. It is
+  on by default at `$15` per calendar day for the app profile, counts validation
+  solves, report review, standalone rehearsal solver lanes, AI-assisted flip
+  building, and AI image search, and blocks further remote-provider calls once
+  reached. Raising the cap now goes through an explicit warning dialog; the main
+  provider bridge also expects a budget contract for remote calls so missed UI
+  paths fail closed instead of silently spending. You can still disable the
+  guardrail in `Settings -> AI`, but that is an explicit choice to accept
+  uncapped provider billing. This is a local warning system, not provider-side
+  billing protection.
 - The Windows route shares the same JavaScript/Electron solver logic, but it
   still needs more real Windows rehearsal history before it should be treated as
   fully tested for valuable validation.
@@ -67,6 +77,10 @@ Use this path before trying any real validation identity:
    hard flips can make one identity cost about `$10` or more, not just `$1`.
    This software is experimental; you are responsible for possible API costs,
    node behavior, and validation results.
+   IdenaAI also has a local daily API budget guardrail enabled by default at
+   `$15`. It now covers autosolving, report review, rehearsal lanes, flip
+   building, and AI image search. Keep it on unless you deliberately accept
+   higher hosted-provider spend for the current day.
    Take care: the rehearsal topology can exercise one primary identity plus
    nine optional participant identities. A remote-provider rehearsal can
    therefore multiply cost up to 10 identities.
@@ -75,7 +89,7 @@ Use this path before trying any real validation identity:
    seeded FLIP-Challenge flips are visible or confirmed. The default topology
    is one bootstrap node plus nine validator identities.
 9. Let the countdown reach zero, watch the solve session, then review the
-    audit/results screen at the end.
+   audit/results screen at the end.
 
 ## Large Bundled Artifacts
 
@@ -861,6 +875,17 @@ flips trigger long reasoning and rechecks; one identity can cost about `$10` or
 more with hosted models, and multi-identity rehearsal can multiply that. Use a
 prepaid API key or strict provider-side budget, and do not enable automatic
 top-up while testing experimental autosolver flows.
+
+IdenaAI adds a local daily API budget guardrail for remote providers. The
+default cap is `$15` per calendar day and the app blocks remote-provider
+calls after that until you approve a higher cap or turn the guardrail off. The
+cap covers validation solving, automatic report review, rehearsal solver lanes,
+AI-assisted flip building, and AI image search. Cap increases use an explicit
+warning dialog, and the main provider bridge fails closed when a remote call is
+missing budget information. This guardrail is deliberately visible in AI
+settings and the rehearsal setup flow, but it is not a billing contract.
+Provider-side prepaid credits and hard spend limits are still the real
+protection against unwanted costs.
 
 ## Project Status
 

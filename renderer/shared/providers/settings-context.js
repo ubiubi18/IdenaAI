@@ -50,6 +50,12 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   autoReportEnabled: false,
   autoReportDelayMinutes: 10,
   autoReportBestFlipEnabled: false,
+  providerDailyBudgetEnabled: true,
+  providerDailyBudgetUsd: 15,
+  providerDailyBudgetOverrideDate: '',
+  providerDailyBudgetOverrideConsentAt: '',
+  providerDailyBudgetLastApprovedUsd: '',
+  providerDailyBudgetLastApprovedAt: '',
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -299,6 +305,38 @@ function buildAiSolverSettings(settings = {}) {
   nextSettings.autoReportBestFlipEnabled = Boolean(
     nextSettings.autoReportBestFlipEnabled
   )
+  nextSettings.providerDailyBudgetEnabled =
+    nextSettings.providerDailyBudgetEnabled === undefined
+      ? DEFAULT_AI_SOLVER_SETTINGS.providerDailyBudgetEnabled
+      : nextSettings.providerDailyBudgetEnabled !== false
+  const normalizedProviderDailyBudgetUsd = Number.parseFloat(
+    nextSettings.providerDailyBudgetUsd
+  )
+  nextSettings.providerDailyBudgetUsd =
+    Number.isFinite(normalizedProviderDailyBudgetUsd) &&
+    normalizedProviderDailyBudgetUsd > 0
+      ? Math.min(10000, Math.max(0.01, normalizedProviderDailyBudgetUsd))
+      : DEFAULT_AI_SOLVER_SETTINGS.providerDailyBudgetUsd
+  nextSettings.providerDailyBudgetOverrideDate = String(
+    nextSettings.providerDailyBudgetOverrideDate || ''
+  ).trim()
+  nextSettings.providerDailyBudgetOverrideConsentAt = String(
+    nextSettings.providerDailyBudgetOverrideConsentAt || ''
+  ).trim()
+  const normalizedProviderDailyBudgetLastApprovedUsd = Number.parseFloat(
+    nextSettings.providerDailyBudgetLastApprovedUsd
+  )
+  nextSettings.providerDailyBudgetLastApprovedUsd =
+    Number.isFinite(normalizedProviderDailyBudgetLastApprovedUsd) &&
+    normalizedProviderDailyBudgetLastApprovedUsd > 0
+      ? Math.min(
+          10000,
+          Math.max(0.01, normalizedProviderDailyBudgetLastApprovedUsd)
+        )
+      : ''
+  nextSettings.providerDailyBudgetLastApprovedAt = String(
+    nextSettings.providerDailyBudgetLastApprovedAt || ''
+  ).trim()
 
   const normalizedMemoryBudgetGiB = Number.parseInt(
     nextSettings.memoryBudgetGiB,
