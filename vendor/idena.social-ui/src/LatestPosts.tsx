@@ -326,7 +326,7 @@ function LatestPosts() {
                     )}
                     <p id="post-copytx-main" className={`inline-block -mt-1 ml-2 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={() => !mainComposerDisabled && copyPostTxHandler('main')}>Copy tx</p>
                 </div>
-                <p className="text-right w-50 mt-0.5 text-gray-400 text-[12px]">Your post will take time to display due to blockchain acceptance.</p>
+                <p className="hidden sm:block text-right w-50 mt-0.5 text-gray-400 text-[12px]">Your post will take time to display due to blockchain acceptance.</p>
                 <button className="h-9 w-27 my-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" disabled={mainComposerDisabled} onClick={(e) => makePostsWith === 'rpc' ? handleOpenRpcMakePostModal(e, 'main') : submitPostHandler('main')}>{submittingPost === 'main' ? 'Posting...' : 'Post!'}</button>
             </div>
         </div>

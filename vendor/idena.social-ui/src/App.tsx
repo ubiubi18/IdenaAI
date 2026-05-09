@@ -1265,11 +1265,11 @@ function App() {
 
     return (
         <main
-            className={`mx-auto flex h-full w-full ${isDesktopOnchainMode ? 'max-w-none flex-col px-4 py-3' : 'max-w-[1880px] flex-row gap-4 px-4 py-3'}`}
+            className={`mx-auto flex h-full w-full ${isDesktopOnchainMode ? 'max-w-none flex-col px-4 py-3' : 'max-w-[1880px] flex-row justify-center gap-4 px-4 py-3'}`}
             style={isDesktopOnchainMode ? { width: '100%', maxWidth: '100%' } : undefined}
         >
             {!isDesktopOnchainMode && (
-            <div className="flex flex-none justify-end">
+            <div className="hidden lg:flex flex-none justify-end">
                 <div className="w-[280px] min-w-[280px] ml-2 mr-1 flex flex-col">
                     <div className="text-[28px] mb-3">
                         <Link to="/">idena.social</Link>
@@ -1519,8 +1519,8 @@ function App() {
                 </div>
             </div>
             {!isDesktopOnchainMode && (
-            <div className="flex flex-none justify-start">
-                <div className="mt-3 mr-2 ml-2 hidden w-[320px] min-w-[320px] xl:flex xl:flex-col text-[13px]">
+            <div className="hidden xl:flex flex-none justify-start">
+                <div className="mt-3 mr-2 ml-2 flex w-[320px] min-w-[320px] flex-col text-[13px]">
                     <div className="flex flex-col h-[90px] justify-center">
                         <div className="px-1 font-[700] text-gray-400"><p>{currentAd?.title ?? defaultAd.title}</p></div>
                         <div className="px-1"><p>{currentAd?.desc ?? defaultAd.desc}</p></div>

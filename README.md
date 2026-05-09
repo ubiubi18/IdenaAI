@@ -32,11 +32,19 @@ This update merges the rehearsal/autosolver test lane back into `main`.
 - Benchmark telemetry and the rehearsal benchmark audit now show candidate
   stories in the same vertical four-panel flip form as the validation session,
   instead of flattened landscape thumbnails or a 2x2 grid.
+- The bundled `idena.social-ui` snapshot is updated to upstream `v11.1.0`
+  while keeping the local desktop/on-chain bridge integration.
 - The experimental `probability_ensemble` solver mode is present for research
   startup, but remains disabled by default. It scores both candidate stories
   independently, can swap presentation order, and aggregates in application
   code. Benchmark it in rehearsal/off-chain mode before using it near a
   valuable identity.
+- Provider cost warning: some `v0.0.5` flips trigger long reasoning chains.
+  One hard identity session can cost not only about `$1`, but around `$10` or
+  more depending on model, flips, retries, and provider pricing. Future updates
+  should make limits clearer and more controllable; for now, use prepaid API
+  keys or hard provider budgets and treat all provider spend as your own
+  responsibility.
 - The Windows route shares the same JavaScript/Electron solver logic, but it
   still needs more real Windows rehearsal history before it should be treated as
   fully tested for valuable validation.
@@ -54,14 +62,14 @@ Use this path before trying any real validation identity:
    - `Local AI runtime`: use the configured local runtime; no provider key is
      needed.
    - `No AI yet`: start only the rehearsal network and arm AI later if needed.
-6. If you use OpenAI, prefer a prepaid-funded API key with no automatic top-up
-   so a rough experimental run cannot create an unlimited provider-side bill.
-   This software is experimental and does not provide warranties for provider
-   spend, node behavior, or validation results.
+6. If you use OpenAI or another remote provider, prefer a prepaid API key or a
+   hard provider budget with no automatic top-up. `v0.0.5` testing showed that
+   hard flips can make one identity cost about `$10` or more, not just `$1`.
+   This software is experimental; you are responsible for possible API costs,
+   node behavior, and validation results.
    Take care: the rehearsal topology can exercise one primary identity plus
    nine optional participant identities. A remote-provider rehearsal can
-   therefore multiply cost up to 10 identities, roughly 10x a single-identity
-   run depending on model, reasoning effort, retries, and provider pricing.
+   therefore multiply cost up to 10 identities.
 7. After start, stay on `Settings -> Node` and watch the node stats and log.
 8. Wait until all local rehearsal nodes are ready/online/connected and the
    seeded FLIP-Challenge flips are visible or confirmed. The default topology
@@ -847,6 +855,12 @@ Hosted API providers are included for user-controlled benchmarking and
 small-scale experimentation with the user's own API key. They are not a
 reliability guarantee for synchronized live validation windows. For serious use,
 prefer local models so capacity scales with your own hardware.
+
+Cost warning: `v0.0.5` can spend much more than earlier rough estimates. Some
+flips trigger long reasoning and rechecks; one identity can cost about `$10` or
+more with hosted models, and multi-identity rehearsal can multiply that. Use a
+prepaid API key or strict provider-side budget, and do not enable automatic
+top-up while testing experimental autosolver flows.
 
 ## Project Status
 
