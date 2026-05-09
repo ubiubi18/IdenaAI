@@ -1,4 +1,4 @@
-# IdenaAI v0.0.5
+# IdenaAI v0.0.6
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,13 +8,13 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This repository is the main app-integration line. Version `0.0.5` is a
+This repository is the main app-integration line. Version `0.0.6` is a
 research checkpoint for rehearsal autosolver UX, hosted/local AI setup,
 short-session provider timing, benchmark review, and the first in-main startup
 path for probability-ensemble flip judging research. It is research software,
 not a hardened wallet release and not a trusted installer distribution.
 
-## IdenaAI v0.0.5 Update
+## IdenaAI v0.0.6 Update
 
 This update merges the rehearsal/autosolver test lane back into `main`.
 
@@ -39,7 +39,7 @@ This update merges the rehearsal/autosolver test lane back into `main`.
   independently, can swap presentation order, and aggregates in application
   code. Benchmark it in rehearsal/off-chain mode before using it near a
   valuable identity.
-- Provider cost warning: some `v0.0.5` flips trigger long reasoning chains.
+- Provider cost warning: some `v0.0.6` flips trigger long reasoning chains.
   One hard identity session can cost not only about `$1`, but around `$10` or
   more depending on model, flips, retries, and provider pricing. Future updates
   should make limits clearer and more controllable; for now, use prepaid API
@@ -63,7 +63,7 @@ Use this path before trying any real validation identity:
      needed.
    - `No AI yet`: start only the rehearsal network and arm AI later if needed.
 6. If you use OpenAI or another remote provider, prefer a prepaid API key or a
-   hard provider budget with no automatic top-up. `v0.0.5` testing showed that
+   hard provider budget with no automatic top-up. `v0.0.6` testing showed that
    hard flips can make one identity cost about `$10` or more, not just `$1`.
    This software is experimental; you are responsible for possible API costs,
    node behavior, and validation results.
@@ -829,7 +829,7 @@ FLIP judging under real provider timing and Windows route conditions.
 
 ## Experimental Warning
 
-Read this part first. `v0.0.5` is not production ready.
+Read this part first. `v0.0.6` is not production ready.
 
 - no warranties
 - not audited
@@ -856,7 +856,7 @@ small-scale experimentation with the user's own API key. They are not a
 reliability guarantee for synchronized live validation windows. For serious use,
 prefer local models so capacity scales with your own hardware.
 
-Cost warning: `v0.0.5` can spend much more than earlier rough estimates. Some
+Cost warning: `v0.0.6` can spend much more than earlier rough estimates. Some
 flips trigger long reasoning and rechecks; one identity can cost about `$10` or
 more with hosted models, and multi-identity rehearsal can multiply that. Use a
 prepaid API key or strict provider-side budget, and do not enable automatic
@@ -864,7 +864,7 @@ top-up while testing experimental autosolver flows.
 
 ## Project Status
 
-`v0.0.5` is an auditable research checkpoint after the Node 24/Electron 41
+`v0.0.6` is an auditable research checkpoint after the Node 24/Electron 41
 runtime work, source-mirror cleanup, idena.social integration, validation
 rehearsal, local AI setup, autosolver telemetry, benchmark flip-form review,
 and the first probability-ensemble research startup path on `main`. It is not a
