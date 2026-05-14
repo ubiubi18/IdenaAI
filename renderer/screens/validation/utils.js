@@ -935,6 +935,36 @@ function normalizeRestorableValidationStateDefinition(stateDef) {
   }
 }
 
+function isPersistedValidationSuccess(stateDef) {
+  return (
+    stateDef?.value === 'validationSucceeded' &&
+    String(stateDef?.context?.submitLongAnswersHash || '').trim()
+  )
+}
+
+function isPersistedValidationFailure(stateDef) {
+  return stateDef?.value === 'validationFailed'
+}
+
+function shouldKeepPersistedValidationSuccess(
+  persistedPayload,
+  nextState,
+  scope = null
+) {
+  if (
+    !isPersistedValidationSuccess(persistedPayload.snapshot) ||
+    !isPersistedValidationFailure(nextState)
+  ) {
+    return false
+  }
+
+  if (scope) {
+    return matchesValidationStateScope(persistedPayload.meta, scope)
+  }
+
+  return true
+}
+
 export function persistScopedValidationState(state, scope) {
   const persistableState = toPersistableValidationState(state)
 
@@ -943,6 +973,16 @@ export function persistScopedValidationState(state, scope) {
   }
 
   const persistedPayload = getStoredValidationStatePayload()
+
+  if (
+    shouldKeepPersistedValidationSuccess(
+      persistedPayload,
+      persistableState,
+      scope
+    )
+  ) {
+    return
+  }
 
   persistState('validation2', {
     [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
@@ -962,12 +1002,51 @@ export function persistValidationState(state, scope = null) {
   if (persistableState) {
     const persistedPayload = getStoredValidationStatePayload()
 
+    if (
+      shouldKeepPersistedValidationSuccess(persistedPayload, persistableState)
+    ) {
+      return
+    }
+
     persistState('validation2', {
       [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
       [VALIDATION_STATE_META_KEY]: persistedPayload.meta,
       [VALIDATION_STATE_SNAPSHOT_KEY]: persistableState,
     })
   }
+}
+
+export function persistValidationSucceededState(context = {}, scope = null) {
+  const persistedPayload = getStoredValidationStatePayload()
+  const normalizedScope = normalizeValidationStateMeta(scope)
+  const meta = normalizedScope || persistedPayload.meta
+
+  if (
+    scope &&
+    persistedPayload.meta &&
+    !matchesValidationStateScope(persistedPayload.meta, scope)
+  ) {
+    return
+  }
+
+  persistState('validation2', {
+    [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
+    [VALIDATION_STATE_META_KEY]: meta,
+    [VALIDATION_STATE_SNAPSHOT_KEY]: {
+      value: 'validationSucceeded',
+      event: buildPersistedValidationEvent(),
+      _event: buildPersistedValidationScxmlEvent(),
+      done: true,
+      context: {
+        ...context,
+        shortFlips: normalizePersistableValidationFlips(context.shortFlips),
+        longFlips: normalizePersistableValidationFlips(context.longFlips),
+        reports: Array.isArray(context.reports)
+          ? context.reports
+          : [...(context.reports ?? [])],
+      },
+    },
+  })
 }
 
 export function loadValidationStateDefinition(scope = null) {

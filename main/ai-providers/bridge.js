@@ -81,11 +81,12 @@ const UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS = [0.95, 0.8, 0.51]
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
 const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
-  // Provisional aliases until distinct GPT-5.5 desktop pricing is configured.
-  'gpt-5.5': {input: 2.5, output: 15},
-  'gpt-5.5-mini': {input: 0.25, output: 2},
+  // OpenAI public API pricing checked on 2026-05-14.
+  'gpt-5.5': {input: 5, output: 30},
+  // gpt-5.5-mini is currently resolved through the configured 5.4-mini fallback.
+  'gpt-5.5-mini': {input: 0.75, output: 4.5},
   'gpt-5.4': {input: 2.5, output: 15},
-  'gpt-5.4-mini': {input: 0.25, output: 2},
+  'gpt-5.4-mini': {input: 0.75, output: 4.5},
   'gpt-5.3-chat-latest': {input: 1.75, output: 14},
   'gpt-5.3-codex': {input: 1.75, output: 14},
   'gpt-5-mini': {input: 0.25, output: 2},
