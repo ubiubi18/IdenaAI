@@ -1,10 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import Modal from 'react-modal';
-import { IdenaApprovedAds, type ApprovedAd } from 'idena-approved-ads';
 import { type Post, type Poster, type Tip, type RpcPostCostEstimate, breakingChanges, estimateRpcPostCost, getNewPosterAndPost, getReplyPosts, deOrphanReplyPosts, getBlockHeightFromTxHash, submitPost, processTip, submitSendTip, supportedImageTypes, storeFileToIpfs, getPastTxsWithIdenaIndexerApi, getRpcClient, type RpcClient, copyPostTx, getPostIdFromChannelId, getNewPostLatestActivity, getblockTxsWithIdenaIndexerApi, getBlockAtWithIdenaIndexerApi, getLastBlockWithIdenaIndexerApi, getTransactionDetailsRpc, getTransactionDetailsIndexerApi } from './logic/asyncUtils';
-import { getDisplayAddress, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, str2bytes } from './logic/utils';
+import { getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, str2bytes } from './logic/utils';
 import { createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
-import WhatIsIdenaPng from './assets/whatisidena.png';
 import { Link, Outlet, useLocation } from 'react-router';
 import type { BrowserStateHistorySettings, MouseEventLocal, PostMediaAttachment } from './App.exports';
 import ModalLikesTipsComponent from './components/ModalLikesTipsComponent';
@@ -12,6 +10,8 @@ import ModalSendTipComponent from './components/ModalSendTipComponent';
 import ModalAddMediaComponent from './components/ModalAddMediaComponent';
 import ModalRpcMakePostComponent from './components/ModalRpcMakePostComponent';
 import ModalExpandImageComponent from './components/ModalExpandImageComponent';
+import MenuComponent from './components/MenuComponent';
+import menuWhiteSvg from './assets/menu-8-white.svg';
 import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSocialPostIdForContract, SOCIAL_CONTRACTS, SOCIAL_CONTRACT_CURRENT, type SocialContractId } from './logic/socialContracts';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
@@ -36,17 +36,9 @@ const zeroAddress = '0x0000000000000000000000000000000000000000';
 const callbackUrl = new URL('confirm-tx.html', socialBaseUrl).toString();
 const termsOfServiceUrl = new URL('terms-of-service.html', socialBaseUrl).toString();
 const attributionsUrl = new URL('attributions.html', socialBaseUrl).toString();
-const defaultAd = {
-    title: 'IDENA: Proof-of-Person blockchain',
-    desc: 'Coordination of individuals',
-    url: 'https://idena.io',
-    thumb: '',
-    media: WhatIsIdenaPng,
-};
 
 const POLLING_INTERVAL = 10000;
 const SCANNING_INTERVAL = 10;
-const ADS_INTERVAL = 10000;
 const SCAN_PAST_POSTS_TTL = 1 * 60;
 const INDEXER_API_ITEMS_LIMIT = 20;
 const SET_NEW_POSTS_ADDED_DELAY = 20;
@@ -157,9 +149,6 @@ function App() {
     const currentBlockCapturedRef = useRef(currentBlockCaptured);
     const [scanningPastBlocks, setScanningPastBlocks] = useState<boolean>(false);
     const scanningPastBlocksRef = useRef(scanningPastBlocks);
-    const [ads, setAds] = useState<ApprovedAd[]>([]);
-    const [currentAd, setCurrentAd] = useState<ApprovedAd | null>(null);
-    const currentAdRef = useRef(currentAd);
     const [inputFindingPastPosts, setInputFindingPastPosts] = useState<string>(initSettings.findingPastPosts);
     const inputFindingPastPostsRef = useRef(inputFindingPastPosts);
     const [noMorePastBlocks, setNoMorePastBlocks] = useState<boolean>(false);
@@ -200,6 +189,7 @@ function App() {
     const [mainComposerCostEstimateLoading, setMainComposerCostEstimateLoading] = useState<boolean>(false);
     const [flashNotice, setFlashNotice] = useState<FlashNotice | null>(null);
     const flashNoticeTimeoutRef = useRef<number | undefined>(undefined);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const clearFlashNotice = () => {
         if (flashNoticeTimeoutRef.current) {
@@ -350,20 +340,6 @@ function App() {
                 setPostersAddress(getCoinbaseAddrResult || '');
             }
 
-            const adsClient = new IdenaApprovedAds({ idenaNodeUrl, idenaNodeApiKey });
-
-            try {
-                if (isDesktopOnchainMode) {
-                    setAds([defaultAd as ApprovedAd]);
-                    return;
-                }
-                const ads = await adsClient.getApprovedAds();
-                setAds([defaultAd as ApprovedAd, ...ads]);
-            } catch (error) {
-                console.error(error);
-                setAds([defaultAd as ApprovedAd]);
-            }
-
         })();
     };
 
@@ -416,31 +392,6 @@ function App() {
     }, [inputIdenaIndexerApiUrlApplied]);
 
     useEffect(() => {
-        setCurrentAd(ads[0]);
-        if (ads.length) {
-            setCurrentAd(ads[0]);
-
-            if (isDesktopOnchainMode) {
-                return undefined;
-            }
-
-            let rotateAdsIntervalId: NodeJS.Timeout;
-
-            async function recurse() {
-                rotateAdsIntervalId = setTimeout(() => {
-                    const adIndex = ads.findIndex((ad) => ad.cid === currentAdRef.current?.cid);
-                    const nextIndex = adIndex !== (ads.length - 1) ? adIndex + 1 : 0;
-                    setCurrentAd(ads[nextIndex]);
-                    recurse();
-                }, ADS_INTERVAL);
-            };
-            recurse();
-
-            return () => clearInterval(rotateAdsIntervalId);
-        }
-    }, [ads]);
-
-    useEffect(() => {
         nodeAvailableRef.current = nodeAvailable;
     }, [nodeAvailable]);
 
@@ -455,10 +406,6 @@ function App() {
     useEffect(() => {
         pastBlockCapturedRef.current = pastBlockCaptured;
     }, [pastBlockCaptured]);
-
-    useEffect(() => {
-        currentAdRef.current = currentAd;
-    }, [currentAd]);
 
     useEffect(() => {
         inputFindingPastPostsRef.current = inputFindingPastPosts;
@@ -1274,6 +1221,8 @@ function App() {
                     <div className="text-[28px] mb-3">
                         <Link to="/">idena.social</Link>
                     </div>
+                    <MenuComponent postersAddress={postersAddress} />
+                    <div className="mb-4" />
                     <div className="mb-4 text-[14px]">
                         <div className="flex flex-col">
                             <div className="flex flex-row mb-2 gap-1">
@@ -1385,6 +1334,32 @@ function App() {
                     className={`mx-auto w-full ${isDesktopOnchainMode ? 'max-w-[1480px]' : 'max-w-[1080px]'}`}
                     style={isDesktopOnchainMode ? { width: '100%', maxWidth: '1480px' } : undefined}
                 >
+                {!isDesktopOnchainMode && (
+                    <div className="lg:hidden mb-3">
+                        <div className="text-[26px] mb-1">
+                            <Link to="/">idena.social</Link>
+                        </div>
+                        <div className="flex flex-row gap-3">
+                            <div className="min-w-8">
+                                <img
+                                    src={menuWhiteSvg}
+                                    className={'h-8 p-[5px] mr-0.5 inline-block rounded-md hover:bg-gray-400/30 hover:cursor-pointer' + (mobileMenuOpen ? ' bg-gray-400/30' : '')}
+                                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                                />
+                            </div>
+                            <div className="flex flex-row gap-1 whitespace-nowrap">
+                                <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
+                                <p className="text-[14px]/7">|</p>
+                                <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank" rel="noopener noreferrer">Attributions</a></p>
+                            </div>
+                        </div>
+                        {mobileMenuOpen && (
+                            <div className="mt-2 mb-4">
+                                <MenuComponent postersAddress={postersAddress} />
+                            </div>
+                        )}
+                    </div>
+                )}
                 {flashNotice && (
                     <div
                         className={`mb-3 flex items-start justify-between gap-3 rounded-md border px-4 py-3 text-[14px] ${
@@ -1469,8 +1444,31 @@ function App() {
                 </div>
                 <Outlet
                     context={{
-                        currentBlockCaptured,
+                        inputNodeApplied,
+                        inputNodeUrl,
+                        setInputNodeUrl,
                         nodeAvailable,
+                        inputNodeKey,
+                        setInputNodeKey,
+                        setInputNodeApplied,
+                        inputSendingTxs,
+                        handleInputSendingTxsToggle,
+                        viewOnlyNode,
+                        inputPostersAddressApplied,
+                        inputPostersAddress,
+                        setInputPostersAddress,
+                        postersAddressInvalid,
+                        setInputPostersAddressApplied,
+                        inputFindingPastPosts,
+                        handleInputFindingPastPostsToggle,
+                        inputIdenaIndexerApiUrlApplied,
+                        inputIdenaIndexerApiUrl,
+                        setInputIdenaIndexerApiUrl,
+                        indexerApiUrlInvalid,
+                        setInputIdenaIndexerApiUrlApplied,
+                        embeddedDesktopOnchainMode: isDesktopOnchainMode,
+                        officialIndexerApiUrl,
+                        currentBlockCaptured,
                         latestPosts,
                         latestActivity,
                         postsRef,
@@ -1509,8 +1507,6 @@ function App() {
                         setMainComposerCostEstimateError,
                         mainComposerCostEstimateLoading,
                         setMainComposerCostEstimateLoading,
-                        inputSendingTxs,
-                        embeddedDesktopOnchainMode: isDesktopOnchainMode,
                         desktopBootstrap,
                         activeSocialContract,
                         activeContractAddress,
@@ -1518,29 +1514,6 @@ function App() {
                 />
                 </div>
             </div>
-            {!isDesktopOnchainMode && (
-            <div className="hidden xl:flex flex-none justify-start">
-                <div className="mt-3 mr-2 ml-2 flex w-[320px] min-w-[320px] flex-col text-[13px]">
-                    <div className="flex flex-col h-[90px] justify-center">
-                        <div className="px-1 font-[700] text-gray-400"><p>{currentAd?.title ?? defaultAd.title}</p></div>
-                        <div className="px-1"><p>{currentAd?.desc ?? defaultAd.desc}</p></div>
-                        <div className="px-1 text-blue-400"><a className="hover:underline" href={currentAd?.url ?? defaultAd.url} target="_blank" rel="noopener noreferrer">{currentAd?.url ?? defaultAd.url}</a></div>
-                    </div>
-                    <div className="my-3 h-[320px] w-[320px]"><a href={currentAd?.url ?? defaultAd.url} target="_blank" rel="noopener noreferrer"><img className="rounded-md" src={currentAd?.media ?? defaultAd.media} /></a></div>
-                    <div className="flex flex-row px-1">
-                        <div className="w-16 flex-auto">
-                            <div className="font-[600] text-gray-400"><p>Sponsored by</p></div>
-                            <div><a className="flex flex-row items-center" href={`https://scan.idena.io/address/${currentAd?.author}`} target="_blank" rel="noopener noreferrer"><img className="-mt-0.5 -ml-1.5 h-5 w-5" src={`https://robohash.org/${currentAd?.author}?set=set1`} /><span>{getDisplayAddress(currentAd?.author || '')}</span></a></div>
-                        </div>
-                        <div className="flex-1" />
-                        <div className="w-16 flex-auto">
-                            <div className="font-[600] text-gray-400"><p>Burnt, in 24 hr</p></div>
-                            <div><p>{currentAd?.burnAmount} iDNA</p></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            )}
             <div onClick={(e) => e.stopPropagation()}>
                 <Modal
                     isOpen={!!modalOpen} 
