@@ -56,12 +56,16 @@ Still placeholder or stubbed:
 
 Current posture:
 
-- no bundled local runtime model is approved by default
+- the default text/runtime lane is the user-installed Qwen/Ollama alias
+  documented in `docs/local-ai-qwen36-gguf.md`
 - no bundled local training model is approved by default
 - any local runtime or training model must be configured deliberately by the
   operator
 - the current research candidate is `allenai/Molmo2-O-7B` on a custom local
   runtime service, but it is not treated as a shipped default
+- local/downloadable model declarations must pass
+  `npm run audit:local-ai-model-licenses` and return either `apache-2.0` or
+  `mit` from current upstream model metadata
 - future base-layer candidates should be evaluated for transparency,
   inspectability, and controllability before they are recommended
 
