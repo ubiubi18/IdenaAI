@@ -1,4 +1,4 @@
-# IdenaAI v0.0.6
+# IdenaAI v0.0.7
 
 `IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
 
@@ -8,15 +8,17 @@
 - local runtime and training experiments tied to the desktop app
 - validation rehearsal tooling for safer local protocol testing
 
-This repository is the main app-integration line. Version `0.0.6` is a
+This repository is the main app-integration line. Version `0.0.7` is a
 research checkpoint for rehearsal autosolver UX, hosted/local AI setup,
-short-session provider timing, benchmark review, and the first in-main startup
-path for probability-ensemble flip judging research. It is research software,
-not a hardened wallet release and not a trusted installer distribution.
+validation recovery, IPFS inspection, cost telemetry, benchmark review, and the
+first in-main startup path for probability-ensemble flip judging research. It
+is research software, not a hardened wallet release and not a trusted installer
+distribution.
 
-## IdenaAI v0.0.6 Update
+## IdenaAI v0.0.7 Update
 
-This update merges the rehearsal/autosolver test lane back into `main`.
+This update merges the rehearsal/autosolver test lane back into `main` and
+adds fixes from the rehearsal audits.
 
 - `Settings -> Node -> Start autosolve rehearsal` now opens a setup dialog
   before the rehearsal starts. It supports a remote provider API key and model
@@ -39,7 +41,19 @@ This update merges the rehearsal/autosolver test lane back into `main`.
   independently, can swap presentation order, and aggregates in application
   code. Benchmark it in rehearsal/off-chain mode before using it near a
   valuable identity.
-- Provider cost warning: some `v0.0.6` flips trigger long reasoning chains.
+- Validation AI cost tracking was corrected after the rehearsal cost-tracker
+  bug. The in-app tracker now better reflects the app's own token accounting
+  and pricing path for validation solve and automatic report-review steps, but
+  it remains local telemetry, not a billing guarantee from any provider.
+- Rehearsal recovery fixes now also apply to the real validation path. Empty
+  short-session fetches no longer persist a fake terminal failure, assigned
+  short-session failures still fail explicitly, and long-session AI fallbacks
+  avoid submitting forced random answers when a remote provider cannot return a
+  usable result.
+- IPFS inspection tooling was added for local moderation and auditing. Use
+  `npm run ipfs:inspect` for RPC-backed inspection while the node is reachable,
+  or `npm run ipfs:inspect:offline` to inspect the stopped embedded repo.
+- Provider cost warning: some `v0.0.7` flips trigger long reasoning chains.
   One hard identity session can cost not only about `$1`, but around `$10` or
   more depending on model, flips, retries, and provider pricing. Future updates
   should make limits clearer and more controllable; for now, use prepaid API
@@ -59,6 +73,23 @@ This update merges the rehearsal/autosolver test lane back into `main`.
   still needs more real Windows rehearsal history before it should be treated as
   fully tested for valuable validation.
 
+## Own Risk And Cost Responsibility
+
+IdenaAI is experimental research software. Running this app, running a node,
+autosolving, inspecting or serving IPFS data, using hosted AI providers, and
+validating a real identity are all at your own risk. Unexpected behavior,
+unexpected network effects, unexpected validation outcomes, unexpected pinned
+or fetched data, and unexpected provider charges are your own responsibility.
+
+Local cost control does not equal provider-side cost control. IdenaAI can show
+local estimates, track local token usage, warn locally, and block calls from
+this app profile when its local budget guardrail is reached. It cannot
+guarantee what OpenAI or any other provider will bill, cannot control usage
+outside this app, cannot prevent provider-side retries or minimum charges, and
+cannot protect you from future provider pricing changes. Use prepaid keys,
+hard provider-side budgets, billing alerts, and provider dashboards if cost
+exposure matters.
+
 ## Quick Rehearsal Tester Path
 
 Use this path before trying any real validation identity:
@@ -73,7 +104,7 @@ Use this path before trying any real validation identity:
      needed.
    - `No AI yet`: start only the rehearsal network and arm AI later if needed.
 6. If you use OpenAI or another remote provider, prefer a prepaid API key or a
-   hard provider budget with no automatic top-up. `v0.0.6` testing showed that
+   hard provider budget with no automatic top-up. `v0.0.7` testing showed that
    hard flips can make one identity cost about `$10` or more, not just `$1`.
    This software is experimental; you are responsible for possible API costs,
    node behavior, and validation results.
@@ -843,7 +874,7 @@ FLIP judging under real provider timing and Windows route conditions.
 
 ## Experimental Warning
 
-Read this part first. `v0.0.6` is not production ready.
+Read this part first. `v0.0.7` is not production ready.
 
 - no warranties
 - not audited
@@ -870,7 +901,7 @@ small-scale experimentation with the user's own API key. They are not a
 reliability guarantee for synchronized live validation windows. For serious use,
 prefer local models so capacity scales with your own hardware.
 
-Cost warning: `v0.0.6` can spend much more than earlier rough estimates. Some
+Cost warning: `v0.0.7` can spend much more than earlier rough estimates. Some
 flips trigger long reasoning and rechecks; one identity can cost about `$10` or
 more with hosted models, and multi-identity rehearsal can multiply that. Use a
 prepaid API key or strict provider-side budget, and do not enable automatic
@@ -889,11 +920,13 @@ protection against unwanted costs.
 
 ## Project Status
 
-`v0.0.6` is an auditable research checkpoint after the Node 24/Electron 41
+`v0.0.7` is an auditable research checkpoint after the Node 24/Electron 41
 runtime work, source-mirror cleanup, idena.social integration, validation
 rehearsal, local AI setup, autosolver telemetry, benchmark flip-form review,
-and the first probability-ensemble research startup path on `main`. It is not a
-production release and not a trusted installer distribution.
+validation recovery fixes, IPFS inspection tooling, the addressed validation AI
+cost-tracker bug, and the first probability-ensemble research startup path on
+`main`. It is not a production release and not a trusted installer
+distribution.
 
 What works today:
 
