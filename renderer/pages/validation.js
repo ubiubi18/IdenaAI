@@ -826,18 +826,22 @@ function LocalAiValidationRecommendation({
       spacing={2}
       px={4}
       py={3}
-      mx={[2, 6]}
+      mx="auto"
       mb={3}
+      w={['calc(100% - 16px)', 'min(720px, calc(100% - 48px))']}
       borderWidth="1px"
       borderColor={panelBorder}
       borderRadius="md"
       bg={panelBg}
+      position="relative"
+      zIndex={2}
     >
       <Flex
-        align={['stretch', 'center']}
-        justify="space-between"
-        direction={['column', 'row']}
+        align="center"
+        justify="center"
+        direction="column"
         gap={2}
+        textAlign="center"
       >
         <Box>
           <Text fontSize="xs" fontWeight={600} color={titleColor}>
@@ -850,7 +854,11 @@ function LocalAiValidationRecommendation({
         <SecondaryButton
           isDisabled={!canCheck}
           isLoading={isChecking}
-          onClick={onCheck}
+          onClick={(event) => {
+            event.stopPropagation()
+            onCheck?.()
+          }}
+          minW="180px"
         >
           {t('Check with Local AI')}
         </SecondaryButton>
@@ -2102,6 +2110,9 @@ function ValidationSession({
     enabled: aiSolverSettings.enabled,
     providerReady: aiProviderSetupReady,
   })
+  const activeAiPriceTag =
+    formatTelemetryCost(aiActiveFlip?.costs) ||
+    formatTelemetryCost(aiLastRun?.summary?.costs)
   const longSessionAiSolveStatus = useMemo(
     () =>
       getValidationLongAiSolveStatus({
@@ -4504,6 +4515,16 @@ function ValidationSession({
                       isTruncated
                     >
                       {aiProgress}
+                    </Text>
+                  )}
+                  {activeAiPriceTag && (
+                    <Text
+                      fontSize="xs"
+                      color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
+                      fontWeight={600}
+                      flexShrink={0}
+                    >
+                      {`price ${activeAiPriceTag}`}
                     </Text>
                   )}
                   {isSessionAutoMode &&

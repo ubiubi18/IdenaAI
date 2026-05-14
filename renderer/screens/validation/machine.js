@@ -90,6 +90,12 @@ function ensureShortSubmitOptions(shortFlips = []) {
     : []
 }
 
+function hasAssignedShortSessionFlips(shortFlips = []) {
+  return (Array.isArray(shortFlips) ? shortFlips : []).some(({hash}) =>
+    String(hash || '').trim()
+  )
+}
+
 function getLongSubmitAnswer({hash, option, relevance}) {
   if (relevance === RelevanceType.Relevant) {
     return FlipGrade.GradeC
@@ -533,6 +539,8 @@ export const createValidationMachine = ({
                           },
                           {
                             target: '#validation.validationFailed',
+                            cond: ({shortFlips}) =>
+                              hasAssignedShortSessionFlips(shortFlips),
                           },
                         ],
                       },

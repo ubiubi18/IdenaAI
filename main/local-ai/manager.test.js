@@ -1321,6 +1321,14 @@ Pages compressed:                       2097152.`)
     })
   })
 
+  it('returns null for missing human-teacher packages when missing is allowed', async () => {
+    const manager = createLocalAiManager({logger: mockLogger(), storage})
+
+    await expect(
+      manager.loadHumanTeacherPackage({epoch: 404, allowMissing: true})
+    ).resolves.toBeNull()
+  })
+
   it('exports human-teacher tasks into a local annotation workspace', async () => {
     const payloadPath = storage.resolveLocalAiPath(
       'modern-payloads',

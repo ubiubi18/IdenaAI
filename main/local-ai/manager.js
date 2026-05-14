@@ -7137,6 +7137,9 @@ function createLocalAiManager({
     )
 
     if (!taskPackage) {
+      if (next.allowMissing === true) {
+        return null
+      }
       throw new Error('Human teacher package is unavailable')
     }
 
