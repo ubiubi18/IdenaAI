@@ -655,6 +655,7 @@ function HumanTeacherLoopBanner() {
           nextSummary = await global.localAi.loadHumanTeacherPackage({
             epoch: targetEpoch,
             currentEpoch,
+            allowMissing: true,
           })
         } catch (loadError) {
           const message = String(

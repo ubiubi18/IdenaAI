@@ -18,6 +18,50 @@ function createDecodedFlip(hash) {
   }
 }
 
+function installReadyImageMocks() {
+  const originalImage = global.Image
+  const originalCreateElement = document.createElement.bind(document)
+  const createElementSpy = jest.spyOn(document, 'createElement')
+
+  function ReadyImage() {
+    this.width = 100
+    this.height = 100
+    this.naturalWidth = 100
+    this.naturalHeight = 100
+  }
+
+  Object.defineProperty(ReadyImage.prototype, 'src', {
+    set() {
+      setTimeout(() => {
+        this.onload?.()
+      }, 0)
+    },
+  })
+
+  global.Image = ReadyImage
+  createElementSpy.mockImplementation((tagName, ...args) => {
+    if (tagName === 'canvas') {
+      return {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          fillStyle: '#000000',
+          fillRect: jest.fn(),
+          drawImage: jest.fn(),
+        }),
+        toDataURL: jest.fn(() => 'data:image/png;base64,MOCK'),
+      }
+    }
+
+    return originalCreateElement(tagName, ...args)
+  })
+
+  return () => {
+    createElementSpy.mockRestore()
+    global.Image = originalImage
+  }
+}
+
 describe('solver-orchestrator planning', () => {
   it('plans all regular solvable short-session flips assigned by the node', () => {
     const shortFlips = Array.from({length: 8}, (_, index) => {
@@ -373,8 +417,10 @@ describe('solver-orchestrator planning', () => {
     const originalAiSolver = global.aiSolver
     const originalEnv = global.env
 
-    class BrokenImage {
-      set src(value) {
+    function BrokenImage() {}
+
+    Object.defineProperty(BrokenImage.prototype, 'src', {
+      set(value) {
         this.currentSrc = value
         setTimeout(() => {
           this.onerror?.({
@@ -382,8 +428,8 @@ describe('solver-orchestrator planning', () => {
             target: {currentSrc: value},
           })
         }, 0)
-      }
-    }
+      },
+    })
 
     global.Image = BrokenImage
     global.aiSolver = {
@@ -422,6 +468,120 @@ describe('solver-orchestrator planning', () => {
       global.Image = originalImage
       global.aiSolver = originalAiSolver
       global.env = originalEnv
+    }
+  })
+
+  it('defers long-session image preparation failures instead of random-answering them', async () => {
+    const originalImage = global.Image
+    const originalAiSolver = global.aiSolver
+    const originalEnv = global.env
+
+    function BrokenImage() {}
+
+    Object.defineProperty(BrokenImage.prototype, 'src', {
+      set(value) {
+        this.currentSrc = value
+        setTimeout(() => {
+          this.onerror?.({
+            type: 'error',
+            target: {currentSrc: value},
+          })
+        }, 0)
+      },
+    })
+
+    global.Image = BrokenImage
+    global.aiSolver = {
+      solveFlipBatch: jest.fn(),
+    }
+    global.env = {
+      ...originalEnv,
+      VALIDATION_AI_IMAGE_PAYLOAD_PREP_RETRY_WAIT_MS: 1,
+    }
+
+    try {
+      const result = await solveValidationSessionWithAi({
+        sessionType: 'long',
+        longFlips: [createDecodedFlip('long-broken-1')],
+        aiSolver: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          longSessionOpenAiStaggerIntervalMs: 0,
+        },
+        hardDeadlineAt: Date.now() + 60 * 1000,
+      })
+
+      expect(global.aiSolver.solveFlipBatch).not.toHaveBeenCalled()
+      expect(result.answers).toHaveLength(0)
+      expect(result.results[0]).toMatchObject({
+        hash: 'long-broken-1',
+        answer: 'skip',
+        forcedDecision: false,
+        forcedDecisionPolicy: null,
+        forcedDecisionReason: 'image_prepare_failed',
+        error:
+          'image_prepare_failed: Unable to load validation flip image (panel-1)',
+      })
+    } finally {
+      global.Image = originalImage
+      global.aiSolver = originalAiSolver
+      global.env = originalEnv
+    }
+  })
+
+  it('lets long-session provider skips remain unanswered for retry', async () => {
+    const originalAiSolver = global.aiSolver
+    const restoreImages = installReadyImageMocks()
+
+    global.aiSolver = {
+      solveFlipBatch: jest.fn().mockResolvedValue({
+        results: [
+          {
+            hash: 'long-skip-1',
+            answer: 'skip',
+            confidence: 0.22,
+            latencyMs: 900,
+            reasoning: 'both stories are still ambiguous',
+            rawAnswerBeforeRemap: 'skip',
+            finalAnswerAfterRemap: 'skip',
+            sideSwapped: false,
+          },
+        ],
+      }),
+    }
+
+    try {
+      const result = await solveValidationSessionWithAi({
+        sessionType: 'long',
+        longFlips: [createDecodedFlip('long-skip-1')],
+        maxFlips: 1,
+        aiSolver: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          benchmarkProfile: 'custom',
+          uncertaintyRepromptEnabled: false,
+          interFlipDelayMs: 0,
+          longSessionOpenAiStaggerIntervalMs: 0,
+        },
+        hardDeadlineAt: Date.now() + 400 * 1000,
+      })
+
+      expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(1)
+      expect(global.aiSolver.solveFlipBatch.mock.calls[0][0]).toMatchObject({
+        forceDecision: false,
+      })
+      expect(result.answers).toHaveLength(0)
+      expect(result.results[0]).toMatchObject({
+        hash: 'long-skip-1',
+        answer: 'skip',
+        confidence: 0.22,
+        forcedDecision: false,
+        forcedDecisionPolicy: null,
+        forcedDecisionReason: 'provider_skip',
+      })
+    } finally {
+      restoreImages()
+      global.aiSolver = originalAiSolver
     }
   })
 
@@ -796,6 +956,59 @@ describe('solver-orchestrator planning', () => {
       dateNowSpy.mockRestore()
       createElementSpy.mockRestore()
       global.Image = originalImage
+      global.aiSolver = originalAiSolver
+    }
+  })
+
+  it('defers remaining long-session answers when the deadline guard stops AI calls', async () => {
+    const originalAiSolver = global.aiSolver
+    const now = 1000000
+    const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(now)
+    const onDecision = jest.fn()
+
+    global.aiSolver = {
+      solveFlipBatch: jest.fn(),
+    }
+
+    try {
+      const result = await solveValidationSessionWithAi({
+        sessionType: 'long',
+        longFlips: [
+          createDecodedFlip('long-deadline-1'),
+          createDecodedFlip('long-deadline-2'),
+        ],
+        aiSolver: {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          benchmarkProfile: 'custom',
+          longSessionOpenAiStaggerIntervalMs: 0,
+        },
+        hardDeadlineAt: now + 2000,
+        onDecision,
+      })
+
+      expect(global.aiSolver.solveFlipBatch).not.toHaveBeenCalled()
+      expect(result.answers).toHaveLength(0)
+      expect(result.results).toHaveLength(2)
+      expect(result.results[0]).toMatchObject({
+        hash: 'long-deadline-1',
+        answer: 'skip',
+        forcedDecision: false,
+        forcedDecisionPolicy: null,
+        forcedDecisionReason: 'deadline_guard',
+        error: 'deadline_guard',
+      })
+      expect(result.results[1]).toMatchObject({
+        hash: 'long-deadline-2',
+        answer: 'skip',
+        forcedDecision: false,
+        forcedDecisionPolicy: null,
+        forcedDecisionReason: 'deadline_guard',
+        error: 'deadline_guard',
+      })
+      expect(onDecision).toHaveBeenCalledTimes(2)
+    } finally {
+      dateNowSpy.mockRestore()
       global.aiSolver = originalAiSolver
     }
   })
