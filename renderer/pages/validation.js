@@ -44,6 +44,7 @@ import {
   SHORT_SESSION_AUTO_SUBMIT_BUFFER_SECONDS,
   SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
   hasEnoughAnswers,
+  persistValidationSucceededState,
 } from '../screens/validation/utils'
 import {
   rememberDismissedValidationScreen,
@@ -1173,7 +1174,10 @@ function ValidationSession({
         onOpenExceededTooltip()
         setTimeout(onCloseExceededTooltip, 3000)
       },
-      onValidationSucceeded: () => {
+      onValidationSucceeded: (context) => {
+        if (!forceAiPreview && validationStateScope) {
+          persistValidationSucceededState(context, validationStateScope)
+        }
         router.push('/validation/after')
       },
     },

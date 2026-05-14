@@ -23,6 +23,7 @@ import {
   hasSubmittedLongSessionAnswers,
   pendingDecodeHashes,
   persistValidationState,
+  persistValidationSucceededState,
   rememberValidationSessionId,
   shouldDiscardPersistedValidationStateForIncompleteFetch,
   shouldDiscardPersistedValidationStateForPeriod,
@@ -70,7 +71,7 @@ function createValidationSessionStore() {
   }
 }
 
-function createPersistableValidationState({context = {}} = {}) {
+function createPersistableValidationState({context = {}, done, value} = {}) {
   const {initialState} = createValidationMachine({
     epoch: context.epoch ?? 0,
     validationStart: Date.UTC(2026, 3, 21, 6, 35, 22),
@@ -82,6 +83,8 @@ function createPersistableValidationState({context = {}} = {}) {
 
   return {
     ...initialState,
+    done: done ?? initialState.done,
+    value: value ?? initialState.value,
     context: {
       ...initialState.context,
       ...context,
@@ -89,6 +92,8 @@ function createPersistableValidationState({context = {}} = {}) {
     toJSON() {
       return {
         ...initialState.toJSON(),
+        done: done ?? initialState.done,
+        value: value ?? initialState.value,
         context: {
           ...initialState.context,
           ...context,
@@ -993,6 +998,108 @@ describe('scoped validation state persistence', () => {
       },
       done: false,
       historyValue: {current: 'shortSession'},
+    })
+  })
+
+  it('persists validation success before navigating away from the live machine', () => {
+    const scope = buildValidationStateScope({
+      epoch: 1,
+      address: '0xabc',
+      nodeScope: 'external:http://127.0.0.1:22301',
+      validationStart: Date.UTC(2026, 4, 14, 14, 38, 31),
+    })
+
+    persistValidationState(
+      createPersistableValidationState({
+        value: {
+          longSession: {
+            fetch: {
+              flips: 'done',
+              keywords: 'success',
+            },
+            solve: {
+              nav: {
+                firstFlip: 'idle',
+              },
+              answer: 'flips',
+            },
+          },
+        },
+        context: {
+          epoch: 1,
+          reports: new Set(),
+          submitLongAnswersHash: null,
+        },
+      }),
+      scope
+    )
+
+    persistValidationSucceededState(
+      {
+        epoch: 1,
+        reports: new Set(['0xreported']),
+        submitLongAnswersHash: '0xsubmit',
+        longFlips: [
+          {
+            hash: '0xlong',
+            option: 2,
+            images: ['blob:long'],
+            decoded: true,
+          },
+        ],
+      },
+      scope
+    )
+
+    expect(validationSessionStoreState.validationStateSnapshot).toMatchObject({
+      value: 'validationSucceeded',
+      done: true,
+      context: {
+        epoch: 1,
+        submitLongAnswersHash: '0xsubmit',
+        reports: ['0xreported'],
+        longFlips: [
+          {
+            hash: '0xlong',
+            option: 2,
+            decoded: false,
+            images: [],
+          },
+        ],
+      },
+    })
+
+    const restoredState = loadValidationState(scope)
+
+    expect(restoredState?.matches('validationSucceeded')).toBe(true)
+    expect(restoredState?.done).toBe(true)
+    expect(restoredState?.context?.submitLongAnswersHash).toBe('0xsubmit')
+
+    persistValidationState(
+      createPersistableValidationState({
+        value: 'validationFailed',
+        done: true,
+        context: {
+          epoch: 1,
+          reports: new Set(),
+          submitLongAnswersHash: null,
+          longFlips: [
+            {
+              hash: '0xlong',
+              failed: true,
+            },
+          ],
+        },
+      }),
+      scope
+    )
+
+    expect(validationSessionStoreState.validationStateSnapshot).toMatchObject({
+      value: 'validationSucceeded',
+      done: true,
+      context: {
+        submitLongAnswersHash: '0xsubmit',
+      },
     })
   })
 
