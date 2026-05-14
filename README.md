@@ -1115,6 +1115,11 @@ Local AI is deliberately conservative right now.
   [docs/local-ai-qwen36-gguf.md](docs/local-ai-qwen36-gguf.md)
 - this Qwen path is a practical local-first default, not a final endorsement or
   a guarantee that the model is neutral, complete, or safe
+- local/downloadable model declarations are limited to upstream model licenses
+  that are MIT or Apache-2.0; hosted AI providers are separate user-configured
+  services and are not part of this local-model license gate
+- re-check current upstream metadata before release with
+  `npm run audit:local-ai-model-licenses`
 - smaller managed runtimes remain research fallbacks for machines that cannot
   run the Qwen/Ollama target comfortably
 - first use asks for an explicit one-time trust approval before installing and starting managed runtime components
@@ -1122,14 +1127,24 @@ Local AI is deliberately conservative right now.
 - trusted runtime files and model shards are verified before startup
 - RAM estimation and reserve controls are now part of the local-runtime setup flow
 
-Prepared research lanes currently include:
+Prepared local model lanes currently include:
 
-- `rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` as the default
-  text/reasoning model through Ollama
-- `allenai/Molmo2-O-7B` as the main managed research runtime
-- `allenai/Molmo2-4B` as a more compact managed fallback
-- `OpenGVLab/InternVL3_5-1B-HF` as the light same-provider alternative
-- `OpenGVLab/InternVL3_5-8B-HF` as a heavier experimental alternative
+| Local use | Local model or alias | Upstream model metadata | License |
+| --- | --- | --- | --- |
+| Default text/reasoning through Ollama | `idenaai-qwen36-27b-claude-opus:q4km` | `rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` | Apache-2.0 |
+| Portable direct Ollama pull target | `hf.co/rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF:Q4_K_M` | `rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` | Apache-2.0 |
+| Fast local-chat fallback | `qwen3.5:9b` | `Qwen/Qwen3.5-9B` | Apache-2.0 |
+| Compact managed runtime | `allenai/Molmo2-4B` | `allenai/Molmo2-4B` | Apache-2.0 |
+| Main managed research runtime | `allenai/Molmo2-O-7B` | `allenai/Molmo2-O-7B` | Apache-2.0 |
+| Light same-provider alternative | `OpenGVLab/InternVL3_5-1B-HF` | `OpenGVLab/InternVL3_5-1B-HF` | Apache-2.0 |
+| Heavier experimental alternative | `OpenGVLab/InternVL3_5-8B-HF` | `OpenGVLab/InternVL3_5-8B-HF` | Apache-2.0 |
+| Legacy sidecar migration marker only | `phi-3.5-vision-instruct` | `microsoft/Phi-3.5-vision-instruct` | MIT |
+
+If a future local default, fallback, or managed install profile does not return
+`apache-2.0` or `mit` from current upstream metadata, remove it from the local
+model declarations before release. Model license compatibility does not remove
+the need to review upstream model cards, dataset notes, responsible-use terms,
+runtime code, and output behavior for the user's own use case.
 
 Advanced users can still point the app at their own local-only:
 

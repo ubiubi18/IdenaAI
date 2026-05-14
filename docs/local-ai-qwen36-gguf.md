@@ -19,6 +19,24 @@ Expected Q4_K_M GGUF SHA-256:
 7af6ce7e82d4d80463f07d53cd5e8570f65689d41af3b5e0b83662033350371f
 ```
 
+## License Declaration
+
+The upstream Hugging Face model metadata for
+`rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` currently declares
+`apache-2.0`. IdenaAI keeps local/downloadable model declarations limited to
+MIT or Apache-2.0 sources.
+
+Re-check the current metadata before release:
+
+```bash
+npm run audit:local-ai-model-licenses
+```
+
+This check covers the local Ollama alias, the portable Hugging Face Ollama
+target, the `qwen3.5:9b` fast local-chat fallback, the managed local runtime
+profiles, and the legacy Phi sidecar migration marker. Hosted AI providers are
+outside this local-model license gate.
+
 ## Local Install
 
 After the GGUF exists in `downloads/local-ai/rico03-qwen36-27b-claude-opus-q4km/`, create the Ollama model:

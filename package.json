@@ -45,6 +45,7 @@
     "audit:artifacts": "node scripts/check-release-artifacts.js",
     "audit:deps": "node scripts/check-dependency-footprint.js",
     "audit:electron": "node scripts/check-electron-safety.js",
+    "audit:local-ai-model-licenses": "node scripts/audit-local-ai-model-licenses.js",
     "build:node:mac:arm64": "npm run setup:sources && bash scripts/build-node-macos-arm64.sh \"$HOME/Library/Application Support/IdenaAI/node/idena-go\"",
     "release:check": "node scripts/release-check.js",
     "lint": "eslint .",
