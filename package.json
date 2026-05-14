@@ -53,6 +53,8 @@
     "test:idena-go:validation": "idena-go/scripts/run-go-toolchain.sh test ./config ./database ./api ./core/ceremony",
     "test:idena-go:wasm": "idena-go/scripts/run-go-toolchain.sh test ./vm/wasm -count=1",
     "index:deep-research": "node scripts/run-python.js scripts/build_deep_research_index.py",
+    "ipfs:inspect": "node scripts/run-python.js scripts/ipfs_inspector.py",
+    "ipfs:inspect:offline": "bash scripts/ipfs-offline-inspector.sh",
     "playwright:close": "bash scripts/close-playwright-browser.sh",
     "i18n:init": "npm run i18n:clean && npm run i18n:scan",
     "i18n:scan": "i18next-scanner",

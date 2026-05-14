@@ -1103,6 +1103,69 @@ describe('scoped validation state persistence', () => {
     })
   })
 
+  it('does not persist empty no-content validation failures', () => {
+    const scope = buildValidationStateScope({
+      epoch: 2,
+      address: '0xabc',
+      nodeScope: 'external:http://127.0.0.1:22301',
+      validationStart: Date.UTC(2026, 4, 14, 15, 22, 2),
+    })
+
+    persistValidationState(
+      createPersistableValidationState({
+        value: 'validationFailed',
+        done: true,
+        context: {
+          epoch: 2,
+          reports: new Set(),
+          shortFlips: [],
+          longFlips: [],
+          submitLongAnswersHash: null,
+          shortSessionSubmittedAt: null,
+        },
+      }),
+      scope
+    )
+
+    expect(validationSessionStoreState.validationStateSnapshot).toBeUndefined()
+    expect(loadValidationState(scope)).toBeUndefined()
+  })
+
+  it('still persists validation failures that include assigned flips', () => {
+    const scope = buildValidationStateScope({
+      epoch: 2,
+      address: '0xabc',
+      nodeScope: 'external:http://127.0.0.1:22301',
+      validationStart: Date.UTC(2026, 4, 14, 15, 22, 2),
+    })
+
+    persistValidationState(
+      createPersistableValidationState({
+        value: 'validationFailed',
+        done: true,
+        context: {
+          epoch: 2,
+          reports: new Set(),
+          shortFlips: [{hash: '0xshort', decoded: true, option: null}],
+          longFlips: [],
+        },
+      }),
+      scope
+    )
+
+    expect(validationSessionStoreState.validationStateSnapshot).toMatchObject({
+      value: 'validationFailed',
+      done: true,
+      context: {
+        shortFlips: [
+          {
+            hash: '0xshort',
+          },
+        ],
+      },
+    })
+  })
+
   it('normalizes legacy persisted snapshots that are missing xstate event metadata', () => {
     const scope = buildValidationStateScope({
       epoch: 0,
