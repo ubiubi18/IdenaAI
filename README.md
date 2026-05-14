@@ -34,8 +34,9 @@ adds fixes from the rehearsal audits.
 - Benchmark telemetry and the rehearsal benchmark audit now show candidate
   stories in the same vertical four-panel flip form as the validation session,
   instead of flattened landscape thumbnails or a 2x2 grid.
-- The bundled `idena.social-ui` snapshot is updated to upstream `v11.1.0`
-  while keeping the local desktop/on-chain bridge integration.
+- The bundled `idena.social-ui` snapshot is updated to upstream `v11.3.0`
+  while keeping the local desktop/on-chain bridge integration. Upstream ad
+  fetching and ad panels are removed from the IdenaAI bundle.
 - The experimental `probability_ensemble` solver mode is present for research
   startup, but remains disabled by default. It scores both candidate stories
   independently, can swap presentation order, and aggregates in application
