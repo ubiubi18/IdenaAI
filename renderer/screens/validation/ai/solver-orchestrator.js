@@ -108,6 +108,14 @@ function normalizeWeight(value, fallback = 1) {
   return Math.min(10, Math.max(0.05, parsed))
 }
 
+function normalizeConfidence(value) {
+  const parsed = toFloatOrFallback(value, 0)
+  if (!Number.isFinite(parsed)) {
+    return 0
+  }
+  return Math.max(0, Math.min(1, parsed))
+}
+
 function normalizeVisionMode(value, fallback = 'composite') {
   const mode = String(value || '')
     .trim()
@@ -1759,6 +1767,78 @@ export async function solveValidationSessionWithAi({
     }
   }
 
+  function buildSkippedSolvedFlip({
+    hash,
+    error,
+    reasoning,
+    forcedDecisionReason = null,
+    source = null,
+  }) {
+    const sourceReasoning = [source?.reasoning, reasoning]
+      .filter(Boolean)
+      .join('; ')
+
+    return {
+      ...(source || {}),
+      hash,
+      answer: 'skip',
+      confidence: normalizeConfidence(source?.confidence),
+      latencyMs: source?.latencyMs || 0,
+      error: error || source?.error || null,
+      reasoning: sourceReasoning || 'AI deferred this flip',
+      rawAnswerBeforeRemap: source?.rawAnswerBeforeRemap || 'skip',
+      finalAnswerAfterRemap: 'skip',
+      sideSwapped: Boolean(source?.sideSwapped),
+      tokenUsage: normalizeTokenUsage(source?.tokenUsage),
+      costs: normalizeCostSummary(source?.costs),
+      uncertaintyRepromptUsed: Boolean(source?.uncertaintyRepromptUsed),
+      finalAdjudicationUsed: Boolean(source?.finalAdjudicationUsed),
+      forcedDecision: false,
+      forcedDecisionPolicy: null,
+      forcedDecisionReason,
+      ensembleTieBreakApplied: Boolean(source?.ensembleTieBreakApplied),
+      ensembleTieBreakCandidates: Array.isArray(
+        source?.ensembleTieBreakCandidates
+      )
+        ? source.ensembleTieBreakCandidates
+        : null,
+      secondPassStrategy: source?.secondPassStrategy || null,
+      frameReasoningUsed: Boolean(source?.frameReasoningUsed),
+      firstPass: source?.firstPass || null,
+      modelFallback: source?.modelFallback || null,
+      modelFallbacks: Array.isArray(source?.modelFallbacks)
+        ? source.modelFallbacks
+        : null,
+    }
+  }
+
+  function buildSessionFallbackSolvedFlip({
+    hash,
+    index = null,
+    error,
+    reasoning,
+    forcedDecisionReason,
+    source = null,
+  }) {
+    if (sessionType === 'long') {
+      return buildSkippedSolvedFlip({
+        hash,
+        error,
+        reasoning,
+        forcedDecisionReason,
+        source,
+      })
+    }
+
+    return buildForcedRandomSolvedFlip({
+      hash,
+      index,
+      error,
+      reasoning,
+      forcedDecisionReason,
+    })
+  }
+
   async function applyForcedRandomFlipDecision({
     flip,
     index,
@@ -1769,7 +1849,7 @@ export async function solveValidationSessionWithAi({
     await applySolvedPayloadFlip({
       payloadFlip: buildPayloadFlipFallback(flip),
       index,
-      solved: buildForcedRandomSolvedFlip({
+      solved: buildSessionFallbackSolvedFlip({
         hash: flip.hash,
         index,
         error,
@@ -1821,7 +1901,7 @@ export async function solveValidationSessionWithAi({
       return {
         payloadFlip,
         index,
-        solved: buildForcedRandomSolvedFlip({
+        solved: buildSessionFallbackSolvedFlip({
           hash: payloadFlip.hash,
           index,
           error: 'deadline_guard',
@@ -1889,7 +1969,8 @@ export async function solveValidationSessionWithAi({
         maxRetries: effectiveProfile.maxRetries,
         maxOutputTokens: effectiveProfile.maxOutputTokens,
         temperature: effectiveProfile.temperature,
-        forceDecision: true,
+        forceDecision:
+          sessionType === 'long' ? false : effectiveProfile.forceDecision,
         uncertaintyRepromptEnabled,
         uncertaintyConfidenceThreshold:
           effectiveProfile.uncertaintyConfidenceThreshold,
@@ -1922,7 +2003,7 @@ export async function solveValidationSessionWithAi({
 
     let providerSolved =
       (batchResult.results || [])[0] ||
-      buildForcedRandomSolvedFlip({
+      buildSessionFallbackSolvedFlip({
         hash: payloadFlip.hash,
         index,
         error: 'no_result',
@@ -2001,13 +2082,14 @@ export async function solveValidationSessionWithAi({
     const solved =
       toAnswerOption(providerSolved.answer) > 0
         ? providerSolved
-        : buildForcedRandomSolvedFlip({
+        : buildSessionFallbackSolvedFlip({
             hash: payloadFlip.hash,
             index,
             error: providerSolved.error || 'skip_answer',
             reasoning:
               providerSolved.reasoning ||
               'provider returned skip during answer session',
+            source: providerSolved,
             forcedDecisionReason: providerSolved.error
               ? 'provider_error'
               : 'provider_skip',
@@ -2212,7 +2294,7 @@ export async function solveValidationSessionWithAi({
       await applySolvedPayloadFlip({
         payloadFlip: preparedFlip.payloadFlip,
         index: preparedFlip.index,
-        solved: buildForcedRandomSolvedFlip({
+        solved: buildSessionFallbackSolvedFlip({
           hash: preparedFlip.payloadFlip.hash,
           index: preparedFlip.index,
           error: 'deadline_guard',

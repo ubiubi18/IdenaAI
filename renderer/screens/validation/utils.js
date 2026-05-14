@@ -946,6 +946,27 @@ function isPersistedValidationFailure(stateDef) {
   return stateDef?.value === 'validationFailed'
 }
 
+function hasPersistedValidationWork(stateDef) {
+  const context = stateDef?.context || {}
+
+  return (
+    hasPersistedValidationHashes(context.shortFlips) ||
+    hasPersistedValidationHashes(context.longFlips) ||
+    Boolean(
+      String(context.submitLongAnswersHash || '').trim() ||
+        String(context.submitShortAnswersHash || '').trim() ||
+        context.shortSessionSubmittedAt
+    )
+  )
+}
+
+function isPersistedInertValidationFailure(stateDef) {
+  return (
+    isPersistedValidationFailure(stateDef) &&
+    !hasPersistedValidationWork(stateDef)
+  )
+}
+
 function shouldKeepPersistedValidationSuccess(
   persistedPayload,
   nextState,
@@ -984,6 +1005,11 @@ export function persistScopedValidationState(state, scope) {
     return
   }
 
+  if (isPersistedInertValidationFailure(persistableState)) {
+    clearValidationState(scope)
+    return
+  }
+
   persistState('validation2', {
     [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
     [VALIDATION_STATE_META_KEY]: normalizeValidationStateMeta(scope),
@@ -1005,6 +1031,11 @@ export function persistValidationState(state, scope = null) {
     if (
       shouldKeepPersistedValidationSuccess(persistedPayload, persistableState)
     ) {
+      return
+    }
+
+    if (isPersistedInertValidationFailure(persistableState)) {
+      clearValidationState(scope)
       return
     }
 

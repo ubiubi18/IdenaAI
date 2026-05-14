@@ -38,6 +38,67 @@ describe('validation machine', () => {
     submitLongAnswers.mockResolvedValue('0xtx')
   })
 
+  it('keeps an empty short session open instead of finalizing as failed', () => {
+    jest.useFakeTimers()
+
+    try {
+      const machine = createValidationMachine({
+        epoch: 2,
+        validationStart: Date.now() - 120 * 1000,
+        shortSessionDuration: 120,
+        longSessionDuration: 300,
+        validationSessionId: '',
+        locale: 'en',
+        initialShortFlips: [],
+      })
+
+      const service = interpret(machine).start()
+      jest.advanceTimersByTime(1000)
+
+      expect(service.state.matches('validationFailed')).toBe(false)
+      expect(service.state.matches('shortSession.solve.answer.normal')).toBe(
+        true
+      )
+      expect(submitShortAnswers).not.toHaveBeenCalled()
+
+      service.stop()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('fails a short session with assigned hashes but insufficient answers', () => {
+    jest.useFakeTimers()
+
+    try {
+      const machine = createValidationMachine({
+        epoch: 2,
+        validationStart: Date.now() - 120 * 1000,
+        shortSessionDuration: 120,
+        longSessionDuration: 300,
+        validationSessionId: '',
+        locale: 'en',
+        initialShortFlips: [
+          {
+            hash: '0xassigned-unanswered',
+            decoded: true,
+            option: null,
+          },
+        ],
+      })
+
+      const service = interpret(machine).start()
+      jest.advanceTimersByTime(1000)
+
+      expect(service.state.matches('validationFailed')).toBe(true)
+      expect(submitShortAnswers).not.toHaveBeenCalled()
+
+      service.stop()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('auto-retries short-answer submit failures without waiting for the dialog', async () => {
     const originalEnv = global.env
     global.env = {
