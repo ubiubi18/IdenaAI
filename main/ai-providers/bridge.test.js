@@ -275,7 +275,7 @@ describe('createAiProviderBridge', () => {
             error: {
               code: 'sk-live-secret12345678',
               message:
-                'Incorrect API key: customSecret12345678 and sk-live-secret12345678 at https://example.test/v1/chat/completions?key=AIzaSecretSecretSecretSecretSecret',
+                'Incorrect API key: customSecret12345678 and sk-live-secret12345678 at https://example.test/v1/chat/completions?key=google-api-key-fixture',
             },
           },
         },

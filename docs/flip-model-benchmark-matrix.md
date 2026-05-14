@@ -4,9 +4,10 @@ This benchmark matrix has been reset to embryo stage.
 
 ## Why
 
-`IdenaAI` no longer ships or recommends a specific local base layer by default.
-The earlier benchmark matrix was tied to model-family assumptions that the
-project has deliberately abandoned for now.
+`IdenaAI` now has a practical Qwen/Ollama local text default, but the earlier
+benchmark matrix was tied to model-family assumptions that the project has
+deliberately abandoned for now. The local default is a runtime convenience, not
+a benchmark endorsement.
 
 ## Current benchmark policy
 
@@ -16,6 +17,8 @@ Until a new candidate base layer is approved:
 - model choice must be supplied explicitly by the operator
 - no documented benchmark result in this repo should be treated as an endorsed
   shipped default
+- local/downloadable model candidates must keep an MIT or Apache-2.0 upstream
+  license declaration and pass `npm run audit:local-ai-model-licenses`
 - fairness diagnostics remain required:
   - slot-bias visibility
   - swap consistency
