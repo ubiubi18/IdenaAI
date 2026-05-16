@@ -134,21 +134,6 @@ function normalizeConfidence(confidence) {
   return Math.max(0, Math.min(1, value))
 }
 
-function normalizeDecision(parsed) {
-  return {
-    answer: normalizeAnswer(parsed && parsed.answer),
-    confidence: normalizeConfidence(parsed && parsed.confidence),
-    reasoning:
-      typeof (parsed && parsed.reasoning) === 'string'
-        ? parsed.reasoning.slice(0, 240)
-        : undefined,
-  }
-}
-
-function normalizeProbability(value) {
-  return normalizeConfidence(value)
-}
-
 function stripControlCharacters(value) {
   return String(value || '')
     .split('')
@@ -157,6 +142,100 @@ function stripControlCharacters(value) {
       return code < 32 || code === 127 ? ' ' : char
     })
     .join('')
+}
+
+function normalizeShortDecisionText(value, maxLength = 220) {
+  return typeof value === 'string'
+    ? stripControlCharacters(value)
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength)
+    : ''
+}
+
+function normalizeDecisionStringList(value, maxItems = 4, maxLength = 220) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => normalizeShortDecisionText(item, maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems)
+}
+
+function normalizeDecisionEvidenceFrames(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => Number.parseInt(item, 10))
+    .filter((item) => Number.isFinite(item) && item >= 1 && item <= 8)
+    .slice(0, 8)
+}
+
+function normalizeDecisionHypotheses(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item, index) => {
+      if (typeof item === 'string') {
+        const textClaim = normalizeShortDecisionText(item)
+        return textClaim
+          ? {
+              id: `hypothesis_${index + 1}`,
+              claim: textClaim,
+              evidenceFrames: [],
+            }
+          : null
+      }
+
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null
+      }
+
+      const claim = normalizeShortDecisionText(
+        item.claim || item.text || item.summary
+      )
+      if (!claim) {
+        return null
+      }
+
+      return {
+        id:
+          normalizeShortDecisionText(item.id || item.key || '', 60) ||
+          `hypothesis_${index + 1}`,
+        claim,
+        evidenceFrames: normalizeDecisionEvidenceFrames(
+          item.evidenceFrames || item.frames || item.evidence_frames
+        ),
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 4)
+}
+
+function normalizeDecision(parsed) {
+  return {
+    answer: normalizeAnswer(parsed && parsed.answer),
+    confidence: normalizeConfidence(parsed && parsed.confidence),
+    reasoning:
+      typeof (parsed && parsed.reasoning) === 'string'
+        ? parsed.reasoning.slice(0, 240)
+        : undefined,
+    observations: normalizeDecisionStringList(parsed && parsed.observations),
+    hypotheses: normalizeDecisionHypotheses(parsed && parsed.hypotheses),
+    knownRisks: normalizeDecisionStringList(
+      parsed && (parsed.knownRisks || parsed.known_risks || parsed.risks)
+    ),
+  }
+}
+
+function normalizeProbability(value) {
+  return normalizeConfidence(value)
 }
 
 function normalizeShortNote(value) {

@@ -70,6 +70,11 @@ adds fixes from the rehearsal audits.
   guardrail in `Settings -> AI`, but that is an explicit choice to accept
   uncapped provider billing. This is a local warning system, not provider-side
   billing protection.
+- Validation AI decisions now store compact local learning records after real
+  and rehearsal solve runs. These records keep the answer, confidence,
+  short factual observations, testable visual hypotheses, known risks, and
+  benchmark/consensus comparison when a label is available. They do not store
+  flip image payloads and they do not trigger extra provider calls.
 - The Windows route shares the same JavaScript/Electron solver logic, but it
   still needs more real Windows rehearsal history before it should be treated as
   fully tested for valuable validation.
@@ -1165,6 +1170,23 @@ local-model direction is still being evaluated.
 
 `session-auto` is meant to reduce or remove ceremony babysitting, but it is
 still experimental and should not be blindly trusted.
+
+### Validation AI Decision Learning
+
+After a validation AI solve run, IdenaAI stores a bounded local learning dataset
+inside this app profile under the validation-results storage key
+`ai-decision-learning-records`. Each record is metadata-only: flip hash,
+session scope, provider/model/profile, selected answer, confidence, short
+reasoning note, observations, testable hypotheses, known risks, deterministic
+checks, and a match/mismatch lesson when a benchmark or consensus label is
+available.
+
+This is a local audit and rehearsal-learning layer. It does not add extra AI
+requests, does not send stored records to a provider, and does not store the flip
+image payloads. Real-session records may be unlabeled at first; they become
+useful for learning only after later human review, benchmark labels, or consensus
+data can be compared. Treat these records as debugging evidence, not as proof
+that an AI answer is correct.
 
 Plain `npm start` uses the workspace practice profile and blocks real on-chain
 `session-auto` on purpose. For a real session from Terminal, you must explicitly
