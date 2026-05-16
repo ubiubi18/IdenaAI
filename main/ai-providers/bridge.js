@@ -6204,7 +6204,16 @@ Task:
 6) Return JSON only.
 
 Allowed JSON schema:
-{"answer":"a|b|skip","confidence":0.0,"reasoning":"short optional note"}
+{
+  "answer":"a|b|skip",
+  "confidence":0.0,
+  "reasoning":"short optional note",
+  "observations":["short factual visual cue"],
+  "hypotheses":[
+    {"id":"chronology_match", "claim":"short testable claim", "evidenceFrames":[1,2]}
+  ],
+  "knownRisks":["short risk note"]
+}
 
 Rules:
 - Use only ${forceDecision ? 'a|b' : 'a|b|skip'} for "answer"
@@ -6213,6 +6222,8 @@ Rules:
 - Track report-worthy cues such as required readable text, watermarks, visible order labels/numbers/letters/arrows/captions, inappropriate content, NSFW content, or graphic violence separately from the side answer.
 - Do not return skip solely because a report-worthy cue exists. Choose by chronology, visible cause -> effect, and consistent entities; report review is a later step.
 - Keep reasoning concise and factual and mention one concrete visual cue
+- Keep observations, hypotheses, and knownRisks short; each array should contain at most 3 items.
+- Hypotheses must be testable visual claims, not hidden chain-of-thought.
 ${
   forceDecision
     ? '- You must choose a or b based on the more coherent candidate story.'
@@ -6282,17 +6293,27 @@ Flip hash: ${hash}
     const candidateAnswer = normalizeLocalAiCandidateAnswer(
       parsed && parsed.answer
     )
-    const confidence = normalizeConfidence(parsed && parsed.confidence)
+    const normalizedDecision = normalizeDecision(parsed || {})
+    const confidence = normalizeConfidence(normalizedDecision.confidence)
     const reasoning =
-      typeof (parsed && parsed.reasoning) === 'string'
-        ? parsed.reasoning.slice(0, 240)
+      typeof normalizedDecision.reasoning === 'string'
+        ? normalizedDecision.reasoning
         : undefined
+    const decisionStructure = {
+      observations: normalizedDecision.observations || [],
+      hypotheses: normalizedDecision.hypotheses || [],
+      knownRisks: normalizedDecision.knownRisks || [],
+    }
 
     if (candidateAnswer === 'skip') {
       return {
         answer: 'skip',
         confidence,
         reasoning,
+        observations: decisionStructure.observations,
+        hypotheses: decisionStructure.hypotheses,
+        knownRisks: decisionStructure.knownRisks,
+        decisionStructure,
       }
     }
 
@@ -6303,6 +6324,10 @@ Flip hash: ${hash}
       answer,
       confidence,
       reasoning,
+      observations: decisionStructure.observations,
+      hypotheses: decisionStructure.hypotheses,
+      knownRisks: decisionStructure.knownRisks,
+      decisionStructure,
     }
   }
 
@@ -10552,6 +10577,11 @@ Flip hash: ${hash}
               answer: normalizeAnswer(decision.answer),
               confidence: normalizeConfidence(decision.confidence),
               reasoning: decision.reasoning,
+              decisionStructure: {
+                observations: rawDecision.observations || [],
+                hypotheses: rawDecision.hypotheses || [],
+                knownRisks: rawDecision.knownRisks || [],
+              },
               rawAnswerBeforeRemap: normalizeAnswer(rawDecision.answer),
               finalAnswerAfterRemap: normalizeAnswer(decision.answer),
               error: null,
@@ -10622,6 +10652,19 @@ Flip hash: ${hash}
             error,
           })
         )
+        const consultantDecisionStructures = consultantDecisions
+          .map((item) =>
+            item && item.decisionStructure
+              ? {
+                  provider: item.provider,
+                  model: item.model,
+                  observations: item.decisionStructure.observations || [],
+                  hypotheses: item.decisionStructure.hypotheses || [],
+                  knownRisks: item.decisionStructure.knownRisks || [],
+                }
+              : null
+          )
+          .filter(Boolean)
         const providerErrors = consultantDecisions
           .filter((item) => item.error)
           .map((item) => item.error)
@@ -10669,6 +10712,10 @@ Flip hash: ${hash}
           answer: aggregate.answer,
           confidence: aggregate.confidence,
           reasoning: aggregate.reasoning,
+          decisionStructure: singleConsultantDecision
+            ? singleConsultantDecision.decisionStructure || null
+            : consultantDecisionStructures[0] || null,
+          consultantDecisionStructures,
           probabilities,
           rawAnswerBeforeRemap,
           finalAnswerAfterRemap,
@@ -10962,6 +11009,8 @@ Flip hash: ${hash}
           latencyMs,
           error,
           reasoning,
+          decisionStructure,
+          consultantDecisionStructures,
           probabilities,
           sideSwapped,
           rawAnswerBeforeRemap,
@@ -10991,6 +11040,8 @@ Flip hash: ${hash}
           latencyMs,
           error,
           reasoning,
+          decisionStructure,
+          consultantDecisionStructures,
           probabilities,
           sideSwapped,
           rawAnswerBeforeRemap,
