@@ -143,6 +143,11 @@ import {
   hasMissingRehearsalSeedMeta,
   mergeRehearsalSeedMetaIntoFlips,
 } from '../screens/validation/rehearsal-benchmark'
+import {
+  buildValidationAiDecisionLearningRecords,
+  computeAiDecisionLearningSummary,
+  persistAiDecisionLearningRecords,
+} from '../screens/validation/ai-decision-learning'
 
 const previewAiSampleSet = require('../../samples/flips/flip-challenge-test-5-decoded-labeled.json')
 
@@ -2420,6 +2425,8 @@ function ValidationSession({
               tokenUsage: event.tokenUsage,
               costs: event.costs,
               reasoning: event.reasoning,
+              decisionStructure: event.decisionStructure,
+              consultantDecisionStructures: event.consultantDecisionStructures,
               uncertaintyRepromptUsed: event.uncertaintyRepromptUsed,
               forcedDecision: event.forcedDecision,
               forcedDecisionPolicy: event.forcedDecisionPolicy,
@@ -2459,6 +2466,8 @@ function ValidationSession({
               tokenUsage: event.tokenUsage,
               costs: event.costs,
               reasoning: event.reasoning,
+              decisionStructure: event.decisionStructure,
+              consultantDecisionStructures: event.consultantDecisionStructures,
               uncertaintyRepromptUsed: event.uncertaintyRepromptUsed,
               forcedDecision: event.forcedDecision,
               forcedDecisionPolicy: event.forcedDecisionPolicy,
@@ -2578,6 +2587,29 @@ function ValidationSession({
         }
       }
 
+      const decisionLearningRecords =
+        validationStateScope && !forceAiPreview
+          ? buildValidationAiDecisionLearningRecords({
+              scope: validationStateScope,
+              sessionType,
+              provider: result.provider,
+              model: result.model,
+              profile: result.profile,
+              results: result.results || [],
+              flips:
+                sessionType === 'short'
+                  ? state.context.shortFlips
+                  : state.context.longFlips,
+            })
+          : []
+      const decisionLearningSummary = computeAiDecisionLearningSummary(
+        decisionLearningRecords
+      )
+
+      if (decisionLearningRecords.length > 0) {
+        persistAiDecisionLearningRecords(decisionLearningRecords)
+      }
+
       setAiLastRun({
         status: 'completed',
         sessionType,
@@ -2589,6 +2621,7 @@ function ValidationSession({
         modelFallback: result.modelFallback,
         flips: result.results || [],
         appliedAnswers: result.answers.length,
+        learning: decisionLearningSummary,
         timeline: liveEntries.slice(-24),
         completedAt: new Date().toISOString(),
       })
@@ -2786,6 +2819,7 @@ function ValidationSession({
     isSessionAutoMode,
     longSessionDuration,
     notifyAi,
+    openProviderBudgetCapDialog,
     forceAiPreview,
     refreshAiProviderStatus,
     send,
@@ -3272,6 +3306,7 @@ function ValidationSession({
     longSessionDuration,
     longFlipsWithReportKeywords,
     notifyAi,
+    openProviderBudgetCapDialog,
     refreshAiProviderStatus,
     send,
     shortSessionDuration,
@@ -4906,6 +4941,12 @@ function formatAiDecisionTrace(item = {}) {
 
 function formatAiDecisionReasoning(item = {}) {
   const parts = []
+  const structure =
+    item.decisionStructure &&
+    typeof item.decisionStructure === 'object' &&
+    !Array.isArray(item.decisionStructure)
+      ? item.decisionStructure
+      : {}
 
   if (item.firstPass) {
     const firstPassBits = []
@@ -4932,6 +4973,24 @@ function formatAiDecisionReasoning(item = {}) {
 
   if (item.reasoning) {
     parts.push(String(item.reasoning))
+  }
+
+  if (Array.isArray(structure.observations) && structure.observations.length) {
+    parts.push(`obs: ${structure.observations.slice(0, 2).join(' | ')}`)
+  }
+
+  if (Array.isArray(structure.hypotheses) && structure.hypotheses.length) {
+    parts.push(
+      `hyp: ${structure.hypotheses
+        .slice(0, 2)
+        .map((hypothesis) => hypothesis && hypothesis.claim)
+        .filter(Boolean)
+        .join(' | ')}`
+    )
+  }
+
+  if (Array.isArray(structure.knownRisks) && structure.knownRisks.length) {
+    parts.push(`risk: ${structure.knownRisks.slice(0, 2).join(' | ')}`)
   }
 
   return parts.join(' || ')
@@ -5146,6 +5205,21 @@ function AiTelemetryPanel({
                   telemetry.summary.diagnostics?.randomForcedDecisions || 0
                 }`}
               </Text>
+              {telemetry.learning && telemetry.learning.total > 0 && (
+                <Text fontSize="xs" color={bodyColor}>
+                  {`learning records ${telemetry.learning.total}, labeled ${
+                    telemetry.learning.labeled
+                  }, mismatch ${telemetry.learning.mismatches}, high-risk ${
+                    telemetry.learning.highRisk
+                  }${
+                    telemetry.learning.accuracy !== null
+                      ? `, labeled accuracy ${toPct(
+                          telemetry.learning.accuracy
+                        )}`
+                      : ''
+                  }`}
+                </Text>
+              )}
             </Stack>
           )}
 

@@ -97,6 +97,28 @@ function buildReportabilityRules() {
   ].join('\n')
 }
 
+function buildDecisionSchemaText() {
+  return `{
+  "answer":"a|b|skip",
+  "confidence":0.0,
+  "reasoning":"short optional note",
+  "observations":["short factual visual cue"],
+  "hypotheses":[
+    {"id":"chronology_match", "claim":"short testable claim", "evidenceFrames":[1,2]}
+  ],
+  "knownRisks":["short risk note"]
+}`
+}
+
+function buildDecisionLearningRules() {
+  return [
+    '- Keep observations, hypotheses, and knownRisks short; each array should contain at most 3 items.',
+    '- Hypotheses must be testable visual claims, not hidden chain-of-thought.',
+    '- Use knownRisks for uncertainty, OCR/text, slot-bias, report-risk, similar-candidate, or low-visibility risks.',
+    '- Do not add extra calls or request more context; this metadata is only for local audit and rehearsal learning.',
+  ].join('\n')
+}
+
 function buildAnswerPhaseKeywordRules() {
   return [
     '- This is the validation answer phase. Official keywords may be unavailable or arrive later; do not wait for them or treat them as required.',
@@ -179,7 +201,7 @@ Task:
 5) Return JSON only.
 
 Allowed JSON schema:
-{"answer":"a|b|skip","confidence":0.0,"reasoning":"short optional note"}
+${buildDecisionSchemaText()}
 
 Rules:
 - Use only ${allowedAnswers} for "answer"
@@ -187,6 +209,7 @@ Rules:
 ${antiPositionRules}
 ${answerPhaseKeywordRules}
 - Keep reasoning concise and factual, and mention one concrete visual cue when possible.
+${buildDecisionLearningRules()}
 ${reportabilityRules}
 ${
   mustChoose
@@ -231,7 +254,7 @@ Task:
 6) Return JSON only.
 
 Allowed JSON schema:
-{"answer":"a|b|skip","confidence":0.0,"reasoning":"short optional note"}
+${buildDecisionSchemaText()}
 
 Rules:
 - Use only ${allowedAnswers} for "answer"
@@ -239,6 +262,7 @@ Rules:
 - Keep reasoning concise and factual, and mention one concrete visual cue when possible.
 ${antiPositionRules}
 ${answerPhaseKeywordRules}
+${buildDecisionLearningRules()}
 ${reportabilityRules}
 ${
   mustChoose
@@ -340,7 +364,7 @@ Task:
 5) Return JSON only.
 
 Allowed JSON schema:
-{"answer":"a|b|skip","confidence":0.0,"reasoning":"short optional note"}
+${buildDecisionSchemaText()}
 
 Rules:
 - Use only ${allowedAnswers} for "answer"
@@ -349,6 +373,7 @@ Rules:
 - Keep reasoning concise and factual, and cite one key visual coherence cue
 ${antiPositionRules}
 ${answerPhaseKeywordRules}
+${buildDecisionLearningRules()}
 ${reportabilityRules}
 ${uncertaintyRule}
 ${passRule}
