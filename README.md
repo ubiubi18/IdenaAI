@@ -11,8 +11,9 @@ your own risk.
 
 Safety/debugging release after the May 2026 live-session audit.
 
-- Real and rehearsal autosolve now use the probability-ensemble path with
-  guarded long-session side choices.
+- Real autosolve now uses the intended probability-ensemble path with guarded
+  long-session side choices by default, not only in short session but also in
+  long session.
 - Cost tracking, ad-free `idena.social-ui`, and local IPFS inspection were
   updated.
 
