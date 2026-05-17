@@ -88,6 +88,24 @@ describe('solver-orchestrator planning', () => {
     )
   })
 
+  it('keeps probability ensemble enabled for long-session plans by default', () => {
+    const plan = planValidationAiSolve({
+      sessionType: 'long',
+      longFlips: [createDecodedFlip('long-default-probability')],
+      aiSolver: {
+        provider: 'openai',
+        benchmarkProfile: 'custom',
+      },
+    })
+
+    expect(plan.effectiveProfile).toMatchObject({
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 3,
+      flipVisionMode: 'composite',
+    })
+  })
+
   it('applies the strict local-ai runtime overrides to planning and budgeting', () => {
     const longFlips = [createDecodedFlip('long-1'), createDecodedFlip('long-2')]
 

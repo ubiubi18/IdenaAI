@@ -17,6 +17,7 @@ const {
   updateNode,
   isNodeBinaryOlderThanLocalSource,
 } = require('./idena-node')
+const {STRICT_PROFILE} = require('./ai-providers/constants')
 
 const VALIDATION_DEVNET_NODE_COUNT = 10
 const VALIDATION_DEVNET_MAX_LOG_LINES = 400
@@ -1377,6 +1378,63 @@ function normalizeValidationDevnetSolverModel(value, fallback = 'gpt-5.5') {
   const normalized = String(value || '').trim()
 
   return normalized || fallback
+}
+
+function buildValidationDevnetSolverProviderPayload(
+  payload = {},
+  {solverMode = 'single-participant-rehearsal'} = {}
+) {
+  const provider = normalizeValidationDevnetSolverProvider(payload.provider)
+  const probabilityRuns = Number.parseInt(payload.probabilityRuns, 10)
+  const probabilityDecisionDelta = Number.parseFloat(
+    payload.probabilityDecisionDelta
+  )
+  const probabilityReasoningEffort = String(
+    payload.probabilityReasoningEffort || ''
+  )
+    .trim()
+    .toLowerCase()
+
+  return {
+    ...payload,
+    mode: solverMode,
+    provider,
+    model: normalizeValidationDevnetSolverModel(payload.model),
+    maxRetries: Math.max(0, Number.parseInt(payload.maxRetries, 10) || 1),
+    maxOutputTokens: Math.max(
+      0,
+      Number.parseInt(payload.maxOutputTokens, 10) || 0
+    ),
+    temperature: Number.isFinite(Number(payload.temperature))
+      ? Number(payload.temperature)
+      : 0,
+    uncertaintyConfidenceThreshold: Number.isFinite(
+      Number(payload.uncertaintyConfidenceThreshold)
+    )
+      ? Number(payload.uncertaintyConfidenceThreshold)
+      : 0.95,
+    flipVisionMode: 'composite',
+    probabilityEnsembleEnabled: provider !== 'local-ai',
+    probabilityRuns:
+      Number.isInteger(probabilityRuns) && probabilityRuns > 0
+        ? Math.max(1, Math.min(5, probabilityRuns))
+        : STRICT_PROFILE.probabilityRuns,
+    probabilityPasses: STRICT_PROFILE.probabilityPasses,
+    probabilityDecisionDelta:
+      Number.isFinite(probabilityDecisionDelta) && probabilityDecisionDelta >= 0
+        ? Math.max(0, Math.min(0.5, probabilityDecisionDelta))
+        : STRICT_PROFILE.probabilityDecisionDelta,
+    probabilityUseSwappedOrder: payload.probabilityUseSwappedOrder !== false,
+    probabilityReasoningEffort: [
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ].includes(probabilityReasoningEffort)
+      ? probabilityReasoningEffort
+      : STRICT_PROFILE.probabilityReasoningEffort,
+  }
 }
 
 function normalizeValidationDevnetSolverFlipHash(value) {
@@ -3352,10 +3410,12 @@ function createValidationDevnetController({
       ),
       maxConcurrency: 1,
       interFlipDelayMs: 0,
-      forceDecision: true,
+      // Match live validation provider calls: short session asks for a forced
+      // side, long session lets probability delta return skip and records it.
+      forceDecision: session !== 'long',
       uncertaintyRepromptEnabled: true,
       uncertaintyRepromptMinRemainingMs: 3000,
-      flipVisionMode: providerPayload.flipVisionMode || 'frames_two_pass',
+      flipVisionMode: providerPayload.flipVisionMode || 'composite',
       session: {
         type: 'rehearsal-solver-lane',
         lane: laneIndex + 1,
@@ -3472,23 +3532,7 @@ function createValidationDevnetController({
     }
 
     const providerPayload = {
-      ...payload,
-      mode: solverMode,
-      provider: normalizeValidationDevnetSolverProvider(payload.provider),
-      model: normalizeValidationDevnetSolverModel(payload.model),
-      maxRetries: Math.max(0, Number.parseInt(payload.maxRetries, 10) || 1),
-      maxOutputTokens: Math.max(
-        0,
-        Number.parseInt(payload.maxOutputTokens, 10) || 0
-      ),
-      temperature: Number.isFinite(Number(payload.temperature))
-        ? Number(payload.temperature)
-        : 0,
-      uncertaintyConfidenceThreshold: Number.isFinite(
-        Number(payload.uncertaintyConfidenceThreshold)
-      )
-        ? Number(payload.uncertaintyConfidenceThreshold)
-        : 0.95,
+      ...buildValidationDevnetSolverProviderPayload(payload, {solverMode}),
     }
     const startedAt = new Date(now()).toISOString()
     const queuedLanes = validators.map((node, index) => ({
@@ -3624,6 +3668,7 @@ module.exports = {
   getValidationDevnetPrimaryPeerTarget,
   countReadyValidationHashItems,
   getValidationHashQueryCapabilities,
+  buildValidationDevnetSolverProviderPayload,
   shouldSuppressValidationDevnetLogLine,
   canConnectValidationDevnetStatus,
   shouldConnectValidationDevnetStatus,
