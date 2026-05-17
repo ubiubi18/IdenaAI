@@ -5706,7 +5706,7 @@ export default function AiSettingsPage() {
                             </Text>
                             <Text color="muted" fontSize="sm">
                               {t(
-                                'Experimental GPT-5.5-style scoring: score both candidates independently over multiple runs, then let the app choose.'
+                                'Default remote-provider scoring: score both candidates independently over multiple runs, then let the app choose.'
                               )}
                             </Text>
                           </Box>
