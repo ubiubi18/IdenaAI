@@ -8,6 +8,13 @@ function mockLogger() {
   }
 }
 
+function solveFlipBatch(bridge, payload) {
+  return bridge.solveFlipBatch({
+    probabilityEnsembleEnabled: false,
+    ...payload,
+  })
+}
+
 function sequenceClock(values) {
   let index = 0
   return () => {
@@ -89,7 +96,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -135,7 +142,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -165,7 +172,7 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
     await expect(
-      bridge.solveFlipBatch({
+      solveFlipBatch(bridge, {
         provider: 'openai',
         model: 'gpt-4o-mini',
         benchmarkProfile: 'custom',
@@ -213,7 +220,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -381,7 +388,7 @@ describe('createAiProviderBridge', () => {
     const bridge = createAiProviderBridge(logger, {httpClient})
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.5',
       benchmarkProfile: 'custom',
@@ -413,7 +420,7 @@ describe('createAiProviderBridge', () => {
     const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    await bridge.solveFlipBatch({
+    await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.4-mini',
       benchmarkProfile: 'custom',
@@ -447,7 +454,7 @@ describe('createAiProviderBridge', () => {
     const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    await bridge.solveFlipBatch({
+    await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.5',
       benchmarkProfile: 'strict',
@@ -491,7 +498,7 @@ describe('createAiProviderBridge', () => {
     const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.4-mini',
       benchmarkProfile: 'custom',
@@ -556,7 +563,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -919,7 +926,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       uncertaintyRepromptEnabled: false,
@@ -952,12 +959,12 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const unswappedResult = await bridge.solveFlipBatch({
+    const unswappedResult = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       flips: [{hash: 'flip-1', leftImage: 'left', rightImage: 'right'}],
     })
-    const swappedResult = await bridge.solveFlipBatch({
+    const swappedResult = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       flips: [{hash: 'flip-2', leftImage: 'left', rightImage: 'right'}],
@@ -984,7 +991,7 @@ describe('createAiProviderBridge', () => {
     const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
 
     await expect(
-      bridge.solveFlipBatch({
+      solveFlipBatch(bridge, {
         provider: 'openai',
         model: 'gpt-4o-mini',
         flips: [{hash: 'flip-no-key'}],
@@ -1001,7 +1008,7 @@ describe('createAiProviderBridge', () => {
       writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
     })
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       legacyHeuristicEnabled: true,
@@ -1112,7 +1119,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1137,6 +1144,58 @@ describe('createAiProviderBridge', () => {
     })
   })
 
+  it('uses probability ensemble by default for remote provider solving', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue(
+      JSON.stringify({
+        optionA: {
+          chronology_probability: 0.9,
+          cause_effect_probability: 0.9,
+          entity_continuity_probability: 0.9,
+          final_state_probability: 0.9,
+          overall_story_probability: 0.9,
+        },
+        optionB: {
+          chronology_probability: 0.2,
+          cause_effect_probability: 0.2,
+          entity_continuity_probability: 0.2,
+          final_state_probability: 0.2,
+          overall_story_probability: 0.2,
+        },
+        report_risk_probability: 0,
+        text_or_order_label_risk_probability: 0,
+        uncertainty_probability: 0.05,
+      })
+    )
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'strict',
+      forceDecision: true,
+      flips: [{hash: 'flip-default-probability'}],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(3)
+    expect(
+      invokeProvider.mock.calls.every(
+        ([call]) => call.promptOptions.promptPhase === 'probability_ensemble'
+      )
+    ).toBe(true)
+    expect(result.results[0]).toMatchObject({
+      hash: 'flip-default-probability',
+      answer: 'left',
+      rawAnswerBeforeRemap: 'left',
+      finalAnswerAfterRemap: 'left',
+      sideSwapped: false,
+    })
+    expect(result.results[0].probabilityEnsemble.runs).toHaveLength(3)
+  })
+
   it('tracks token usage per flip and in summary totals', async () => {
     const invokeProvider = jest.fn().mockResolvedValue({
       rawText: '{"answer":"left","confidence":0.9}',
@@ -1152,7 +1211,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1194,7 +1253,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    await bridge.solveFlipBatch({
+    await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       uncertaintyRepromptEnabled: false,
@@ -1241,7 +1300,7 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
     try {
-      const result = await bridge.solveFlipBatch({
+      const result = await solveFlipBatch(bridge, {
         provider: 'openai',
         model: 'gpt-4o-mini',
         benchmarkProfile: 'custom',
@@ -1274,7 +1333,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1302,7 +1361,7 @@ describe('createAiProviderBridge', () => {
       writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
     })
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'local-ai',
       model: 'local-vision',
       benchmarkProfile: 'custom',
@@ -1335,7 +1394,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.5',
       benchmarkProfile: 'custom',
@@ -1368,7 +1427,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.5',
       benchmarkProfile: 'custom',
@@ -1407,7 +1466,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1488,7 +1547,7 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
     try {
-      const result = await bridge.solveFlipBatch({
+      const result = await solveFlipBatch(bridge, {
         provider: 'openai',
         model: 'gpt-4o-mini',
         benchmarkProfile: 'custom',
@@ -1558,7 +1617,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1611,7 +1670,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1661,7 +1720,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1702,7 +1761,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       benchmarkProfile: 'custom',
@@ -1779,7 +1838,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.5',
       benchmarkProfile: 'custom',
@@ -1878,7 +1937,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-5.5',
       benchmarkProfile: 'custom',
@@ -1928,7 +1987,7 @@ describe('createAiProviderBridge', () => {
       apiKey: 'sk-test-compatible',
     })
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       uncertaintyRepromptEnabled: false,
@@ -2014,8 +2073,8 @@ describe('createAiProviderBridge', () => {
       ],
     }
 
-    const equalWeightResult = await bridge.solveFlipBatch(basePayload)
-    const weightedResult = await bridge.solveFlipBatch({
+    const equalWeightResult = await solveFlipBatch(bridge, basePayload)
+    const weightedResult = await solveFlipBatch(bridge, {
       ...basePayload,
       ensemblePrimaryWeight: 1,
       consultProviders: [
@@ -2058,7 +2117,7 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test-openai'})
     bridge.setProviderKey({provider: 'gemini', apiKey: 'sk-test-gemini'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       flips: [
@@ -2095,7 +2154,7 @@ describe('createAiProviderBridge', () => {
     })
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test-openai'})
 
-    const result = await bridge.solveFlipBatch({
+    const result = await solveFlipBatch(bridge, {
       provider: 'openai',
       model: 'gpt-4o-mini',
       legacyHeuristicEnabled: true,
@@ -2145,7 +2204,7 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
     await expect(
-      bridge.solveFlipBatch({
+      solveFlipBatch(bridge, {
         provider: 'openai',
         model: 'gpt-4o-mini',
         flips: [{hash: 'flip-needs-gemini-key'}],
