@@ -9,19 +9,12 @@ your own risk.
 
 ## v0.0.8 Changelog
 
-Validation-safety and debugging release after the May 2026 live-session audit.
+Safety/debugging release after the May 2026 live-session audit.
 
-- Probability ensemble is now the default remote-provider validation path for
-  both real sessions and rehearsal.
-- Long-session side choices are separated from grade/report data; `GradeC` and
-  `Inappropriate` cannot be submitted as side choices.
-- The failed side-swap long-session mode was removed from default and rehearsal
-  paths.
-- The validation AI cost tracker bug was addressed, but provider-side billing
-  limits remain the user's responsibility.
-- `idena.social-ui` is bundled from upstream `v11.3.0` with ads removed from
-  the desktop bundle.
-- Local IPFS inspection commands are available for moderation/audit work.
+- Real and rehearsal autosolve now use the probability-ensemble path with
+  guarded long-session side choices.
+- Cost tracking, ad-free `idena.social-ui`, and local IPFS inspection were
+  updated.
 
 ## Own Risk And Cost Responsibility
 
