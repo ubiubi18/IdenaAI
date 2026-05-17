@@ -1413,6 +1413,9 @@ function buildValidationDevnetSolverProviderPayload(
     )
       ? Number(payload.uncertaintyConfidenceThreshold)
       : 0.95,
+    // Rehearsal lanes are debugging tools for live validation, so force the
+    // same remote-provider probability/composite path even if stale settings
+    // still contain the older frame-mode rehearsal defaults.
     flipVisionMode: 'composite',
     probabilityEnsembleEnabled: provider !== 'local-ai',
     probabilityRuns:
