@@ -4,6 +4,7 @@ import {
   submitLongAnswers,
   submitShortAnswers,
 } from '../../shared/api/validation'
+import {AnswerType, FlipGrade, RelevanceType} from '../../shared/types'
 
 jest.mock('../../shared/api/validation', () => ({
   fetchFlipHashes: jest.fn(() => new Promise(() => {})),
@@ -581,6 +582,108 @@ describe('validation machine', () => {
     } finally {
       URL.revokeObjectURL = originalRevokeObjectUrl
     }
+  })
+
+  it('preserves approved long-session left/right answers during submit', async () => {
+    const machine = createValidationMachine({
+      epoch: 1,
+      validationStart: Date.now() + 60 * 1000,
+      shortSessionDuration: 120,
+      longSessionDuration: 300,
+      validationSessionId: '',
+      locale: 'en',
+      initialValidationPeriod: 'long',
+      initialLongFlips: [
+        {
+          hash: '0xlong-approved-submit',
+          decoded: true,
+          option: AnswerType.Left,
+          relevance: RelevanceType.Relevant,
+        },
+      ],
+    })
+
+    const service = interpret(machine).start()
+    service.send('START_LONG_SESSION')
+    service.send('SUBMIT_NOW')
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out waiting for approved long submit'))
+      }, 1000)
+
+      service.onTransition((state) => {
+        if (state.matches('validationSucceeded')) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+    })
+
+    expect(submitLongAnswers).toHaveBeenCalledWith(
+      [
+        {
+          hash: '0xlong-approved-submit',
+          answer: AnswerType.Left,
+          grade: FlipGrade.GradeD,
+        },
+      ],
+      0,
+      1
+    )
+
+    service.stop()
+  })
+
+  it('keeps reported long-session flips out of side-answer fallback', async () => {
+    const machine = createValidationMachine({
+      epoch: 1,
+      validationStart: Date.now() + 60 * 1000,
+      shortSessionDuration: 120,
+      longSessionDuration: 300,
+      validationSessionId: '',
+      locale: 'en',
+      initialValidationPeriod: 'long',
+      initialLongFlips: [
+        {
+          hash: '0xlong-reported-submit',
+          decoded: true,
+          option: AnswerType.None,
+          relevance: RelevanceType.Irrelevant,
+        },
+      ],
+    })
+
+    const service = interpret(machine).start()
+    service.send('START_LONG_SESSION')
+    service.send('SUBMIT_NOW')
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out waiting for reported long submit'))
+      }, 1000)
+
+      service.onTransition((state) => {
+        if (state.matches('validationSucceeded')) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+    })
+
+    expect(submitLongAnswers).toHaveBeenCalledWith(
+      [
+        {
+          hash: '0xlong-reported-submit',
+          answer: AnswerType.None,
+          grade: FlipGrade.Reported,
+        },
+      ],
+      0,
+      1
+    )
+
+    service.stop()
   })
 
   it('treats duplicate long-answer tx errors as validation success', async () => {

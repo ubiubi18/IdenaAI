@@ -573,10 +573,10 @@ describe('createAiProviderBridge', () => {
     expect(sleep).toHaveBeenCalledTimes(1)
     expect(result.results[0]).toMatchObject({
       hash: 'flip-rate-limit',
-      sideSwapped: true,
+      sideSwapped: false,
       rawAnswerBeforeRemap: 'right',
-      finalAnswerAfterRemap: 'left',
-      answer: 'left',
+      finalAnswerAfterRemap: 'right',
+      answer: 'right',
       confidence: 0.8,
     })
   })
@@ -909,7 +909,7 @@ describe('createAiProviderBridge', () => {
     })
   })
 
-  it('remaps right-biased answers when side order is swapped', async () => {
+  it('keeps normal non-probability answers in original side order', async () => {
     const invokeProvider = jest
       .fn()
       .mockResolvedValue('{"answer":"right","confidence":0.8}')
@@ -929,20 +929,20 @@ describe('createAiProviderBridge', () => {
     expect(invokeProvider).toHaveBeenCalledTimes(1)
     expect(result.results[0]).toMatchObject({
       hash: 'flip-2',
-      sideSwapped: true,
+      sideSwapped: false,
       rawAnswerBeforeRemap: 'right',
-      finalAnswerAfterRemap: 'left',
-      answer: 'left',
+      finalAnswerAfterRemap: 'right',
+      answer: 'right',
       confidence: 0.8,
     })
     expect(invokeProvider.mock.calls[0][0].flip).toMatchObject({
       hash: 'flip-2',
-      leftImage: 'right',
-      rightImage: 'left',
+      leftImage: 'left',
+      rightImage: 'right',
     })
   })
 
-  it('does not force every one-flip batch into the same swap direction', async () => {
+  it('does not side-swap non-probability one-flip batches', async () => {
     const invokeProvider = jest
       .fn()
       .mockResolvedValue('{"answer":"left","confidence":0.8}')
@@ -972,10 +972,10 @@ describe('createAiProviderBridge', () => {
     })
     expect(swappedResult.results[0]).toMatchObject({
       hash: 'flip-2',
-      sideSwapped: true,
+      sideSwapped: false,
       rawAnswerBeforeRemap: 'left',
-      finalAnswerAfterRemap: 'right',
-      answer: 'right',
+      finalAnswerAfterRemap: 'left',
+      answer: 'left',
     })
   })
 
@@ -1101,7 +1101,7 @@ describe('createAiProviderBridge', () => {
     )
   })
 
-  it('balances side swapping to an even split for 6 flips', async () => {
+  it('does not globally side-swap normal live solve batches', async () => {
     const invokeProvider = jest
       .fn()
       .mockResolvedValue('{"answer":"left","confidence":0.8}')
@@ -1128,12 +1128,12 @@ describe('createAiProviderBridge', () => {
     })
 
     expect(result.summary.diagnostics).toMatchObject({
-      swapped: 3,
-      notSwapped: 3,
+      swapped: 0,
+      notSwapped: 6,
       rawLeft: 6,
-      finalLeft: 3,
-      finalRight: 3,
-      remappedDecisions: 3,
+      finalLeft: 6,
+      finalRight: 0,
+      remappedDecisions: 0,
     })
   })
 
