@@ -3794,6 +3794,12 @@ export default function AiSettingsPage() {
   const externalProviderChoice = isLocalAiPrimaryProvider
     ? 'openai'
     : activeProvider
+  const remoteProviderAutosolverArmed = Boolean(
+    aiSolver.enabled &&
+      aiSolver.mode === 'session-auto' &&
+      !isLocalAiPrimaryProvider
+  )
+  const remoteProviderAutosolverLabel = formatAiProviderLabel(activeProvider)
   const externalAiSummary = aiSolver.enabled
     ? t(
         'Insert one or multiple AI provider API keys here. For OpenAI testing, use a prepaid key without automatic top-up when possible.'
@@ -3811,17 +3817,35 @@ export default function AiSettingsPage() {
     setShowProviderSetup(true)
     setShowLocalAiSetup(false)
   }, [externalProviderChoice, localAi, updateAiSolverSettings])
-  const enableLocalAiSetup = useCallback(
-    () =>
-      startLocalAiWithSettings({
-        localAiPatch: buildRecommendedLocalAiMacPreset(),
-        enableLocalProvider: true,
-        preparingMessage: t(
-          'Preparing Qwen via Ollama now. IdenaAI will try to start Ollama and connect to your configured local model endpoint.'
+  const enableLocalAiSetup = useCallback(() => {
+    if (remoteProviderAutosolverArmed) {
+      setShowLocalAiSetup(true)
+      setShowProviderSetup(false)
+      notify(
+        t('Provider autosolver already armed'),
+        t(
+          '{{provider}} session-auto is already selected for real validation. Leave Local AI setup alone unless you intentionally want to switch providers.',
+          {provider: remoteProviderAutosolverLabel}
         ),
-      }),
-    [startLocalAiWithSettings, t]
-  )
+        'warning'
+      )
+      return null
+    }
+
+    return startLocalAiWithSettings({
+      localAiPatch: buildRecommendedLocalAiMacPreset(),
+      enableLocalProvider: true,
+      preparingMessage: t(
+        'Preparing Qwen via Ollama now. IdenaAI will try to start Ollama and connect to your configured local model endpoint.'
+      ),
+    })
+  }, [
+    notify,
+    remoteProviderAutosolverArmed,
+    remoteProviderAutosolverLabel,
+    startLocalAiWithSettings,
+    t,
+  ])
   const toggleProviderSetup = useCallback(() => {
     setShowProviderSetup((value) => {
       const nextValue = !value
@@ -3984,16 +4008,44 @@ export default function AiSettingsPage() {
                     bg="white"
                   >
                     <Stack spacing={3}>
-                      <Box>
-                        <Text fontWeight={600}>
-                          {t('Default: Qwen local AI on this device')}
-                        </Text>
-                        <Text color="muted" fontSize="sm" mt={1}>
-                          {t(
-                            'IdenaAI uses Qwen through Ollama as the local-first text and code review model. No API key is required for this path.'
-                          )}
-                        </Text>
-                      </Box>
+                      <Flex gap={3} align="stretch" flexWrap="wrap">
+                        <Box flex="1 1 260px">
+                          <Text fontWeight={600}>
+                            {t('Default: Qwen local AI on this device')}
+                          </Text>
+                          <Text color="muted" fontSize="sm" mt={1}>
+                            {t(
+                              'IdenaAI uses Qwen through Ollama as the local-first text and code review model. No API key is required for this path.'
+                            )}
+                          </Text>
+                        </Box>
+                        {remoteProviderAutosolverArmed ? (
+                          <Box
+                            flex="1 1 240px"
+                            borderWidth="1px"
+                            borderColor="orange.300"
+                            borderRadius="md"
+                            bg="orange.012"
+                            p={3}
+                          >
+                            <Stack spacing={1}>
+                              <Text
+                                color="orange.700"
+                                fontSize="sm"
+                                fontWeight={700}
+                              >
+                                {t('Provider autosolver already armed')}
+                              </Text>
+                              <Text color="muted" fontSize="xs">
+                                {t(
+                                  '{{provider}} is already selected for session-auto real validation. Local AI setup is optional; do not start it unless you intentionally want to switch providers.',
+                                  {provider: remoteProviderAutosolverLabel}
+                                )}
+                              </Text>
+                            </Stack>
+                          </Box>
+                        ) : null}
+                      </Flex>
                       <Text color="muted" fontSize="xs">
                         {t('Current runtime')}: {localAiTopSummaryTitle}
                       </Text>
@@ -4056,6 +4108,7 @@ export default function AiSettingsPage() {
                       </Box>
                       <Stack isInline spacing={2} flexWrap="wrap">
                         <PrimaryButton
+                          isDisabled={remoteProviderAutosolverArmed}
                           onClick={enableLocalAiSetup}
                           isLoading={isStartingLocalAi}
                         >
@@ -6100,6 +6153,28 @@ export default function AiSettingsPage() {
                 )}
               </Text>
 
+              {remoteProviderAutosolverArmed ? (
+                <Box
+                  borderWidth="1px"
+                  borderColor="orange.300"
+                  borderRadius="md"
+                  bg="orange.012"
+                  p={3}
+                >
+                  <Stack spacing={1}>
+                    <Text color="orange.700" fontWeight={700}>
+                      {t('Provider autosolver already armed')}
+                    </Text>
+                    <Text color="muted" fontSize="sm">
+                      {t(
+                        '{{provider}} is already the real-session autosolve path. Local AI start presets are disabled here to avoid accidental provider switching before validation.',
+                        {provider: remoteProviderAutosolverLabel}
+                      )}
+                    </Text>
+                  </Stack>
+                </Box>
+              ) : null}
+
               <Flex align="center" justify="space-between">
                 <Box>
                   <Text fontWeight={500}>{t('Enable local AI')}</Text>
@@ -6111,7 +6186,10 @@ export default function AiSettingsPage() {
                 </Box>
                 <Switch
                   isChecked={!!localAi.enabled}
-                  isDisabled={isStartingLocalAi}
+                  isDisabled={
+                    isStartingLocalAi ||
+                    (!localAi.enabled && remoteProviderAutosolverArmed)
+                  }
                   onChange={() => {
                     if (localAi.enabled) {
                       updateLocalAiSettings({enabled: false})
@@ -6219,36 +6297,42 @@ export default function AiSettingsPage() {
 
               <Stack isInline spacing={2} flexWrap="wrap">
                 <PrimaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyRecommendedLocalAiSetup}
                   isLoading={isStartingLocalAi}
                 >
                   {t('Use Qwen/Ollama default')}
                 </PrimaryButton>
                 <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyMolmo24BCompactSetup}
                   isLoading={isStartingLocalAi}
                 >
                   {t('Use compact Molmo2-4B fallback')}
                 </SecondaryButton>
                 <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyMolmo2OResearchSetup}
                   isLoading={isStartingLocalAi}
                 >
                   {t('Try stronger Molmo2-O 7B')}
                 </SecondaryButton>
                 <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyInternVl351BLightSetup}
                   isLoading={isStartingLocalAi}
                 >
                   {t('Try light InternVL3.5-1B')}
                 </SecondaryButton>
                 <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyInternVl358BExperimentalSetup}
                   isLoading={isStartingLocalAi}
                 >
                   {t('Try experimental InternVL3.5-8B')}
                 </SecondaryButton>
                 <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={fixLocalAiAutomatically}
                   isLoading={isStartingLocalAi}
                 >
@@ -6888,7 +6972,11 @@ export default function AiSettingsPage() {
                   </Box>
                   <Stack isInline spacing={2}>
                     <SecondaryButton
-                      isDisabled={!localAi.enabled || isStartingLocalAi}
+                      isDisabled={
+                        !localAi.enabled ||
+                        isStartingLocalAi ||
+                        remoteProviderAutosolverArmed
+                      }
                       onClick={async () => {
                         const nextPayload = localAiRuntimePayload
                         setIsStartingLocalAi(true)
@@ -6969,6 +7057,7 @@ export default function AiSettingsPage() {
                       </SecondaryButton>
                     ) : null}
                     <SecondaryButton
+                      isDisabled={remoteProviderAutosolverArmed}
                       isLoading={isStartingLocalAi}
                       onClick={fixLocalAiAutomatically}
                     >
