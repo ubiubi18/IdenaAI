@@ -752,6 +752,9 @@ outages, API cost, or validation risk.
 Normal live solving now keeps the original left/right order. Candidate-order
 swapping is limited to probability-ensemble audit runs where each run records
 the explicit Option A/B to original-side mapping before aggregation.
+Long-session submission keeps side choice and report/grade signals separate:
+the submitted side answer is restricted to none, left, or right, while later
+keyword/report review uses the separate grade/report field.
 
 ### Three-Stage Probability Submission
 
