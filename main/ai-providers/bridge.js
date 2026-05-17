@@ -77,6 +77,9 @@ const {
 const SUPPORTED_PROVIDERS = Object.values(PROVIDERS)
 const MAX_CONSULTANTS = 4
 const UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS = [0.95, 0.8, 0.51]
+const MAX_PROBABILITY_ENSEMBLE_RUNS = 3
+const PROBABILITY_FIRST_RUN_STOP_THRESHOLD = 0.95
+const PROBABILITY_SECOND_RUN_STOP_THRESHOLD = 0.82
 
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
@@ -10248,12 +10251,16 @@ Flip hash: ${hash}
         const solveProbabilityEnsembleConsultant = async (consultant) => {
           const probabilityRunCount = Math.max(
             1,
-            Math.min(5, Number(profile.probabilityRuns) || 3)
+            Math.min(
+              MAX_PROBABILITY_ENSEMBLE_RUNS,
+              Number(profile.probabilityRuns) || MAX_PROBABILITY_ENSEMBLE_RUNS
+            )
           )
           let combinedTokenUsage = createEmptyTokenUsage()
           const runs = []
           const runErrors = []
           const providerMetaEntries = []
+          let earlyStopReason = ''
 
           const buildPreviousProbabilityAuditHint = (runSwapped) => {
             if (!runs.length) {
@@ -10284,6 +10291,41 @@ Flip hash: ${hash}
               previous_delta: previousAggregate.delta,
               previous_answer: previousAggregate.answer,
             })
+          }
+
+          const getProbabilityEarlyStopReason = () => {
+            if (!runs.length) {
+              return ''
+            }
+
+            const stopAggregate = aggregateProbabilityEnsembleRuns(runs, {
+              forceDecision: true,
+              probabilityDecisionDelta: profile.probabilityDecisionDelta,
+              tieBreakerKey: flip.hash,
+            })
+            const left = Number(stopAggregate.avgLeft)
+            const right = Number(stopAggregate.avgRight)
+            const best = Math.max(left, right)
+            const delta = Math.abs(left - right)
+
+            if (
+              stopAggregate.runCount === 1 &&
+              best >= PROBABILITY_FIRST_RUN_STOP_THRESHOLD &&
+              delta > 1e-9
+            ) {
+              return 'first_run_probability_0_95'
+            }
+
+            if (
+              stopAggregate.runCount >= 2 &&
+              best >= PROBABILITY_SECOND_RUN_STOP_THRESHOLD &&
+              delta >=
+                normalizeConfidence(profile.probabilityDecisionDelta || 0.08)
+            ) {
+              return 'second_run_probability_0_82_delta'
+            }
+
+            return ''
           }
 
           for (
@@ -10387,6 +10429,12 @@ Flip hash: ${hash}
                 swapped: runSwapped,
                 payload: parsedPayload,
               })
+
+              const stopReason = getProbabilityEarlyStopReason()
+              if (stopReason) {
+                earlyStopReason = stopReason
+                break
+              }
             } catch (error) {
               runErrors.push(
                 `run ${runNumber}: ${sanitizeProviderDiagnosticMessage(
@@ -10405,7 +10453,10 @@ Flip hash: ${hash}
           }
 
           const probabilityAggregate = aggregateProbabilityEnsembleRuns(runs, {
-            forceDecision: profile.forceDecision || !allowSkip,
+            forceDecision:
+              profile.forceDecision ||
+              !allowSkip ||
+              runs.length >= probabilityRunCount,
             probabilityDecisionDelta: profile.probabilityDecisionDelta,
             tieBreakerKey: flip.hash,
           })
@@ -10417,6 +10468,7 @@ Flip hash: ${hash}
                   runCount: probabilityAggregate.runCount,
                   requestedRuns: probabilityRunCount,
                   failedRuns: runErrors.length,
+                  earlyStopReason,
                   useSwappedOrder: profile.probabilityUseSwappedOrder,
                 },
               }
@@ -10425,6 +10477,7 @@ Flip hash: ${hash}
                   runCount: probabilityAggregate.runCount,
                   requestedRuns: probabilityRunCount,
                   failedRuns: runErrors.length,
+                  earlyStopReason,
                   useSwappedOrder: profile.probabilityUseSwappedOrder,
                 },
               }
@@ -10448,6 +10501,7 @@ Flip hash: ${hash}
               delta: probabilityAggregate.delta,
               runCount: probabilityAggregate.runCount,
               requestedRuns: probabilityRunCount,
+              earlyStopReason,
               skippedByRisk: probabilityAggregate.skippedByRisk,
               skippedByDelta: probabilityAggregate.skippedByDelta,
               runs: probabilityAggregate.runs.map((run) => ({
