@@ -175,9 +175,9 @@ describe('solver-orchestrator planning', () => {
       },
     })
 
-    expect(plan.effectiveProfile.requestTimeoutMs).toBe(45000)
+    expect(plan.effectiveProfile.requestTimeoutMs).toBe(90000)
     expect(plan.effectiveProfile.maxRetries).toBe(0)
-    expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(95000)
+    expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(90000)
     expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
     expect(plan.effectiveProfile.probabilityRuns).toBe(3)
     expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('high')
@@ -247,7 +247,7 @@ describe('solver-orchestrator planning', () => {
 
     expect(shortBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(shortBudget.solveConcurrency).toBe(6)
-    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(45000)
+    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(90000)
     expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
     expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
     expect(shortBudget.effectiveProfile.probabilityRuns).toBe(3)
@@ -945,7 +945,7 @@ describe('solver-orchestrator planning', () => {
           maxRetries: 0,
           shortSessionOpenAiParallelConcurrency: 1,
         },
-        hardDeadlineAt: now + 7000,
+        hardDeadlineAt: now + 12000,
         onDecision,
       })
 
@@ -1031,7 +1031,7 @@ describe('solver-orchestrator planning', () => {
     }
   })
 
-  it('staggers short-session OpenAI launches while keeping solves parallel', async () => {
+  it('launches short-session OpenAI solves together while keeping solves parallel', async () => {
     const originalImage = global.Image
     const originalAiSolver = global.aiSolver
     const originalCreateElement = document.createElement.bind(document)
@@ -1119,7 +1119,6 @@ describe('solver-orchestrator planning', () => {
           uncertaintyRepromptEnabled: false,
           interFlipDelayMs: 0,
           maxRetries: 0,
-          shortSessionOpenAiParallelLaunchDelayMs: 5,
         },
         hardDeadlineAt: Date.now() + 60 * 1000,
       })
@@ -1128,9 +1127,7 @@ describe('solver-orchestrator planning', () => {
       expect(global.aiSolver.solveFlipBatch).toHaveBeenCalledTimes(6)
       expect(maxInFlight).toBe(6)
       expect(startTimes).toHaveLength(6)
-      expect(
-        startTimes[startTimes.length - 1] - startTimes[0]
-      ).toBeGreaterThanOrEqual(20)
+      expect(startTimes[startTimes.length - 1] - startTimes[0]).toBeLessThan(20)
     } finally {
       createElementSpy.mockRestore()
       global.Image = originalImage

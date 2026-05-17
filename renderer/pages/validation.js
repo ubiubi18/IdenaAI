@@ -2218,7 +2218,9 @@ function ValidationSession({
         longSessionDuration,
         sessionType,
         shortSessionSubmitBufferSeconds:
-          SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
+          sessionType === 'short'
+            ? 0
+            : SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
       })
       const rawRemainingSolveMs = getValidationSessionPhaseRemainingMs({
         validationStart,
@@ -2226,7 +2228,9 @@ function ValidationSession({
         longSessionDuration,
         sessionType,
         shortSessionSubmitBufferSeconds:
-          SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
+          sessionType === 'short'
+            ? 0
+            : SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
       })
       const reserveAutoReportReviewWindow =
         sessionType === 'long' &&
