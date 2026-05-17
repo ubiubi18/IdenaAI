@@ -258,7 +258,7 @@ function buildAiSolverSettings(settings = {}) {
   )
   nextSettings.probabilityRuns =
     Number.isFinite(normalizedProbabilityRuns) && normalizedProbabilityRuns > 0
-      ? Math.max(1, Math.min(5, normalizedProbabilityRuns))
+      ? Math.max(1, Math.min(3, normalizedProbabilityRuns))
       : DEFAULT_AI_SOLVER_SETTINGS.probabilityRuns
   const probabilityPasses = Array.isArray(nextSettings.probabilityPasses)
     ? nextSettings.probabilityPasses

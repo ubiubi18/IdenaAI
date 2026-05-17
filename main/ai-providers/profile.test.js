@@ -94,12 +94,12 @@ describe('sanitizeBenchmarkProfile', () => {
     })
   })
 
-  it('preserves probability ensemble overrides in strict profile mode', () => {
+  it('clamps probability ensemble overrides in strict profile mode', () => {
     expect(
       sanitizeBenchmarkProfile({
         benchmarkProfile: 'strict',
         probabilityEnsembleEnabled: true,
-        probabilityRuns: 4,
+        probabilityRuns: 5,
         probabilityPasses: ['independent_scores', 'adversarial_recheck'],
         probabilityDecisionDelta: 0.12,
         probabilityUseSwappedOrder: false,
@@ -108,7 +108,7 @@ describe('sanitizeBenchmarkProfile', () => {
     ).toStrictEqual({
       ...STRICT_PROFILE,
       probabilityEnsembleEnabled: true,
-      probabilityRuns: 4,
+      probabilityRuns: 3,
       probabilityPasses: ['independent_scores', 'adversarial_recheck'],
       probabilityDecisionDelta: 0.12,
       probabilityUseSwappedOrder: false,

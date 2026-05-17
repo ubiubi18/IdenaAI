@@ -131,7 +131,7 @@ const CUSTOM_LIMITS = {
   temperature: [0, 2],
   uncertaintyConfidenceThreshold: [0, 1],
   uncertaintyRepromptMinRemainingMs: [500, 120 * 1000],
-  probabilityRuns: [1, 5],
+  probabilityRuns: [1, 3],
   probabilityDecisionDelta: [0, 0.5],
 }
 

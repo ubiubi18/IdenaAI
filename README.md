@@ -688,15 +688,13 @@ Default remote path:
 - choose the higher side only when the probability separation is meaningful
 - keep side choice separate from grade/report metadata
 
-Short-session OpenAI parallel mode may use two probability runs to stay inside
-the submit window. The general default is three runs.
+The default is an adaptive maximum of three probability runs:
 
-The mental model is:
-
-1. First pass: trust only very strong results, around `0.95`.
-2. Second pass: accept a clearer re-score around `0.80`.
-3. Third/final pass: use the best available probability result when time is
-   nearly gone.
+1. Stop after run 1 if one side reaches about `0.95`.
+2. Stop after run 2 if one side reaches at least `0.82` and the other side is
+   at least `0.08` lower.
+3. Otherwise run once more, then choose the side with the highest aggregate
+   probability.
 
 This reduces side and position bias. It does not eliminate model error,
 provider outages, latency risk, API cost, or validation risk.

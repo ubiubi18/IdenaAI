@@ -103,7 +103,7 @@ export function buildRehearsalSolverLanePayload(
     probabilityEnsembleEnabled: provider !== 'local-ai',
     probabilityRuns:
       Number.isInteger(probabilityRuns) && probabilityRuns > 0
-        ? Math.max(1, Math.min(5, probabilityRuns))
+        ? Math.max(1, Math.min(3, probabilityRuns))
         : 3,
     probabilityPasses: REHEARSAL_PROBABILITY_PASSES,
     probabilityDecisionDelta:
