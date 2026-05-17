@@ -186,6 +186,8 @@ function normalizeProbabilityReasoningEffort(value) {
 
 function normalizeProbabilityProfile(input = {}) {
   return {
+    // Missing flags come from older settings and rehearsal payloads. Treat
+    // absence as the current default, not as an opt-out.
     probabilityEnsembleEnabled:
       input.probabilityEnsembleEnabled == null
         ? DEFAULT_PROFILE.probabilityEnsembleEnabled

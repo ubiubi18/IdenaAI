@@ -1885,7 +1885,7 @@ function NodeSettings() {
                 </Text>
                 <Text color="orange.500" fontSize="sm">
                   {t(
-                    'Provider cost warning: v0.0.6 can spend up to about $10 or more for one hard identity session when flips trigger long reasoning. Use prepaid API limits; testers are responsible for provider bills.'
+                    'Provider cost warning: v0.0.8 still can spend about $10 or more for one hard identity session when flips trigger long reasoning. Use prepaid API limits; testers are responsible for provider bills.'
                   )}
                 </Text>
                 <Text
@@ -1930,7 +1930,7 @@ function NodeSettings() {
               </Text>
               <Text color="orange.500" mt={2}>
                 {t(
-                  'Take care: v0.0.6 remote-provider solving can cost about $1 to $10+ for one identity depending on flips, reasoning effort, retries, and provider pricing. A 10-identity rehearsal can multiply that. Use prepaid API limits; testers are responsible for provider bills.'
+                  'Take care: v0.0.8 remote-provider solving can cost about $1 to $10+ for one identity depending on flips, reasoning effort, retries, and provider pricing. A 10-identity rehearsal can multiply that. Use prepaid API limits; testers are responsible for provider bills.'
                 )}
               </Text>
               <Text
@@ -2676,7 +2676,7 @@ function NodeSettings() {
                 {!isRealAutosolverDialog && (
                   <Text color="orange.500" fontSize="sm">
                     {t(
-                      'Provider-backed rehearsal can scale to one primary plus nine optional participant identities. In v0.0.6, one hard identity session may already cost about $10 or more; a full 10-identity run can multiply that.'
+                      'Provider-backed rehearsal can scale to one primary plus nine optional participant identities. In v0.0.8, one hard identity session may already cost about $10 or more; a full 10-identity run can multiply that.'
                     )}
                   </Text>
                 )}
