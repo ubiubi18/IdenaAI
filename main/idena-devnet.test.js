@@ -9,6 +9,7 @@ const {
   buildValidationDevnetSeedFlipMetaByHash,
   buildValidationDevnetSeedFlipReviewPayloadByHash,
   countReadyValidationHashItems,
+  buildValidationDevnetSolverProviderPayload,
   getValidationDevnetPrimaryPeerTarget,
   getValidationDevnetPublishedFlipCount,
   loadValidationDevnetSeedFlips,
@@ -105,6 +106,31 @@ describe('validation devnet helpers', () => {
     expect(config.Validation.ShortSessionDuration).toBe(120000000000)
     expect(config.Validation.LongSessionDuration).toBe(900000000000)
     expect(config.Consensus.Automine).toBe(false)
+  })
+
+  it('forces rehearsal solver provider payloads onto live probability defaults', () => {
+    expect(
+      buildValidationDevnetSolverProviderPayload(
+        {
+          provider: 'openai',
+          model: 'gpt-5.5',
+          probabilityEnsembleEnabled: false,
+          probabilityRuns: 2,
+          flipVisionMode: 'frames_two_pass',
+        },
+        {solverMode: 'single-participant-rehearsal'}
+      )
+    ).toMatchObject({
+      mode: 'single-participant-rehearsal',
+      provider: 'openai',
+      model: 'gpt-5.5',
+      flipVisionMode: 'composite',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 2,
+      probabilityDecisionDelta: 0.08,
+      probabilityUseSwappedOrder: true,
+      probabilityReasoningEffort: 'xhigh',
+    })
   })
 
   it('serializes genesis big-int balances as raw JSON numbers', () => {

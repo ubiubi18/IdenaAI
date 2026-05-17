@@ -1111,6 +1111,10 @@ Behavior notes:
   validation state while the countdown is still running
 - the default rehearsal autosolve uses one local identity and the current AI
   provider/model for a local dry run only
+- remote-provider rehearsal autosolve now follows the live validation
+  probability-ensemble path by default, uses composite flip payloads, and keeps
+  long-session low-delta probability results as skips instead of silently
+  exercising the older binary side-choice fallback
 - the optional nine-participant rehearsal uses the same AI provider/model,
   staggers provider request starts, records compact per-participant telemetry,
   and does not submit answers or touch mainnet identities

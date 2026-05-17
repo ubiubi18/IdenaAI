@@ -186,7 +186,10 @@ function normalizeProbabilityReasoningEffort(value) {
 
 function normalizeProbabilityProfile(input = {}) {
   return {
-    probabilityEnsembleEnabled: Boolean(input.probabilityEnsembleEnabled),
+    probabilityEnsembleEnabled:
+      input.probabilityEnsembleEnabled == null
+        ? DEFAULT_PROFILE.probabilityEnsembleEnabled
+        : Boolean(input.probabilityEnsembleEnabled),
     probabilityRuns: normalizeProbabilityRuns(input.probabilityRuns),
     probabilityPasses: normalizeProbabilityPasses(input.probabilityPasses),
     probabilityDecisionDelta: Math.max(
@@ -1209,9 +1212,6 @@ function applyShortSessionOpenAiParallelTimeout(
   }
 
   const requestTimeoutMs = SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
-  const requestedProbabilityRuns = normalizeProbabilityRuns(
-    profile.probabilityRuns
-  )
   const uncertaintyConfidenceThreshold = Math.max(
     toFloatOrFallback(
       profile.uncertaintyConfidenceThreshold,
@@ -1232,12 +1232,11 @@ function applyShortSessionOpenAiParallelTimeout(
       SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS
     ),
     probabilityEnsembleEnabled: true,
-    probabilityRuns: profile.probabilityEnsembleEnabled
-      ? Math.max(
-          requestedProbabilityRuns,
-          SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
-        )
-      : SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS,
+    probabilityRuns:
+      normalizeProbabilityRuns(profile.probabilityRuns) ===
+      DEFAULT_PROFILE.probabilityRuns
+        ? SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
+        : normalizeProbabilityRuns(profile.probabilityRuns),
     probabilityReasoningEffort:
       SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT,
     requestTimeoutMs,
