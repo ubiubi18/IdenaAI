@@ -96,6 +96,9 @@ export function buildRehearsalSolverLanePayload(
     uncertaintyConfidenceThreshold:
       Number(aiSolver.uncertaintyConfidenceThreshold) || 0.95,
     uncertaintyRepromptMinRemainingMs: 3000,
+    // Keep rehearsal close to real validation. The failed long-session audit
+    // showed that rehearsal must not exercise the old frame/binary path while
+    // live validation uses probability ensemble.
     flipVisionMode: 'composite',
     probabilityEnsembleEnabled: provider !== 'local-ai',
     probabilityRuns:

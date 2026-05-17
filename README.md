@@ -1,1540 +1,271 @@
-# IdenaAI v0.0.7
+# IdenaAI v0.0.8
 
-`IdenaAI` is an experimental desktop fork of `idena-desktop` focused on:
+IdenaAI is an experimental desktop fork of `idena-desktop` for validation,
+FLIP, local AI, and rehearsal research.
 
-- local and hosted AI integration
-- FLIP solving, generation, and benchmarking research
-- human-teacher annotation flows
-- local runtime and training experiments tied to the desktop app
-- validation rehearsal tooling for safer local protocol testing
+It is not a hardened wallet release, not a trusted installer distribution, and
+not a guarantee of validation success. Build and inspect it locally. Use it at
+your own risk.
 
-This repository is the main app-integration line. Version `0.0.7` is a
-research checkpoint for rehearsal autosolver UX, hosted/local AI setup,
-validation recovery, IPFS inspection, cost telemetry, benchmark review, and the
-first in-main startup path for probability-ensemble flip judging research. It
-is research software, not a hardened wallet release and not a trusted installer
-distribution.
+## v0.0.8 Focus
 
-## IdenaAI v0.0.7 Update
+This release is mainly a validation-safety and debugging release after the May
+2026 live-session audit.
 
-This update merges the rehearsal/autosolver test lane back into `main` and
-adds fixes from the rehearsal audits.
-
-- `Settings -> Node -> Start autosolve rehearsal` now opens a setup dialog
-  before the rehearsal starts. It supports a remote provider API key and model
-  choice, Local AI with no provider key, or starting the rehearsal with no AI
-  armed yet.
-- The rehearsal start flow stays on the node settings page so you can watch
-  node readiness, seeded flip counts, and logs instead of being moved directly
-  into the validation wait screen.
-- GPT-5.5 is the default OpenAI model, with short-session OpenAI defaults aimed
-  at more expensive but faster/reasoned runs. The short-session path keeps a
-  deadline guard so it submits the latest available decision, or a deterministic
-  fallback if no result exists near the cutoff.
-- Benchmark telemetry and the rehearsal benchmark audit now show candidate
-  stories in the same vertical four-panel flip form as the validation session,
-  instead of flattened landscape thumbnails or a 2x2 grid.
-- The bundled `idena.social-ui` snapshot is updated to upstream `v11.3.0`
-  while keeping the local desktop/on-chain bridge integration. Upstream ad
-  fetching and ad panels are removed from the IdenaAI bundle.
-- The experimental `probability_ensemble` solver mode is now the default for
-  remote-provider validation solving. It scores both candidate stories
-  independently, can swap presentation order inside tracked probability runs,
-  and aggregates in application code. Benchmark it in rehearsal/off-chain mode
-  before using it near a valuable identity.
-- Validation AI cost tracking was corrected after the rehearsal cost-tracker
-  bug. The in-app tracker now better reflects the app's own token accounting
-  and pricing path for validation solve and automatic report-review steps, but
-  it remains local telemetry, not a billing guarantee from any provider.
-- Rehearsal recovery fixes now also apply to the real validation path. Empty
-  short-session fetches no longer persist a fake terminal failure, assigned
-  short-session failures still fail explicitly, and long-session AI fallbacks
-  avoid submitting forced random answers when a remote provider cannot return a
-  usable result.
-- IPFS inspection tooling was added for local moderation and auditing. Use
-  `npm run ipfs:inspect` for RPC-backed inspection while the node is reachable,
-  or `npm run ipfs:inspect:offline` to inspect the stopped embedded repo.
-- Provider cost warning: some `v0.0.7` flips trigger long reasoning chains.
-  One hard identity session can cost not only about `$1`, but around `$10` or
-  more depending on model, flips, retries, and provider pricing. Future updates
-  should make limits clearer and more controllable; for now, use prepaid API
-  keys or hard provider budgets and treat all provider spend as your own
-  responsibility.
-- Remote-provider spend is now guarded locally by a daily API budget cap. It is
-  on by default at `$15` per calendar day for the app profile, counts validation
-  solves, report review, standalone rehearsal solver lanes, AI-assisted flip
-  building, and AI image search, and blocks further remote-provider calls once
-  reached. Raising the cap now goes through an explicit warning dialog; the main
-  provider bridge also expects a budget contract for remote calls so missed UI
-  paths fail closed instead of silently spending. You can still disable the
-  guardrail in `Settings -> AI`, but that is an explicit choice to accept
-  uncapped provider billing. This is a local warning system, not provider-side
-  billing protection.
-- Validation AI decisions now store compact local learning records after real
-  and rehearsal solve runs. These records keep the answer, confidence,
-  short factual observations, testable visual hypotheses, known risks, and
-  benchmark/consensus comparison when a label is available. They do not store
-  flip image payloads and they do not trigger extra provider calls.
-- The Windows route shares the same JavaScript/Electron solver logic, but it
-  still needs more real Windows rehearsal history before it should be treated as
-  fully tested for valuable validation.
+- Remote-provider validation solving uses probability ensemble by default.
+- Rehearsal remote-provider autosolve now follows the same probability
+  ensemble path as real validation.
+- Normal live solving no longer globally swaps left/right sides. Candidate
+  order swapping is only allowed inside tracked probability-ensemble runs.
+- Long-session submission keeps side choice and grade/report data separate.
+  `GradeC` and `Inappropriate` cannot be submitted as side choices.
+- The failed long-session mode was removed from default/rehearsal paths.
+- Rehearsal lanes use composite flip payloads like the live path.
+- Long-session rehearsal can keep low-delta probability results as `skip` for
+  audit instead of forcing the old binary side-choice fallback.
+- The validation AI cost tracker bug was addressed. Local tracking is better,
+  but provider billing remains the user's responsibility.
+- `idena.social-ui` is bundled from upstream `v11.3.0` with ad fetching and ad
+  panels removed from the desktop bundle.
+- Local IPFS inspection commands are available for moderation/audit work.
 
 ## Own Risk And Cost Responsibility
 
-IdenaAI is experimental research software. Running this app, running a node,
-autosolving, inspecting or serving IPFS data, using hosted AI providers, and
-validating a real identity are all at your own risk. Unexpected behavior,
-unexpected network effects, unexpected validation outcomes, unexpected pinned
-or fetched data, and unexpected provider charges are your own responsibility.
+Running IdenaAI, running a node, validating a real identity, autosolving,
+serving or inspecting IPFS data, and using hosted AI providers are all at your
+own risk.
 
-Local cost control does not equal provider-side cost control. IdenaAI can show
-local estimates, track local token usage, warn locally, and block calls from
-this app profile when its local budget guardrail is reached. It cannot
-guarantee what OpenAI or any other provider will bill, cannot control usage
-outside this app, cannot prevent provider-side retries or minimum charges, and
-cannot protect you from future provider pricing changes. Use prepaid keys,
-hard provider-side budgets, billing alerts, and provider dashboards if cost
-exposure matters.
+Local cost control is not provider-side cost control. IdenaAI can estimate
+usage, track local token accounting, warn locally, and stop calls from this app
+profile once its local budget cap is reached. It cannot control what OpenAI,
+Gemini, Anthropic, OpenRouter, or any other provider bills. Use prepaid keys,
+hard provider-side budgets, provider dashboards, and billing alerts.
 
-## Quick Rehearsal Tester Path
+Do not use valuable identities, unattended validation, or auto top-up provider
+billing unless you have audited the code and accepted the risk.
 
-Use this path before trying any real validation identity:
+## Quick Start From Source
 
-1. Open the installed `IdenaAI` folder in a terminal and run `npm start`.
-2. In the app, open `Settings -> Node`.
-3. For a clean local rehearsal, turn off `Run built-in node`.
-4. Click `Start autosolve rehearsal`.
-5. In the setup dialog choose one path:
-   - `Remote provider API`: paste a provider key and choose a model.
-   - `Local AI runtime`: use the configured local runtime; no provider key is
-     needed.
-   - `No AI yet`: start only the rehearsal network and arm AI later if needed.
-6. If you use OpenAI or another remote provider, prefer a prepaid API key or a
-   hard provider budget with no automatic top-up. `v0.0.7` testing showed that
-   hard flips can make one identity cost about `$10` or more, not just `$1`.
-   This software is experimental; you are responsible for possible API costs,
-   node behavior, and validation results.
-   IdenaAI also has a local daily API budget guardrail enabled by default at
-   `$15`. It now covers autosolving, report review, rehearsal lanes, flip
-   building, and AI image search. Keep it on unless you deliberately accept
-   higher hosted-provider spend for the current day.
-   Take care: the rehearsal topology can exercise one primary identity plus
-   nine optional participant identities. A remote-provider rehearsal can
-   therefore multiply cost up to 10 identities.
-7. After start, stay on `Settings -> Node` and watch the node stats and log.
-8. Wait until all local rehearsal nodes are ready/online/connected and the
-   seeded FLIP-Challenge flips are visible or confirmed. The default topology
-   is one bootstrap node plus nine validator identities.
-9. Let the countdown reach zero, watch the solve session, then review the
-   audit/results screen at the end.
+Requirements:
 
-## Large Bundled Artifacts
+- macOS, Windows, or Linux
+- Node.js `24.15.x`
+- npm `11.12.x`
+- Git
 
-This repo intentionally carries large static libraries in
-`idena-wasm-binding/lib/` for reproducible local node builds. The macOS arm64
-node build script remaps Rust source paths before rebuilding
-`libidena_wasm_darwin_arm64.a`, so the checked-in library can be verified
-without exposing local machine paths:
+Install and run:
 
 ```bash
-strings idena-wasm-binding/lib/libidena_wasm_darwin_arm64.a | rg '/Users/|/private/var|sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|OPENAI_API_KEY'
-```
-
-That command should print no matches.
-
-## First Installation
-
-- [first installation on mac](#first-installation-on-mac)
-- [first installation on windows](#first-installation-on-windows)
-- [first installation on VPS Linux, not fully tested yet](#first-installation-on-vps-linux-not-fully-tested-yet)
-
-Use the walkthrough for your operating system only. On Mac, open the Terminal
-app. On Windows, open Windows PowerShell or Windows Terminal with a PowerShell
-tab. Do not paste Windows PowerShell commands into Mac Terminal, and do not
-paste Mac Terminal commands into Windows PowerShell.
-
-For each step, copy only the grey code block under that step. On GitHub you can
-usually use the small copy button on the code block; otherwise select the lines
-and copy with `Cmd+C` on Mac or `Ctrl+C` on Windows. Paste into the terminal
-with `Cmd+V` on Mac or `Ctrl+V` / right-click on Windows, then press `Enter` if
-it does not start automatically. Wait until the command finishes and the normal
-prompt comes back before moving to the next step. If a password is requested on
-Mac, type it even if no characters appear. If an installer window opens, finish
-that installer before continuing.
-
-If a command shows an error, stop at that step. Copy the command you ran, the
-full error text, your operating system version, and the output from
-`npm run doctor` if available, then ask an AI assistant or someone technical to
-help debug that exact step.
-
-## First Installation On Mac
-
-These steps assume a fresh macOS machine with no Git, Node, npm, Go, Python, or
-Homebrew already prepared. Open Terminal from `Applications -> Utilities` or
-with Spotlight search, then run each code block in order. The final `npm start`
-command opens IdenaAI inside Electron from the source checkout.
-
-The correct window is the normal macOS Terminal app, usually with a prompt that
-ends in `%` or `$`. These are shell commands; do not paste them into a browser,
-TextEdit, or the IdenaAI app itself.
-
-Experimental safety warning: there are no warranties. This code can be buggy,
-unsafe, or wrong, and autosolve can affect a real validation session. Run it
-only on a secure test system with no private data, no valuable wallets, no
-valuable identity, and no important assets attached. Ideally test first with a
-clean identity and ask elsewhere for an invite if needed. Do not run this on a
-computer or profile that holds anything important.
-
-Step 1: install Apple command line tools. A system dialog may open; finish that
-installer before continuing.
-
-```bash
-xcode-select -p >/dev/null 2>&1 || xcode-select --install
-```
-
-Step 2: install Homebrew if it is missing, then load it into the current shell.
-
-```bash
-if ! command -v brew >/dev/null 2>&1; then
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-
-if [ -x /opt/homebrew/bin/brew ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -x /usr/local/bin/brew ]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-else
-  echo "Homebrew was not found after installation. Reopen Terminal and rerun this step."
-  exit 1
-fi
-```
-
-Step 3: install the required developer dependencies without NVM.
-
-```bash
-brew update
-brew install git node@24 python@3.12 go
-
-NODE24_BIN="$(brew --prefix node@24)/bin"
-case ":$PATH:" in
-  *":$NODE24_BIN:"*) ;;
-  *) echo "export PATH=\"$NODE24_BIN:\$PATH\"" >> ~/.zprofile ;;
-esac
-export PATH="$NODE24_BIN:$PATH"
-```
-
-Step 4: verify Node and npm. Continue only if Node is `v24.15.0` or newer on
-the Node 24 line. Node 25+ is intentionally rejected by this repo.
-
-```bash
-node -v
-npm -v
-npm install -g npm@11.12.0
-node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 15) { throw new Error(`IdenaAI requires Node v24.15.0 or newer on Node 24, got ${process.versions.node}`) }'
-npm -v
-git --version
-python3 --version
-go version
-```
-
-Step 5: clone or update the IdenaAI source checkout.
-
-```bash
-mkdir -p "$HOME/Documents/idena-benchmark-workspace"
-cd "$HOME/Documents/idena-benchmark-workspace"
-
-if [ -d IdenaAI/.git ]; then
-  cd IdenaAI
-  git pull --ff-only origin main
-else
-  git clone https://github.com/ubiubi18/IdenaAI.git
-  cd IdenaAI
-fi
-```
-
-Step 6: install app dependencies and prepare the bundled Idena source runtime.
-
-```bash
-npm ci
-npm run setup:sources
-npm run doctor
-```
-
-Step 7: optionally start the normal source Electron app as a smoke test. This
-uses the source-run practice profile, not the normal real app profile.
-
-```bash
+git clone https://github.com/ubiubi18/IdenaAI.git
+cd IdenaAI
+npm install
 npm start
 ```
 
-On first startup, the built-in node can take a long time before it finds usable
-P2P peers and begins real syncing. Logs such as `Peers are not found` or
-handshake timeouts do not always mean it is permanently broken; wait at least
-15-30 minutes on a stable network before judging it. Some older bootstrap nodes
-appear to be gone, so the first peer connection can be slow.
+Useful checks:
 
-Step 8: for real-session autosolve from Terminal, close the smoke-test app
-first. Then point Electron at the normal real macOS profile and set the explicit
-autosolve override:
+```bash
+npm run doctor
+npm test -- --runInBand
+npm run lint -- --quiet
+npm run audit:privacy
+```
+
+For source-built node work:
+
+```bash
+npm run setup:sources
+npm run build:node
+```
+
+Packaged builds are developer/debugging artifacts. The source run is the
+preferred path for research and auditing.
+
+## Real Validation Startup
+
+For a real validation source run on macOS, use the real app profile and allow
+session-auto only when you intentionally want it:
 
 ```bash
 cd "$HOME/Documents/idena-benchmark-workspace/IdenaAI"
-
 IDENA_DESKTOP_USER_DATA_DIR="$HOME/Library/Application Support/IdenaAI" \
 IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
 npm start
 ```
 
-Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
-
-1. Open `Settings -> AI`.
-2. Turn on AI.
-3. Choose `Use external API provider`.
-4. Set `Main AI provider` to `OpenAI`.
-5. Paste your own OpenAI API key with `Set key`.
-6. Choose the OpenAI model you intend to pay for, for example `gpt-5.5`, or
-   enter your own OpenAI model id.
-7. Click `Test connection` and continue only after it succeeds.
-
-OpenAI autosolve can spend API money and sends validation flip content to
-OpenAI for model inference. Keep provider spending limits low, do not commit or
-share your API key, and do not run this on a real identity until you understand
-the cost and privacy tradeoff.
-
-Step 10: still inside the Electron app, check all of these before clicking
-`Enable auto-solve next session`:
-
-- the startup log points to `~/Library/Application Support/IdenaAI`, not
-  `IdenaAI-runtime`
-- the app shows the real identity you intend to validate
-- the node is mainnet, synced, and eligible for the next validation
-- `Settings -> AI -> Test connection` succeeds with OpenAI
-- the IdenaAI window, Terminal, internet connection, and computer stay awake
-  through the ceremony
-- `Validation -> Enable auto-solve next session` is clicked only after every
-  check above is true
-
-This can submit answers on-chain automatically. Wrong answers, missed sessions,
-provider costs, node failures, network failures, macOS sleep, or app crashes
-are your responsibility. Do not test this first on an identity you care about.
-
-## First Installation On Windows
-
-These steps assume a fresh Windows 10 PC with no Git, Node, npm, Go, Python,
-MSYS2, MinGW, NVM, or Visual Studio build tools already prepared. Open Windows
-PowerShell from the Start menu, or open Windows Terminal and choose a PowerShell
-tab. Do not use `cmd.exe`, Git Bash, or the MSYS2 shell for these steps. Run
-each code block in order. The final `npm start` command opens IdenaAI inside
-Electron from the source checkout.
-
-The correct window usually shows a PowerShell prompt that starts with `PS` and
-ends with `>`. Some installers may ask for administrator permission in a
-separate Windows dialog; approve only if you trust the source checkout and the
-command you just ran.
-
-Experimental safety warning: there are no warranties. This code can be buggy,
-unsafe, or wrong, and autosolve can affect a real validation session. Run it
-only on a secure test system with no private data, no valuable wallets, no
-valuable identity, and no important assets attached. Ideally test first with a
-clean identity and ask elsewhere for an invite if needed. Do not run this on a
-computer or profile that holds anything important.
-
-PowerShell copy paste can behave differently across Windows terminals, keyboard
-layouts, antivirus tools, and older shells. If a copied block fails or appears
-to do nothing, do not keep pasting the whole walkthrough at once. Paste one step
-at a time, and if needed one command at a time, so you can see exactly which
-dependency is missing and fix that install manually before continuing.
-Windows Defender, firewall products, controlled folder access, corporate device
-guards, and other security tools can also block downloads, compilers, scripts,
-or app startup in ways this README cannot predict for every PC. If that happens,
-copy the exact command, the full error output, and the relevant `npm run doctor`
-output into an AI assistant or coding agent and ask for a Windows-specific
-adjustment instead of guessing.
-
-Step 1: verify `winget`. If this opens Microsoft Store, install App Installer,
-close PowerShell, reopen it, and rerun this step.
-
-```powershell
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-  Start-Process "ms-windows-store://pdp/?ProductId=9NBLGGH4NNS1"
-  throw "Install App Installer from Microsoft Store, reopen PowerShell, then rerun this step."
-}
-
-winget --version
-```
-
-Step 2: install Windows 10 prerequisites. The Visual Studio Build Tools
-installer may open a separate installer window.
-
-```powershell
-winget install --id Git.Git -e
-winget install --id OpenJS.NodeJS.LTS -e --version 24.15.0
-winget install --id Python.Python.3.12 -e
-winget install --id GoLang.Go -e
-winget install --id MSYS2.MSYS2 -e
-winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-```
-
-If `winget` cannot find the exact Node `24.15.0` package, run
-`winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 4
-shows Node `v24.15.0` or a newer `v24.x` release. Do not use NVM for Windows for
-this setup if it fails on your PC.
-
-Step 3: install the MinGW toolchain inside MSYS2 and add the detected
-`ucrt64\bin` directory to the user path.
-
-```powershell
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($null -eq $userPath) {
-  $userPath = ""
-}
-
-if (-not (Test-Path "C:\msys64\ucrt64\bin")) {
-  $cleanPath = (($userPath -split ";") | Where-Object { $_ -and $_ -ne "C:\msys64\ucrt64\bin" }) -join ";"
-  [Environment]::SetEnvironmentVariable("Path", $cleanPath, "User")
-}
-
-function Get-MsysRootCandidates {
-  $wingetRoots = @()
-  $wingetPackagesDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
-  if (Test-Path $wingetPackagesDir) {
-    $wingetRoots = Get-ChildItem $wingetPackagesDir -Directory -Filter "MSYS2.MSYS2*" -ErrorAction SilentlyContinue |
-      ForEach-Object { Join-Path $_.FullName "msys64" }
-  }
-
-  @(
-    "C:\msys64",
-    "$env:LOCALAPPDATA\Programs\msys64",
-    "$env:ProgramFiles\msys64",
-    "${env:ProgramFiles(x86)}\msys64",
-    $wingetRoots
-  ) | Where-Object { $_ -and (Test-Path (Join-Path $_ "usr\bin\bash.exe")) }
-}
-
-$msysRoot = Get-MsysRootCandidates | Select-Object -First 1
-if (-not $msysRoot) {
-  winget install --id MSYS2.MSYS2 -e
-  $msysRoot = Get-MsysRootCandidates | Select-Object -First 1
-}
-
-if (-not $msysRoot) {
-  throw "MSYS2 bash.exe was not found. Reopen PowerShell after installing MSYS2, then rerun this step."
-}
-
-$msysBash = Join-Path $msysRoot "usr\bin\bash.exe"
-$ucrtBin = Join-Path $msysRoot "ucrt64\bin"
-
-& $msysBash -lc "pacman -Sy --needed --noconfirm base-devel mingw-w64-ucrt-x86_64-toolchain"
-
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($null -eq $userPath) {
-  $userPath = ""
-}
-
-if ($userPath -notlike "*$ucrtBin*") {
-  [Environment]::SetEnvironmentVariable("Path", "$ucrtBin;$userPath", "User")
-}
-
-$env:Path = "$ucrtBin;$env:Path"
-
-if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
-  throw "gcc was not found after installing MSYS2. Close PowerShell, reopen it, and rerun Step 3."
-}
-
-Get-Command gcc
-gcc --version
-```
-
-Step 4: close PowerShell, reopen it, then verify Node and npm. Continue only if
-Node is `v24.15.0` or newer on the Node 24 line. Node 25+ is intentionally
-rejected by this repo.
-
-```powershell
-Get-Command node
-node -v
-npm -v
-
-$nodeVersion = [version]((node -v).TrimStart("v"))
-if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.15.0") {
-  throw "IdenaAI requires Node v24.15.0 or newer on Node 24, got v$nodeVersion"
-}
-
-npm install -g npm@11.12.0
-npm -v
-
-$npmVersion = [version](npm -v)
-if ($npmVersion -lt [version]"11.12.0") {
-  throw "IdenaAI requires npm 11.12.0 or newer, got $npmVersion"
-}
-
-git --version
-python --version
-go version
-Get-Command gcc
-gcc --version
-git config --global core.longpaths true
-```
-
-If `Get-Command node` still points to an NVM folder from an older attempt,
-remove NVM for Windows or fix `Path`, then reopen PowerShell and rerun this
-step.
-
-Step 5: clone or update the IdenaAI source checkout.
-
-```powershell
-cd $env:USERPROFILE\Documents
-
-if (Test-Path .\IdenaAI) {
-  cd IdenaAI
-  git pull --ff-only origin main
-} else {
-  git clone https://github.com/ubiubi18/IdenaAI.git
-  cd IdenaAI
-}
-```
-
-Step 6: install app dependencies, prepare the source mirrors, and build the
-pinned Idena node from source in PowerShell before Electron opens. `detached
-HEAD` messages inside `idena-go`, `idena-wasm`, or `idena-wasm-binding` are
-normal because the setup pins exact source commits.
-
-```powershell
-npm ci
-npm run setup:sources
-npm run build:node
-
-$builtNodeVersion = (& .\build\node\current\idena-go.exe --version) -join "`n"
-$builtNodeVersion
-if ($builtNodeVersion -notmatch "1\.1\.2") {
-  throw "The source-built Idena node is missing or not version 1.1.2."
-}
-
-npm run doctor
-```
-
-Step 7: optionally start the normal source Electron app as a smoke test. This
-uses the source-run practice profile, not the normal real app profile. Keep the
-`npm run build:node` result in place so `Install node` / `Update node` can copy
-the pinned source-built node instead of opening a hidden local `go.exe` build.
-
-```powershell
-npm start
-```
-
-On first startup, the built-in node can take a long time before it finds usable
-P2P peers and begins real syncing. Logs such as `Peers are not found` or
-handshake timeouts do not always mean it is permanently broken; wait at least
-15-30 minutes on a stable network before judging it. Some older bootstrap nodes
-appear to be gone, so the first peer connection can be slow.
-
-Step 8: for real-session autosolve from PowerShell, close the smoke-test app
-first. Then point Electron at the normal real Windows profile and set the
-explicit autosolve override.
-
-```powershell
-cd $env:USERPROFILE\Documents\IdenaAI
-
-$env:IDENA_DESKTOP_USER_DATA_DIR="$env:APPDATA\IdenaAI"
-$env:IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO="1"
-
-npm start
-```
-
-The override above only applies to the current PowerShell window. Close that
-PowerShell window when you are done with the real-session run.
-
-Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
-
-1. Open `Settings -> AI`.
-2. Turn on AI.
-3. Choose `Use external API provider`.
-4. Set `Main AI provider` to `OpenAI`.
-5. Paste your own OpenAI API key with `Set key`.
-6. Choose the OpenAI model you intend to pay for, for example `gpt-5.5`, or
-   enter your own OpenAI model id.
-7. Click `Test connection` and continue only after it succeeds.
-
-OpenAI autosolve can spend API money and sends validation flip content to
-OpenAI for model inference. Keep provider spending limits low, do not commit or
-share your API key, and do not run this on a real identity until you understand
-the cost and privacy tradeoff.
-
-Step 10: still inside the Electron app, check all of these before clicking
-`Enable auto-solve next session`:
-
-- the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
-- the app shows the real identity you intend to validate
-- the node is mainnet, synced, and eligible for the next validation
-- `Settings -> AI -> Test connection` succeeds with OpenAI
-- the IdenaAI window, PowerShell, internet connection, and computer stay awake
-  through the ceremony
-- `Validation -> Enable auto-solve next session` is clicked only after every
-  check above is true
-
-This can submit answers on-chain automatically. Wrong answers, missed sessions,
-provider costs, node failures, network failures, Windows sleep, or app crashes
-are your responsibility. Do not test this first on an identity you care about.
-
-## First Installation On VPS Linux, Not Fully Tested Yet
-
-This is a proposed route for an Ubuntu 22.04 or 24.04 VPS. It is not fully
-tested yet. `IdenaAI` is an Electron desktop app, so a VPS needs a real GUI
-session through VNC, RDP, or another remote desktop. Pure SSH/headless mode is
-acceptable for dependency smoke tests only, not for a real validation ceremony.
-
-Prefer Mac or Windows for your first real session until the VPS route has its
-own successful rehearsal history. If you do use a VPS, use a dedicated server,
-encrypt/back up keys yourself, keep API spending limits low, and keep the
-remote desktop open while validation is running.
-
-Step 1: install base packages, Node 24, npm 11.12, Go, and Electron runtime
-libraries.
-
-```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl git build-essential python3 python3-pip pkg-config
-
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt-get install -y nodejs golang-go
-sudo npm install -g npm@11.12.0
-
-if apt-cache show libasound2t64 >/dev/null 2>&1; then
-  ASOUND_PACKAGE=libasound2t64
-else
-  ASOUND_PACKAGE=libasound2
-fi
-
-sudo apt-get install -y \
-  "$ASOUND_PACKAGE" \
-  libgtk-3-0 \
-  libnss3 \
-  libxss1 \
-  libxtst6 \
-  libx11-xcb1 \
-  libxkbfile1 \
-  libsecret-1-dev \
-  xdg-utils \
-  xvfb \
-  xauth
-
-node -v
-npm -v
-go version
-```
-
-Step 2: install a lightweight remote desktop if the VPS image does not already
-provide one. Secure VNC with SSH tunneling or your provider firewall; do not
-expose a VNC password prompt directly to the public internet.
-
-```bash
-sudo apt-get install -y xfce4 xfce4-goodies tigervnc-standalone-server
-vncserver
-```
-
-Step 3: open a terminal inside the remote desktop session, then clone and start
-the source app.
-
-```bash
-mkdir -p "$HOME/idena-benchmark-workspace"
-cd "$HOME/idena-benchmark-workspace"
-
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
-
-npm ci
-npm run setup:sources
-npm run doctor
-npm start
-```
-
-Step 4: for a real Linux profile, close the smoke-test app first, then start
-with the Linux app-data folder explicitly selected. This real-session Linux path
-is not fully tested yet.
-
-```bash
-cd "$HOME/idena-benchmark-workspace/IdenaAI"
-
-IDENA_DESKTOP_USER_DATA_DIR="$HOME/.config/IdenaAI" \
-IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
-npm start
-```
-
-Use `Settings -> Node` for rehearsal first, then `Settings -> AI -> Test
-connection`. Do not arm a real Linux VPS validation until rehearsal, provider
-testing, remote desktop stability, time sync, networking, and restart behavior
-have all been tested on that exact server.
-
-## Use This As A Reference
-
-Do not install or run this blindly. Clone it, inspect it, ask a coding agent or
-human reviewer to explain the parts you do not understand, and adapt it to your
-own machine and risk model. The intended P2P posture is local responsibility:
-you bring your own keys, your own AI provider or local model, your own review,
-and your own decision to run.
-
-## Two Autosolver Options
-
-The install commands live in the newer first-install walkthroughs above. Use
-those sections as the source of truth:
-
-- [first installation on mac](#first-installation-on-mac)
-- [first installation on windows](#first-installation-on-windows)
-
-Keep these modes separate:
-
-- **Real session** means a real Idena validation with a real identity. Mistakes
-  can cost your validation or identity. Use only the real-session startup step
-  from the Mac or Windows walkthrough, and only after you understand the warning
-  there.
-- **Rehearsal** means a local practice network on your own computer. Use this
-  before touching a real validation. Start the normal source app, open
-  `Settings -> Node`, and use `Start and use rehearsal network`.
-- **Off-chain flip tests** stay local. Use `Flips -> New`, build or edit draft
-  flips, and run the local queue/solver controls before publishing anything.
-
-Profile rule:
-
-- plain `npm start` uses the workspace practice profile under
-  `IdenaAI-runtime/IdenaAIDev`
-- real-session startup must explicitly point at the real app data folder:
-  `~/Library/Application Support/IdenaAI` on macOS or `%APPDATA%\IdenaAI` on
-  Windows
-- if the startup log points to `IdenaAI-runtime`, you are in the practice
-  profile, not the real profile
-
-Packaged app builds are developer/debugging work, not the beginner install path.
-For first use, prefer the terminal-first source run described in the Mac or
-Windows walkthrough.
-
-Rehearsal and off-chain queue runs stay local and do not submit mainnet answers.
-Mainnet validation, reporting, wallet, and identity use remain at your own risk.
-
-## Current Autosolver Status And Probability Ensemble Research
-
-The `main` branch is the conservative integration line. It currently keeps the
-normal autosolver decision path as the default, with recent hardening focused on
-Windows validation reliability and hosted provider safety:
-
-- OpenAI/Gemini provider URLs are restricted to `http` or `https`, without
-  embedded credentials.
-- provider endpoint query strings, fragments, unsafe headers, and diagnostic
-  secret leaks are stripped or rejected where possible.
-- validation submit RPC calls use a more Windows-tolerant timeout and more
-  precise duplicate-transaction detection.
-- long-session OpenAI solving uses the more stable composite image route by
-  default, and frame-mode provider errors can retry once with a composite
-  payload before falling back.
-- short-session submit and long-session report states now give clearer UI
-  feedback, especially when no report slots are available.
-
-Platform status: the macOS source and rehearsal route is the route currently
-exercised during this research loop. The Windows route uses the same
-JavaScript/Electron solver logic and has a dedicated first-install walkthrough,
-but should still be treated as not fully tested yet for valuable real
-validation until you have a successful Windows rehearsal and smoke-test history.
-The VPS Linux route above is proposed and not fully tested yet.
-
-The GPT-5.5 probability-ensemble flip-judging redesign is now available on
-`main` and is the default remote-provider solver path. It also remains
-available on the separate research branch for isolated comparison work:
-
-```bash
-vibe/gpt55-probability-ensemble-research
-```
-
-The experimental `probability_ensemble` mode avoids asking the model to choose
-left or right immediately. It asks for independent probability scores for both
-candidate stories, optionally swaps candidate order between runs, and lets
-application code aggregate the result. The goal is to reduce early side
-anchoring and position bias. It does not eliminate model errors, provider
-outages, API cost, or validation risk.
-
-Normal live solving now keeps the original left/right order. Candidate-order
-swapping is limited to probability-ensemble audit runs where each run records
-the explicit Option A/B to original-side mapping before aggregation.
-Long-session submission keeps side choice and report/grade signals separate:
-the submitted side answer is restricted to none, left, or right, while later
-keyword/report review uses the separate grade/report field.
-
-### Three-Stage Probability Submission
-
-The safer mental model is: do not ask GPT-5.5 to guess left or right in one
-shot. Treat each flip like two possible four-panel stories and make the model
-earn the decision.
-
-1. First pass: observe and score both sides. The app trusts this pass only when
-   confidence is at least `0.95`. Anything below that is treated as not strong
-   enough for a first answer.
-2. Second pass: audit the weak points and re-score. The app accepts this pass
-   at `0.80` confidence or higher.
-3. Third pass: final adjudication. The minimum confidence gate is `0.51`. Below
-   that, the flip is still treated as unresolved unless the session deadline
-   forces the app to submit the best available result.
-
-For probability ensemble scores, the app compares the averaged left and right
-story scores:
+Before a real session:
+
+- confirm the app is connected to the real chain, not the rehearsal node
+- confirm peer count and node sync
+- confirm AI provider, model, API key, and local daily cap
+- confirm `probabilityEnsembleEnabled` is on for remote providers
+- do not run rehearsal during a real validation window
+
+## Rehearsal First
+
+Use rehearsal before real validation.
+
+1. Open `Settings -> Node`.
+2. Turn off `Run built-in node` for a clean local rehearsal.
+3. Click `Start autosolve rehearsal`.
+4. Choose one setup mode:
+   - `Remote provider API`
+   - `Local AI runtime`
+   - `No AI yet`
+5. Watch node readiness, seeded flip counts, and logs on the same settings
+   page.
+6. Open validation when the rehearsal session is ready.
+7. Review the audit/results screen after the run.
+
+Remote-provider rehearsal can run one primary identity plus optional
+participant lanes. A 9-ID participant rehearsal can multiply provider cost.
+Keep local and provider-side budgets low until you know the behavior.
+
+## Probability Ensemble
+
+The current remote-provider solver does not ask the model for a single rushed
+left/right answer. It asks for probability scores for both candidate stories.
+
+Default remote path:
+
+- score Option A and Option B independently
+- optionally swap A/B presentation inside tracked probability runs
+- map A/B scores back to original left/right before aggregation
+- choose the higher side only when the probability separation is meaningful
+- keep side choice separate from grade/report metadata
+
+Short-session OpenAI parallel mode may use two probability runs to stay inside
+the submit window. The general default is three runs.
+
+The mental model is:
+
+1. First pass: trust only very strong results, around `0.95`.
+2. Second pass: accept a clearer re-score around `0.80`.
+3. Third/final pass: use the best available probability result when time is
+   nearly gone.
+
+This reduces side and position bias. It does not eliminate model error,
+provider outages, latency risk, API cost, or validation risk.
+
+## Debugging Notes
+
+The failed long-session audit showed two important failure modes:
+
+- Long-session `answer` was allowed to collide with grade/report values. This
+  made `GradeC` / `Inappropriate` capable of replacing a left/right side
+  choice. `v0.0.8` guards this path.
+- Non-probability long solving used side-swap/remap behavior that did not match
+  real submission semantics. `v0.0.8` keeps normal solving in original order
+  and limits candidate swapping to tracked probability-ensemble runs.
+
+When debugging a future run, check:
+
+- `probabilityEnsembleEnabled`
+- `probabilityEnsemble.runs[*].optionATo` and `optionBTo`
+- `rawAnswerBeforeRemap`
+- `finalAnswerAfterRemap`
+- `sideSwapped`
+- submitted long-session `answer`
+- submitted long-session `grade`
+- provider errors, forced decisions, and skipped low-delta decisions
+- the local cost ledger and the provider dashboard
+
+Important invariant:
 
 ```text
-delta = abs(avgLeft - avgRight)
+long-session answer: none | left | right
+report/quality grade: separate grade/report field
 ```
 
-The default meaningful separation is `0.08`. If the sides are closer than that,
-the result is considered too close and should be rechecked when time allows. If
-one side is ahead by at least `0.08`, the app can choose the higher-probability
-side.
+## IPFS Inspection
 
-This helps because the model first looks, then scores each side separately,
-then challenges its own answer. That reduces position bias such as preferring
-the first, left, or Option A candidate just because of where it appears. GPT-5.5
-has been strong in this structure because it is better at structured comparison
-than at a single rushed binary choice.
-
-### Why Short Session Is Still Harder
-
-Long session can use the full careful flow more reliably. The app usually has
-more time, the images are already decoded, keywords can be loaded, and report
-review is a separate checklist step. That gives GPT-5.5 enough room to solve,
-audit, and then help with reporting.
-
-Short session cannot simply copy the long-session behavior. It has to load
-images, prepare provider payloads, run model calls, parse the result, select
-answers, and submit before the safety buffer. The current guard aims to submit
-before the final risky seconds, with a hard fallback near the end of the short
-window. That means a slow provider, a late image, or a reconnect can consume the
-time that would otherwise be used for all three probability stages.
-
-So the short-session goal is not "think forever until perfect." It is "run as
-many probability and recheck stages as the clock safely allows, then submit the
-best current result before the deadline." If no model result exists by the
-deadline guard, the app records and uses a deterministic fallback instead of
-missing the session entirely.
-
-To start probability-ensemble research from current `main`:
+RPC-backed inspection while the node is reachable:
 
 ```bash
-git fetch origin
-git switch main
-git pull --ff-only origin main
-npm ci
-npm run setup:sources
-npm start
+npm run ipfs:inspect
 ```
 
-To compare against the separate probability ensemble research branch from an
-existing checkout:
+Offline inspection of the stopped embedded repo:
 
 ```bash
-git fetch origin
-git switch vibe/gpt55-probability-ensemble-research
-npm ci
-npm run setup:sources
-npm start
+npm run ipfs:inspect:offline
 ```
 
-On Windows, keep using the Windows walkthrough prerequisites and build the
-source node before the first Electron start:
+This is a local moderation/audit aid. It does not prove authorship by itself
+and does not make third-party IPFS content safe.
 
-```powershell
-git fetch origin
-git switch vibe/gpt55-probability-ensemble-research
-npm ci
+## Local AI
+
+Local AI support is research-grade.
+
+- Local chat/code paths can use Ollama-compatible local models.
+- Local AI avoids hosted provider billing but depends on your hardware.
+- Local model licenses must be audited before redistribution or bundled use.
+- The AGInt / IdenaAI AGInt Core research fork is separate from this main app
+  integration line.
+
+## idena.social Bundle
+
+The desktop bundle includes an `idena.social-ui` snapshot for the local desktop
+integration. The v0.0.8 line keeps upstream `v11.3.0` functionality relevant to
+the desktop/on-chain bridge while removing upstream ad fetching and ad panels
+from the bundled app.
+
+## Important Local Data
+
+On macOS the main app profile is usually:
+
+```text
+~/Library/Application Support/IdenaAI
+```
+
+Important subfolders:
+
+- `node/datadir/`: node database, keys, node API key
+- `logs/`: app and node logs
+- `ai-benchmark/`: validation and AI telemetry
+- `validation-devnet/`: rehearsal node data and logs
+- `local-ai/`: local AI configuration and captures
+
+Do not commit these folders or private keys.
+
+## Useful Commands
+
+```bash
+npm start
+npm run doctor
 npm run setup:sources
 npm run build:node
-npm start
+npm run build
+npm run dist
+npm test -- --runInBand
+npm run lint -- --quiet
+npm run audit:privacy
+npm run audit:local-ai-model-licenses
+npm run ipfs:inspect
+npm run ipfs:inspect:offline
 ```
 
-Those startup commands open the normal source-run practice profile. For any
-real-session test on the research branch, use the real-profile startup command
-from the Mac or Windows walkthrough after switching branches, and confirm the
-startup log points to the real app-data folder before enabling autosolve.
+## Current Status
 
-If startup stops with `Renderer dev port 8000 is already in use`, another
-source dev runtime is still using the default renderer port. Close the existing
-IdenaAI/Electron window first, then rerun `npm start`. On macOS you can inspect
-the holder with:
+What works for research:
 
-```bash
-lsof -nP -iTCP:8000 -sTCP:LISTEN
-```
-
-If it is clearly an old IdenaAI/Next/Node dev process, stop it with:
-
-```bash
-kill <PID>
-```
-
-If you deliberately need two source checkouts open, start the second one on a
-different renderer port:
-
-```bash
-IDENA_DESKTOP_RENDERER_PORT=8001 npm start
-```
-
-Configure it in `Settings -> AI` as an advanced experimental setting:
-
-- leave the probability ensemble setting enabled for the default remote-provider
-  solver path
-- keep the short-session OpenAI default at two probability runs so the audit
-  pass has a realistic chance to finish before submit; use three or more only
-  for off-chain or rehearsal experiments where latency is not critical
-- keep swapped candidate order enabled only for the probability-ensemble audit
-  runs; the normal live solver does not globally swap left/right sides
-- benchmark on rehearsal or off-chain datasets before using it near a valuable
-  identity
-
-Do not treat probability ensemble as a production validation strategy. It is a
-test lane for measuring whether independent scoring plus aggregation improves
-FLIP judging under real provider timing and Windows route conditions.
-
-## Experimental Warning
-
-Read this part first. `v0.0.7` is not production ready.
-
-- no warranties
-- not audited
-- not externally security-reviewed
-- developed through broad, fast-moving, AI-assisted / vibe-coding iterations
-- work in progress
-- experimental software with breaking changes, wrong behavior, and rough edges
-- contains large cross-cutting changes that still need slower human review
-- not suitable for valuable identities, funds, unattended automation, or blind trust
-- not suitable for unattended on-chain validation or reporting
-- do not install or run this if you do not understand what it is doing
-- do not expect a trusted downloadable app; build and inspect locally
-- use throwaway or low-value Idena addresses only
-- do not attach valuable identities to this fork
-- use it only on a secured system you control
-- do your own research before trusting anything here
-- ask an AI agent or a human reviewer to audit the repo and adapt it to your own needs before relying on it
-
-If you are not comfortable reviewing diffs, debugging broken flows, reading logs,
-and accepting the possibility of incorrect results, do not use this build.
-
-Hosted API providers are included for user-controlled benchmarking and
-small-scale experimentation with the user's own API key. They are not a
-reliability guarantee for synchronized live validation windows. For serious use,
-prefer local models so capacity scales with your own hardware.
-
-Cost warning: `v0.0.7` can spend much more than earlier rough estimates. Some
-flips trigger long reasoning and rechecks; one identity can cost about `$10` or
-more with hosted models, and multi-identity rehearsal can multiply that. Use a
-prepaid API key or strict provider-side budget, and do not enable automatic
-top-up while testing experimental autosolver flows.
-
-IdenaAI adds a local daily API budget guardrail for remote providers. The
-default cap is `$15` per calendar day and the app blocks remote-provider
-calls after that until you approve a higher cap or turn the guardrail off. The
-cap covers validation solving, automatic report review, rehearsal solver lanes,
-AI-assisted flip building, and AI image search. Cap increases use an explicit
-warning dialog, and the main provider bridge fails closed when a remote call is
-missing budget information. This guardrail is deliberately visible in AI
-settings and the rehearsal setup flow, but it is not a billing contract.
-Provider-side prepaid credits and hard spend limits are still the real
-protection against unwanted costs.
-
-## Project Status
-
-`v0.0.7` is an auditable research checkpoint after the Node 24/Electron 41
-runtime work, source-mirror cleanup, idena.social integration, validation
-rehearsal, local AI setup, autosolver telemetry, benchmark flip-form review,
-validation recovery fixes, IPFS inspection tooling, the addressed validation AI
-cost-tracker bug, and the first probability-ensemble research startup path on
-`main`. It is not a production release and not a trusted installer
-distribution.
-
-What works today:
-
-- AI settings and hosted/local runtime controls inside the app
-- OpenAI/provider solving, benchmarking, and AI-assisted FLIP generation
-- Qwen via Ollama as the default local text and code-review path
-- validation rehearsal devnet with one default identity and an optional 9-ID
-  local capacity test
-- source-built pinned `idena-go` runtime through `npm run setup:sources` and
-  `npm run build:node`
-- session-auto research flow with route entry, provider-readiness retries,
-  deadline checks, fallback traces, cost logs, and benchmark telemetry
-- rehearsal autosolver setup from `Settings -> Node`, including remote provider,
-  Local AI, and no-AI start modes
-- advanced probability-ensemble research mode, enabled by default for remote
-  providers
-- local benchmark and run artifacts under `userData/ai-benchmark/`
-
-Recent cleanup:
-
-- packaged settings tabs navigate correctly in static Electron builds
-- the in-app identity mark has a local fallback when an asset path fails
-- old tracked source snapshots and large rehearsal shards were removed from the
-  current tree; scripts now clone/import generated local caches
-- dependency footprint work removed the direct `jimp` image stack and root
-  `idena-sdk-js` runtime dependency, upgraded Electron, and pinned source/CI
-  installs to Node `24.15.0`
-- the README now documents source-first usage and the local-build trust model
-- benchmark telemetry and audit previews now use the same vertical flip form as
-  the validation session
+- source-run Electron desktop app
+- real-chain node connection and validation UI
+- private rehearsal devnet
+- remote-provider AI solving
+- probability-ensemble validation research
+- AI cost telemetry and local daily provider guardrail
+- local AI experiments
+- IPFS inspection helpers
 
 Still experimental:
 
-- unattended on-chain validation and reporting
+- unattended real validation
+- unattended reporting
 - packaged end-user release quality
-- stable local-model defaults
+- local model defaults
 - local/federated training workflows
-- polished first-run UX across every OS and toolchain
-- full human/security review of the fast AI-assisted changes
+- AGInt research architecture
 
-Existing Git history still contains older large files. A fully small historical
-clone would require a deliberate history rewrite or a fresh source mirror.
-
-## Live Metrics
-
-The app keeps local benchmark and validation-related metrics so experiments are easier to inspect.
-
-- main local metrics path: `userData/ai-benchmark/`
-- key log file: `userData/ai-benchmark/session-metrics.jsonl`
-- local audits are written under `userData/ai-benchmark/audits/`
-- test-unit queue and run artifacts also live under the same local directory
-
-For source runs from the standard workspace layout, `npm start` resolves
-`userData` under the workspace-local runtime directory:
-
-```text
-../IdenaAI-runtime/IdenaAIDev/ai-benchmark/
-```
-
-For a packaged macOS app, the same metrics path resolves under:
-
-```text
-~/Library/Application Support/IdenaAI/ai-benchmark/
-```
-
-Treat these files as experimental diagnostics:
-
-- schemas may still change
-- entries may be incomplete during crashes or interrupted runs
-- do not build production assumptions on top of them yet
-
-## Runtime and Data Paths
-
-The app separates packaged data from source-run data.
-
-Source runs started with `npm start` use `scripts/start-electron-dev.js`, which
-defaults to a workspace-local runtime root next to the checked-out repository:
-
-```text
-../IdenaAI-runtime/IdenaAIDev/
-```
-
-For example, if the repository is checked out at:
-
-```text
-~/src/IdenaAI/
-```
-
-the default source-run `userData` path is:
-
-```text
-~/src/IdenaAI-runtime/IdenaAIDev/
-```
-
-Packaged builds default to the OS app-data directory with storage name
-`IdenaAI`; on macOS that is usually:
-
-```text
-~/Library/Application Support/IdenaAI/
-```
-
-You can override the runtime directory explicitly:
-
-```bash
-IDENA_DESKTOP_USER_DATA_DIR=/absolute/path/to/idenaai-runtime npm start
-```
-
-For real validation, do not use plain `npm start`. Use the real-session startup
-step from the Mac or Windows first-install walkthrough, which points Electron at
-the OS app-data profile and sets `IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1`
-deliberately. Plain `npm start` is a source development runtime with a separate
-practice profile, and it refuses to start if that profile has real on-chain
-`session-auto` armed.
-
-Important subdirectories inside `userData`:
-
-- `node/datadir/`: built-in node database, key material, and node API key
-- `logs/`: Electron and app logs
-- `ai-benchmark/`: validation and AI benchmark telemetry
-- `validation-devnet/`: local rehearsal-network nodes and logs
-- `local-ai/`: local AI configuration, captures, and managed-runtime state
-
-## Validation Rehearsal Devnet
-
-The repo now includes an isolated validation rehearsal path inside the desktop app.
-
-What it is:
-
-- a private local multi-node Idena network for rehearsal runs
-- seeded with FLIP-Challenge flips for local short-session practice
-- separate from mainnet and intended for protocol-flow testing
-
-What you can do from `Settings -> Node`:
-
-- start and use the rehearsal network immediately
-- start it in the background without switching the app over yet
-- run one rehearsal autosolve lane against the current local devnet status
-- optionally run nine parallel rehearsal-only participant lanes against the
-  current local devnet status
-- restart a fresh rehearsal network
-- stop the rehearsal network
-
-Behavior notes:
-
-- the app can connect to the rehearsal node for the current app session only
-- that rehearsal connection is transient and should not overwrite your normal saved node settings
-- the app exposes live status and rehearsal-network logs in the same settings panel
-- the app now waits for assigned validation hashes on the primary rehearsal node
-  before switching into validation, instead of handing over as soon as the
-  private network merely looks alive
-- the node settings screen shows assigned short/long-session flip counts on the
-  primary rehearsal node so the handoff state is visible
-- if a rehearsal run still enters validation without flips, the validation page
-  should now offer a restart path instead of hanging indefinitely in a silent
-  `0 / 0` waiting state
-- short-session AI results now remain visible briefly after submission so the
-  benchmark telemetry can still be inspected before the UI switches into long
-  session
-- long-session AI telemetry now shows per-flip decision traces, including raw
-  skips, reprompt frame-review passes, random fallback votes, and reasoning
-  summaries for those decisions
-- rehearsal results can be audited afterwards, or skipped in one click and
-  revisited later, with annotations stored for later local-training research
-- local stats and benchmark annotation can now open during the long-session
-  countdown as soon as reporting is available, instead of only after the full
-  post-session wait has ended
-- those local results and annotation screens now refresh live from persisted
-  validation state while the countdown is still running
-- the default rehearsal autosolve uses one local identity and the current AI
-  provider/model for a local dry run only
-- remote-provider rehearsal autosolve now follows the live validation
-  probability-ensemble path by default, uses composite flip payloads, and keeps
-  long-session low-delta probability results as skips instead of silently
-  exercising the older binary side-choice fallback
-- the optional nine-participant rehearsal uses the same AI provider/model,
-  staggers provider request starts, records compact per-participant telemetry,
-  and does not submit answers or touch mainnet identities
-- take care with remote providers: one primary plus nine optional rehearsal
-  participants means a full rehearsal can spend provider budget for up to 10
-  identities, roughly 10x a single-identity run depending on model and settings
-- this is still experimental and can still break in edge cases
-
-## Local AI Preparations
-
-Local AI is deliberately conservative right now.
-
-- the default text and code-review path is Qwen via Ollama:
-  `idenaai-qwen36-27b-claude-opus:q4km`
-- the source GGUF and local alias setup are documented in
-  [docs/local-ai-qwen36-gguf.md](docs/local-ai-qwen36-gguf.md)
-- this Qwen path is a practical local-first default, not a final endorsement or
-  a guarantee that the model is neutral, complete, or safe
-- local/downloadable model declarations are limited to upstream model licenses
-  that are MIT or Apache-2.0; hosted AI providers are separate user-configured
-  services and are not part of this local-model license gate
-- re-check current upstream metadata before release with
-  `npm run audit:local-ai-model-licenses`
-- smaller managed runtimes remain research fallbacks for machines that cannot
-  run the Qwen/Ollama target comfortably
-- first use asks for an explicit one-time trust approval before installing and starting managed runtime components
-- the managed runtime is loopback-only and token-gated
-- trusted runtime files and model shards are verified before startup
-- RAM estimation and reserve controls are now part of the local-runtime setup flow
-
-Prepared local model lanes currently include:
-
-| Local use | Local model or alias | Upstream model metadata | License |
-| --- | --- | --- | --- |
-| Default text/reasoning through Ollama | `idenaai-qwen36-27b-claude-opus:q4km` | `rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` | Apache-2.0 |
-| Portable direct Ollama pull target | `hf.co/rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF:Q4_K_M` | `rico03/Qwen3.6-27B-Claude-Opus-Reasoning-Distilled-GGUF` | Apache-2.0 |
-| Fast local-chat fallback | `qwen3.5:9b` | `Qwen/Qwen3.5-9B` | Apache-2.0 |
-| Compact managed runtime | `allenai/Molmo2-4B` | `allenai/Molmo2-4B` | Apache-2.0 |
-| Main managed research runtime | `allenai/Molmo2-O-7B` | `allenai/Molmo2-O-7B` | Apache-2.0 |
-| Light same-provider alternative | `OpenGVLab/InternVL3_5-1B-HF` | `OpenGVLab/InternVL3_5-1B-HF` | Apache-2.0 |
-| Heavier experimental alternative | `OpenGVLab/InternVL3_5-8B-HF` | `OpenGVLab/InternVL3_5-8B-HF` | Apache-2.0 |
-| Legacy sidecar migration marker only | `phi-3.5-vision-instruct` | `microsoft/Phi-3.5-vision-instruct` | MIT |
-
-If a future local default, fallback, or managed install profile does not return
-`apache-2.0` or `mit` from current upstream metadata, remove it from the local
-model declarations before release. Model license compatibility does not remove
-the need to review upstream model cards, dataset notes, responsible-use terms,
-runtime code, and output behavior for the user's own use case.
-
-Advanced users can still point the app at their own local-only:
-
-- Ollama runtime
-- MLX / MLX-VLM setup
-- Transformers-based server
-- `vLLM` endpoint
-
-All base models contain cultural, political, linguistic, and dataset bias. Treat
-their output with distance, review important answers yourself, and avoid turning
-one model's framing into protocol truth. A future P2P direction could be to
-train or curate an AI base model toward broader worldwide representation of
-diverse ideas, languages, and mindsets, but that is not realistic for this
-project today. For now, local AI experiments are enabled and the broader
-local-model direction is still being evaluated.
-
-## Session-Auto Validation
-
-`session-auto` is meant to reduce or remove ceremony babysitting, but it is
-still experimental and should not be blindly trusted.
-
-### Validation AI Decision Learning
-
-After a validation AI solve run, IdenaAI stores a bounded local learning dataset
-inside this app profile under the validation-results storage key
-`ai-decision-learning-records`. Each record is metadata-only: flip hash,
-session scope, provider/model/profile, selected answer, confidence, short
-reasoning note, observations, testable hypotheses, known risks, deterministic
-checks, and a match/mismatch lesson when a benchmark or consensus label is
-available.
-
-This is a local audit and rehearsal-learning layer. It does not add extra AI
-requests, does not send stored records to a provider, and does not store the flip
-image payloads. Real-session records may be unlabeled at first; they become
-useful for learning only after later human review, benchmark labels, or consensus
-data can be compared. Treat these records as debugging evidence, not as proof
-that an AI answer is correct.
-
-Plain `npm start` uses the workspace practice profile and blocks real on-chain
-`session-auto` on purpose. For a real session from Terminal, you must explicitly
-set `IDENA_DESKTOP_USER_DATA_DIR` to the real app data folder and set
-`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1`. Dev/practice runs can still run the
-off-chain solver preview and validation rehearsal network without that override.
-
-Current intended behavior:
-
-- auto-route into the validation flow when the real ceremony reaches the right phase
-- retry provider-readiness checks during the session instead of depending on a
-  single lucky startup check
-- optionally use an OpenAI-only short-session fast lane with Priority
-  processing and reduced reasoning effort, while automatically degrading to the
-  normal OpenAI plan if the API shape changes or fast-lane handling is rejected
-- keep short-session OpenAI solving parallel, but stagger provider request
-  launches by default so the API does not receive every flip request in one
-  burst
-- refuse late AI runs when too little short- or long-session time remains, with
-  short-session automation targeting submission before the final safety buffer
-- escalate uncertain flips into annotated frame-review and final adjudication
-  passes instead of silently leaving them as skips
-- if a flip still cannot be resolved after those passes, apply a forced fallback
-  vote and record that fact in telemetry rather than hiding the outcome
-- submit long-session answers automatically even when delayed AI report review is
-  disabled, unsupported, or fails
-- start automatic report review early enough to keep a 3-minute safety window;
-  inside that window, use the fast report path with parallel calls, no keyword
-  wait loop, no retries, and shorter provider timeouts
-
-Current limitation:
-
-- short session is still the hardest window to hit reliably because image fetch,
-  node readiness, and model latency all compete with protocol timing
-- you should still assume short-session automation can miss under bad network,
-  slow provider, or reconnect-heavy conditions
-
-## Real Session Auto-Solve With OpenAI
-
-Use this path only if you understand the risk. There are no guarantees: the app,
-the node, the OpenAI API, the model, the network, or your machine can fail at
-the wrong time. The AI can also submit wrong answers. Any missed validation,
-wrong submission, reward loss, identity impact, API cost, or other consequence
-is your own responsibility.
-
-Use the first-install walkthroughs as the source of truth for startup commands:
-
-- [first installation on mac](#first-installation-on-mac)
-- [first installation on windows](#first-installation-on-windows)
-
-Before arming real session-auto:
-
-- close every other IdenaAI app/window
-- back up the identity/private key yourself
-- start IdenaAI from the real-session step for your operating system
-- confirm the selected profile is mainnet, not the rehearsal node
-- confirm the identity is eligible for the next validation
-- confirm `Settings -> AI -> Test connection` works before the ceremony
-- keep the node online, synced, and eligible for the next ceremony
-- keep the app open, the computer awake, and the internet connection stable
-- stay nearby and watch the ceremony; this is not unattended production software
-- keep API spending limits low
-
-OpenAI `gpt-5.5` example:
-
-1. Start IdenaAI with the real-session command from the Mac or Windows
-   walkthrough above.
-2. Make sure the app is using your real mainnet identity and real mainnet node,
-   not the validation rehearsal network.
-3. Open `Settings -> AI`.
-4. Turn on AI.
-5. Choose `Use external API provider`.
-6. Set `Main AI provider` to `OpenAI`.
-7. Paste your OpenAI API key and click `Set key`.
-8. Choose `gpt-5.5`, or enter `gpt-5.5` as the custom model id.
-9. Click `Test connection` and confirm the configured model works before the
-   validation window.
-10. Open `Validation`.
-11. Click `Enable auto-solve next session`.
-12. Keep the IdenaAI window and Terminal running through the ceremony and
-    monitor short and long session submissions.
-
-Do not commit API keys, screenshots containing keys, `settings.json`, node data,
-or files from `~/Library/Application Support/IdenaAI/`. Keep provider spending
-limits low until you have your own successful rehearsal and smoke-test history.
-`IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1` is a deliberate override for real
-Terminal session-auto. Do not add it casually to normal practice runs.
-
-## Safety and Privacy
-
-Treat this repository as test software and assume mistakes are possible.
-
-Recommended precautions:
-
-- use a low-value or disposable Idena identity
-- do not attach valuable identities, valuable wallets, or long-lived production secrets
-- keep provider budgets small
-- prefer a separate machine, VM, or OS user profile
-- use only a secured system you control
-- review AI-generated flips manually before publishing on-chain
-- review local runtime downloads and diffs before trusting them
-- ask an AI agent to audit your local branch and adjust it to your own threat model
-
-If human annotations are later used for shared training, those contributions may
-become part of propagated model artifacts. Only contribute material you have the
-right to share.
-
-## Standalone Boundary and Dependency Footprint
-
-The project boundary is intentionally split:
-
-- `idena-go` is the Bitcoin-like standalone protocol layer: one node binary plus
-  its data directory, with no npm runtime requirement
-- IdenaAI desktop is an optional Electron UX shell for node control, social UI,
-  validation rehearsal, and AI research
-- local AI models are downloaded only on demand and should not be bundled into
-  repo history or release artifacts
-- vendored `idena.social-ui` output must not bring its own `node_modules` into
-  packaged builds
-
-Dependency policy:
-
-- prefer browser Canvas, built-in `fetch`, Node core modules, and small internal
-  helpers before adding runtime npm packages
-- keep heavier migrations, such as storage or UI framework replacement, as
-  separate reviewed work
-- keep future Electron upgrades as separate modernization work. The current
-  desktop line pins Electron to `41.3.0` and requires Node `24.15.0+` on Node
-  24 LTS; `.nvmrc`, `.node-version`, and CI currently pin Node `24.15.0` for
-  reproducible installs and builds
-- use `npm run audit:deps` to inspect root runtime deps, production transitive
-  package count, largest installed packages, production audit summary, and
-  packaged-file risk
-- new root runtime dependencies should update
-  `scripts/dependency-footprint-baseline.json` only when the extra surface is
-  intentional
-
-## Install and Run from Source
-
-For first installation, use the Mac or Windows walkthrough near the top of this
-README. Those sections are the source of truth for dependency setup,
-copy-paste guidance, Windows source-built node steps, and real-profile startup.
-
-- [first installation on mac](#first-installation-on-mac)
-- [first installation on windows](#first-installation-on-windows)
-
-Do not expect a trusted installer or ready-made build to download. Treat this
-repo as a reference implementation that you clone, inspect, adapt, and run on
-your own machine. If a command fails, copy the full command, full error output,
-your OS/CPU, and `node -v && npm -v` into a coding agent or give it to someone
-with real local knowledge of your system.
-
-Developer quick reference after dependencies are already installed:
-
-```bash
-git clone https://github.com/ubiubi18/IdenaAI.git
-cd IdenaAI
-npm ci
-npm run setup:sources
-npm run doctor
-npm start
-```
-
-Useful checks and local builds:
-
-```bash
-npm run doctor
-npm run audit:privacy
-npm run audit:electron
-npm run audit:deps
-npm test
-npm run build
-npm run dist
-```
-
-Source mirrors and FLIP-Challenge imports:
-
-```bash
-npm run setup:sources
-npm run update:sources
-npm run setup:flips
-npm run setup:flips -- --split test --skip-flips 200 --max-flips 200
-```
-
-These commands use `scripts/source-manifest.json` and default to pinned
-`ubiubi18` mirrors for `idena-go`, `idena-wasm`, and `idena-wasm-binding`.
-Generated source directories and FLIP imports are local caches and are
-intentionally ignored by git.
-
-Linux quick start: install Git, Node 24, Python 3, Go, `build-essential` or
-equivalent, and the native build dependencies required by Electron/canvas on
-your distribution. Then use the developer quick reference above. Distribution
-package names differ, so paste terminal output into a coding agent if setup
-needs local adjustment.
-
-## In-App Paths
-
-Use these paths after the app is open. For real on-chain session automation,
-start with the real-session command in the Mac or Windows first-install
-walkthrough first.
-
-- AI backend:
-  open `Settings -> AI`, turn on AI, choose an external provider or managed
-  local runtime, set your own key/model if needed, and click `Test connection`.
-  OpenAI `gpt-5.5` is one supported hosted smoke-test target when your key has
-  access.
-- Managed local AI:
-  review the RAM/disk warning and Hugging Face trust prompt before preparing the
-  runtime. First startup can take several minutes and may fail on low-memory
-  machines.
-- Validation rehearsal:
-  open `Settings -> Node`, start `Validation Rehearsal Devnet`, wait until the
-  private network is ready, then run `Run 1 rehearsal autosolve`. Use the
-  optional 9-ID rehearsal only as a local capacity test with your own provider
-  key, machine, and cost limits.
-- Flip builder and off-chain solving:
-  open `Flips -> New`, build or edit a draft, add it to the queue, then run the
-  local solver controls before publishing anything.
-- Live validation automation:
-  complete rehearsal first, use only the real-session startup command for your
-  OS, open `Validation`, click `Enable auto-solve next session`, and watch the
-  ceremony. This can miss, submit wrong answers, spend API money, or damage an
-  identity.
-- Results and logs:
-  local run data is written under `userData/ai-benchmark/`, including
-  `session-metrics.jsonl`, local audit output under `audits/`, and post-session
-  stats/fallback traces where available.
-
-## Training Workflow
-
-The local FLIP training stack remains in the repo for research.
-
-It currently supports:
-
-- FLIP-Challenge dataset prep from Hugging Face
-- human-teacher annotation import
-- local LoRA pilot training experiments
-- matrix comparison of baseline vs human-assisted modes
-- side-by-side comparison of `best_single` vs `deepfunding`
-
-Important limitation:
-
-- no approved bundled local training base model is currently endorsed by the project
-
-Start here:
-
-- [docs/flip-challenge-local-training.md](docs/flip-challenge-local-training.md)
-
-Related notes:
-
-- [docs/local-ai-mvp-architecture.md](docs/local-ai-mvp-architecture.md)
-- [docs/federated-model-distribution.md](docs/federated-model-distribution.md)
-- [docs/federated-human-teacher-protocol.md](docs/federated-human-teacher-protocol.md)
-
-## Source Mirrors and Smaller Checkouts
-
-The old bundled `idena-go`, `idena-wasm`, and `idena-wasm-binding` source trees
-are no longer tracked in this repo. They are generated local caches now. Use
-scripts when you need them:
-
-```bash
-npm run doctor
-npm run setup:sources
-npm run setup:flips
-```
-
-`setup:sources` clones the pinned `ubiubi18` mirrors from
-`scripts/source-manifest.json`. `setup:flips` imports FLIP-Challenge data into
-`data/`, which is also ignored by git. The repo keeps only the small bundled
-demo samples needed for smoke tests and quick rehearsal.
-
-The managed `idena-go` runtime is source-first too:
-
-- packaged apps copy a platform node binary bundled at build time
-- source checkouts can build the node locally with `npm run build:node`
-- Windows first-install commands run `npm run build:node` before the first
-  Electron startup so the in-app `Install node` / `Update node` action can copy
-  the pinned source-built node instead of opening a hidden local `go.exe` build
-- runtime release lookup defaults to `ubiubi18/idena-go` only and should remain
-  a fallback path, not the normal Windows source-run installation path
-- override release repos through `IDENAAI_NODE_RELEASE_REPOS` or force remote
-  release lookup through `IDENAAI_NODE_PREFER_REMOTE_RELEASE=1` only if you
-  intentionally trust the replacement source
-
-Do not assume the official `idena-desktop` app release path is repaired. The
-upstream PRs below explain the desktop failure mode and proposed fixes, but they
-are not a reliable default app binary source for this repo because they are
-still unmerged or draft at the time of this README update:
-
-- [`idena-network/idena-wasm-binding#1`](https://github.com/idena-network/idena-wasm-binding/pull/1):
-  open PR adding the Darwin arm64 wasm binding archive
-- [`idena-network/idena-go#1158`](https://github.com/idena-network/idena-go/pull/1158):
-  draft PR for minimal Apple Silicon compatibility
-- [`idena-network/idena-go#1157`](https://github.com/idena-network/idena-go/pull/1157):
-  open PR pinning old Windows/macOS release runners, without adding native Apple
-  Silicon release support
-
-That is why this repo uses pinned source mirrors and local builds first. Treat
-remote binary downloads as an explicit trust decision, not the normal path.
-
-This reduces future checkout/source-archive friction, but it does not erase the
-large files from existing Git history. A fully small historical clone would need
-a separate history rewrite or a fresh source mirror.
-
-If public release packaging becomes more formal later:
-
-- keep those files under review before every tag
-- keep clone/update scripts and local generated caches instead of recommitting
-  large bundles
-- consider Git LFS or external release artifacts only for data that cannot be
-  generated or fetched locally
-- make sure `THIRD_PARTY_NOTICES.md` ships with any redistributed binary bundle
-
-## Development History
-
-Very short overview:
-
-- `Phase 1`: desktop fork created to explore AI inside `idena-desktop`
-- `Phase 2`: human-teacher annotation and local training research were added
-- `Phase 3`: provider benchmarking, solving, and generation were separated from local-model-training semantics
-- `Phase 4`: the old local base-model direction was reset and the project returned to embryo stage for local AI while `Molmo2-O` and alternative managed lanes are evaluated
-- `Phase 5`: local rehearsal devnet controls, live metrics, and explicit managed-runtime preparation lanes were added to tighten the research loop inside the app
-- `Phase 6`: dependency footprint work removed the old direct `jimp` and
-  `idena-sdk-js` runtime paths, added dependency audits, and upgraded the
-  Electron runtime to `41.3.0`
-- `Phase 7`: session-auto validation was hardened with short-session parallel
-  solving, long-session staggered solving, AI cost telemetry, report-review
-  deadlines, local rehearsal audit, and explicit fallback traces
-- `Phase 8`: local AI setup was hardened with a compact 4B default, RAM-fit
-  warnings, Hugging Face trust dialogs, abort/switch controls, and
-  workspace-local dev data paths
-- `Phase 9`: the install and CI runtime was standardized on Node `24.15.0`
-  through `.nvmrc`, `.node-version`, package `engines`, preinstall checks, and
-  GitHub Actions
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+Do not treat this as a production wallet or a guaranteed validation tool.
