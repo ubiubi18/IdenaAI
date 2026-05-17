@@ -1420,7 +1420,7 @@ function buildValidationDevnetSolverProviderPayload(
     probabilityEnsembleEnabled: provider !== 'local-ai',
     probabilityRuns:
       Number.isInteger(probabilityRuns) && probabilityRuns > 0
-        ? Math.max(1, Math.min(5, probabilityRuns))
+        ? Math.max(1, Math.min(3, probabilityRuns))
         : STRICT_PROFILE.probabilityRuns,
     probabilityPasses: STRICT_PROFILE.probabilityPasses,
     probabilityDecisionDelta:
