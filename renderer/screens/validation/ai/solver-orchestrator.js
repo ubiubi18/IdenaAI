@@ -2172,7 +2172,7 @@ export async function solveValidationSessionWithAi({
       return {
         payloadFlip: preparedFlip.payloadFlip,
         index: preparedFlip.index,
-        solved: buildForcedRandomSolvedFlip({
+        solved: buildSessionFallbackSolvedFlip({
           hash: preparedFlip.payloadFlip.hash,
           index: preparedFlip.index,
           error: 'safe_submit_guard',
@@ -2201,7 +2201,7 @@ export async function solveValidationSessionWithAi({
         : {
             payloadFlip: preparedFlip.payloadFlip,
             index: preparedFlip.index,
-            solved: buildForcedRandomSolvedFlip({
+            solved: buildSessionFallbackSolvedFlip({
               hash: preparedFlip.payloadFlip.hash,
               index: preparedFlip.index,
               error: 'safe_submit_guard',
