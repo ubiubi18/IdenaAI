@@ -88,7 +88,9 @@ async function main() {
     const sha = result.sha ? ` (${result.sha.slice(0, 12)})` : ''
 
     console.log(
-      `${status.padEnd(7)} ${result.license || 'missing-license'} ${check.localModel} -> ${check.hfModel}${revision}${sha}`
+      `${status.padEnd(7)} ${result.license || 'missing-license'} ${
+        check.localModel
+      } -> ${check.hfModel}${revision}${sha}`
     )
 
     if (!allowed) {

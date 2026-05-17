@@ -750,6 +750,10 @@ application code aggregate the result. The goal is to reduce early side
 anchoring and position bias. It does not eliminate model errors, provider
 outages, API cost, or validation risk.
 
+Normal live solving now keeps the original left/right order. Candidate-order
+swapping is limited to probability-ensemble audit runs where each run records
+the explicit Option A/B to original-side mapping before aggregation.
+
 ### Three-Stage Probability Submission
 
 The safer mental model is: do not ask GPT-5.5 to guess left or right in one
@@ -870,7 +874,8 @@ Configure it in `Settings -> AI` as an advanced experimental option:
 - keep the short-session OpenAI default at two probability runs so the audit
   pass has a realistic chance to finish before submit; use three or more only
   for off-chain or rehearsal experiments where latency is not critical
-- keep swapped candidate order enabled
+- keep swapped candidate order enabled only for the probability-ensemble audit
+  runs; the normal live solver does not globally swap left/right sides
 - benchmark on rehearsal or off-chain datasets before using it near a valuable
   identity
 
