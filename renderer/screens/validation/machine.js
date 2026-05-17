@@ -97,6 +97,9 @@ function hasAssignedShortSessionFlips(shortFlips = []) {
 }
 
 function getLongSubmitAnswer({hash, option, relevance}) {
+  // Long-session side choice is deliberately restricted to none/left/right.
+  // Reporting and quality grades travel in `grade`, so numeric grade values
+  // such as GradeC must never leak into the `answer` field.
   if (relevance === RelevanceType.Irrelevant) {
     return AnswerType.None
   }
