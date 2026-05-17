@@ -7,26 +7,20 @@ It is not a hardened wallet release, not a trusted installer distribution, and
 not a guarantee of validation success. Build and inspect it locally. Use it at
 your own risk.
 
-## v0.0.8 Focus
+## v0.0.8 Changelog
 
-This release is mainly a validation-safety and debugging release after the May
-2026 live-session audit.
+Validation-safety and debugging release after the May 2026 live-session audit.
 
-- Remote-provider validation solving uses probability ensemble by default.
-- Rehearsal remote-provider autosolve now follows the same probability
-  ensemble path as real validation.
-- Normal live solving no longer globally swaps left/right sides. Candidate
-  order swapping is only allowed inside tracked probability-ensemble runs.
-- Long-session submission keeps side choice and grade/report data separate.
-  `GradeC` and `Inappropriate` cannot be submitted as side choices.
-- The failed long-session mode was removed from default/rehearsal paths.
-- Rehearsal lanes use composite flip payloads like the live path.
-- Long-session rehearsal can keep low-delta probability results as `skip` for
-  audit instead of forcing the old binary side-choice fallback.
-- The validation AI cost tracker bug was addressed. Local tracking is better,
-  but provider billing remains the user's responsibility.
-- `idena.social-ui` is bundled from upstream `v11.3.0` with ad fetching and ad
-  panels removed from the desktop bundle.
+- Probability ensemble is now the default remote-provider validation path for
+  both real sessions and rehearsal.
+- Long-session side choices are separated from grade/report data; `GradeC` and
+  `Inappropriate` cannot be submitted as side choices.
+- The failed side-swap long-session mode was removed from default and rehearsal
+  paths.
+- The validation AI cost tracker bug was addressed, but provider-side billing
+  limits remain the user's responsibility.
+- `idena.social-ui` is bundled from upstream `v11.3.0` with ads removed from
+  the desktop bundle.
 - Local IPFS inspection commands are available for moderation/audit work.
 
 ## Own Risk And Cost Responsibility
