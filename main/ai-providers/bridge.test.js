@@ -15,6 +15,26 @@ function solveFlipBatch(bridge, payload) {
   })
 }
 
+function makeProbabilityOption(score) {
+  return {
+    chronology_probability: score,
+    cause_effect_probability: score,
+    entity_continuity_probability: score,
+    final_state_probability: score,
+    overall_story_probability: score,
+  }
+}
+
+function makeProbabilityPayload({left, right, swapped = false}) {
+  return {
+    optionA: makeProbabilityOption(swapped ? right : left),
+    optionB: makeProbabilityOption(swapped ? left : right),
+    report_risk_probability: 0,
+    text_or_order_label_risk_probability: 0,
+    uncertainty_probability: 0.05,
+  }
+}
+
 function sequenceClock(values) {
   let index = 0
   return () => {
@@ -1145,27 +1165,12 @@ describe('createAiProviderBridge', () => {
   })
 
   it('uses probability ensemble by default for remote provider solving', async () => {
-    const invokeProvider = jest.fn().mockResolvedValue(
-      JSON.stringify({
-        optionA: {
-          chronology_probability: 0.9,
-          cause_effect_probability: 0.9,
-          entity_continuity_probability: 0.9,
-          final_state_probability: 0.9,
-          overall_story_probability: 0.9,
-        },
-        optionB: {
-          chronology_probability: 0.2,
-          cause_effect_probability: 0.2,
-          entity_continuity_probability: 0.2,
-          final_state_probability: 0.2,
-          overall_story_probability: 0.2,
-        },
-        report_risk_probability: 0,
-        text_or_order_label_risk_probability: 0,
-        uncertainty_probability: 0.05,
-      })
-    )
+    const invokeProvider = jest.fn().mockImplementation(({flip}) => {
+      const swapped = Array.isArray(flip.images) && flip.images[0] === 'right'
+      return Promise.resolve(
+        JSON.stringify(makeProbabilityPayload({left: 0.9, right: 0.2, swapped}))
+      )
+    })
     const bridge = createAiProviderBridge(mockLogger(), {
       invokeProvider,
       writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
@@ -1177,10 +1182,16 @@ describe('createAiProviderBridge', () => {
       model: 'gpt-5.5',
       benchmarkProfile: 'strict',
       forceDecision: true,
-      flips: [{hash: 'flip-default-probability'}],
+      flips: [
+        {
+          hash: 'flip-default-probability',
+          leftImage: 'left',
+          rightImage: 'right',
+        },
+      ],
     })
 
-    expect(invokeProvider).toHaveBeenCalledTimes(3)
+    expect(invokeProvider).toHaveBeenCalledTimes(2)
     expect(
       invokeProvider.mock.calls.every(
         ([call]) => call.promptOptions.promptPhase === 'probability_ensemble'
@@ -1193,7 +1204,149 @@ describe('createAiProviderBridge', () => {
       finalAnswerAfterRemap: 'left',
       sideSwapped: false,
     })
-    expect(result.results[0].probabilityEnsemble.runs).toHaveLength(3)
+    expect(result.results[0].probabilityEnsemble).toMatchObject({
+      runCount: 2,
+      requestedRuns: 3,
+      earlyStopReason: 'second_run_probability_0_82_delta',
+    })
+    expect(result.results[0].probabilityEnsemble.runs).toHaveLength(2)
+  })
+
+  it('stops probability ensemble after one run when one side is at least 0.95', async () => {
+    const invokeProvider = jest
+      .fn()
+      .mockResolvedValue(
+        JSON.stringify(makeProbabilityPayload({left: 0.96, right: 0.25}))
+      )
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.solveFlipBatch({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'strict',
+      forceDecision: true,
+      flips: [{hash: 'flip-first-run-high-probability'}],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(result.results[0]).toMatchObject({
+      hash: 'flip-first-run-high-probability',
+      answer: 'left',
+    })
+    expect(result.results[0].probabilityEnsemble).toMatchObject({
+      runCount: 1,
+      requestedRuns: 3,
+      earlyStopReason: 'first_run_probability_0_95',
+    })
+  })
+
+  it('stops probability ensemble after two runs when the side aggregate reaches 0.82 with enough delta', async () => {
+    const scores = [
+      {left: 0.8, right: 0.68},
+      {left: 0.84, right: 0.66},
+    ]
+    let callIndex = 0
+    const invokeProvider = jest.fn().mockImplementation(({flip}) => {
+      const index = Math.min(callIndex, scores.length - 1)
+      callIndex += 1
+      const swapped = Array.isArray(flip.images) && flip.images[0] === 'right'
+      return Promise.resolve(
+        JSON.stringify(makeProbabilityPayload({...scores[index], swapped}))
+      )
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await solveFlipBatch(bridge, {
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 3,
+      probabilityDecisionDelta: 0.08,
+      probabilityUseSwappedOrder: true,
+      forceDecision: true,
+      flips: [
+        {
+          hash: 'flip-second-run-threshold',
+          leftImage: 'left',
+          rightImage: 'right',
+        },
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(result.results[0].answer).toBe('left')
+    expect(result.results[0].probabilities.left).toBeCloseTo(0.82)
+    expect(result.results[0].probabilities.right).toBeCloseTo(0.67)
+    expect(result.results[0].probabilityEnsemble).toMatchObject({
+      runCount: 2,
+      requestedRuns: 3,
+      earlyStopReason: 'second_run_probability_0_82_delta',
+    })
+    expect(result.results[0].probabilityEnsemble.runs[1]).toMatchObject({
+      swapped: true,
+      optionATo: 'right',
+      optionBTo: 'left',
+    })
+  })
+
+  it('uses the third probability run when the second run is still below the 0.82 aggregate threshold', async () => {
+    const scores = [
+      {left: 0.79, right: 0.74},
+      {left: 0.8, right: 0.75},
+      {left: 0.83, right: 0.72},
+    ]
+    let callIndex = 0
+    const invokeProvider = jest.fn().mockImplementation(({flip}) => {
+      const index = Math.min(callIndex, scores.length - 1)
+      callIndex += 1
+      const swapped = Array.isArray(flip.images) && flip.images[0] === 'right'
+      return Promise.resolve(
+        JSON.stringify(makeProbabilityPayload({...scores[index], swapped}))
+      )
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await solveFlipBatch(bridge, {
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 3,
+      probabilityDecisionDelta: 0.08,
+      probabilityUseSwappedOrder: true,
+      forceDecision: false,
+      flips: [
+        {
+          hash: 'flip-third-run-needed',
+          leftImage: 'left',
+          rightImage: 'right',
+        },
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(3)
+    expect(result.results[0].answer).toBe('left')
+    expect(result.results[0].probabilityEnsemble).toMatchObject({
+      skippedByDelta: false,
+    })
+    expect(result.results[0].probabilityEnsemble).toMatchObject({
+      runCount: 3,
+      requestedRuns: 3,
+      earlyStopReason: '',
+    })
   })
 
   it('tracks token usage per flip and in summary totals', async () => {

@@ -5783,7 +5783,7 @@ export default function AiSettingsPage() {
                               <Input
                                 type="number"
                                 min={1}
-                                max={5}
+                                max={3}
                                 value={aiSolver.probabilityRuns ?? 3}
                                 onChange={(e) =>
                                   updateNumberField(

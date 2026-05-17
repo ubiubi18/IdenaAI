@@ -40,6 +40,7 @@ import {
   getValidationSessionPhaseDeadlineAt,
   getValidationSessionPhaseRemainingMs,
   getValidationAutoReportDelayMs,
+  AUTO_REPORT_REVIEW_RUNTIME_BUFFER_MS,
   getShortSessionLongSessionTransitionDelayMs,
   SHORT_SESSION_AUTO_SUBMIT_BUFFER_SECONDS,
   SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
@@ -2211,7 +2212,7 @@ function ValidationSession({
             }
           : aiSolverSettings
       const displayFlips = sessionFlips(state)
-      const solveDeadlineAt = getValidationSessionPhaseDeadlineAt({
+      const rawSolveDeadlineAt = getValidationSessionPhaseDeadlineAt({
         validationStart,
         shortSessionDuration,
         longSessionDuration,
@@ -2219,7 +2220,7 @@ function ValidationSession({
         shortSessionSubmitBufferSeconds:
           SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
       })
-      const remainingSolveMs = getValidationSessionPhaseRemainingMs({
+      const rawRemainingSolveMs = getValidationSessionPhaseRemainingMs({
         validationStart,
         shortSessionDuration,
         longSessionDuration,
@@ -2227,6 +2228,20 @@ function ValidationSession({
         shortSessionSubmitBufferSeconds:
           SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
       })
+      const reserveAutoReportReviewWindow =
+        sessionType === 'long' &&
+        autoReportEnabled &&
+        global.aiSolver &&
+        typeof global.aiSolver.reviewValidationReports === 'function' &&
+        !isLocalAiProvider(solveAiSettings.provider)
+      const solveDeadlineAt =
+        reserveAutoReportReviewWindow && Number.isFinite(rawSolveDeadlineAt)
+          ? rawSolveDeadlineAt - AUTO_REPORT_REVIEW_RUNTIME_BUFFER_MS
+          : rawSolveDeadlineAt
+      const remainingSolveMs =
+        reserveAutoReportReviewWindow && Number.isFinite(rawRemainingSolveMs)
+          ? rawRemainingSolveMs - AUTO_REPORT_REVIEW_RUNTIME_BUFFER_MS
+          : rawRemainingSolveMs
       const solveBudget = estimateValidationAiSolveBudget({
         sessionType,
         shortFlips: state.context.shortFlips,
@@ -2814,6 +2829,7 @@ function ValidationSession({
     aiSolving,
     aiSessionType,
     canRunAiSolve,
+    autoReportEnabled,
     clearAutoSolveRetry,
     epoch,
     isSessionAutoMode,
@@ -3811,6 +3827,43 @@ function ValidationSession({
         return
       }
 
+      const canRunReportBeforeDeadline =
+        autoReportEnabled &&
+        canRunAutomaticReportReview &&
+        awaitingHumanReporting &&
+        !autoReportRunning &&
+        !manualReportingStartedRef.current
+
+      if (
+        canRunReportBeforeDeadline &&
+        (state.matches('longSession.solve.answer.finishFlips') ||
+          state.matches('longSession.solve.answer.keywords'))
+      ) {
+        if (state.matches('longSession.solve.answer.finishFlips')) {
+          send('START_KEYWORDS_QUALIFICATION')
+        }
+        setAutoReportDeadlineAt(Date.now())
+        if (!autoReportDeadlineAt) {
+          notifyAi(
+            t('Immediate AI auto-report armed'),
+            t(
+              'Long session is inside the deadline guard. AI report review will run now, then submit automatically.'
+            ),
+            'warning'
+          )
+        }
+        return
+      }
+
+      if (
+        autoReportEnabled &&
+        canRunAutomaticReportReview &&
+        aiSolving &&
+        state.matches('longSession.solve.answer.flips')
+      ) {
+        return
+      }
+
       longSessionDeadlineAutoSubmitRef.current = signature
       manualReportingStartedRef.current = false
       autoReportSubmitPendingRef.current = false
@@ -3844,6 +3897,12 @@ function ValidationSession({
       clearTimeout(timeoutId)
     }
   }, [
+    aiSolving,
+    autoReportDeadlineAt,
+    autoReportEnabled,
+    autoReportRunning,
+    awaitingHumanReporting,
+    canRunAutomaticReportReview,
     clearAutoSolveRetry,
     epoch,
     forceAiPreview,
