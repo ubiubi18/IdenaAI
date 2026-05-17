@@ -40,6 +40,10 @@ import {
   useSettingsState,
 } from '../../shared/providers/settings-context'
 import {
+  formatAiProviderLabel,
+  isLocalAiProvider,
+} from '../../shared/utils/ai-provider-readiness'
+import {
   DEFAULT_DEVELOPER_AI_DRAFT_TRIGGER_MODE,
   DEFAULT_DEVELOPER_AI_DRAFT_ANSWER_WINDOW_TOKENS,
   DEFAULT_DEVELOPER_AI_DRAFT_CONTEXT_WINDOW_TOKENS,
@@ -6632,8 +6636,16 @@ export default function AiHumanTeacherPage() {
   const {t} = useTranslation()
   const router = useRouter()
   const toast = useToast()
-  const {localAi} = useSettingsState()
+  const {aiSolver, localAi} = useSettingsState()
   const {updateLocalAiSettings} = useSettingsDispatch()
+  const activeAiProvider =
+    String(aiSolver?.provider || 'openai').trim() || 'openai'
+  const remoteProviderAutosolverArmed = Boolean(
+    aiSolver?.enabled &&
+      aiSolver?.mode === 'session-auto' &&
+      !isLocalAiProvider(activeAiProvider)
+  )
+  const remoteProviderAutosolverLabel = formatAiProviderLabel(activeAiProvider)
   const epochState = useEpochState()
   const queryEpoch = String(router.query?.epoch || '').trim()
   const fallbackEpoch = React.useMemo(() => {
@@ -11948,7 +11960,7 @@ export default function AiHumanTeacherPage() {
                       </Text>
                     </Box>
 
-                    <SimpleGrid columns={[1, 1, 3]} spacing={3}>
+                    <SimpleGrid columns={[1, 1, 2]} spacing={3}>
                       <Box
                         borderWidth="1px"
                         borderColor="green.100"
@@ -12060,28 +12072,46 @@ export default function AiHumanTeacherPage() {
                               )}
                             </Text>
                           </Stack>
+                          {remoteProviderAutosolverArmed ? (
+                            <Alert status="warning" borderRadius="md" py={2}>
+                              <Stack spacing={1}>
+                                <Text fontSize="sm" fontWeight={700}>
+                                  {t('Provider autosolver already armed')}
+                                </Text>
+                                <Text fontSize="xs">
+                                  {t(
+                                    '{{provider}} is already selected for real-session autosolve. Local pilot training is blocked here so you do not accidentally switch focus during a provider run.',
+                                    {provider: remoteProviderAutosolverLabel}
+                                  )}
+                                </Text>
+                              </Stack>
+                            </Alert>
+                          ) : null}
                           <SecondaryButton
                             mt="auto"
-                            isDisabled={!hasInteractiveLocalAiBridge}
+                            isDisabled={
+                              !hasInteractiveLocalAiBridge ||
+                              remoteProviderAutosolverArmed
+                            }
                             onClick={openLocalPilotTrainingDialog}
                           >
                             {t('Review local pilot training')}
                           </SecondaryButton>
                         </Stack>
                       </Box>
+
+                      {!developerStickyRunConsoleVisible ? (
+                        <LocalTrainingImpactPanel
+                          telemetry={developerTelemetry}
+                          telemetryError={developerTelemetryError}
+                          thermalSummary={developerLocalTrainingThermalSummary}
+                          isBusy={developerTelemetryIsBusy}
+                          t={t}
+                        />
+                      ) : null}
                     </SimpleGrid>
                   </Stack>
                 </Box>
-
-                {!developerStickyRunConsoleVisible ? (
-                  <LocalTrainingImpactPanel
-                    telemetry={developerTelemetry}
-                    telemetryError={developerTelemetryError}
-                    thermalSummary={developerLocalTrainingThermalSummary}
-                    isBusy={developerTelemetryIsBusy}
-                    t={t}
-                  />
-                ) : null}
                 {!developerStickyRunConsoleVisible ? (
                   <LocalTrainingRunPanel
                     activeRun={developerActiveRun}
