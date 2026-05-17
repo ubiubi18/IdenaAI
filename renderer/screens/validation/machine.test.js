@@ -340,9 +340,22 @@ describe('validation machine', () => {
     const submittedAnswers = submitShortAnswers.mock.calls[0][0]
     expect(submittedAnswers).toHaveLength(3)
     expect(submittedAnswers.every(({answer}) => answer > 0)).toBe(true)
-    expect(
-      service.state.context.shortFlips.every(({option}) => option > 0)
-    ).toBe(true)
+    expect(service.state.context.shortFlips).toEqual([
+      expect.objectContaining({
+        hash: '0xshort-answered',
+        option: AnswerType.Left,
+      }),
+      expect.objectContaining({
+        hash: '0xshort-unanswered-a',
+        option: AnswerType.Left,
+        aiForcedFallback: true,
+      }),
+      expect.objectContaining({
+        hash: '0xshort-unanswered-b',
+        option: AnswerType.Right,
+        aiForcedFallback: true,
+      }),
+    ])
 
     service.stop()
   })

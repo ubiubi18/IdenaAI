@@ -13,6 +13,7 @@ function isRenderableAiCandidateFlip(flip) {
 export function getValidationAiSessionType({
   state = null,
   submitting = false,
+  hasRenderableShortFlips = false,
   hasRenderableLongFlips = false,
 } = {}) {
   if (!state || typeof state.matches !== 'function' || submitting) {
@@ -21,7 +22,7 @@ export function getValidationAiSessionType({
 
   if (
     state.matches('shortSession.solve.answer.normal') &&
-    state.matches('shortSession.fetch.done')
+    (state.matches('shortSession.fetch.done') || hasRenderableShortFlips)
   ) {
     return 'short'
   }
@@ -111,6 +112,47 @@ export function getValidationLongAiSolveStatus({
   )
   const loadingFlips = allFlips.filter(
     (flip) => flip && !flip.failed && (!flip.ready || !flip.decoded)
+  )
+
+  return {
+    renderableDecodedFlips,
+    decodedUnansweredFlips,
+    loadingFlips,
+    decodedUnansweredHashes: decodedUnansweredFlips
+      .map(({hash}) => hash)
+      .filter(Boolean),
+    renderableDecodedFlipCount: renderableDecodedFlips.length,
+    decodedUnansweredFlipCount: decodedUnansweredFlips.length,
+    loadingFlipCount: loadingFlips.length,
+    hasDecodedUnansweredFlips: decodedUnansweredFlips.length > 0,
+    hasLoadingFlips: loadingFlips.length > 0,
+  }
+}
+
+export function getValidationShortAiSolveStatus({
+  shortFlips = [],
+  solvedHashes = [],
+} = {}) {
+  const solvedHashSet = new Set(
+    Array.isArray(solvedHashes) ? solvedHashes.filter(Boolean) : []
+  )
+  const regularFlips = (Array.isArray(shortFlips) ? shortFlips : []).filter(
+    (flip) => flip && !flip.extra
+  )
+  const renderableDecodedFlips = regularFlips.filter(
+    isRenderableAiCandidateFlip
+  )
+  const decodedUnansweredFlips = renderableDecodedFlips.filter(
+    (flip) => !isAnsweredValidationFlip(flip) && !solvedHashSet.has(flip.hash)
+  )
+  const loadingFlips = regularFlips.filter(
+    (flip) =>
+      flip &&
+      !flip.failed &&
+      (!flip.ready ||
+        !flip.decoded ||
+        !Array.isArray(flip.images) ||
+        !Array.isArray(flip.orders))
   )
 
   return {
