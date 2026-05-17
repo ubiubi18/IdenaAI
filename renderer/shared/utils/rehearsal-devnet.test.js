@@ -1,6 +1,8 @@
 const {
   buildRehearsalNetworkPayload,
   REHEARSAL_NETWORK_LEAD_SECONDS,
+  REHEARSAL_NETWORK_NODE_COUNT,
+  REHEARSAL_NETWORK_SEED_FLIP_COUNT,
 } = require('./rehearsal-devnet')
 
 describe('rehearsal devnet payloads', () => {
@@ -10,9 +12,9 @@ describe('rehearsal devnet payloads', () => {
         connectApp: true,
       })
     ).toMatchObject({
-      nodeCount: 9,
+      nodeCount: REHEARSAL_NETWORK_NODE_COUNT,
       firstCeremonyLeadSeconds: REHEARSAL_NETWORK_LEAD_SECONDS,
-      seedFlipCount: 27,
+      seedFlipCount: REHEARSAL_NETWORK_SEED_FLIP_COUNT,
       connectApp: true,
       connectCountdownSeconds: null,
     })

@@ -4875,19 +4875,6 @@ function hashScore(value) {
   return score
 }
 
-function buildSwapPlan(flips) {
-  const total = Array.isArray(flips) ? flips.length : 0
-  if (!total) {
-    return []
-  }
-
-  return flips.map((flip, index) => {
-    const marker =
-      flip && flip.hash ? String(flip.hash) : `flip-index-${String(index)}`
-    return hashScore(marker) % 2 === 0
-  })
-}
-
 function remapDecisionIfSwapped(decision, swapped) {
   if (!swapped) {
     return decision
@@ -10032,7 +10019,10 @@ Flip hash: ${hash}
         : {}
     const startedAt = now()
     const deadlineAt = startedAt + profile.deadlineMs
-    const swapPlan = buildSwapPlan(flips)
+    // Keep normal live solving in the original left/right order. The only
+    // allowed presentation swap is inside probability-ensemble runs, where each
+    // run stores an explicit Option A/B -> original-side mapping before scoring.
+    const swapPlan = flips.map(() => false)
     const interFlipDelayMs = Math.max(0, Number(profile.interFlipDelayMs) || 0)
     const onFlipStart =
       typeof payload.onFlipStart === 'function' ? payload.onFlipStart : null

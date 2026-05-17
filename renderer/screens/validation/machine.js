@@ -97,16 +97,13 @@ function hasAssignedShortSessionFlips(shortFlips = []) {
 }
 
 function getLongSubmitAnswer({hash, option, relevance}) {
-  if (relevance === RelevanceType.Relevant) {
-    return FlipGrade.GradeC
-  }
-
   if (relevance === RelevanceType.Irrelevant) {
-    return FlipGrade.Reported
+    return AnswerType.None
   }
 
-  if (Number(option) > 0) {
-    return option
+  const answer = Number(option)
+  if (answer === AnswerType.Left || answer === AnswerType.Right) {
+    return answer
   }
 
   return deterministicAnswerFallback(hash)
