@@ -72,7 +72,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
   shortSessionFlipVisionMode: 'composite',
-  probabilityEnsembleEnabled: false,
+  probabilityEnsembleEnabled: true,
   probabilityRuns: 3,
   probabilityPasses: [
     'visual_observation',

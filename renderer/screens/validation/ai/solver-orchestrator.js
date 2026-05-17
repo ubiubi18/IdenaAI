@@ -17,7 +17,7 @@ const DEFAULT_PROFILE = {
   uncertaintyRepromptInstruction: '',
   promptTemplateOverride: '',
   flipVisionMode: 'composite',
-  probabilityEnsembleEnabled: false,
+  probabilityEnsembleEnabled: true,
   probabilityRuns: 3,
   probabilityPasses: [
     'visual_observation',

@@ -81,7 +81,7 @@ describe('sanitizeBenchmarkProfile', () => {
       uncertaintyRepromptInstruction: '',
       promptTemplateOverride: '',
       flipVisionMode: 'composite',
-      probabilityEnsembleEnabled: false,
+      probabilityEnsembleEnabled: true,
       probabilityRuns: 3,
       probabilityPasses: [
         'visual_observation',

@@ -37,11 +37,11 @@ adds fixes from the rehearsal audits.
 - The bundled `idena.social-ui` snapshot is updated to upstream `v11.3.0`
   while keeping the local desktop/on-chain bridge integration. Upstream ad
   fetching and ad panels are removed from the IdenaAI bundle.
-- The experimental `probability_ensemble` solver mode is present for research
-  startup, but remains disabled by default. It scores both candidate stories
-  independently, can swap presentation order, and aggregates in application
-  code. Benchmark it in rehearsal/off-chain mode before using it near a
-  valuable identity.
+- The experimental `probability_ensemble` solver mode is now the default for
+  remote-provider validation solving. It scores both candidate stories
+  independently, can swap presentation order inside tracked probability runs,
+  and aggregates in application code. Benchmark it in rehearsal/off-chain mode
+  before using it near a valuable identity.
 - Validation AI cost tracking was corrected after the rehearsal cost-tracker
   bug. The in-app tracker now better reflects the app's own token accounting
   and pricing path for validation solve and automatic report-review steps, but
@@ -735,9 +735,8 @@ validation until you have a successful Windows rehearsal and smoke-test history.
 The VPS Linux route above is proposed and not fully tested yet.
 
 The GPT-5.5 probability-ensemble flip-judging redesign is now available on
-`main` as an advanced experimental mode, but it is not the default solver path.
-It also remains available on the separate research branch for isolated
-comparison work:
+`main` and is the default remote-provider solver path. It also remains
+available on the separate research branch for isolated comparison work:
 
 ```bash
 vibe/gpt55-probability-ensemble-research
@@ -868,9 +867,10 @@ different renderer port:
 IDENA_DESKTOP_RENDERER_PORT=8001 npm start
 ```
 
-Configure it in `Settings -> AI` as an advanced experimental option:
+Configure it in `Settings -> AI` as an advanced experimental setting:
 
-- enable the probability ensemble setting
+- leave the probability ensemble setting enabled for the default remote-provider
+  solver path
 - keep the short-session OpenAI default at two probability runs so the audit
   pass has a realistic chance to finish before submit; use three or more only
   for off-chain or rehearsal experiments where latency is not critical
@@ -952,7 +952,8 @@ What works today:
   deadline checks, fallback traces, cost logs, and benchmark telemetry
 - rehearsal autosolver setup from `Settings -> Node`, including remote provider,
   Local AI, and no-AI start modes
-- advanced probability-ensemble research mode, disabled by default
+- advanced probability-ensemble research mode, enabled by default for remote
+  providers
 - local benchmark and run artifacts under `userData/ai-benchmark/`
 
 Recent cleanup:
