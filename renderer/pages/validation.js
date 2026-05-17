@@ -128,6 +128,7 @@ import {getNodeBridge} from '../shared/utils/node-bridge'
 import {useInterval} from '../shared/hooks/use-interval'
 import {
   getValidationAiSessionType,
+  getValidationShortAiSolveStatus,
   getValidationLongAiSolveStatus,
   getValidationReportKeywordStatus,
   shouldFinishLongSessionAiSolve,
@@ -156,6 +157,7 @@ const AUTO_REPORT_DEFAULT_DELAY_MINUTES = 10
 const SESSION_AUTO_PROVIDER_RETRY_MS = 5 * 1000
 const SESSION_AUTO_SOLVE_RETRY_MS = 4 * 1000
 const SESSION_AUTO_SOLVE_ERROR_RETRY_MS = 8 * 1000
+const SHORT_SESSION_INCREMENTAL_SOLVE_RETRY_MS = 500
 const MIN_AUTO_REPORT_DELAY_MS = 15 * 1000
 const AUTO_REPORT_KEYWORD_WAIT_MS = 8 * 1000
 const AUTO_REPORT_KEYWORD_RETRY_MS = 2 * 1000
@@ -1057,6 +1059,8 @@ function ValidationSession({
     useState(false)
   const [autoSolveRetryTick, setAutoSolveRetryTick] = useState(0)
   const autoSolveStartedRef = useRef({short: false, long: false})
+  const autoSolveShortSignatureRef = useRef('')
+  const previousShortAutoSolveSignatureRef = useRef('')
   const autoSolveLongSignatureRef = useRef('')
   const autoSolveRetryAfterRef = useRef({short: 0, long: 0})
   const autoSolveRetryTimerRef = useRef({short: null, long: null})
@@ -1744,6 +1748,9 @@ function ValidationSession({
       if (key === 'long') {
         autoSolveLongSignatureRef.current = ''
       }
+      if (key === 'short') {
+        autoSolveShortSignatureRef.current = ''
+      }
 
       const previousTimer = autoSolveRetryTimerRef.current[key]
       if (previousTimer) {
@@ -1812,6 +1819,8 @@ function ValidationSession({
     })
     autoSolveStartedRef.current.short = false
     autoSolveStartedRef.current.long = false
+    autoSolveShortSignatureRef.current = ''
+    previousShortAutoSolveSignatureRef.current = ''
     autoSolveLongSignatureRef.current = ''
     clearAutoSolveRetry('short')
     clearAutoSolveRetry('long')
@@ -1823,12 +1832,17 @@ function ValidationSession({
     )
   }, [clearAutoSolveRetry, notifyAi, t, updateAiSolverSettings])
 
+  const hasRenderableShortFlips = hasRenderableValidationFlips(
+    filterRegularFlips(state.context?.shortFlips || [])
+  )
+  const hasRenderableLongFlips = hasRenderableValidationFlips(
+    state.context?.longFlips || []
+  )
   const aiSessionType = getValidationAiSessionType({
     state,
     submitting: isSubmitting(state),
-    hasRenderableLongFlips: hasRenderableValidationFlips(
-      state.context?.longFlips || []
-    ),
+    hasRenderableShortFlips,
+    hasRenderableLongFlips,
   })
 
   const canAutoRunAiSolveForCurrentPeriod = shouldAutoRunSessionForPeriod({
@@ -1957,6 +1971,8 @@ function ValidationSession({
 
     if (currentPeriod === EpochPeriod.ShortSession) {
       autoSolveStartedRef.current.short = false
+      autoSolveShortSignatureRef.current = ''
+      previousShortAutoSolveSignatureRef.current = ''
       clearAutoSolveRetry('short')
     }
 
@@ -2119,6 +2135,15 @@ function ValidationSession({
   const activeAiPriceTag =
     formatTelemetryCost(aiActiveFlip?.costs) ||
     formatTelemetryCost(aiLastRun?.summary?.costs)
+  const shortSessionAiSolveStatus = useMemo(
+    () =>
+      getValidationShortAiSolveStatus({
+        shortFlips: state.context?.shortFlips || [],
+      }),
+    [state]
+  )
+  const shortSessionAutoSolveSignature =
+    shortSessionAiSolveStatus.decodedUnansweredHashes.join(',')
   const longSessionAiSolveStatus = useMemo(
     () =>
       getValidationLongAiSolveStatus({
@@ -2698,7 +2723,7 @@ function ValidationSession({
         if (
           result.answers.length > 0 &&
           (answerStats.allAnswered ||
-            (reachedSubmitCutoff && hasEnoughAnswers(shortFlipsAfterAi)))
+            (reachedSubmitCutoff && answerStats.answered > 0))
         ) {
           clearAutoSolveRetry('short')
           send('SUBMIT')
@@ -2712,7 +2737,7 @@ function ValidationSession({
             sessionType: 'short',
             delayMs:
               result.answers.length > 0
-                ? SESSION_AUTO_SOLVE_RETRY_MS
+                ? SHORT_SESSION_INCREMENTAL_SOLVE_RETRY_MS
                 : SESSION_AUTO_SOLVE_ERROR_RETRY_MS,
           })
           notifyAi(
@@ -2801,6 +2826,9 @@ function ValidationSession({
 
       if (error?.code === 'provider_not_ready') {
         autoSolveStartedRef.current[sessionType] = false
+        if (sessionType === 'short') {
+          autoSolveShortSignatureRef.current = ''
+        }
         if (sessionType === 'long') {
           autoSolveLongSignatureRef.current = ''
         }
@@ -3395,13 +3423,12 @@ function ValidationSession({
       }
 
       const shortFlips = state.context?.shortFlips || []
-      const answerStats = getDecodedRegularAnswerStats(shortFlips)
       const hasEnoughShortAnswers = hasEnoughAnswers(shortFlips)
+      const hasAssignedRegularShortFlips = filterRegularFlips(shortFlips).some(
+        ({hash}) => String(hash || '').trim()
+      )
 
-      if (
-        !hasEnoughShortAnswers &&
-        !(isRehearsalNodeSession && answerStats.answered > 0)
-      ) {
+      if (!hasAssignedRegularShortFlips) {
         return
       }
 
@@ -3409,9 +3436,9 @@ function ValidationSession({
       clearAutoSolveRetry('short')
       notifyAi(
         t('Short session submit sent early'),
-        isRehearsalNodeSession && !hasEnoughShortAnswers
+        !hasEnoughShortAnswers
           ? t(
-              'Rehearsal short session is close to the chain cutoff, so partial answers are being submitted now to avoid a missing-answer run.'
+              'Short session is close to the chain cutoff, so available answers are being submitted now and missing regular flips use deterministic fallback votes.'
             )
           : t(
               'Short-session answers are being submitted before the final cutoff so the chain has time to include the transaction.'
@@ -3427,25 +3454,54 @@ function ValidationSession({
   )
 
   useEffect(() => {
+    if (aiSessionType !== 'short') {
+      previousShortAutoSolveSignatureRef.current = ''
+      return
+    }
+
+    if (!shortSessionAutoSolveSignature) {
+      previousShortAutoSolveSignatureRef.current = ''
+      return
+    }
+
+    if (
+      previousShortAutoSolveSignatureRef.current &&
+      previousShortAutoSolveSignatureRef.current !==
+        shortSessionAutoSolveSignature
+    ) {
+      autoSolveStartedRef.current.short = false
+      autoSolveShortSignatureRef.current = ''
+      clearAutoSolveRetry('short')
+    }
+
+    previousShortAutoSolveSignatureRef.current = shortSessionAutoSolveSignature
+  }, [aiSessionType, clearAutoSolveRetry, shortSessionAutoSolveSignature])
+
+  useEffect(() => {
     if (
       isSessionAutoMode &&
       canRunAiSolve &&
       aiSessionType === 'short' &&
       canAutoRunAiSolveForCurrentPeriod &&
+      shortSessionAutoSolveSignature &&
+      !aiSolving &&
       !isAutoSolveRetryPending('short') &&
-      !autoSolveStartedRef.current.short
+      autoSolveShortSignatureRef.current !== shortSessionAutoSolveSignature
     ) {
       autoSolveStartedRef.current.short = true
+      autoSolveShortSignatureRef.current = shortSessionAutoSolveSignature
       runAiSolve()
     }
   }, [
     aiSessionType,
+    aiSolving,
     autoSolveRetryTick,
     canAutoRunAiSolveForCurrentPeriod,
     canRunAiSolve,
     isAutoSolveRetryPending,
     isSessionAutoMode,
     runAiSolve,
+    shortSessionAutoSolveSignature,
   ])
 
   useEffect(() => {
@@ -3548,6 +3604,8 @@ function ValidationSession({
 
     shortSessionDecodeRecoveryAttemptedRef.current = true
     autoSolveStartedRef.current.short = false
+    autoSolveShortSignatureRef.current = ''
+    previousShortAutoSolveSignatureRef.current = ''
     clearAutoSolveRetry('short')
     send('REFETCH_FLIPS')
   }, [clearAutoSolveRetry, currentPeriod, forceAiPreview, send, state])
@@ -4062,6 +4120,8 @@ function ValidationSession({
   useEffect(() => {
     if (aiSessionType !== 'short') {
       autoSolveStartedRef.current.short = false
+      autoSolveShortSignatureRef.current = ''
+      previousShortAutoSolveSignatureRef.current = ''
       clearAutoSolveRetry('short')
       shortSessionDecodeRecoveryAttemptedRef.current = false
     }

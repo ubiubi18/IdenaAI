@@ -1,4 +1,4 @@
-# IdenaAI v0.0.8
+# IdenaAI v0.0.9
 
 IdenaAI is an experimental desktop fork of `idena-desktop` for validation,
 FLIP, local AI, and rehearsal research.
@@ -7,14 +7,22 @@ It is not a hardened wallet release, not a trusted installer distribution, and
 not a guarantee of validation success. Build and inspect it locally. Use it at
 your own risk.
 
-## v0.0.8 Changelog
+## v0.0.9 Changelog
 
-Safety/debugging release after the May 2026 live-session audit.
+Validation-safety release for the next real on-chain test.
 
-- Real autosolve now uses the probability-ensemble path not only in short
-  session by default, but now also in long session.
-- Cost tracking, ad-free `idena.social-ui`, and local IPFS inspection were
-  updated.
+- Short-session autosolve now sends each available flip to the provider as soon
+  as it appears, instead of waiting for every assigned flip to finish loading.
+- Short-session submission keeps a 10-second safety buffer and uses
+  deterministic fallback votes for remaining regular flips at cutoff.
+- Probability-ensemble tracking was hardened further across short and long
+  validation paths so side/order mapping stays auditable.
+- This line is ready for the next on-chain test, but rehearsal cannot prove
+  every live-chain timing and provider edge case. IdenaAI will move to v0.1.0
+  only after the first successful 100% on-chain test run.
+- Use at your own risk. Autosolve decisions, hosted provider spending, node
+  operation, IPFS data, and validation outcomes remain the user's
+  responsibility.
 
 ## Own Risk And Cost Responsibility
 
@@ -705,9 +713,9 @@ The failed long-session audit showed two important failure modes:
 
 - Long-session `answer` was allowed to collide with grade/report values. This
   made `GradeC` / `Inappropriate` capable of replacing a left/right side
-  choice. `v0.0.8` guards this path.
+  choice. `v0.0.9` guards this path.
 - Non-probability long solving used side-swap/remap behavior that did not match
-  real submission semantics. `v0.0.8` keeps normal solving in original order
+  real submission semantics. `v0.0.9` keeps normal solving in original order
   and limits candidate swapping to tracked probability-ensemble runs.
 
 When debugging a future run, check:
@@ -759,7 +767,7 @@ Local AI support is research-grade.
 ## idena.social Bundle
 
 The desktop bundle includes an `idena.social-ui` snapshot for the local desktop
-integration. The v0.0.8 line keeps upstream `v11.3.0` functionality relevant to
+integration. The v0.0.9 line keeps upstream `v11.3.0` functionality relevant to
 the desktop/on-chain bridge while removing upstream ad fetching and ad panels
 from the bundled app.
 

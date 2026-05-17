@@ -1,6 +1,7 @@
 const {EpochPeriod} = require('../types')
 const {
   getValidationAiSessionType,
+  getValidationShortAiSolveStatus,
   getValidationLongAiSolveStatus,
   getValidationReportKeywordStatus,
   hasOnchainAutoSubmitConsent,
@@ -28,6 +29,61 @@ describe('validation ai auto gating', () => {
         },
       })
     ).toBe('short')
+  })
+
+  it('offers short-session AI solve before fetch is done once any short flip is renderable', () => {
+    const activeStates = new Set(['shortSession.solve.answer.normal'])
+
+    expect(
+      getValidationAiSessionType({
+        state: {
+          matches: (value) => activeStates.has(value),
+        },
+        hasRenderableShortFlips: true,
+      })
+    ).toBe('short')
+  })
+
+  it('tracks decoded unanswered short-session flips separately from still-loading flips', () => {
+    const result = getValidationShortAiSolveStatus({
+      shortFlips: [
+        {
+          hash: '0x1',
+          ready: true,
+          decoded: true,
+          failed: false,
+          option: 0,
+          images: ['a'],
+          orders: [[0], [0]],
+        },
+        {
+          hash: '0x2',
+          ready: true,
+          decoded: true,
+          failed: false,
+          option: 1,
+          images: ['b'],
+          orders: [[0], [0]],
+        },
+        {
+          hash: '0x3',
+          ready: false,
+          decoded: false,
+          failed: false,
+        },
+        {
+          hash: '0xextra',
+          extra: true,
+          ready: false,
+          decoded: false,
+          failed: false,
+        },
+      ],
+    })
+
+    expect(result.decodedUnansweredHashes).toEqual(['0x1'])
+    expect(result.decodedUnansweredFlipCount).toBe(1)
+    expect(result.loadingFlipCount).toBe(1)
   })
 
   it('detects a long-session AI solve window when long flips are fetched', () => {
