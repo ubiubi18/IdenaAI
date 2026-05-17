@@ -686,6 +686,54 @@ describe('validation machine', () => {
     service.stop()
   })
 
+  it('never submits GradeC or Inappropriate as a long-session side answer', async () => {
+    const machine = createValidationMachine({
+      epoch: 1,
+      validationStart: Date.now() + 60 * 1000,
+      shortSessionDuration: 120,
+      longSessionDuration: 300,
+      validationSessionId: '',
+      locale: 'en',
+      initialValidationPeriod: 'long',
+      initialLongFlips: [
+        {
+          hash: '0xlong-stale-inappropriate',
+          decoded: true,
+          option: AnswerType.Inappropriate,
+          relevance: RelevanceType.Relevant,
+        },
+      ],
+    })
+
+    const service = interpret(machine).start()
+    service.send('START_LONG_SESSION')
+    service.send('SUBMIT_NOW')
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timed out waiting for stale option submit'))
+      }, 1000)
+
+      service.onTransition((state) => {
+        if (state.matches('validationSucceeded')) {
+          clearTimeout(timeout)
+          resolve()
+        }
+      })
+    })
+
+    const [[answers]] = submitLongAnswers.mock.calls
+    expect(answers[0]).toMatchObject({
+      hash: '0xlong-stale-inappropriate',
+      grade: FlipGrade.GradeD,
+    })
+    expect([AnswerType.Left, AnswerType.Right]).toContain(answers[0].answer)
+    expect(answers[0].answer).not.toBe(AnswerType.Inappropriate)
+    expect(answers[0].answer).not.toBe(FlipGrade.GradeC)
+
+    service.stop()
+  })
+
   it('treats duplicate long-answer tx errors as validation success', async () => {
     submitLongAnswers.mockRejectedValueOnce(new Error('duplicate transaction'))
 
