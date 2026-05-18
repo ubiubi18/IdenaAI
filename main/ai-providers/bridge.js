@@ -5751,6 +5751,43 @@ function normalizeValidationReportAnswer(value) {
   return answer === 'left' || answer === 'right' ? answer : null
 }
 
+function normalizeValidationReportProbability(value) {
+  const probability = Number(value)
+  if (!Number.isFinite(probability)) {
+    return null
+  }
+  return Math.max(0, Math.min(1, probability))
+}
+
+function normalizeValidationReportProbabilities(parsed) {
+  let probabilitySource = null
+  if (parsed && typeof parsed.probabilities === 'object') {
+    probabilitySource = parsed.probabilities
+  } else if (parsed && typeof parsed.sideProbabilities === 'object') {
+    probabilitySource = parsed.sideProbabilities
+  }
+  const left = normalizeValidationReportProbability(
+    probabilitySource?.left ??
+      parsed?.left_probability ??
+      parsed?.leftProbability ??
+      parsed?.probability_left ??
+      parsed?.probabilityLeft
+  )
+  const right = normalizeValidationReportProbability(
+    probabilitySource?.right ??
+      parsed?.right_probability ??
+      parsed?.rightProbability ??
+      parsed?.probability_right ??
+      parsed?.probabilityRight
+  )
+
+  if (left === null || right === null) {
+    return null
+  }
+
+  return {left, right}
+}
+
 function buildValidationReportReviewPrompt({
   keywords = [],
   reviewBothSides = false,
@@ -5785,6 +5822,7 @@ function buildValidationReportReviewPrompt({
     ? [
         'Answer-side rules:',
         '- Return "answer":"left" or "answer":"right".',
+        '- Also return calibrated side probabilities as "probabilities":{"left":0.0,"right":0.0}.',
         '- You may switch the side only in this long-session keyword/report phase.',
         '- Switch only when the alternate side is visually more coherent or materially better fits both official keywords without weaker story coherence.',
         '- Do not switch merely because one keyword is subtle; visual chronology still has priority.',
@@ -5811,7 +5849,7 @@ function buildValidationReportReviewPrompt({
     ...answerLines,
     'Return JSON only with this shape:',
     reviewBothSides
-      ? '{"answer":"left"|"right","decision":"approve"|"report","confidence":0.0,"reason":"short reason","triggeredRules":["keyword_missing"|"text_dependency"|"order_labels"|"inappropriate_content"|"unrelated_stories"|"waking_template"|"answer_cue"|"keywords_only_inside_media"]}'
+      ? '{"answer":"left"|"right","probabilities":{"left":0.0,"right":0.0},"decision":"approve"|"report","confidence":0.0,"reason":"short reason","triggeredRules":["keyword_missing"|"text_dependency"|"order_labels"|"inappropriate_content"|"unrelated_stories"|"waking_template"|"answer_cue"|"keywords_only_inside_media"]}'
       : '{"decision":"approve"|"report","confidence":0.0,"reason":"short reason","triggeredRules":["keyword_missing"|"text_dependency"|"order_labels"|"inappropriate_content"|"unrelated_stories"|"waking_template"|"answer_cue"|"keywords_only_inside_media"]}',
     '',
     'Keywords:',
@@ -5959,6 +5997,7 @@ function normalizeValidationReportDecision(parsed) {
     answer: normalizeValidationReportAnswer(
       parsed && (parsed.answer || parsed.side || parsed.correctAnswer)
     ),
+    probabilities: normalizeValidationReportProbabilities(parsed),
     decision,
     confidence: normalizeConfidence(parsed && parsed.confidence),
     reason,
@@ -5971,6 +6010,9 @@ function aggregateValidationReportReviews(reviews = []) {
   let reportScore = 0
   let leftAnswerScore = 0
   let rightAnswerScore = 0
+  let leftProbabilityScore = 0
+  let rightProbabilityScore = 0
+  let probabilityWeight = 0
   let totalWeight = 0
   let bestApprove = null
   let bestApproveScore = -1
@@ -5987,6 +6029,18 @@ function aggregateValidationReportReviews(reviews = []) {
       leftAnswerScore += score
     } else if (item && item.answer === 'right') {
       rightAnswerScore += score
+    }
+    if (
+      item &&
+      item.probabilities &&
+      Number.isFinite(Number(item.probabilities.left)) &&
+      Number.isFinite(Number(item.probabilities.right))
+    ) {
+      leftProbabilityScore +=
+        weight * normalizeConfidence(item.probabilities.left)
+      rightProbabilityScore +=
+        weight * normalizeConfidence(item.probabilities.right)
+      probabilityWeight += weight
     }
 
     if (item && item.decision === 'report') {
@@ -6006,7 +6060,19 @@ function aggregateValidationReportReviews(reviews = []) {
   })
 
   let answer = null
-  if (leftAnswerScore > rightAnswerScore) {
+  const probabilities =
+    probabilityWeight > 0
+      ? {
+          left: normalizeConfidence(leftProbabilityScore / probabilityWeight),
+          right: normalizeConfidence(rightProbabilityScore / probabilityWeight),
+        }
+      : null
+
+  if (probabilities && probabilities.left > probabilities.right) {
+    answer = 'left'
+  } else if (probabilities && probabilities.right > probabilities.left) {
+    answer = 'right'
+  } else if (leftAnswerScore > rightAnswerScore) {
     answer = 'left'
   } else if (rightAnswerScore > leftAnswerScore) {
     answer = 'right'
@@ -6015,6 +6081,7 @@ function aggregateValidationReportReviews(reviews = []) {
   if (reportScore <= 0 && approveScore <= 0) {
     return {
       answer,
+      probabilities,
       decision: 'approve',
       confidence: 0,
       reason: 'insufficient signal',
@@ -6029,6 +6096,7 @@ function aggregateValidationReportReviews(reviews = []) {
 
   return {
     answer,
+    probabilities,
     decision,
     confidence:
       totalWeight > 0 ? Math.max(0, Math.min(1, chosenScore / totalWeight)) : 0,
@@ -11292,6 +11360,7 @@ Flip hash: ${hash}
               model: consultant.model,
               weight: normalizeConsultantWeight(consultant.weight, 1),
               answer: review.answer,
+              probabilities: review.probabilities,
               decision: review.decision,
               confidence: review.confidence,
               reason: review.reason,
@@ -11345,6 +11414,7 @@ Flip hash: ${hash}
       return {
         hash: flip.hash,
         answer: aggregate.answer,
+        probabilities: aggregate.probabilities,
         decision: aggregate.decision,
         confidence: aggregate.confidence,
         reason: aggregate.reason,
@@ -11362,6 +11432,7 @@ Flip hash: ${hash}
             model: consultModel,
             weight: itemWeight,
             answer,
+            probabilities,
             decision,
             confidence,
             error,
@@ -11370,6 +11441,7 @@ Flip hash: ${hash}
             model: consultModel,
             weight: normalizeConsultantWeight(itemWeight, 1),
             answer,
+            probabilities,
             decision,
             confidence,
             error,

@@ -139,6 +139,7 @@ import {
   shouldShowValidationAiUi,
   shouldShowValidationLocalAiUi,
   selectAutoReportBestFlipHash,
+  shouldApplyAutoReportSideCorrection,
 } from '../shared/utils/validation-ai-auto'
 import {
   computeRehearsalBenchmarkSummary,
@@ -1075,6 +1076,7 @@ function ValidationSession({
   const autoReportSubmitPendingRef = useRef(false)
   const autoReportKeywordWaitStartedAtRef = useRef(null)
   const autoReportKeywordWaitNotifiedRef = useRef(false)
+  const longAiDecisionByHashRef = useRef(new Map())
   const localAiCaptureSyncRef = useRef({})
   const preparedValidationSessionRef = useRef({
     epoch: null,
@@ -2311,6 +2313,9 @@ function ValidationSession({
       setAiProgress(t('Preparing flip payloads...'))
       setAiLiveTimeline([])
       setAiActiveFlip(null)
+      if (sessionType === 'long') {
+        longAiDecisionByHashRef.current = new Map()
+      }
       setAiLastRun({
         status: 'running',
         sessionType,
@@ -2480,6 +2485,9 @@ function ValidationSession({
               flipVisionModeApplied: event.flipVisionModeApplied,
               flipVisionModeFallback: event.flipVisionModeFallback,
               firstPass: event.firstPass,
+              probabilities: event.probabilities,
+              probabilityEnsemble: event.probabilityEnsemble,
+              ensembleProbabilities: event.ensembleProbabilities,
               modelFallback: event.modelFallback,
               modelFallbacks: event.modelFallbacks,
               index: event.index,
@@ -2521,12 +2529,18 @@ function ValidationSession({
               flipVisionModeApplied: event.flipVisionModeApplied,
               flipVisionModeFallback: event.flipVisionModeFallback,
               firstPass: event.firstPass,
+              probabilities: event.probabilities,
+              probabilityEnsemble: event.probabilityEnsemble,
+              ensembleProbabilities: event.ensembleProbabilities,
               modelFallback: event.modelFallback,
               modelFallbacks: event.modelFallbacks,
               leftFrames: event.leftFrames,
               rightFrames: event.rightFrames,
             }
             liveEntries.push(entry)
+            if (event.sessionType === 'long') {
+              longAiDecisionByHashRef.current.set(event.hash, entry)
+            }
             setAiLiveTimeline((prev) => prev.concat(entry).slice(-24))
             setAiProgress(
               t(
@@ -2669,6 +2683,13 @@ function ValidationSession({
         timeline: liveEntries.slice(-24),
         completedAt: new Date().toISOString(),
       })
+      if (sessionType === 'long') {
+        longAiDecisionByHashRef.current = new Map(
+          (Array.isArray(result.results) ? result.results : [])
+            .filter((item) => item && item.hash)
+            .map((item) => [item.hash, item])
+        )
+      }
 
       if (!forceAiPreview && validationStateScope) {
         appendValidationAiCostLedgerEntry(validationStateScope, {
@@ -3223,6 +3244,7 @@ function ValidationSession({
           .map((item) => [item.hash, item])
       )
       const switchedAnswerHashes = []
+      const blockedAnswerSwitches = []
       const autoBestFlipHash =
         aiSolverSettings.autoReportBestFlipEnabled === true &&
         Object.keys(bestFlipHashes || {}).length < 1
@@ -3233,15 +3255,30 @@ function ValidationSession({
           : ''
 
       candidateSourceFlips.forEach((flip) => {
+        const reviewItem = reviewResultByHash.get(flip.hash)
         const reviewedAnswerOption = normalizeAutoReportAnswerOption(
-          reviewResultByHash.get(flip.hash)?.answer
+          reviewItem?.answer
         )
-        if (reviewedAnswerOption && reviewedAnswerOption !== flip.option) {
+        const sideCorrection = shouldApplyAutoReportSideCorrection({
+          currentOption: flip.option,
+          originalDecision: longAiDecisionByHashRef.current.get(flip.hash),
+          reviewResult: reviewItem,
+        })
+
+        if (sideCorrection.apply && sideCorrection.option !== flip.option) {
           switchedAnswerHashes.push(flip.hash)
           send({
             type: 'ANSWER',
             hash: flip.hash,
-            option: reviewedAnswerOption,
+            option: sideCorrection.option,
+          })
+        } else if (
+          reviewedAnswerOption &&
+          reviewedAnswerOption !== flip.option
+        ) {
+          blockedAnswerSwitches.push({
+            hash: flip.hash,
+            reason: sideCorrection.reason,
           })
         }
 
@@ -3281,8 +3318,8 @@ function ValidationSession({
         keywordStatus.missingKeywordFlipCount > 0
           ? t(
               autoBestFlipHash
-                ? 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s), then marked the strongest approved flip as best. Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.'
-                : 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s). Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.',
+                ? 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s), then marked the strongest approved flip as best. Blocked {{blocked}} unqualified side correction(s). Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.'
+                : 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s). Blocked {{blocked}} unqualified side correction(s). Skipped {{skipped}} flip(s) with missing keywords. Long session answers will be submitted automatically.',
               {
                 reported: reportHashSet.size,
                 approved: Math.max(
@@ -3291,12 +3328,13 @@ function ValidationSession({
                 ),
                 skipped: keywordStatus.missingKeywordFlipCount,
                 switched: switchedAnswerHashes.length,
+                blocked: blockedAnswerSwitches.length,
               }
             )
           : t(
               autoBestFlipHash
-                ? 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s), then marked the strongest approved flip as best. Long session answers will be submitted automatically.'
-                : 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s). Long session answers will be submitted automatically.',
+                ? 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s), then marked the strongest approved flip as best. Blocked {{blocked}} unqualified side correction(s). Long session answers will be submitted automatically.'
+                : 'Applied {{reported}} report decisions, {{approved}} approvals, and {{switched}} long-answer correction(s). Blocked {{blocked}} unqualified side correction(s). Long session answers will be submitted automatically.',
               {
                 reported: reportHashSet.size,
                 approved: Math.max(
@@ -3304,6 +3342,7 @@ function ValidationSession({
                   candidateSourceFlips.length - reportHashSet.size
                 ),
                 switched: switchedAnswerHashes.length,
+                blocked: blockedAnswerSwitches.length,
               }
             )
       )

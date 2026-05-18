@@ -13,6 +13,7 @@ const {
   shouldShowValidationAiUi,
   shouldShowValidationLocalAiUi,
   selectAutoReportBestFlipHash,
+  shouldApplyAutoReportSideCorrection,
 } = require('./validation-ai-auto')
 
 describe('validation ai auto gating', () => {
@@ -451,5 +452,93 @@ describe('validation ai auto gating', () => {
         reportHashes: ['0xreported'],
       })
     ).toBe('')
+  })
+
+  it('blocks auto-report side correction without probabilities', () => {
+    expect(
+      shouldApplyAutoReportSideCorrection({
+        currentOption: 1,
+        originalDecision: {probabilities: {left: 0.84, right: 0.55}},
+        reviewResult: {answer: 'right', confidence: 0.99},
+      })
+    ).toMatchObject({
+      apply: false,
+      option: 1,
+      reason: 'missing probabilities',
+    })
+  })
+
+  it('applies auto-report side correction when report probabilities pass threshold and merged check', () => {
+    expect(
+      shouldApplyAutoReportSideCorrection({
+        currentOption: 1,
+        originalDecision: {
+          probabilities: {left: 0.74, right: 0.68},
+          probabilityEnsemble: {runCount: 2},
+        },
+        reviewResult: {
+          answer: 'right',
+          probabilities: {left: 0.2, right: 0.92},
+        },
+      })
+    ).toMatchObject({
+      apply: true,
+      option: 2,
+      reason: 'merged probability check passed',
+    })
+  })
+
+  it('blocks auto-report side correction when report delta is too small', () => {
+    expect(
+      shouldApplyAutoReportSideCorrection({
+        currentOption: 1,
+        originalDecision: {probabilities: {left: 0.65, right: 0.63}},
+        reviewResult: {
+          answer: 'right',
+          probabilities: {left: 0.75, right: 0.82},
+        },
+      })
+    ).toMatchObject({
+      apply: false,
+      option: 1,
+      reason: 'below delta threshold',
+    })
+  })
+
+  it('protects strong original probability decisions from weak report corrections', () => {
+    expect(
+      shouldApplyAutoReportSideCorrection({
+        currentOption: 1,
+        originalDecision: {probabilities: {left: 0.95, right: 0.2}},
+        reviewResult: {
+          answer: 'right',
+          probabilities: {left: 0.05, right: 0.94},
+        },
+      })
+    ).toMatchObject({
+      apply: false,
+      option: 1,
+      reason: 'below probability threshold',
+    })
+  })
+
+  it('allows fallback decisions to be corrected by report probabilities', () => {
+    expect(
+      shouldApplyAutoReportSideCorrection({
+        currentOption: 1,
+        originalDecision: {
+          forcedDecision: true,
+          forcedDecisionPolicy: 'random',
+        },
+        reviewResult: {
+          answer: 'right',
+          probabilities: {left: 0.2, right: 0.84},
+        },
+      })
+    ).toMatchObject({
+      apply: true,
+      option: 2,
+      reason: 'no original probabilities',
+    })
   })
 })
