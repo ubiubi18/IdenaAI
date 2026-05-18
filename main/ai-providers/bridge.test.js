@@ -697,7 +697,7 @@ describe('createAiProviderBridge', () => {
   it('can correct the long-session answer side during keyword report review', async () => {
     const invokeProvider = jest.fn().mockResolvedValue({
       rawText:
-        '{"answer":"right","decision":"approve","confidence":0.86,"reason":"Right is the coherent keyword-matching sequence","triggeredRules":[]}',
+        '{"answer":"right","probabilities":{"left":0.2,"right":0.88},"decision":"approve","confidence":0.86,"reason":"Right is the coherent keyword-matching sequence","triggeredRules":[]}',
       usage: {
         promptTokens: 140,
         completionTokens: 28,
@@ -748,9 +748,58 @@ describe('createAiProviderBridge', () => {
     expect(invokeProvider.mock.calls[0][0].promptText).toContain(
       'Current selected answer before this report review: left.'
     )
+    expect(invokeProvider.mock.calls[0][0].promptText).toContain(
+      '"probabilities":{"left":0.0,"right":0.0}'
+    )
     expect(result.results[0]).toMatchObject({
       hash: 'flip-report-side-switch',
       answer: 'right',
+      probabilities: {
+        left: 0.2,
+        right: 0.88,
+      },
+      decision: 'approve',
+      confidence: 0.86,
+    })
+  })
+
+  it('keeps report-review side probabilities separate from plain answer confidence', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText:
+        '{"answer":"right","decision":"approve","confidence":0.86,"reason":"Right looks better","triggeredRules":[]}',
+      usage: {
+        promptTokens: 140,
+        completionTokens: 24,
+        totalTokens: 164,
+      },
+    })
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.reviewValidationReports({
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      requestTimeoutMs: 1000,
+      maxRetries: 0,
+      flips: [
+        {
+          hash: 'flip-report-side-switch-no-probability',
+          leftImages: ['left-1', 'left-2', 'left-3', 'left-4'],
+          rightImages: ['right-1', 'right-2', 'right-3', 'right-4'],
+          selectedAnswer: 'left',
+          keywords: [{name: 'lamp'}, {name: 'cat'}],
+        },
+      ],
+    })
+
+    expect(result.results[0]).toMatchObject({
+      hash: 'flip-report-side-switch-no-probability',
+      answer: 'right',
+      probabilities: null,
       decision: 'approve',
       confidence: 0.86,
     })
