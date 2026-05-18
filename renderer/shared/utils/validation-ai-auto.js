@@ -1,4 +1,9 @@
-import {EpochPeriod} from '../types'
+import {AnswerType, EpochPeriod} from '../types'
+
+export const REPORT_SIDE_SWITCH_MIN_PROBABILITY = 0.82
+export const REPORT_SIDE_SWITCH_MIN_DELTA = 0.08
+export const REPORT_SIDE_SWITCH_STRONG_ORIGINAL_MIN_PROBABILITY = 0.95
+export const REPORT_SIDE_SWITCH_STRONG_ORIGINAL_MIN_DELTA = 0.16
 
 function isAnsweredValidationFlip(flip) {
   return Number(flip?.option) > 0
@@ -8,6 +13,185 @@ function isRenderableAiCandidateFlip(flip) {
   return Boolean(
     flip && flip.decoded && !flip.failed && flip.images && flip.orders
   )
+}
+
+function normalizeProbability(value) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+  return Math.max(0, Math.min(1, parsed))
+}
+
+function normalizeSideProbabilities(source) {
+  let probabilities = source
+  if (source && typeof source.probabilities === 'object') {
+    probabilities = source.probabilities
+  } else if (source && typeof source.sideProbabilities === 'object') {
+    probabilities = source.sideProbabilities
+  }
+  const left = normalizeProbability(probabilities?.left)
+  const right = normalizeProbability(probabilities?.right)
+
+  if (left === null || right === null) {
+    return null
+  }
+
+  return {left, right}
+}
+
+function getAnswerSide(option) {
+  if (option === AnswerType.Left || option === 'left') {
+    return 'left'
+  }
+  if (option === AnswerType.Right || option === 'right') {
+    return 'right'
+  }
+  return null
+}
+
+function getAnswerOption(side) {
+  if (side === 'left') {
+    return AnswerType.Left
+  }
+  if (side === 'right') {
+    return AnswerType.Right
+  }
+  return AnswerType.None
+}
+
+function getOriginalSideProbabilities(originalDecision = {}) {
+  return (
+    normalizeSideProbabilities(originalDecision?.probabilities) ||
+    normalizeSideProbabilities(originalDecision?.probabilityEnsemble) ||
+    normalizeSideProbabilities(originalDecision?.ensembleProbabilities)
+  )
+}
+
+function getProbabilityRunCount(originalDecision = {}) {
+  const runCount = Number(originalDecision?.probabilityEnsemble?.runCount)
+  if (Number.isFinite(runCount) && runCount > 0) {
+    return runCount
+  }
+
+  const runs = originalDecision?.probabilityEnsemble?.runs
+  return Array.isArray(runs) && runs.length > 0 ? runs.length : 1
+}
+
+function isFallbackDecision(originalDecision = {}) {
+  return Boolean(
+    !originalDecision ||
+      originalDecision.forcedDecision ||
+      originalDecision.forcedDecisionPolicy === 'random' ||
+      originalDecision.forcedDecisionReason ||
+      originalDecision.rawAnswerBeforeRemap === 'skip'
+  )
+}
+
+export function shouldApplyAutoReportSideCorrection({
+  currentOption = AnswerType.None,
+  originalDecision = null,
+  reviewResult = null,
+} = {}) {
+  const currentSide = getAnswerSide(currentOption)
+  const reviewSide = getAnswerSide(reviewResult?.answer)
+
+  if (!currentSide || !reviewSide || reviewSide === currentSide) {
+    return {
+      apply: false,
+      option: currentOption,
+      reason: 'no-op',
+    }
+  }
+
+  const reportProbabilities = normalizeSideProbabilities(reviewResult)
+  if (!reportProbabilities) {
+    return {
+      apply: false,
+      option: currentOption,
+      reason: 'missing probabilities',
+    }
+  }
+
+  const currentReportProbability = reportProbabilities[currentSide]
+  const reviewReportProbability = reportProbabilities[reviewSide]
+  const reportDelta = reviewReportProbability - currentReportProbability
+  const originalProbabilities = getOriginalSideProbabilities(originalDecision)
+  const originalSideProbability = originalProbabilities?.[currentSide]
+  const originalIsStrong =
+    Number.isFinite(originalSideProbability) &&
+    originalSideProbability >=
+      REPORT_SIDE_SWITCH_STRONG_ORIGINAL_MIN_PROBABILITY
+  const minProbability = originalIsStrong
+    ? REPORT_SIDE_SWITCH_STRONG_ORIGINAL_MIN_PROBABILITY
+    : REPORT_SIDE_SWITCH_MIN_PROBABILITY
+  const minDelta = originalIsStrong
+    ? REPORT_SIDE_SWITCH_STRONG_ORIGINAL_MIN_DELTA
+    : REPORT_SIDE_SWITCH_MIN_DELTA
+
+  if (reviewReportProbability < minProbability) {
+    return {
+      apply: false,
+      option: currentOption,
+      reason: 'below probability threshold',
+      reportProbabilities,
+    }
+  }
+
+  if (reportDelta < minDelta) {
+    return {
+      apply: false,
+      option: currentOption,
+      reason: originalIsStrong
+        ? 'below strong original delta'
+        : 'below delta threshold',
+      reportProbabilities,
+    }
+  }
+
+  if (!originalProbabilities || isFallbackDecision(originalDecision)) {
+    return {
+      apply: true,
+      option: getAnswerOption(reviewSide),
+      reason: originalProbabilities
+        ? 'fallback corrected by report probabilities'
+        : 'no original probabilities',
+      reportProbabilities,
+    }
+  }
+
+  const runCount = getProbabilityRunCount(originalDecision)
+  const mergedCurrent =
+    (originalProbabilities[currentSide] * runCount + currentReportProbability) /
+    (runCount + 1)
+  const mergedReview =
+    (originalProbabilities[reviewSide] * runCount + reviewReportProbability) /
+    (runCount + 1)
+  const mergedDelta = mergedReview - mergedCurrent
+
+  if (mergedDelta < REPORT_SIDE_SWITCH_MIN_DELTA) {
+    return {
+      apply: false,
+      option: currentOption,
+      reason: 'merged probability check failed',
+      reportProbabilities,
+      mergedProbabilities: {
+        [currentSide]: mergedCurrent,
+        [reviewSide]: mergedReview,
+      },
+    }
+  }
+
+  return {
+    apply: true,
+    option: getAnswerOption(reviewSide),
+    reason: 'merged probability check passed',
+    reportProbabilities,
+    mergedProbabilities: {
+      [currentSide]: mergedCurrent,
+      [reviewSide]: mergedReview,
+    },
+  }
 }
 
 export function getValidationAiSessionType({
