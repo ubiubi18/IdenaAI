@@ -1398,6 +1398,70 @@ describe('createAiProviderBridge', () => {
     })
   })
 
+  it('falls back to a standard decision when all probability runs fail', async () => {
+    const timeoutError = new Error('timeout of 9000ms exceeded')
+    timeoutError.code = 'ECONNABORTED'
+    const invokeProvider = jest.fn().mockImplementation(({promptOptions}) => {
+      if (promptOptions.promptPhase === 'probability_ensemble') {
+        return Promise.reject(timeoutError)
+      }
+      return Promise.resolve(
+        JSON.stringify({
+          answer: 'right',
+          confidence: 0.86,
+          reasoning: 'single-pass decision after ensemble timeout',
+        })
+      )
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await solveFlipBatch(bridge, {
+      provider: 'openai',
+      model: 'gpt-5.5',
+      benchmarkProfile: 'custom',
+      probabilityEnsembleEnabled: true,
+      probabilityRuns: 3,
+      maxRetries: 0,
+      forceDecision: true,
+      flips: [
+        {
+          hash: 'flip-probability-all-runs-timeout',
+          leftImage: 'left',
+          rightImage: 'right',
+        },
+      ],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(4)
+    expect(
+      invokeProvider.mock.calls
+        .slice(0, 3)
+        .every(
+          ([call]) => call.promptOptions.promptPhase === 'probability_ensemble'
+        )
+    ).toBe(true)
+    expect(invokeProvider.mock.calls[3][0].promptOptions.promptPhase).toBe(
+      'decision'
+    )
+    expect(result.results[0]).toMatchObject({
+      answer: 'right',
+      error: null,
+      probabilityEnsemble: {
+        runCount: 0,
+        requestedRuns: 3,
+        failedRuns: 3,
+        earlyStopReason: 'fallback_single_pass',
+        fallbackUsed: true,
+      },
+    })
+    expect(result.results[0].probabilityEnsemble.errors).toHaveLength(3)
+    expect(result.results[0].reasoning).toContain('used single-pass fallback')
+  })
+
   it('tracks token usage per flip and in summary totals', async () => {
     const invokeProvider = jest.fn().mockResolvedValue({
       rawText: '{"answer":"left","confidence":0.9}',
@@ -2125,13 +2189,24 @@ describe('createAiProviderBridge', () => {
     expect(result.results[0].uncertaintyRepromptUsed).not.toBe(true)
   })
 
-  it('does not aggregate malformed probability ensemble payloads', async () => {
-    const invokeProvider = jest.fn().mockResolvedValue(
-      JSON.stringify({
-        optionA: {chronology_probability: 0.9},
-        optionB: {chronology_probability: 0.1},
-      })
-    )
+  it('falls back to a standard decision for malformed probability ensemble payloads', async () => {
+    const invokeProvider = jest.fn().mockImplementation(({promptOptions}) => {
+      if (promptOptions.promptPhase === 'probability_ensemble') {
+        return Promise.resolve(
+          JSON.stringify({
+            optionA: {chronology_probability: 0.9},
+            optionB: {chronology_probability: 0.1},
+          })
+        )
+      }
+      return Promise.resolve(
+        JSON.stringify({
+          answer: 'left',
+          confidence: 0.82,
+          reasoning: 'single-pass decision after malformed probability payload',
+        })
+      )
+    })
 
     const bridge = createAiProviderBridge(mockLogger(), {
       invokeProvider,
@@ -2145,6 +2220,7 @@ describe('createAiProviderBridge', () => {
       benchmarkProfile: 'custom',
       probabilityEnsembleEnabled: true,
       probabilityRuns: 1,
+      maxRetries: 0,
       forceDecision: true,
       flips: [
         {
@@ -2156,10 +2232,17 @@ describe('createAiProviderBridge', () => {
     })
 
     expect(result.results[0]).toMatchObject({
-      forcedDecision: true,
-      forcedDecisionReason: 'provider_error',
+      answer: 'left',
+      error: null,
+      probabilityEnsemble: {
+        runCount: 0,
+        requestedRuns: 1,
+        failedRuns: 1,
+        earlyStopReason: 'fallback_single_pass',
+        fallbackUsed: true,
+      },
     })
-    expect(result.results[0].error).toContain(
+    expect(result.results[0].probabilityEnsemble.errors[0]).toContain(
       'probability response missing required numeric probability fields'
     )
   })

@@ -54,20 +54,19 @@ const IMAGE_PREP_PER_FLIP_MS = {
 const FRAME_REVIEW_PREP_MIN_MS = 900
 const MIN_PER_FLIP_SOLVE_BUDGET_MS = 2500
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
-  'gpt-5.5-mini',
   'gpt-5.5',
-  'gpt-5.4-mini',
+  'gpt-5.5-mini',
   'gpt-5.4',
+  'gpt-5.4-mini',
 ]
+const SHORT_SESSION_OPENAI_DEFAULT_FAST_MODEL = 'gpt-5.5'
 const SHORT_SESSION_OPENAI_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_MAX_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS = 0
-const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 90 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 90 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD = 0.95
-const SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS = 35 * 1000
-const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 3
-const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'high'
+const SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS = 15 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS = 25 * 1000
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS = 1
+const SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT = 'low'
 const LONG_SESSION_OPENAI_STAGGER_REQUEST_TIMEOUT_MS = 180 * 1000
 const LONG_SESSION_OPENAI_STAGGER_INTERVAL_MS = 45 * 1000
 const LONG_SESSION_OPENAI_STAGGER_MAX_IN_FLIGHT = 4
@@ -1058,7 +1057,7 @@ function resolveShortSessionOpenAiFastMode({
 
   const promptOptions = {
     openAiServiceTier: 'priority',
-    openAiReasoningEffort: 'xhigh',
+    openAiReasoningEffort: 'low',
   }
 
   if (aiSolver.shortSessionOpenAiFastEnabled !== true) {
@@ -1073,7 +1072,7 @@ function resolveShortSessionOpenAiFastMode({
     .toLowerCase()
   const fastModel = SHORT_SESSION_OPENAI_FAST_MODELS.includes(requestedModel)
     ? requestedModel
-    : 'gpt-5.5'
+    : SHORT_SESSION_OPENAI_DEFAULT_FAST_MODEL
 
   return {
     model: fastModel,
@@ -1202,50 +1201,32 @@ function applyShortSessionOpenAiParallelTimeout(
   }
 
   const normalizedFlipCount = Math.max(0, toNumberOrFallback(flipCount, 0))
-  const solveConcurrency = getSolveConcurrency({
-    sessionType,
-    provider: normalizedProvider,
-    aiSolver,
-  })
 
-  if (normalizedFlipCount < 2 || solveConcurrency < normalizedFlipCount) {
+  if (normalizedFlipCount < 1) {
     return profile
   }
 
   const requestTimeoutMs = SHORT_SESSION_OPENAI_PARALLEL_REQUEST_TIMEOUT_MS
-  const uncertaintyConfidenceThreshold = Math.max(
-    toFloatOrFallback(
-      profile.uncertaintyConfidenceThreshold,
-      DEFAULT_PROFILE.uncertaintyConfidenceThreshold
-    ),
-    SHORT_SESSION_OPENAI_PARALLEL_UNCERTAINTY_THRESHOLD
+  const shortProbabilityEnsembleEnabled =
+    aiSolver.shortSessionOpenAiProbabilityEnsembleEnabled === true
+  const shortProbabilityRuns = normalizeProbabilityRuns(
+    aiSolver.shortSessionOpenAiProbabilityRuns,
+    SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
   )
 
   return {
     ...profile,
-    uncertaintyRepromptEnabled: true,
-    uncertaintyConfidenceThreshold,
-    uncertaintyRepromptMinRemainingMs: Math.max(
-      toNumberOrFallback(
-        profile.uncertaintyRepromptMinRemainingMs,
-        DEFAULT_PROFILE.uncertaintyRepromptMinRemainingMs
-      ),
-      SHORT_SESSION_OPENAI_PARALLEL_REPROMPT_MIN_REMAINING_MS
+    interFlipDelayMs: 0,
+    uncertaintyRepromptEnabled: false,
+    probabilityEnsembleEnabled: shortProbabilityEnsembleEnabled,
+    probabilityRuns: shortProbabilityRuns,
+    probabilityReasoningEffort: normalizeProbabilityReasoningEffort(
+      aiSolver.shortSessionOpenAiProbabilityReasoningEffort ||
+        SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT
     ),
-    probabilityEnsembleEnabled: true,
-    probabilityRuns:
-      normalizeProbabilityRuns(profile.probabilityRuns) ===
-      DEFAULT_PROFILE.probabilityRuns
-        ? SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_RUNS
-        : normalizeProbabilityRuns(profile.probabilityRuns),
-    probabilityReasoningEffort:
-      SHORT_SESSION_OPENAI_PARALLEL_PROBABILITY_REASONING_EFFORT,
     requestTimeoutMs,
     maxRetries: 0,
-    deadlineMs: Math.max(
-      toNumberOrFallback(profile.deadlineMs, DEFAULT_PROFILE.deadlineMs),
-      SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS
-    ),
+    deadlineMs: SHORT_SESSION_OPENAI_PARALLEL_DEADLINE_MS,
   }
 }
 

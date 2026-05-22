@@ -80,6 +80,7 @@ const UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS = [0.95, 0.8, 0.51]
 const MAX_PROBABILITY_ENSEMBLE_RUNS = 3
 const PROBABILITY_FIRST_RUN_STOP_THRESHOLD = 0.95
 const PROBABILITY_SECOND_RUN_STOP_THRESHOLD = 0.82
+const PROBABILITY_ENSEMBLE_FALLBACK_RESERVE_MS = 4500
 
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
@@ -10316,6 +10317,90 @@ Flip hash: ${hash}
           return hashScore(`${flip.hash}|probability|${runIndex}`) % 2 === 0
         }
 
+        const solveStandardDecisionConsultant = async (
+          consultant,
+          {probabilityFallbackReason = '', probabilityFallbackMeta = null} = {}
+        ) => {
+          let decisionResponse
+          let combinedTokenUsage = createEmptyTokenUsage()
+          let frameReasoningUsed = false
+
+          if (useFrameReasoning) {
+            const frameReasoningResponse = await invokeConsultantOnce(
+              consultant,
+              {
+                ...basePromptOptions,
+                secondPass,
+                forceDecision: false,
+                flipVisionMode: 'frames_two_pass',
+                promptPhase: 'frame_reasoning',
+              }
+            )
+            const normalizedFrameReasoning = normalizeProviderResponse(
+              frameReasoningResponse
+            )
+            combinedTokenUsage = addTokenUsage(
+              combinedTokenUsage,
+              normalizedFrameReasoning.tokenUsage
+            )
+            frameReasoningUsed = true
+
+            decisionResponse = await invokeConsultantOnce(consultant, {
+              ...basePromptOptions,
+              secondPass,
+              forceDecision: !allowSkip,
+              flipVisionMode: 'frames_two_pass',
+              promptPhase: 'decision_from_frame_reasoning',
+              frameReasoning: normalizedFrameReasoning.rawText,
+            })
+          } else {
+            decisionResponse = await invokeConsultantOnce(consultant, {
+              ...basePromptOptions,
+              secondPass,
+              forceDecision: !allowSkip,
+              flipVisionMode: passFlipVisionMode,
+              promptPhase: 'decision',
+            })
+          }
+
+          const {rawText, tokenUsage, providerMeta} =
+            normalizeProviderResponse(decisionResponse)
+          combinedTokenUsage = addTokenUsage(combinedTokenUsage, tokenUsage)
+
+          const parsed = extractJsonBlock(rawText)
+          const rawDecision = normalizeDecision(parsed)
+          const decision = remapDecisionIfSwapped(rawDecision, swapped)
+          const reasoning = probabilityFallbackReason
+            ? `${decision.reasoning}; ${probabilityFallbackReason}; used single-pass fallback`
+            : decision.reasoning
+
+          return {
+            provider: consultant.provider,
+            model: consultant.model,
+            weight: normalizeConsultantWeight(consultant.weight, 1),
+            answer: normalizeAnswer(decision.answer),
+            confidence: normalizeConfidence(decision.confidence),
+            reasoning,
+            decisionStructure: {
+              observations: rawDecision.observations || [],
+              hypotheses: rawDecision.hypotheses || [],
+              knownRisks: rawDecision.knownRisks || [],
+            },
+            rawAnswerBeforeRemap: normalizeAnswer(rawDecision.answer),
+            finalAnswerAfterRemap: normalizeAnswer(decision.answer),
+            error: null,
+            tokenUsage: combinedTokenUsage,
+            costs: estimateProviderTextCostSummary(
+              consultant.provider,
+              consultant.model,
+              combinedTokenUsage
+            ),
+            frameReasoningUsed,
+            providerMeta,
+            probabilityEnsemble: probabilityFallbackMeta,
+          }
+        }
+
         const solveProbabilityEnsembleConsultant = async (consultant) => {
           const probabilityRunCount = Math.max(
             1,
@@ -10401,6 +10486,22 @@ Flip hash: ${hash}
             runIndex < probabilityRunCount;
             runIndex += 1
           ) {
+            const remainingBeforeRunMs = deadlineAt - now()
+            const guardedRunBudgetMs = Math.max(
+              750,
+              Math.min(Number(profile.requestTimeoutMs) || 0, 15 * 1000)
+            )
+            if (
+              (runs.length > 0 || runErrors.length > 0) &&
+              remainingBeforeRunMs <=
+                guardedRunBudgetMs + PROBABILITY_ENSEMBLE_FALLBACK_RESERVE_MS
+            ) {
+              earlyStopReason = runs.length
+                ? 'deadline_partial_runs'
+                : 'deadline_single_pass_fallback'
+              break
+            }
+
             const runSwapped = shouldSwapProbabilityRun(
               runIndex,
               probabilityRunCount
@@ -10513,11 +10614,27 @@ Flip hash: ${hash}
           }
 
           if (!runs.length) {
-            throw new Error(
-              runErrors.length
-                ? `probability ensemble failed: ${runErrors.join(' | ')}`
-                : 'probability ensemble failed: no valid runs'
-            )
+            const fallbackReason = runErrors.length
+              ? `probability ensemble unavailable: ${runErrors.join(' | ')}`
+              : 'probability ensemble unavailable: no valid runs'
+            return solveStandardDecisionConsultant(consultant, {
+              probabilityFallbackReason: fallbackReason,
+              probabilityFallbackMeta: {
+                probabilities: null,
+                avgLeft: null,
+                avgRight: null,
+                delta: null,
+                runCount: 0,
+                requestedRuns: probabilityRunCount,
+                failedRuns: runErrors.length,
+                earlyStopReason: 'fallback_single_pass',
+                skippedByRisk: false,
+                skippedByDelta: false,
+                fallbackUsed: true,
+                runs: [],
+                errors: runErrors,
+              },
+            })
           }
 
           const probabilityAggregate = aggregateProbabilityEnsembleRuns(runs, {
@@ -10632,80 +10749,7 @@ Flip hash: ${hash}
               return await solveProbabilityEnsembleConsultant(consultant)
             }
 
-            let decisionResponse
-            let combinedTokenUsage = createEmptyTokenUsage()
-            let frameReasoningUsed = false
-
-            if (useFrameReasoning) {
-              const frameReasoningResponse = await invokeConsultantOnce(
-                consultant,
-                {
-                  ...basePromptOptions,
-                  secondPass,
-                  forceDecision: false,
-                  flipVisionMode: 'frames_two_pass',
-                  promptPhase: 'frame_reasoning',
-                }
-              )
-              const normalizedFrameReasoning = normalizeProviderResponse(
-                frameReasoningResponse
-              )
-              combinedTokenUsage = addTokenUsage(
-                combinedTokenUsage,
-                normalizedFrameReasoning.tokenUsage
-              )
-              frameReasoningUsed = true
-
-              decisionResponse = await invokeConsultantOnce(consultant, {
-                ...basePromptOptions,
-                secondPass,
-                forceDecision: !allowSkip,
-                flipVisionMode: 'frames_two_pass',
-                promptPhase: 'decision_from_frame_reasoning',
-                frameReasoning: normalizedFrameReasoning.rawText,
-              })
-            } else {
-              decisionResponse = await invokeConsultantOnce(consultant, {
-                ...basePromptOptions,
-                secondPass,
-                forceDecision: !allowSkip,
-                flipVisionMode: passFlipVisionMode,
-                promptPhase: 'decision',
-              })
-            }
-
-            const {rawText, tokenUsage, providerMeta} =
-              normalizeProviderResponse(decisionResponse)
-            combinedTokenUsage = addTokenUsage(combinedTokenUsage, tokenUsage)
-
-            const parsed = extractJsonBlock(rawText)
-            const rawDecision = normalizeDecision(parsed)
-            const decision = remapDecisionIfSwapped(rawDecision, swapped)
-
-            return {
-              provider: consultant.provider,
-              model: consultant.model,
-              weight: normalizeConsultantWeight(consultant.weight, 1),
-              answer: normalizeAnswer(decision.answer),
-              confidence: normalizeConfidence(decision.confidence),
-              reasoning: decision.reasoning,
-              decisionStructure: {
-                observations: rawDecision.observations || [],
-                hypotheses: rawDecision.hypotheses || [],
-                knownRisks: rawDecision.knownRisks || [],
-              },
-              rawAnswerBeforeRemap: normalizeAnswer(rawDecision.answer),
-              finalAnswerAfterRemap: normalizeAnswer(decision.answer),
-              error: null,
-              tokenUsage: combinedTokenUsage,
-              costs: estimateProviderTextCostSummary(
-                consultant.provider,
-                consultant.model,
-                combinedTokenUsage
-              ),
-              frameReasoningUsed,
-              providerMeta,
-            }
+            return await solveStandardDecisionConsultant(consultant)
           } catch (error) {
             const message = createProviderErrorMessage({
               provider: consultant.provider,

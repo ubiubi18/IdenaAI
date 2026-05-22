@@ -131,6 +131,7 @@ import {
   getValidationShortAiSolveStatus,
   getValidationLongAiSolveStatus,
   getValidationReportKeywordStatus,
+  shouldWaitForMoreShortSessionFlips,
   shouldFinishLongSessionAiSolve,
   shouldWaitForValidationReportKeywords,
   shouldAllowSessionAutoMode,
@@ -159,6 +160,7 @@ const SESSION_AUTO_PROVIDER_RETRY_MS = 5 * 1000
 const SESSION_AUTO_SOLVE_RETRY_MS = 4 * 1000
 const SESSION_AUTO_SOLVE_ERROR_RETRY_MS = 8 * 1000
 const SHORT_SESSION_INCREMENTAL_SOLVE_RETRY_MS = 500
+const SHORT_SESSION_AUTO_SOLVE_READY_WAIT_MS = 5 * 1000
 const MIN_AUTO_REPORT_DELAY_MS = 15 * 1000
 const AUTO_REPORT_KEYWORD_WAIT_MS = 8 * 1000
 const AUTO_REPORT_KEYWORD_RETRY_MS = 2 * 1000
@@ -394,6 +396,68 @@ function buildModelFallbackNotice({modelFallback, t}) {
         models: fallbackPairs,
       }
     ),
+  }
+}
+
+function buildShortSessionFallbackNotice({
+  sessionType = null,
+  result = null,
+  t,
+}) {
+  if (!result || sessionType !== 'short') {
+    return null
+  }
+
+  const results = Array.isArray(result.results) ? result.results : []
+  if (!results.length) {
+    return null
+  }
+  const fallbackResults = results.filter((item) =>
+    Boolean(item?.forcedDecisionPolicy === 'random' || item?.error)
+  )
+  const safeSubmitGuardCount = results.filter(
+    (item) => item?.forcedDecisionReason === 'safe_submit_guard'
+  ).length
+  const providerErrorCount = results.filter((item) => {
+    const error = String(item?.error || '').toLowerCase()
+    return (
+      item?.forcedDecisionReason === 'provider_error' ||
+      error.includes('request failed') ||
+      error.includes('timeout') ||
+      error.includes('deadline_exceeded')
+    )
+  }).length
+  const tokenizedResultCount = results.filter((item) => {
+    const usage = item?.tokenUsage || {}
+    return (
+      Number(usage.promptTokens) > 0 ||
+      Number(usage.completionTokens) > 0 ||
+      Number(usage.totalTokens) > 0
+    )
+  }).length
+
+  if (!fallbackResults.length && tokenizedResultCount > 0) {
+    return null
+  }
+
+  return {
+    title: t('Short-session AI degraded'),
+    description: t(
+      '{{fallbacks}}/{{total}} short flips used fallback answers; {{safeGuards}} hit the safe-submit guard; {{providerErrors}} had provider errors. Short answers were still submitted.',
+      {
+        fallbacks: fallbackResults.length,
+        total: Math.max(results.length, result.summary?.totalFlips || 0),
+        safeGuards: safeSubmitGuardCount,
+        providerErrors: providerErrorCount,
+      }
+    ),
+    stats: {
+      fallbacks: fallbackResults.length,
+      total: Math.max(results.length, result.summary?.totalFlips || 0),
+      safeSubmitGuardCount,
+      providerErrorCount,
+      tokenizedResultCount,
+    },
   }
 }
 
@@ -1062,6 +1126,7 @@ function ValidationSession({
   const autoSolveStartedRef = useRef({short: false, long: false})
   const autoSolveShortSignatureRef = useRef('')
   const previousShortAutoSolveSignatureRef = useRef('')
+  const shortSessionFirstReadyAtRef = useRef(0)
   const autoSolveLongSignatureRef = useRef('')
   const autoSolveRetryAfterRef = useRef({short: 0, long: 0})
   const autoSolveRetryTimerRef = useRef({short: null, long: null})
@@ -2617,6 +2682,24 @@ function ValidationSession({
         )
       )
 
+      const shortSessionFallbackNotice = buildShortSessionFallbackNotice({
+        sessionType,
+        result,
+        t,
+      })
+      if (shortSessionFallbackNotice) {
+        global.logger.warn('AI short-session degraded', {
+          provider: result.provider,
+          model: result.model,
+          ...shortSessionFallbackNotice.stats,
+        })
+        notifyAi(
+          shortSessionFallbackNotice.title,
+          shortSessionFallbackNotice.description,
+          'warning'
+        )
+      }
+
       const modelFallbackNotice = buildModelFallbackNotice({
         modelFallback: result.modelFallback,
         t,
@@ -3495,12 +3578,18 @@ function ValidationSession({
   useEffect(() => {
     if (aiSessionType !== 'short') {
       previousShortAutoSolveSignatureRef.current = ''
+      shortSessionFirstReadyAtRef.current = 0
       return
     }
 
     if (!shortSessionAutoSolveSignature) {
       previousShortAutoSolveSignatureRef.current = ''
+      shortSessionFirstReadyAtRef.current = 0
       return
+    }
+
+    if (!shortSessionFirstReadyAtRef.current) {
+      shortSessionFirstReadyAtRef.current = Date.now()
     }
 
     if (
@@ -3527,6 +3616,27 @@ function ValidationSession({
       !isAutoSolveRetryPending('short') &&
       autoSolveShortSignatureRef.current !== shortSessionAutoSolveSignature
     ) {
+      if (!shortSessionFirstReadyAtRef.current) {
+        shortSessionFirstReadyAtRef.current = Date.now()
+      }
+
+      if (
+        shouldWaitForMoreShortSessionFlips({
+          status: shortSessionAiSolveStatus,
+          firstReadyAt: shortSessionFirstReadyAtRef.current,
+          validationStart,
+          shortSessionDuration,
+          maxWaitMs: SHORT_SESSION_AUTO_SOLVE_READY_WAIT_MS,
+          submitBufferSeconds: SHORT_SESSION_RELIABLE_SUBMIT_BUFFER_SECONDS,
+        })
+      ) {
+        scheduleAutoSolveRetry({
+          sessionType: 'short',
+          delayMs: SHORT_SESSION_INCREMENTAL_SOLVE_RETRY_MS,
+        })
+        return
+      }
+
       autoSolveStartedRef.current.short = true
       autoSolveShortSignatureRef.current = shortSessionAutoSolveSignature
       runAiSolve()
@@ -3540,7 +3650,11 @@ function ValidationSession({
     isAutoSolveRetryPending,
     isSessionAutoMode,
     runAiSolve,
+    scheduleAutoSolveRetry,
+    shortSessionAiSolveStatus,
     shortSessionAutoSolveSignature,
+    shortSessionDuration,
+    validationStart,
   ])
 
   useEffect(() => {
