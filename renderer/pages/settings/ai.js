@@ -153,10 +153,10 @@ const MODEL_PRESETS = {
 }
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
-  'gpt-5.5-mini',
   'gpt-5.5',
-  'gpt-5.4-mini',
+  'gpt-5.5-mini',
   'gpt-5.4',
+  'gpt-5.4-mini',
 ]
 const AI_SETTINGS_TOAST_ID = 'ai-settings-status-toast'
 
@@ -4945,7 +4945,8 @@ export default function AiSettingsPage() {
                           </SettingsFormLabel>
                           <Select
                             value={
-                              aiSolver.shortSessionOpenAiFastModel || 'gpt-5.5'
+                              aiSolver.shortSessionOpenAiFastModel ||
+                              DEFAULT_AI_SETTINGS.shortSessionOpenAiFastModel
                             }
                             onChange={(e) =>
                               updateAiSolverSettings({
