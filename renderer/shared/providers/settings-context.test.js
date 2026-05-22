@@ -79,6 +79,18 @@ describe('settings-context ai solver normalization', () => {
     })
   })
 
+  it('accepts full short-session fast models', () => {
+    expect(
+      buildAiSolverSettings({
+        shortSessionOpenAiFastEnabled: true,
+        shortSessionOpenAiFastModel: 'gpt-5.5',
+      })
+    ).toMatchObject({
+      shortSessionOpenAiFastEnabled: true,
+      shortSessionOpenAiFastModel: 'gpt-5.5',
+    })
+  })
+
   it('normalizes the auto-report best-flip switch', () => {
     expect(
       buildAiSolverSettings({
@@ -102,7 +114,7 @@ describe('settings-context ai solver normalization', () => {
     })
   })
 
-  it('accepts gpt-5.5 fast-mode selections without downgrading them', () => {
+  it('accepts short-session mini fast-mode selections without downgrading them', () => {
     expect(
       buildAiSolverSettings({
         shortSessionOpenAiFastEnabled: true,
@@ -124,7 +136,7 @@ describe('settings-context ai solver normalization', () => {
     ).toMatchObject({
       provider: 'openai',
       model: 'gpt-5.5',
-      shortSessionOpenAiFastModel: 'gpt-5.5',
+      shortSessionOpenAiFastModel: 'gpt-5.4-mini',
     })
   })
 

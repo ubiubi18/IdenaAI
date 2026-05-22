@@ -354,6 +354,61 @@ export function getValidationShortAiSolveStatus({
   }
 }
 
+export function shouldWaitForMoreShortSessionFlips({
+  status = null,
+  firstReadyAt = 0,
+  now = Date.now(),
+  validationStart = null,
+  shortSessionDuration = null,
+  maxWaitMs = 0,
+  submitBufferSeconds = 0,
+} = {}) {
+  const decodedUnansweredFlipCount = Number(status?.decodedUnansweredFlipCount)
+  const loadingFlipCount = Number(status?.loadingFlipCount)
+
+  if (
+    !Number.isFinite(decodedUnansweredFlipCount) ||
+    decodedUnansweredFlipCount < 1 ||
+    !Number.isFinite(loadingFlipCount) ||
+    loadingFlipCount < 1
+  ) {
+    return false
+  }
+
+  const normalizedNow = Number(now)
+  const normalizedFirstReadyAt = Number(firstReadyAt)
+  const normalizedMaxWaitMs = Math.max(0, Number(maxWaitMs) || 0)
+
+  if (
+    !Number.isFinite(normalizedNow) ||
+    !Number.isFinite(normalizedFirstReadyAt) ||
+    normalizedFirstReadyAt <= 0 ||
+    normalizedMaxWaitMs <= 0
+  ) {
+    return false
+  }
+
+  const waitRemainingMs =
+    normalizedMaxWaitMs - Math.max(0, normalizedNow - normalizedFirstReadyAt)
+  if (waitRemainingMs <= 0) {
+    return false
+  }
+
+  const startedAt = Number(validationStart)
+  const durationSeconds = Number(shortSessionDuration)
+  const bufferSeconds = Math.max(0, Number(submitBufferSeconds) || 0)
+
+  if (Number.isFinite(startedAt) && Number.isFinite(durationSeconds)) {
+    const solveCutoffAt =
+      startedAt + Math.max(0, durationSeconds - bufferSeconds) * 1000
+    if (normalizedNow + waitRemainingMs >= solveCutoffAt) {
+      return false
+    }
+  }
+
+  return true
+}
+
 export function shouldFinishLongSessionAiSolve({
   longFlips = [],
   solvedHashes = [],

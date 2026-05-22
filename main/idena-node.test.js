@@ -2,7 +2,9 @@ const path = require('path')
 
 const {
   __test__: {
+    buildNodeParameters,
     getBundledNodeFileCandidates,
+    getConfiguredBootstrapNodes,
     isPeerHintRetryable,
     isRpcMethodUnavailableError,
     getNodeReleaseRepos,
@@ -131,6 +133,18 @@ describe('idena node peer hints', () => {
     ])
   })
 
+  it('does not carry old generated bootnodes back into the managed config', () => {
+    const previousConfig = {
+      IpfsConf: {
+        BootNodes: ['/ip4/9.9.9.9/tcp/40405/ipfs/QmStaleGeneratedPeer'],
+      },
+    }
+
+    expect(getConfiguredBootstrapNodes(previousConfig)).not.toContain(
+      '/ip4/9.9.9.9/tcp/40405/ipfs/QmStaleGeneratedPeer'
+    )
+  })
+
   it('backs off failed hints exponentially', () => {
     expect(
       isPeerHintRetryable(
@@ -186,5 +200,26 @@ describe('idena node peer hints', () => {
       failures: 0,
       lastSucceededAt: '2026-04-25T10:00:00.000Z',
     })
+  })
+})
+
+describe('idena node launch security', () => {
+  it('keeps the rpc api key out of process arguments', () => {
+    const parameters = buildNodeParameters({
+      port: 9119,
+      tcpPort: 50505,
+      ipfsPort: 50506,
+      autoActivateMining: true,
+      version: '1.1.2',
+      dataDir: '/tmp/idena-node-data',
+      configFile: '/tmp/idena-node-config.json',
+    })
+
+    expect(parameters).toContain('--datadir')
+    expect(parameters).toContain('--rpcaddr')
+    expect(parameters).toContain('127.0.0.1')
+    expect(parameters).toContain('--autoonline')
+    expect(parameters).not.toContain('--apikey')
+    expect(parameters.join(' ')).not.toContain('secret')
   })
 })

@@ -10,6 +10,7 @@ const {
   shouldAllowSessionAutoMode,
   shouldBlockSessionAutoInDev,
   shouldAutoRunSessionForPeriod,
+  shouldWaitForMoreShortSessionFlips,
   shouldShowValidationAiUi,
   shouldShowValidationLocalAiUi,
   selectAutoReportBestFlipHash,
@@ -85,6 +86,57 @@ describe('validation ai auto gating', () => {
     expect(result.decodedUnansweredHashes).toEqual(['0x1'])
     expect(result.decodedUnansweredFlipCount).toBe(1)
     expect(result.loadingFlipCount).toBe(1)
+  })
+
+  it('waits briefly for remaining short-session flips before starting autosolve', () => {
+    const now = 1779462032000
+    const status = {
+      decodedUnansweredFlipCount: 1,
+      loadingFlipCount: 5,
+    }
+
+    expect(
+      shouldWaitForMoreShortSessionFlips({
+        status,
+        firstReadyAt: now - 1000,
+        now,
+        validationStart: now - 30 * 1000,
+        shortSessionDuration: 120,
+        maxWaitMs: 5000,
+        submitBufferSeconds: 10,
+      })
+    ).toBe(true)
+
+    expect(
+      shouldWaitForMoreShortSessionFlips({
+        status,
+        firstReadyAt: now - 6000,
+        now,
+        validationStart: now - 30 * 1000,
+        shortSessionDuration: 120,
+        maxWaitMs: 5000,
+        submitBufferSeconds: 10,
+      })
+    ).toBe(false)
+  })
+
+  it('does not wait for short-session flips once the reliable cutoff is near', () => {
+    const now = 1779462110000
+
+    expect(
+      shouldWaitForMoreShortSessionFlips({
+        status: {
+          decodedUnansweredFlipCount: 1,
+          loadingFlipCount: 5,
+        },
+        firstReadyAt: now - 1000,
+        now,
+        validationStart: now - 108 * 1000,
+        shortSessionDuration: 120,
+        maxWaitMs: 5000,
+        submitBufferSeconds: 10,
+      })
+    ).toBe(false)
   })
 
   it('detects a long-session AI solve window when long flips are fetched', () => {

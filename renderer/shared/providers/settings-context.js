@@ -101,10 +101,10 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
 }
 
 const OPENAI_SHORT_SESSION_FAST_MODELS = [
-  'gpt-5.5-mini',
   'gpt-5.5',
-  'gpt-5.4-mini',
+  'gpt-5.5-mini',
   'gpt-5.4',
+  'gpt-5.4-mini',
 ]
 const AI_FLIP_VISION_MODES = [
   'composite',
@@ -225,14 +225,6 @@ function buildAiSolverSettings(settings = {}) {
     )
       ? normalizedShortSessionOpenAiFastModel
       : DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
-  if (
-    ['gpt-5.4-mini', 'gpt-5.4'].includes(
-      nextSettings.shortSessionOpenAiFastModel
-    )
-  ) {
-    nextSettings.shortSessionOpenAiFastModel =
-      DEFAULT_AI_SOLVER_SETTINGS.shortSessionOpenAiFastModel
-  }
   const normalizedShortSessionFlipVisionMode = String(
     nextSettings.shortSessionFlipVisionMode || ''
   ).trim()

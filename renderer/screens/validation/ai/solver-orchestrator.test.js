@@ -152,13 +152,28 @@ describe('solver-orchestrator planning', () => {
     expect(shortPlan.model).toBe('gpt-5.5-mini')
     expect(shortPlan.promptOptions).toEqual({
       openAiServiceTier: 'priority',
-      openAiReasoningEffort: 'xhigh',
+      openAiReasoningEffort: 'low',
     })
     expect(longPlan.model).toBe('gpt-5.4')
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('enables a three-stage short-session OpenAI probability ensemble on the parallel lane', () => {
+  it('keeps the full model when short fast mode requests it', () => {
+    const plan = planValidationAiSolve({
+      sessionType: 'short',
+      shortFlips: [createDecodedFlip('short-full-fast-model')],
+      aiSolver: {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        shortSessionOpenAiFastEnabled: true,
+        shortSessionOpenAiFastModel: 'gpt-5.5',
+      },
+    })
+
+    expect(plan.model).toBe('gpt-5.5')
+  })
+
+  it('uses bounded short-session OpenAI settings on the fast lane', () => {
     const shortFlips = Array.from({length: 6}, (_, index) =>
       createDecodedFlip(`short-timeout-${index + 1}`)
     )
@@ -175,19 +190,14 @@ describe('solver-orchestrator planning', () => {
       },
     })
 
-    expect(plan.effectiveProfile.requestTimeoutMs).toBe(90000)
+    expect(plan.effectiveProfile.requestTimeoutMs).toBe(15000)
     expect(plan.effectiveProfile.maxRetries).toBe(0)
-    expect(plan.effectiveProfile.deadlineMs).toBeGreaterThanOrEqual(90000)
-    expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(plan.effectiveProfile.probabilityRuns).toBe(3)
-    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('high')
-    expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(true)
-    expect(
-      plan.effectiveProfile.uncertaintyConfidenceThreshold
-    ).toBeGreaterThanOrEqual(0.95)
-    expect(
-      plan.effectiveProfile.uncertaintyRepromptMinRemainingMs
-    ).toBeGreaterThanOrEqual(35000)
+    expect(plan.effectiveProfile.deadlineMs).toBe(25000)
+    expect(plan.effectiveProfile.interFlipDelayMs).toBe(0)
+    expect(plan.effectiveProfile.probabilityEnsembleEnabled).toBe(false)
+    expect(plan.effectiveProfile.probabilityRuns).toBe(1)
+    expect(plan.effectiveProfile.probabilityReasoningEffort).toBe('low')
+    expect(plan.effectiveProfile.uncertaintyRepromptEnabled).toBe(false)
   })
 
   it('plans probability ensemble settings as multi-run solving without uncertainty reserve', () => {
@@ -202,11 +212,11 @@ describe('solver-orchestrator planning', () => {
         provider: 'openai',
         model: 'gpt-5.5',
         benchmarkProfile: 'strict',
-        probabilityEnsembleEnabled: true,
-        probabilityRuns: 5,
+        shortSessionOpenAiProbabilityEnsembleEnabled: true,
+        shortSessionOpenAiProbabilityRuns: 3,
         probabilityDecisionDelta: 0.12,
         probabilityUseSwappedOrder: false,
-        probabilityReasoningEffort: 'high',
+        shortSessionOpenAiProbabilityReasoningEffort: 'high',
       },
     })
 
@@ -247,13 +257,11 @@ describe('solver-orchestrator planning', () => {
 
     expect(shortBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(shortBudget.solveConcurrency).toBe(6)
-    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(90000)
+    expect(shortBudget.effectiveProfile.requestTimeoutMs).toBe(15000)
     expect(shortBudget.effectiveProfile.maxRetries).toBe(0)
-    expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(3)
-    expect(
-      shortBudget.effectiveProfile.uncertaintyConfidenceThreshold
-    ).toBeGreaterThanOrEqual(0.95)
+    expect(shortBudget.effectiveProfile.probabilityEnsembleEnabled).toBe(false)
+    expect(shortBudget.effectiveProfile.probabilityRuns).toBe(1)
+    expect(shortBudget.effectiveProfile.uncertaintyRepromptEnabled).toBe(false)
     expect(longBudget.effectiveProfile.flipVisionMode).toBe('composite')
     expect(longBudget.solveConcurrency).toBe(1)
     expect(longBudget.effectiveProfile.requestTimeoutMs).toBe(180000)
@@ -293,7 +301,7 @@ describe('solver-orchestrator planning', () => {
       sessionType: 'short',
       shortFlips,
       aiSolver: {
-        provider: 'openai',
+        provider: 'local-ai',
         benchmarkProfile: 'custom',
         requestTimeoutMs: 9000,
         interFlipDelayMs: 650,
@@ -306,7 +314,7 @@ describe('solver-orchestrator planning', () => {
       sessionType: 'short',
       shortFlips,
       aiSolver: {
-        provider: 'openai',
+        provider: 'local-ai',
         benchmarkProfile: 'custom',
         requestTimeoutMs: 9000,
         interFlipDelayMs: 650,
@@ -319,7 +327,7 @@ describe('solver-orchestrator planning', () => {
       sessionType: 'short',
       shortFlips,
       aiSolver: {
-        provider: 'openai',
+        provider: 'local-ai',
         benchmarkProfile: 'custom',
         requestTimeoutMs: 9000,
         interFlipDelayMs: 650,
@@ -392,10 +400,10 @@ describe('solver-orchestrator planning', () => {
     })
 
     expect(budget.flipCount).toBe(6)
-    expect(budget.effectiveProfile.probabilityEnsembleEnabled).toBe(true)
-    expect(budget.effectiveProfile.probabilityRuns).toBe(3)
+    expect(budget.effectiveProfile.probabilityEnsembleEnabled).toBe(false)
+    expect(budget.effectiveProfile.probabilityRuns).toBe(1)
     expect(budget.uncertaintyReviewFlipCount).toBe(0)
-    expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThanOrEqual(95)
+    expect(Math.ceil(budget.estimatedMs / 1000)).toBeLessThanOrEqual(20)
   })
 
   it('budgets retry attempts and backoff into the preflight estimate', () => {
@@ -405,7 +413,7 @@ describe('solver-orchestrator planning', () => {
       sessionType: 'short',
       shortFlips,
       aiSolver: {
-        provider: 'openai',
+        provider: 'local-ai',
         benchmarkProfile: 'custom',
         requestTimeoutMs: 9000,
         interFlipDelayMs: 650,
@@ -418,7 +426,7 @@ describe('solver-orchestrator planning', () => {
       sessionType: 'short',
       shortFlips,
       aiSolver: {
-        provider: 'openai',
+        provider: 'local-ai',
         benchmarkProfile: 'custom',
         requestTimeoutMs: 9000,
         interFlipDelayMs: 650,
@@ -823,11 +831,11 @@ describe('solver-orchestrator planning', () => {
           provider: 'openai',
           model: 'gpt-5.5',
           benchmarkProfile: 'strict',
-          probabilityEnsembleEnabled: true,
-          probabilityRuns: 5,
+          shortSessionOpenAiProbabilityEnsembleEnabled: true,
+          shortSessionOpenAiProbabilityRuns: 3,
           probabilityDecisionDelta: 0.12,
           probabilityUseSwappedOrder: false,
-          probabilityReasoningEffort: 'high',
+          shortSessionOpenAiProbabilityReasoningEffort: 'high',
         },
         hardDeadlineAt: Date.now() + 120 * 1000,
       })
