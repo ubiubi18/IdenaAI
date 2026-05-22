@@ -67,6 +67,7 @@ const getNodeDataDir = () => path.join(getNodeDir(), 'datadir')
 const getNodeFile = () => path.join(getNodeDir(), idenaBin + getBinarySuffix())
 
 const getNodeConfigFile = () => path.join(getNodeDir(), 'config.json')
+const getNodeApiKeyFile = () => path.join(getNodeDataDir(), 'api.key')
 const getNodePeerHintsFile = () => path.join(getNodeDir(), 'peer-hints.json')
 const getNodeRuntimeFile = () => path.join(getNodeDir(), 'runtime.json')
 
@@ -385,31 +386,21 @@ function parsePeerHintList(value) {
   )
 }
 
-function getConfiguredBootstrapNodes(existingConfig = {}) {
-  const existingBootNodes = toArray(existingConfig?.IpfsConf?.BootNodes).map(
-    normalizePeerAddr
-  )
+function getConfiguredBootstrapNodes() {
   const extraBootNodes = parsePeerHintList(
     process.env.IDENA_NODE_EXTRA_IPFS_BOOTNODES
   )
 
-  return uniqStrings([
-    ...existingBootNodes,
-    ...defaultIpfsBootstrapNodes,
-    ...extraBootNodes,
-  ])
+  return uniqStrings([...defaultIpfsBootstrapNodes, ...extraBootNodes])
 }
 
-async function getEffectiveBootstrapNodes(existingConfig = {}) {
+async function getEffectiveBootstrapNodes() {
   const cachedPeerHints = sortPeerHintsForRetry(await readPeerHints())
     .filter((hint) => hint.source === 'runtime' || hint.source === 'cache')
     .filter((hint) => isPeerHintRetryable(hint))
     .map(({addr}) => addr)
 
-  return uniqStrings([
-    ...cachedPeerHints,
-    ...getConfiguredBootstrapNodes(existingConfig),
-  ])
+  return uniqStrings([...cachedPeerHints, ...getConfiguredBootstrapNodes()])
 }
 
 async function ensureNodeConfig() {
@@ -432,12 +423,35 @@ async function ensureNodeConfig() {
     ...currentConfig,
     IpfsConf: {
       ...((currentConfig && currentConfig.IpfsConf) || {}),
-      BootNodes: await getEffectiveBootstrapNodes(currentConfig),
+      BootNodes: await getEffectiveBootstrapNodes(),
     },
   }
 
   await fs.writeJson(configFile, nextConfig, {spaces: 2})
+  await fs.chmod(configFile, 0o600).catch((error) => {
+    logger.warn('cannot restrict node config permissions', {
+      error: error.toString(),
+    })
+  })
   return nextConfig
+}
+
+async function ensureNodeApiKey(apiKey) {
+  const normalizedApiKey = String(apiKey || '').trim()
+  if (!normalizedApiKey) {
+    throw new Error('node api key is required')
+  }
+
+  await fs.ensureDir(getNodeDataDir())
+  await fs.writeFile(getNodeApiKeyFile(), `${normalizedApiKey}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+  await fs.chmod(getNodeApiKeyFile(), 0o600).catch((error) => {
+    logger.warn('cannot restrict node api key permissions', {
+      error: error.toString(),
+    })
+  })
 }
 
 async function readPeerHints() {
@@ -482,6 +496,11 @@ async function writePeerHints(peers) {
     },
     {spaces: 2}
   )
+  await fs.chmod(getNodePeerHintsFile(), 0o600).catch((error) => {
+    logger.warn('cannot restrict node peer hints permissions', {
+      error: error.toString(),
+    })
+  })
 }
 
 async function rememberPeers(peers) {
@@ -556,6 +575,11 @@ async function writeNodeRuntime({pid, port}) {
     },
     {spaces: 2}
   )
+  await fs.chmod(getNodeRuntimeFile(), 0o600).catch((error) => {
+    logger.warn('cannot restrict node runtime permissions', {
+      error: error.toString(),
+    })
+  })
 }
 
 async function clearNodeRuntime(expectedPid) {
@@ -780,6 +804,40 @@ function getNodeVerbosity() {
   return process.env.NODE_ENV === 'development'
     ? devNodeVerbosity
     : defaultNodeVerbosity
+}
+
+function buildNodeParameters({
+  port,
+  tcpPort,
+  ipfsPort,
+  autoActivateMining,
+  version,
+  dataDir = getNodeDataDir(),
+  configFile = getNodeConfigFile(),
+}) {
+  const parameters = [
+    '--datadir',
+    dataDir,
+    '--rpcaddr',
+    '127.0.0.1',
+    '--rpcport',
+    port,
+    '--port',
+    tcpPort,
+    '--ipfsport',
+    ipfsPort,
+    '--verbosity',
+    String(getNodeVerbosity()),
+  ]
+
+  if (autoActivateMining && semver.gt(version, '0.28.3')) {
+    parameters.push('--autoonline')
+  }
+
+  parameters.push('--config')
+  parameters.push(configFile)
+
+  return parameters
 }
 
 function startPeerAssist({port, apiKey, onLog, bootstrapNodes = []}) {
@@ -1525,29 +1583,16 @@ async function startNode(
     return recoveredNode
   }
 
-  const parameters = [
-    '--datadir',
-    getNodeDataDir(),
-    '--rpcport',
-    port,
-    '--port',
-    tcpPort,
-    '--ipfsport',
-    ipfsPort,
-    '--apikey',
-    apiKey,
-    '--verbosity',
-    String(getNodeVerbosity()),
-  ]
-
   const version = await getCurrentVersion(false)
+  await ensureNodeApiKey(apiKey)
 
-  if (autoActivateMining && semver.gt(version, '0.28.3')) {
-    parameters.push('--autoonline')
-  }
-
-  parameters.push('--config')
-  parameters.push(getNodeConfigFile())
+  const parameters = buildNodeParameters({
+    port,
+    tcpPort,
+    ipfsPort,
+    autoActivateMining,
+    version,
+  })
 
   const idenaNode = spawn(getNodeFile(), parameters)
   await writeNodeRuntime({pid: idenaNode.pid, port})
@@ -1801,7 +1846,9 @@ module.exports = {
   getNodeIpfsDir,
   tryStopNode,
   __test__: {
+    buildNodeParameters,
     getBundledNodeFileCandidates,
+    getConfiguredBootstrapNodes,
     getNodeReleaseRepos,
     getPeerHintFailureBackoffMs,
     isRpcMethodUnavailableError,
