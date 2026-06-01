@@ -95,6 +95,7 @@ const REHEARSAL_AI_PROVIDER_OPTIONS = [
   {value: 'groq', label: 'Groq'},
   {value: 'deepseek', label: 'DeepSeek'},
   {value: 'openrouter', label: 'OpenRouter'},
+  {value: 'moonshot', label: 'Moonshot Kimi'},
   {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
 ]
 
@@ -107,6 +108,7 @@ const REHEARSAL_AI_DEFAULT_MODELS = {
   groq: 'llama-3.2-90b-vision-preview',
   deepseek: 'deepseek-chat',
   openrouter: 'openai/gpt-4o-mini',
+  moonshot: 'kimi-k2.6',
   'openai-compatible': 'gpt-5.5',
 }
 
@@ -144,6 +146,7 @@ const REHEARSAL_AI_MODEL_PRESETS = {
     'anthropic/claude-3.7-sonnet',
     'google/gemini-2.0-flash-001',
   ],
+  moonshot: ['kimi-k2.6'],
   'openai-compatible': [
     'gpt-5.5',
     'gpt-5.5-mini',

@@ -189,16 +189,18 @@ const REASONING_MODEL_PRESETS = {
     'anthropic/claude-3.7-sonnet',
     'google/gemini-2.0-flash-001',
   ],
+  moonshot: ['kimi-k2.6'],
 }
 
 const IMAGE_MODEL_PRESETS = {
   openai: ['gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-1'],
   'openai-compatible': ['gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-1'],
   gemini: ['gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'],
+  moonshot: [],
 }
 
-// Pricing snapshot for common OpenAI text+vision models (USD per 1M tokens),
-// based on public OpenAI pricing/docs checked on 2026-05-14.
+// Pricing snapshot for common provider text+vision models (USD per 1M tokens).
+// OpenAI checked on 2026-05-14; Moonshot Kimi K2.6 checked on 2026-06-01.
 const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'gpt-5.5': {input: 5, output: 30},
   // gpt-5.5-mini is currently resolved through the configured 5.4-mini fallback.
@@ -213,6 +215,7 @@ const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'gpt-4o': {input: 2.5, output: 10},
   'gpt-4o-mini': {input: 0.15, output: 0.6},
   'o4-mini': {input: 1.1, output: 4.4},
+  'kimi-k2.6': {input: 0.95, output: 4},
 }
 
 // OpenAI image-generation pricing snapshot (USD per image),
@@ -841,6 +844,7 @@ function normalizeConsultProvider(value) {
       'groq',
       'deepseek',
       'openrouter',
+      'moonshot',
     ].includes(provider)
   ) {
     return provider
@@ -1973,10 +1977,18 @@ export default function NewFlipPage() {
     const provider = String(aiSolverSettings.provider || 'openai')
       .trim()
       .toLowerCase()
-    const base = Array.isArray(IMAGE_MODEL_PRESETS[provider])
+    const hasProviderPreset = Object.prototype.hasOwnProperty.call(
+      IMAGE_MODEL_PRESETS,
+      provider
+    )
+    const base = hasProviderPreset
       ? IMAGE_MODEL_PRESETS[provider]
       : IMAGE_MODEL_PRESETS.openai
-    const merged = [...base, String(aiImageModel || '').trim()]
+    const currentModel =
+      hasProviderPreset && base.length === 0
+        ? ''
+        : String(aiImageModel || '').trim()
+    const merged = [...base, currentModel]
       .map((item) => String(item || '').trim())
       .filter(Boolean)
     return Array.from(new Set(merged))
@@ -2154,7 +2166,9 @@ export default function NewFlipPage() {
       .toLowerCase()
     const model = String(aiSolverSettings.model || '').trim()
     const pricing =
-      provider === 'openai' || provider === 'openai-compatible'
+      provider === 'openai' ||
+      provider === 'openai-compatible' ||
+      provider === 'moonshot'
         ? resolveOpenAiModelPricing(model)
         : null
 
