@@ -252,6 +252,37 @@ export function buildDynamicArgs(args = []) {
     .filter(({value = null}) => value !== null)
 }
 
+export function normalizeVotingOptions(options = []) {
+  return (Array.isArray(options) ? options : [])
+    .filter(({value}) => Boolean(value))
+    .map((option, index) => ({
+      ...option,
+      id: index,
+    }))
+}
+
+export function getVotingOptionIndex(options = [], selectedOption = -1) {
+  const normalizedSelectedOption = Number(selectedOption)
+
+  if (!Number.isInteger(normalizedSelectedOption)) {
+    return -1
+  }
+
+  const sourceOptions = Array.isArray(options) ? options : []
+  const indexById = sourceOptions.findIndex(
+    ({id}) => Number(id) === normalizedSelectedOption
+  )
+
+  if (indexById >= 0) {
+    return indexById
+  }
+
+  return normalizedSelectedOption >= 0 &&
+    normalizedSelectedOption < sourceOptions.length
+    ? normalizedSelectedOption
+    : -1
+}
+
 export function contractMaxFee(gasCost, txFee) {
   return Math.ceil((Number(gasCost) + Number(txFee)) * 1.1)
 }
@@ -464,6 +495,8 @@ export const humanError = (
       return 'The voting cannot be terminated'
     case 'insufficient funds':
       return 'Not enough funds to vote'
+    case 'index out of range':
+      return 'Cannot vote. The selected option is not valid for this voting. Refresh the voting and choose one of the listed options.'
     default:
       return error
   }
@@ -473,7 +506,7 @@ export const isAllowedToTerminate = ({estimatedTerminationTime}) =>
   estimatedTerminationTime && dayjs().isAfter(estimatedTerminationTime)
 
 export function stripOptions(options) {
-  return options.filter(({value}) => Boolean(value))
+  return normalizeVotingOptions(options)
 }
 
 export function hasValuableOptions(options) {
@@ -498,20 +531,26 @@ export const mapVoting = ({
   minPayment,
   oracleRewardFund,
   ...voting
-}) => ({
-  ...voting,
-  id: contractAddress,
-  contractHash: contractAddress,
-  issuer: author,
-  status: state,
-  createDate: createTime,
-  startDate: startTime,
-  finishDate: estimatedVotingFinishTime || votingFinishTime,
-  finishCountingDate: estimatedPublicVotingFinishTime || publicVotingFinishTime,
-  votingMinPayment: minPayment,
-  rewardsFund: oracleRewardFund || 0,
-  ...hexToObject(fact),
-})
+}) => {
+  const decodedFact = hexToObject(fact)
+
+  return {
+    ...voting,
+    id: contractAddress,
+    contractHash: contractAddress,
+    issuer: author,
+    status: state,
+    createDate: createTime,
+    startDate: startTime,
+    finishDate: estimatedVotingFinishTime || votingFinishTime,
+    finishCountingDate:
+      estimatedPublicVotingFinishTime || publicVotingFinishTime,
+    votingMinPayment: minPayment,
+    rewardsFund: oracleRewardFund || 0,
+    ...decodedFact,
+    options: normalizeVotingOptions(decodedFact.options),
+  }
+}
 
 export function mapVotingStatus(status) {
   if (areSameCaseInsensitive(status, VotingStatus.CanBeProlonged))
