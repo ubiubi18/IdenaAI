@@ -103,6 +103,18 @@ global.getZoomLevel = global.getZoomLevel || (() => 0)
 global.setZoomLevel = global.setZoomLevel || (() => {})
 
 const AVAILABLE_TIMEOUT = global.isDev || global.isTest ? 0 : 1000 * 5
+const AI_PROVIDER_DEFAULT_MODELS = {
+  openai: 'gpt-5.5',
+  anthropic: 'claude-3-7-sonnet-latest',
+  gemini: 'gemini-2.0-flash',
+  xai: 'grok-2-vision-latest',
+  mistral: 'mistral-large-latest',
+  groq: 'llama-3.2-90b-vision-preview',
+  deepseek: 'deepseek-chat',
+  openrouter: 'openai/gpt-4o-mini',
+  moonshot: 'kimi-k2.6',
+  'openai-compatible': 'gpt-4o-mini',
+}
 
 const sendConfirmQuit = () => getAppBridge().requestConfirmQuit()
 
@@ -569,6 +581,7 @@ function BenchmarkResearchBanner() {
           {value: 'groq', label: 'Groq'},
           {value: 'deepseek', label: 'DeepSeek'},
           {value: 'openrouter', label: 'OpenRouter'},
+          {value: 'moonshot', label: 'Moonshot Kimi'},
           {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
         ]}
         onComplete={async ({provider}) => {
@@ -581,6 +594,9 @@ function BenchmarkResearchBanner() {
           updateAiSolverSettings({
             enabled: true,
             provider,
+            ...(AI_PROVIDER_DEFAULT_MODELS[provider]
+              ? {model: AI_PROVIDER_DEFAULT_MODELS[provider]}
+              : {}),
           })
           router.push(
             provider === 'local-ai'

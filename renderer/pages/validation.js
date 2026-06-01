@@ -566,6 +566,7 @@ function normalizeAiConsultProvider(value) {
       'groq',
       'deepseek',
       'openrouter',
+      'moonshot',
     ].includes(provider)
   ) {
     return provider

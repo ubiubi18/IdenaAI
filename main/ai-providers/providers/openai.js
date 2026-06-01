@@ -311,6 +311,7 @@ function buildOpenAiPayloadVariants({
   images,
   profile,
   promptOptions = {},
+  providerConfig = {},
 }) {
   const structuredOutput =
     promptOptions &&
@@ -328,6 +329,7 @@ function buildOpenAiPayloadVariants({
   const reasoningEffort = String(
     promptOptions.openAiReasoningEffort || ''
   ).trim()
+  const includeTemperature = !(providerConfig && providerConfig.omitTemperature)
 
   return dedupePayloadVariants([
     buildOpenAiPayload({
@@ -337,7 +339,7 @@ function buildOpenAiPayloadVariants({
       images,
       profile,
       tokenField: 'max_tokens',
-      includeTemperature: true,
+      includeTemperature,
       includeResponseFormat: true,
       includeServiceTier: true,
       includeReasoningEffort: true,
@@ -352,7 +354,7 @@ function buildOpenAiPayloadVariants({
       images,
       profile,
       tokenField: 'max_completion_tokens',
-      includeTemperature: true,
+      includeTemperature,
       includeResponseFormat: true,
       includeServiceTier: true,
       includeReasoningEffort: true,
@@ -367,7 +369,7 @@ function buildOpenAiPayloadVariants({
       images,
       profile,
       tokenField: 'max_completion_tokens',
-      includeTemperature: true,
+      includeTemperature,
       includeResponseFormat: false,
       includeServiceTier: true,
       includeReasoningEffort: true,
@@ -625,6 +627,7 @@ async function callOpenAi({
         images,
         profile,
         promptOptions,
+        providerConfig,
       }),
       requestConfig: {
         timeout: profile.requestTimeoutMs,
