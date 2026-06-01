@@ -62,6 +62,9 @@ import {
   INTERNVL3_5_1B_RESEARCH_RUNTIME_MODEL,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL,
+  KIMI_K2_6_LOCAL_BASE_URL,
+  KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
+  KIMI_K2_6_LOCAL_RUNTIME_MODEL,
   MOLMO2_O_RESEARCH_RUNTIME_MODEL,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
@@ -72,6 +75,7 @@ import {
   buildRecommendedLocalAiMacPreset,
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
+  buildKimiK26ExtremeLocalPreset,
   buildManagedLocalRuntimePreset,
   buildMolmo2OResearchPreset,
   buildMolmo24BCompactPreset,
@@ -99,6 +103,7 @@ const DEFAULT_MODELS = {
   groq: 'llama-3.2-90b-vision-preview',
   deepseek: 'deepseek-chat',
   openrouter: 'openai/gpt-4o-mini',
+  moonshot: 'kimi-k2.6',
 }
 
 const MODEL_PRESETS = {
@@ -150,6 +155,7 @@ const MODEL_PRESETS = {
     'anthropic/claude-3.7-sonnet',
     'google/gemini-2.0-flash-001',
   ],
+  moonshot: ['kimi-k2.6'],
 }
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
@@ -170,6 +176,7 @@ const MAIN_PROVIDER_OPTIONS = [
   {value: 'groq', label: 'Groq'},
   {value: 'deepseek', label: 'DeepSeek'},
   {value: 'openrouter', label: 'OpenRouter'},
+  {value: 'moonshot', label: 'Moonshot Kimi'},
   {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
 ]
 
@@ -264,11 +271,11 @@ const DEFAULT_LOCAL_AI_DEBUG_FLIP_INPUT = `{
 const MAX_LOCAL_AI_ADAPTER_IMPORT_BYTES = 96 * 1024 * 1024
 const MIN_AI_MEMORY_BUDGET_GIB = 4
 const DEFAULT_AI_MEMORY_BUDGET_GIB = 32
-const MAX_AI_MEMORY_BUDGET_GIB = 128
+const MAX_AI_MEMORY_BUDGET_GIB = 1024
 const LIVE_SESSION_STACK_MIN_GIB = 4
 const DEFAULT_SYSTEM_RESERVE_GIB = 6
 const MIN_SYSTEM_RESERVE_GIB = 0
-const MAX_SYSTEM_RESERVE_GIB = 32
+const MAX_SYSTEM_RESERVE_GIB = 128
 const EXTERNAL_PROVIDER_SESSION_TARGET_GIB = 8
 const DEFAULT_LOCAL_AI_MEMORY_REFERENCE = 'qwen36-27b-q4km'
 const LOCAL_AI_MEMORY_REFERENCE_PROFILES = [
@@ -362,6 +369,15 @@ const LOCAL_AI_MEMORY_REFERENCE_PROFILES = [
     detail:
       'Only relevant for unusually large local setups. Most users should stay well below this class.',
   },
+  {
+    value: 'kimi-k2.6-local',
+    label: `Extreme local ${KIMI_K2_6_LOCAL_RUNTIME_MODEL} endpoint`,
+    shortLabel: 'Kimi K2.6 1T MoE',
+    minimumGiB: 512,
+    comfortableGiB: 800,
+    detail:
+      'Only for state-of-the-art workstation or server-class systems. Expect hundreds of GB of RAM/VRAM, fast storage, and a separately managed vLLM/SGLang/KTransformers server.',
+  },
 ]
 const LOCAL_AI_MODEL_CEILING_GUIDE = [
   {label: 'below 3B-class local models', comfortableGiB: 0},
@@ -373,6 +389,7 @@ const LOCAL_AI_MODEL_CEILING_GUIDE = [
   {label: 'around 13B-class local models', comfortableGiB: 48},
   {label: 'around 34B-class local models', comfortableGiB: 96},
   {label: 'around 70B-class local models', comfortableGiB: 128},
+  {label: 'around Kimi K2.6-class 1T MoE models', comfortableGiB: 800},
 ]
 
 function numberOrFallback(value, fallback) {
@@ -1506,6 +1523,12 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
   const backend = String(localAi?.runtimeBackend || '')
     .trim()
     .toLowerCase()
+  const runtimeFamily = String(localAi?.runtimeFamily || '')
+    .trim()
+    .toLowerCase()
+  const isKimiK26LocalEndpoint =
+    runtimeFamily === KIMI_K2_6_LOCAL_RUNTIME_FAMILY ||
+    String(localAi?.model || '').trim() === KIMI_K2_6_LOCAL_RUNTIME_MODEL
 
   if (managedRuntime) {
     return {
@@ -1517,6 +1540,22 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
       ),
       endpointReadOnly: true,
       startLabel: t('Install / start managed runtime'),
+    }
+  }
+
+  if (isKimiK26LocalEndpoint) {
+    return {
+      title: t('Extreme local Kimi K2.6 endpoint'),
+      description: t(
+        'This is only a connector for a Kimi K2.6 server you operate yourself. It is for very expensive systems with roughly 800 GB RAM/VRAM-class headroom, fast storage, and a current inference stack such as vLLM, SGLang, or KTransformers.'
+      ),
+      endpointLabel: t('Local Kimi server endpoint'),
+      endpointHelper: t(
+        'Expected default: {{baseUrl}} with /v1/chat/completions or /chat/completions. Keep it loopback-only and start the Kimi server outside IdenaAI.',
+        {baseUrl: KIMI_K2_6_LOCAL_BASE_URL}
+      ),
+      endpointReadOnly: false,
+      startLabel: t('Connect to local Kimi endpoint'),
     }
   }
 
@@ -2034,6 +2073,13 @@ export default function AiSettingsPage() {
       const managedRuntimeMemoryReference = managedRuntime
         ? resolveManagedLocalRuntimeMemoryReference(nextLocalAi.runtimeFamily)
         : ''
+      const localRuntimeMemoryReference =
+        !managedRuntime &&
+        String(nextLocalAi.runtimeFamily || '')
+          .trim()
+          .toLowerCase() === KIMI_K2_6_LOCAL_RUNTIME_FAMILY
+          ? KIMI_K2_6_LOCAL_RUNTIME_FAMILY
+          : ''
 
       if (openSetup) {
         setShowLocalAiSetup(true)
@@ -2066,11 +2112,12 @@ export default function AiSettingsPage() {
 
       updateLocalAiSettings(nextSettingsPatch)
 
-      const nextAiSolverPatch = managedRuntimeMemoryReference
-        ? {
-            localAiMemoryReference: managedRuntimeMemoryReference,
-          }
-        : {}
+      const nextAiSolverPatch = {}
+      if (managedRuntimeMemoryReference) {
+        nextAiSolverPatch.localAiMemoryReference = managedRuntimeMemoryReference
+      } else if (localRuntimeMemoryReference) {
+        nextAiSolverPatch.localAiMemoryReference = localRuntimeMemoryReference
+      }
 
       if (enableLocalProvider) {
         Object.assign(nextAiSolverPatch, {
@@ -2386,6 +2433,18 @@ export default function AiSettingsPage() {
         localAiPatch: buildInternVl358BExperimentalPreset(),
         preparingMessage: t(
           'Preparing the experimental InternVL3.5-8B runtime now. Progress will appear below.'
+        ),
+      }),
+    [startLocalAiWithSettings, t]
+  )
+
+  const applyKimiK26ExtremeLocalSetup = useCallback(
+    () =>
+      startLocalAiWithSettings({
+        localAiPatch: buildKimiK26ExtremeLocalPreset(),
+        enableLocalProvider: true,
+        preparingMessage: t(
+          'Connecting to the local Kimi K2.6 endpoint now. IdenaAI will not download or start Kimi; run your own vLLM, SGLang, or KTransformers server first on this machine.'
         ),
       }),
     [startLocalAiWithSettings, t]
@@ -3677,6 +3736,8 @@ export default function AiSettingsPage() {
   const selectedMemoryReferenceIsManagedRuntime = Boolean(
     selectedMemoryManagedRuntimeFamily
   )
+  const selectedMemoryReferenceIsKimiK26 =
+    selectedLocalAiMemoryReference.value === KIMI_K2_6_LOCAL_RUNTIME_FAMILY
   const oneClickManagedInstallProfile = useMemo(
     () => getManagedLocalRuntimeInstallProfile(oneClickManagedRuntimeFamily),
     [oneClickManagedRuntimeFamily]
@@ -3698,6 +3759,60 @@ export default function AiSettingsPage() {
       ),
     [oneClickManagedInstallProfile, normalizedSystemReserveGiB, t]
   )
+  const oneClickLocalTargetText = useMemo(() => {
+    if (selectedMemoryReferenceIsManagedRuntime) {
+      return formatManagedRuntimeInstallTarget(oneClickManagedInstallProfile, t)
+    }
+
+    if (selectedMemoryReferenceIsKimiK26) {
+      return t('External local Kimi endpoint · {{model}}', {
+        model: KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+      })
+    }
+
+    return t('Qwen via Ollama · {{model}}', {
+      model: QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
+    })
+  }, [
+    oneClickManagedInstallProfile,
+    selectedMemoryReferenceIsKimiK26,
+    selectedMemoryReferenceIsManagedRuntime,
+    t,
+  ])
+  const oneClickLocalRequirementText = useMemo(() => {
+    if (selectedMemoryReferenceIsManagedRuntime) {
+      return oneClickManagedInstallRequirement
+    }
+
+    const comfortable =
+      selectedLocalAiMemoryReference.comfortableGiB + normalizedSystemReserveGiB
+
+    if (selectedMemoryReferenceIsKimiK26) {
+      return t(
+        'RAM guide: roughly {{comfortable}} GB total with {{reserve}} GB reserved. Start your own local Kimi server at {{baseUrl}} first.',
+        {
+          comfortable,
+          reserve: normalizedSystemReserveGiB,
+          baseUrl: KIMI_K2_6_LOCAL_BASE_URL,
+        }
+      )
+    }
+
+    return t(
+      'RAM guide: safer around {{comfortable}} GB total with {{reserve}} GB reserved for node/app.',
+      {
+        comfortable,
+        reserve: normalizedSystemReserveGiB,
+      }
+    )
+  }, [
+    normalizedSystemReserveGiB,
+    oneClickManagedInstallRequirement,
+    selectedLocalAiMemoryReference.comfortableGiB,
+    selectedMemoryReferenceIsKimiK26,
+    selectedMemoryReferenceIsManagedRuntime,
+    t,
+  ])
   const activeManagedInstallRequirement = useMemo(
     () =>
       describeManagedRuntimeSystemRequirement(
@@ -3832,17 +3947,38 @@ export default function AiSettingsPage() {
       return null
     }
 
+    let selectedPatch = buildRecommendedLocalAiMacPreset()
+    let preparingMessage = t(
+      'Preparing Qwen via Ollama now. IdenaAI will try to start Ollama and connect to your configured local model endpoint.'
+    )
+
+    if (selectedMemoryManagedRuntimeFamily) {
+      selectedPatch = buildManagedLocalRuntimePreset(
+        selectedMemoryManagedRuntimeFamily
+      )
+      preparingMessage = t(
+        'Preparing the selected managed on-device runtime now. Progress will appear below.'
+      )
+    }
+
+    if (selectedMemoryReferenceIsKimiK26) {
+      selectedPatch = buildKimiK26ExtremeLocalPreset()
+      preparingMessage = t(
+        'Connecting to the local Kimi K2.6 endpoint now. IdenaAI will not download or start Kimi; run your own vLLM, SGLang, or KTransformers server first on this machine.'
+      )
+    }
+
     return startLocalAiWithSettings({
-      localAiPatch: buildRecommendedLocalAiMacPreset(),
+      localAiPatch: selectedPatch,
       enableLocalProvider: true,
-      preparingMessage: t(
-        'Preparing Qwen via Ollama now. IdenaAI will try to start Ollama and connect to your configured local model endpoint.'
-      ),
+      preparingMessage,
     })
   }, [
     notify,
     remoteProviderAutosolverArmed,
     remoteProviderAutosolverLabel,
+    selectedMemoryManagedRuntimeFamily,
+    selectedMemoryReferenceIsKimiK26,
     startLocalAiWithSettings,
     t,
   ])
@@ -4052,12 +4188,14 @@ export default function AiSettingsPage() {
                       <Box
                         borderWidth="1px"
                         borderColor={
+                          selectedMemoryReferenceIsKimiK26 ||
                           oneClickManagedInstallWarning
                             ? 'orange.200'
                             : 'green.100'
                         }
                         borderRadius="md"
                         bg={
+                          selectedMemoryReferenceIsKimiK26 ||
                           oneClickManagedInstallWarning
                             ? 'orange.012'
                             : 'green.010'
@@ -4069,32 +4207,23 @@ export default function AiSettingsPage() {
                             {t('One-click local target')}
                           </Text>
                           <Text color="muted" fontSize="xs">
-                            {selectedMemoryReferenceIsManagedRuntime
-                              ? formatManagedRuntimeInstallTarget(
-                                  oneClickManagedInstallProfile,
-                                  t
-                                )
-                              : t('Qwen via Ollama · {{model}}', {
-                                  model: QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
-                                })}
+                            {oneClickLocalTargetText}
                           </Text>
                           <Text color="muted" fontSize="xs">
-                            {selectedMemoryReferenceIsManagedRuntime
-                              ? oneClickManagedInstallRequirement
-                              : t(
-                                  'RAM guide: safer around {{comfortable}} GB total with {{reserve}} GB reserved for node/app.',
-                                  {
-                                    comfortable:
-                                      selectedLocalAiMemoryReference.comfortableGiB +
-                                      normalizedSystemReserveGiB,
-                                    reserve: normalizedSystemReserveGiB,
-                                  }
-                                )}
+                            {oneClickLocalRequirementText}
                           </Text>
-                          {!selectedMemoryReferenceIsManagedRuntime ? (
+                          {!selectedMemoryReferenceIsManagedRuntime &&
+                          !selectedMemoryReferenceIsKimiK26 ? (
                             <Text color="muted" fontSize="xs">
                               {t(
                                 'If this desktop is too small for Qwen, open Local AI settings and use a compact managed fallback.'
+                              )}
+                            </Text>
+                          ) : null}
+                          {selectedMemoryReferenceIsKimiK26 ? (
+                            <Text color="orange.600" fontSize="xs">
+                              {t(
+                                'Extreme hardware only: this option is for server/workstation owners who already operate Kimi K2.6 locally. IdenaAI only connects to the local endpoint.'
                               )}
                             </Text>
                           ) : null}
@@ -6334,6 +6463,13 @@ export default function AiSettingsPage() {
                 </SecondaryButton>
                 <SecondaryButton
                   isDisabled={remoteProviderAutosolverArmed}
+                  onClick={applyKimiK26ExtremeLocalSetup}
+                  isLoading={isStartingLocalAi}
+                >
+                  {t('Connect extreme local Kimi K2.6')}
+                </SecondaryButton>
+                <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
                   onClick={fixLocalAiAutomatically}
                   isLoading={isStartingLocalAi}
                 >
@@ -6345,6 +6481,22 @@ export default function AiSettingsPage() {
                   'Qwen/Ollama is the default text and code review path. Use the smaller managed fallbacks only when this computer cannot run it comfortably.'
                 )}
               </Text>
+              <Box
+                borderWidth="1px"
+                borderColor="orange.200"
+                bg="orange.012"
+                borderRadius="md"
+                p={3}
+              >
+                <Text color="orange.700" fontSize="sm" fontWeight={600}>
+                  {t('Kimi K2.6 local is extreme hardware only')}
+                </Text>
+                <Text color="muted" fontSize="sm" mt={1}>
+                  {t(
+                    'Use the Kimi K2.6 local option only when you already run the model yourself on a very expensive workstation or server, roughly 800 GB RAM/VRAM-class with state-of-the-art GPUs/storage. IdenaAI only connects to the loopback endpoint and will not download or manage that model.'
+                  )}
+                </Text>
+              </Box>
               <Box
                 borderWidth="1px"
                 borderColor={localAiSetupStatusBorderColor}
