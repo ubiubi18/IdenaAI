@@ -1,6 +1,14 @@
 import {TextEncoder, TextDecoder} from 'util'
 
-const {buildDynamicArgs, buildContractDeploymentArgs} = require('./utils')
+const {
+  buildDynamicArgs,
+  buildContractDeploymentArgs,
+  stripOptions,
+  getVotingOptionIndex,
+  hexToObject,
+  objectToHex,
+  mapVoting,
+} = require('./utils')
 
 describe('buildDynamicArgs', () => {
   it('should filter nullish values out', () => {
@@ -67,5 +75,74 @@ describe('buildDeploymentArgs', () => {
         ).toHaveProperty('value', String(v))
       )
     })
+  })
+})
+
+describe('voting options', () => {
+  global.TextEncoder = TextEncoder
+  global.TextDecoder = TextDecoder
+
+  it('filters empty options and reindexes ids for contract storage', () => {
+    expect(
+      stripOptions([
+        {id: 0, value: ''},
+        {id: 4, value: 'Accept'},
+        {id: 8, value: 'Reject'},
+      ])
+    ).toEqual([
+      {id: 0, value: 'Accept'},
+      {id: 1, value: 'Reject'},
+    ])
+  })
+
+  it('maps a selected UI option id to the contract option index', () => {
+    const options = [
+      {id: 4, value: 'Accept'},
+      {id: 8, value: 'Reject'},
+    ]
+
+    expect(getVotingOptionIndex(options, 4)).toBe(0)
+    expect(getVotingOptionIndex(options, 8)).toBe(1)
+    expect(getVotingOptionIndex(options, 0)).toBe(0)
+    expect(getVotingOptionIndex(options, 3)).toBe(-1)
+  })
+
+  it('stores reindexed options in deployment args', () => {
+    const fact = hexToObject(
+      buildContractDeploymentArgs(
+        {
+          title: 'title',
+          options: [
+            {id: 0, value: ''},
+            {id: 2, value: 'Yes'},
+            {id: 5, value: 'No'},
+          ],
+        },
+        {from: '0x0', stake: 100, gasCost: 0, txFee: 0}
+      ).args.find(({index}) => index === 0).value
+    )
+
+    expect(fact.options).toEqual([
+      {id: 0, value: 'Yes'},
+      {id: 1, value: 'No'},
+    ])
+  })
+
+  it('normalizes fetched voting fact options', () => {
+    expect(
+      mapVoting({
+        contractAddress: '0x1',
+        fact: `0x${objectToHex({
+          title: 'title',
+          options: [
+            {id: 2, value: 'Yes'},
+            {id: 5, value: 'No'},
+          ],
+        }).toString()}`,
+      }).options
+    ).toEqual([
+      {id: 0, value: 'Yes'},
+      {id: 1, value: 'No'},
+    ])
   })
 })
