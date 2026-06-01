@@ -779,6 +779,7 @@ function normalizeConsultProvider(value) {
       'groq',
       'deepseek',
       'openrouter',
+      'moonshot',
     ].includes(provider)
   ) {
     return provider
