@@ -23,6 +23,7 @@ import {
   fetchLastOpenVotings,
   hasLinklessOptions,
   minOwnerDeposit,
+  getVotingOptionIndex,
 } from './utils'
 import {VotingStatus} from '../../shared/types'
 import {callRpc, HASH_IN_MEMPOOL, isAddress} from '../../shared/utils/utils'
@@ -1170,7 +1171,8 @@ export const createViewVotingMachine = (id, epoch, address) =>
                     data: {message: 'Please choose an option'},
                   }),
                 ],
-                cond: ({selectedOption = -1}) => selectedOption < 0,
+                cond: ({options, selectedOption = -1}) =>
+                  getVotingOptionIndex(options, selectedOption) < 0,
               },
               {
                 target: 'review',
@@ -1227,10 +1229,23 @@ export const createViewVotingMachine = (id, epoch, address) =>
     },
     {
       actions: {
-        applyVoting: assign((context, {data}) => ({
-          ...context,
-          ...data,
-        })),
+        applyVoting: assign((context, {data}) => {
+          const nextContext = {
+            ...context,
+            ...data,
+          }
+
+          return {
+            ...nextContext,
+            selectedOption:
+              getVotingOptionIndex(
+                nextContext.options,
+                nextContext.selectedOption
+              ) >= 0
+                ? nextContext.selectedOption
+                : -1,
+          }
+        }),
         applyFundingAmount: assign({
           balance: ({balance = 0}, {amount}) =>
             Number(balance) + Number(amount),
@@ -1292,9 +1307,15 @@ export const createViewVotingMachine = (id, epoch, address) =>
         ...votingServices(),
         vote: async (
           // eslint-disable-next-line no-shadow
-          {contractHash, selectedOption, gasCost, txFee, epoch},
+          {contractHash, selectedOption, options, gasCost, txFee, epoch},
           {from}
         ) => {
+          const voteOptionIndex = getVotingOptionIndex(options, selectedOption)
+
+          if (voteOptionIndex < 0) {
+            throw new Error('Please choose an option')
+          }
+
           const readonlyCallContract = createContractReadonlyCaller({
             contractHash,
           })
@@ -1315,7 +1336,7 @@ export const createViewVotingMachine = (id, epoch, address) =>
           const voteHash = await readonlyCallContract(
             'voteHash',
             'hex',
-            {value: selectedOption, format: 'byte'},
+            {value: voteOptionIndex, format: 'byte'},
             {value: salt}
           )
 
@@ -1366,7 +1387,7 @@ export const createViewVotingMachine = (id, epoch, address) =>
           await callContract(
             'sendVote',
             ContractRpcMode.Call,
-            {value: selectedOption.toString(), format: 'byte'},
+            {value: voteOptionIndex.toString(), format: 'byte'},
             {value: salt}
           )
 
