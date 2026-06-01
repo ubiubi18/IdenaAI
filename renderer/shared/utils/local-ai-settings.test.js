@@ -43,11 +43,16 @@ const {
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL,
+  KIMI_K2_6_LOCAL_BASE_URL,
+  KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
+  KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+  KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL,
   buildLocalAiSettings,
   buildMolmo2OResearchPreset,
   buildMolmo24BCompactPreset,
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
+  buildKimiK26ExtremeLocalPreset,
   buildManagedLocalAiTrustApprovalPatch,
   buildManagedLocalRuntimePreset,
   buildLocalAiRepairPreset,
@@ -372,6 +377,23 @@ describe('local-ai settings schema', () => {
       model: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
       visionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
     })
+  })
+
+  it('builds an extreme local Kimi K2.6 endpoint preset without managed install', () => {
+    expect(buildKimiK26ExtremeLocalPreset()).toMatchObject({
+      runtimeBackend: 'local-runtime-service',
+      baseUrl: KIMI_K2_6_LOCAL_BASE_URL,
+      endpoint: KIMI_K2_6_LOCAL_BASE_URL,
+      runtimeType: 'sidecar',
+      runtimeFamily: KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
+      model: KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+      visionModel: KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL,
+    })
+    expect(
+      getManagedLocalRuntimeFamilyForMemoryReference(
+        KIMI_K2_6_LOCAL_RUNTIME_FAMILY
+      )
+    ).toBe('')
   })
 
   it('uses compact Molmo2-4B as the managed local runtime default', () => {
