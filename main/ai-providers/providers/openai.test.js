@@ -213,6 +213,53 @@ describe('openai provider adapter', () => {
     expect(httpClient.post.mock.calls[3][1].temperature).toBeUndefined()
   })
 
+  test('omits temperature when provider config requires provider defaults', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          choices: [
+            {
+              message: {
+                content: '{"answer":"left","confidence":0.82}',
+              },
+            },
+          ],
+        },
+      }),
+    }
+
+    await callOpenAi({
+      httpClient,
+      apiKey: 'moonshot-key',
+      model: 'kimi-k2.6',
+      flip: {
+        hash: 'flip-kimi',
+        leftImage: 'data:image/png;base64,AAA',
+        rightImage: 'data:image/png;base64,BBB',
+      },
+      prompt: 'test prompt',
+      profile: {
+        temperature: 0,
+        maxOutputTokens: 128,
+        requestTimeoutMs: 5000,
+      },
+      providerConfig: {
+        baseUrl: 'https://api.moonshot.ai/v1',
+        omitTemperature: true,
+      },
+    })
+
+    expect(httpClient.post).toHaveBeenCalledTimes(1)
+    expect(httpClient.post.mock.calls[0][0]).toBe(
+      'https://api.moonshot.ai/v1/chat/completions'
+    )
+    expect(httpClient.post.mock.calls[0][1]).toMatchObject({
+      model: 'kimi-k2.6',
+      max_tokens: 128,
+    })
+    expect(httpClient.post.mock.calls[0][1].temperature).toBeUndefined()
+  })
+
   test('passes through service tier and reasoning effort when requested', async () => {
     const httpClient = {
       post: jest.fn().mockResolvedValue({

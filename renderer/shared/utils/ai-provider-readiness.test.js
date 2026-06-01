@@ -63,9 +63,9 @@ describe('ai-provider-readiness', () => {
   })
 
   it('returns a readable missing-provider list', () => {
-    expect(formatMissingAiProviders(['openai', 'gemini', 'openai', ''])).toBe(
-      'openai, gemini'
-    )
+    expect(
+      formatMissingAiProviders(['openai', 'moonshot', 'gemini', 'openai', ''])
+    ).toBe('openai, Moonshot Kimi, gemini')
   })
 
   it('keeps the local AI enabled flag in the runtime payload', () => {

@@ -25,6 +25,10 @@ const INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY = 'internvl3.5-8b'
 const INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL = 'OpenGVLab/InternVL3_5-8B-HF'
 const INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL =
   'OpenGVLab/InternVL3_5-8B-HF'
+const KIMI_K2_6_LOCAL_BASE_URL = 'http://127.0.0.1:30000'
+const KIMI_K2_6_LOCAL_RUNTIME_FAMILY = 'kimi-k2.6-local'
+const KIMI_K2_6_LOCAL_RUNTIME_MODEL = 'moonshotai/Kimi-K2.6'
+const KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL = 'moonshotai/Kimi-K2.6'
 const QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL =
   'idenaai-qwen36-27b-claude-opus:q4km'
 const QWEN36_27B_CLAUDE_OPUS_HF_OLLAMA_MODEL =
@@ -793,6 +797,17 @@ function buildInternVl358BExperimentalPreset() {
   }
 }
 
+function buildKimiK26ExtremeLocalPreset() {
+  return {
+    ...buildLocalAiRuntimePreset(LOCAL_RUNTIME_SERVICE_BACKEND),
+    baseUrl: KIMI_K2_6_LOCAL_BASE_URL,
+    endpoint: KIMI_K2_6_LOCAL_BASE_URL,
+    runtimeFamily: KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
+    model: KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+    visionModel: KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL,
+  }
+}
+
 function buildManagedLocalRuntimePreset(runtimeFamily = '') {
   const normalizedFamily =
     trimString(runtimeFamily).toLowerCase() ||
@@ -1141,6 +1156,10 @@ module.exports = {
   INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_MODEL,
   INTERNVL3_5_8B_RESEARCH_RUNTIME_VISION_MODEL,
+  KIMI_K2_6_LOCAL_BASE_URL,
+  KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
+  KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+  KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL,
   QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
   QWEN36_27B_CLAUDE_OPUS_HF_OLLAMA_MODEL,
   QWEN36_27B_CLAUDE_OPUS_GGUF_REPO,
@@ -1157,6 +1176,7 @@ module.exports = {
   buildMolmo24BCompactPreset,
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
+  buildKimiK26ExtremeLocalPreset,
   buildManagedLocalRuntimePreset,
   buildManagedMolmo2RuntimePreset,
   resolveManagedLocalRuntimeMemoryReference,

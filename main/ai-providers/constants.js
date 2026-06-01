@@ -9,6 +9,7 @@ const PROVIDERS = {
   Groq: 'groq',
   DeepSeek: 'deepseek',
   OpenRouter: 'openrouter',
+  Moonshot: 'moonshot',
 }
 
 const DEFAULT_MODELS = {
@@ -22,6 +23,7 @@ const DEFAULT_MODELS = {
   [PROVIDERS.Groq]: 'llama-3.2-90b-vision-preview',
   [PROVIDERS.DeepSeek]: 'deepseek-chat',
   [PROVIDERS.OpenRouter]: 'openai/gpt-4o-mini',
+  [PROVIDERS.Moonshot]: 'kimi-k2.6',
 }
 
 const PROVIDER_CONFIG_DEFAULTS = {
@@ -78,6 +80,14 @@ const PROVIDER_CONFIG_DEFAULTS = {
       'X-Title': 'Idena Benchmark Desktop',
     },
   },
+  [PROVIDERS.Moonshot]: {
+    baseUrl: 'https://api.moonshot.ai/v1',
+    chatPath: '/chat/completions',
+    modelsPath: '/models',
+    authHeader: 'Authorization',
+    authPrefix: 'Bearer',
+    omitTemperature: true,
+  },
 }
 
 const OPENAI_COMPATIBLE_PROVIDERS = [
@@ -88,6 +98,7 @@ const OPENAI_COMPATIBLE_PROVIDERS = [
   PROVIDERS.Groq,
   PROVIDERS.DeepSeek,
   PROVIDERS.OpenRouter,
+  PROVIDERS.Moonshot,
 ]
 
 const STRICT_PROFILE = {

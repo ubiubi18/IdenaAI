@@ -99,6 +99,8 @@ const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
   'gpt-4o': {input: 2.5, output: 10},
   'gpt-4o-mini': {input: 0.15, output: 0.6},
   'o4-mini': {input: 1.1, output: 4.4},
+  // Moonshot Kimi K2.6 pricing checked on 2026-06-01; input uses cache-miss rate.
+  'kimi-k2.6': {input: 0.95, output: 4},
 }
 
 const OPENAI_IMAGE_PRICING_USD_PER_IMAGE = {
@@ -282,7 +284,10 @@ function isOpenAiCompatibleProvider(provider) {
 }
 
 function supportsImageGenerationProvider(provider) {
-  return isOpenAiCompatibleProvider(provider) || provider === PROVIDERS.Gemini
+  return (
+    (isOpenAiCompatibleProvider(provider) && provider !== PROVIDERS.Moonshot) ||
+    provider === PROVIDERS.Gemini
+  )
 }
 
 function isLocalAiProvider(provider) {
@@ -6758,7 +6763,10 @@ Flip hash: ${hash}
       providerConfig
     )
 
-    if (isOpenAiCompatibleProvider(provider)) {
+    if (
+      isOpenAiCompatibleProvider(provider) &&
+      provider !== PROVIDERS.Moonshot
+    ) {
       return callOpenAiImage({
         httpClient,
         apiKey: resolvedApiKey,
