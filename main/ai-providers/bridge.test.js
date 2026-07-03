@@ -1208,6 +1208,37 @@ describe('createAiProviderBridge', () => {
     )
   })
 
+  it('supports DeepInfra Qwen provider defaults', async () => {
+    const httpClient = {
+      post: jest
+        .fn()
+        .mockResolvedValue({data: {choices: [{message: {content: '{}'}}]}}),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'deepinfra', apiKey: 'di-test-key'})
+
+    const result = await bridge.testProvider({
+      provider: 'deepinfra',
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      provider: 'deepinfra',
+      model: 'Qwen/Qwen3.6-35B-A3B',
+    })
+    expect(httpClient.post).toHaveBeenCalledWith(
+      'https://api.deepinfra.com/v1/openai/chat/completions',
+      expect.objectContaining({
+        model: 'Qwen/Qwen3.6-35B-A3B',
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer di-test-key',
+        }),
+      })
+    )
+  })
+
   it('does not globally side-swap normal live solve batches', async () => {
     const invokeProvider = jest
       .fn()
@@ -6104,6 +6135,28 @@ describe('createAiProviderBridge', () => {
       })
     ).rejects.toThrow(
       'AI image search is not available for provider: moonshot. Supported providers: openai-compatible and gemini.'
+    )
+  })
+
+  it('does not route DeepInfra Qwen through image generation endpoints', async () => {
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient: {
+        post: jest.fn(),
+        get: jest.fn(),
+      },
+    })
+    bridge.setProviderKey({provider: 'deepinfra', apiKey: 'di-test-key'})
+
+    await expect(
+      bridge.generateImageSearchResults({
+        provider: 'deepinfra',
+        model: 'Qwen/Qwen3.6-35B-A3B',
+        imageModel: 'Qwen/Qwen3.6-35B-A3B',
+        prompt: 'draw a simple scene',
+        maxImages: 1,
+      })
+    ).rejects.toThrow(
+      'AI image search is not available for provider: deepinfra. Supported providers: openai-compatible and gemini.'
     )
   })
 

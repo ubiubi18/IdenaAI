@@ -17,7 +17,7 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import {useTranslation} from 'react-i18next'
-import {Input, Select, Toast} from './components'
+import {ExternalLink, Input, Select, Toast} from './components'
 import {PrimaryButton, SecondaryButton} from './button'
 import {EyeIcon, EyeOffIcon} from './icons'
 import {isLocalAiProvider} from '../utils/ai-provider-readiness'
@@ -28,6 +28,21 @@ import {
 import {getSharedGlobal} from '../utils/shared-global'
 
 const LOCAL_AI_DEFAULT_RESERVE_GIB = 6
+const PREFERRED_EXTERNAL_PROVIDER = 'deepinfra'
+const DEEPINFRA_QWEN_LINKS = [
+  {
+    label: 'Add DeepInfra credits',
+    href: 'https://deepinfra.com/dash/billing',
+  },
+  {
+    label: 'Create DeepInfra API key',
+    href: 'https://deepinfra.com/dash/api_keys',
+  },
+  {
+    label: 'DeepInfra Qwen API docs',
+    href: 'https://deepinfra.com/Qwen/Qwen3.6-35B-A3B/api',
+  },
+]
 
 function ensureBridge() {
   if (!global.aiSolver) {
@@ -74,12 +89,17 @@ export function AiEnableDialog({
     () => providerOptions.some((item) => isLocalAiProvider(item.value)),
     [providerOptions]
   )
-  const firstExternalProvider = useMemo(
-    () =>
+  const firstExternalProvider = useMemo(() => {
+    const preferredProvider = providerOptions.find(
+      (item) => item.value === PREFERRED_EXTERNAL_PROVIDER
+    )?.value
+
+    return (
+      preferredProvider ||
       providerOptions.find((item) => !isLocalAiProvider(item.value))?.value ||
-      'openai',
-    [providerOptions]
-  )
+      'openai'
+    )
+  }, [providerOptions])
 
   useEffect(() => {
     if (!isOpen) return
@@ -338,6 +358,38 @@ export function AiEnableDialog({
                       'Cloud providers need a session API key. Use this only when you intentionally want an external API instead of local AI on this device.'
                     )}
                   </Text>
+                  {provider === PREFERRED_EXTERNAL_PROVIDER ? (
+                    <Box
+                      borderWidth="1px"
+                      borderColor="blue.100"
+                      borderRadius="md"
+                      bg="blue.012"
+                      p={3}
+                    >
+                      <Stack spacing={2}>
+                        <Text fontSize="sm" fontWeight={600}>
+                          {t('Hosted Qwen 3.6 via DeepInfra')}
+                        </Text>
+                        <Text color="muted" fontSize="xs">
+                          {t(
+                            'Use DeepInfra credits and a DeepInfra API key for the hosted Qwen preset. IdenaAI also keeps its own local daily API cap, but provider-side credits or hard budgets are the real spend control.'
+                          )}
+                        </Text>
+                        <Stack isInline spacing={2} flexWrap="wrap">
+                          {DEEPINFRA_QWEN_LINKS.map((item) => (
+                            <ExternalLink
+                              key={item.href}
+                              href={item.href}
+                              h="7"
+                              fontSize="sm"
+                            >
+                              {t(item.label)}
+                            </ExternalLink>
+                          ))}
+                        </Stack>
+                      </Stack>
+                    </Box>
+                  ) : null}
                   {!isLocalProvider ? (
                     <>
                       <InputGroup w="full">
@@ -353,6 +405,11 @@ export function AiEnableDialog({
                         <InputRightElement w="6" h="6" m="1">
                           <IconButton
                             size="xs"
+                            aria-label={
+                              isApiKeyVisible
+                                ? t('Hide provider API key')
+                                : t('Show provider API key')
+                            }
                             icon={
                               isApiKeyVisible ? <EyeOffIcon /> : <EyeIcon />
                             }
