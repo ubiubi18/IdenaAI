@@ -101,6 +101,8 @@ const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
   'o4-mini': {input: 1.1, output: 4.4},
   // Moonshot Kimi K2.6 pricing checked on 2026-06-01; input uses cache-miss rate.
   'kimi-k2.6': {input: 0.95, output: 4},
+  // DeepInfra public Qwen3.6-35B-A3B pricing checked on 2026-07-03.
+  'qwen/qwen3.6-35b-a3b': {input: 0.15, output: 0.95},
 }
 
 const OPENAI_IMAGE_PRICING_USD_PER_IMAGE = {
@@ -285,7 +287,9 @@ function isOpenAiCompatibleProvider(provider) {
 
 function supportsImageGenerationProvider(provider) {
   return (
-    (isOpenAiCompatibleProvider(provider) && provider !== PROVIDERS.Moonshot) ||
+    (isOpenAiCompatibleProvider(provider) &&
+      provider !== PROVIDERS.Moonshot &&
+      provider !== PROVIDERS.DeepInfra) ||
     provider === PROVIDERS.Gemini
   )
 }

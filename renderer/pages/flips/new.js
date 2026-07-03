@@ -183,7 +183,9 @@ const REASONING_MODEL_PRESETS = {
     'meta-llama/llama-4-scout-17b-16e-instruct',
   ],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepinfra: ['Qwen/Qwen3.6-35B-A3B'],
   openrouter: [
+    'qwen/qwen3.6-35b-a3b',
     'openai/gpt-4o-mini',
     'openai/gpt-4.1-mini',
     'anthropic/claude-3.7-sonnet',
@@ -197,10 +199,12 @@ const IMAGE_MODEL_PRESETS = {
   'openai-compatible': ['gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-1'],
   gemini: ['gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'],
   moonshot: [],
+  deepinfra: [],
 }
 
 // Pricing snapshot for common provider text+vision models (USD per 1M tokens).
-// OpenAI checked on 2026-05-14; Moonshot Kimi K2.6 checked on 2026-06-01.
+// OpenAI checked on 2026-05-14; Moonshot Kimi K2.6 checked on 2026-06-01;
+// DeepInfra Qwen3.6-35B-A3B checked on 2026-07-03.
 const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'gpt-5.5': {input: 5, output: 30},
   // gpt-5.5-mini is currently resolved through the configured 5.4-mini fallback.
@@ -216,6 +220,7 @@ const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'gpt-4o-mini': {input: 0.15, output: 0.6},
   'o4-mini': {input: 1.1, output: 4.4},
   'kimi-k2.6': {input: 0.95, output: 4},
+  'qwen/qwen3.6-35b-a3b': {input: 0.15, output: 0.95},
 }
 
 // OpenAI image-generation pricing snapshot (USD per image),
@@ -843,6 +848,7 @@ function normalizeConsultProvider(value) {
       'mistral',
       'groq',
       'deepseek',
+      'deepinfra',
       'openrouter',
       'moonshot',
     ].includes(provider)
@@ -1792,7 +1798,7 @@ export default function NewFlipPage() {
   )
   const providerDailyBudgetStatus = useMemo(
     () => getAiProviderDailyBudgetStatus(aiSolverSettings),
-    [aiSolverSettings, generationCostLedger]
+    [aiSolverSettings]
   )
   const enableOptionalAiFeatures = useCallback(() => {
     updateAiSolverSettings({enabled: true})
@@ -2168,7 +2174,9 @@ export default function NewFlipPage() {
     const pricing =
       provider === 'openai' ||
       provider === 'openai-compatible' ||
-      provider === 'moonshot'
+      provider === 'moonshot' ||
+      provider === 'deepinfra' ||
+      provider === 'openrouter'
         ? resolveOpenAiModelPricing(model)
         : null
 
