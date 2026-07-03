@@ -29,6 +29,7 @@ import {
   Dialog,
   DialogBody,
   DialogFooter,
+  ExternalLink,
   Input,
   Progress,
   Select,
@@ -104,7 +105,50 @@ const DEFAULT_MODELS = {
   deepseek: 'deepseek-chat',
   openrouter: 'openai/gpt-4o-mini',
   moonshot: 'kimi-k2.6',
+  deepinfra: 'Qwen/Qwen3.6-35B-A3B',
 }
+
+const QWEN36_35B_A3B_MODEL = 'Qwen/Qwen3.6-35B-A3B'
+const QWEN36_35B_A3B_OPENROUTER_MODEL = 'qwen/qwen3.6-35b-a3b'
+
+const DEEPINFRA_QWEN_INFERENCE_LINKS = [
+  {
+    label: 'Add DeepInfra credits',
+    href: 'https://deepinfra.com/dash/billing',
+  },
+  {
+    label: 'Create DeepInfra API key',
+    href: 'https://deepinfra.com/dash/api_keys',
+  },
+  {
+    label: 'DeepInfra Qwen API docs',
+    href: 'https://deepinfra.com/Qwen/Qwen3.6-35B-A3B/api',
+  },
+]
+
+const OPENROUTER_QWEN_INFERENCE_LINKS = [
+  {
+    label: 'OpenRouter credits',
+    href: 'https://openrouter.ai/settings/credits',
+  },
+  {
+    label: 'OpenRouter Qwen listing',
+    href: 'https://openrouter.ai/qwen/qwen3.6-35b-a3b',
+  },
+]
+
+const HUGGINGFACE_QWEN_INFERENCE_LINK = {
+  label: 'Hugging Face billing',
+  href: 'https://huggingface.co/settings/billing',
+}
+
+const HOSTED_QWEN_INFERENCE_LINKS = [
+  ...DEEPINFRA_QWEN_INFERENCE_LINKS,
+  ...OPENROUTER_QWEN_INFERENCE_LINKS,
+  {
+    ...HUGGINGFACE_QWEN_INFERENCE_LINK,
+  },
+]
 
 const MODEL_PRESETS = {
   'local-ai': [],
@@ -150,12 +194,14 @@ const MODEL_PRESETS = {
   ],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   openrouter: [
+    QWEN36_35B_A3B_OPENROUTER_MODEL,
     'openai/gpt-4o-mini',
     'openai/gpt-4.1-mini',
     'anthropic/claude-3.7-sonnet',
     'google/gemini-2.0-flash-001',
   ],
   moonshot: ['kimi-k2.6'],
+  deepinfra: [QWEN36_35B_A3B_MODEL],
 }
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
@@ -175,6 +221,7 @@ const MAIN_PROVIDER_OPTIONS = [
   {value: 'mistral', label: 'Mistral'},
   {value: 'groq', label: 'Groq'},
   {value: 'deepseek', label: 'DeepSeek'},
+  {value: 'deepinfra', label: 'Qwen 3.6 via DeepInfra'},
   {value: 'openrouter', label: 'OpenRouter'},
   {value: 'moonshot', label: 'Moonshot Kimi'},
   {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
@@ -712,6 +759,60 @@ function describeExternalProviderBudgetFeasibility(
 
 function isCustomConfigProvider(provider) {
   return provider === 'openai-compatible'
+}
+
+function getHostedQwenInferenceSetup(provider, model) {
+  const normalizedProvider = String(provider || '')
+    .trim()
+    .toLowerCase()
+  const normalizedModel = String(model || '')
+    .trim()
+    .toLowerCase()
+
+  const isQwenModel =
+    normalizedModel === QWEN36_35B_A3B_MODEL.toLowerCase() ||
+    normalizedModel === QWEN36_35B_A3B_OPENROUTER_MODEL
+
+  if (normalizedProvider === 'deepinfra') {
+    return {
+      description:
+        '{{model}} is wired as the hosted Qwen default. DeepInfra uses an OpenAI-compatible API, so loading a DeepInfra key here is enough to test and run it.',
+      pricing:
+        'Pricing snapshot checked 2026-07-03: DeepInfra public tier is about $0.15 per 1M input tokens and $0.95 per 1M output tokens. Keep provider-side credits or hard budgets enabled; the daily cap above is only local.',
+      links: [
+        ...DEEPINFRA_QWEN_INFERENCE_LINKS,
+        HUGGINGFACE_QWEN_INFERENCE_LINK,
+      ],
+    }
+  }
+
+  if (
+    normalizedProvider === 'openrouter' &&
+    normalizedModel === QWEN36_35B_A3B_OPENROUTER_MODEL
+  ) {
+    return {
+      description:
+        'The selected OpenRouter model routes to hosted Qwen 3.6 35B-A3B. Load an OpenRouter key here, then manage credits in OpenRouter.',
+      pricing:
+        'Pricing snapshot checked 2026-07-03: OpenRouter lists this model at about $0.14-$0.15 per 1M input tokens and about $1.00 per 1M output tokens. Keep provider-side credits or hard budgets enabled; the daily cap above is only local.',
+      links: [
+        ...OPENROUTER_QWEN_INFERENCE_LINKS,
+        HUGGINGFACE_QWEN_INFERENCE_LINK,
+      ],
+    }
+  }
+
+  if (isQwenModel) {
+    return {
+      description:
+        'The selected model matches the hosted Qwen 3.6 35B-A3B preset. Load a compatible provider key here, then use the provider links below for billing and model setup.',
+      pricing:
+        'Pricing snapshot checked 2026-07-03: hosted Qwen 3.6 35B-A3B is roughly $0.15 per 1M input tokens and about $0.95-$1.00 per 1M output tokens on the listed inference providers. Keep provider-side credits or hard budgets enabled; the daily cap above is only local.',
+      links: HOSTED_QWEN_INFERENCE_LINKS,
+    }
+  }
+
+  return null
 }
 
 function buildProviderConfigForBridge(aiSolver, provider) {
@@ -3369,6 +3470,9 @@ export default function AiSettingsPage() {
   )
   const activeModel =
     aiSolver.model || resolveDefaultModelForProvider(activeProvider, localAi)
+  const hostedQwenInferenceSetup =
+    !isLocalAiPrimaryProvider &&
+    getHostedQwenInferenceSetup(activeProvider, activeModel)
   const presetValue = modelPresets.includes(activeModel)
     ? activeModel
     : 'custom'
@@ -3907,7 +4011,7 @@ export default function AiSettingsPage() {
     updateAiSolverSettings,
   ])
   const externalProviderChoice = isLocalAiPrimaryProvider
-    ? 'openai'
+    ? 'deepinfra'
     : activeProvider
   const remoteProviderAutosolverArmed = Boolean(
     aiSolver.enabled &&
@@ -3917,10 +4021,10 @@ export default function AiSettingsPage() {
   const remoteProviderAutosolverLabel = formatAiProviderLabel(activeProvider)
   const externalAiSummary = aiSolver.enabled
     ? t(
-        'Insert one or multiple AI provider API keys here. For OpenAI testing, use a prepaid key without automatic top-up when possible.'
+        'Insert one or multiple AI provider API keys here. For hosted Qwen or OpenAI testing, use provider-side credits or hard budgets when possible.'
       )
     : t(
-        'Use this when you want an external AI provider via API instead of a local runtime. For OpenAI testing, a prepaid key without automatic top-up is recommended.'
+        'Use this when you want an external AI provider via API instead of a local runtime. Hosted Qwen is the default practical path for desktops that cannot run the model locally.'
       )
   const enableExternalProviderSetup = useCallback(() => {
     pendingProviderSetupRevealRef.current = true
@@ -4772,6 +4876,44 @@ export default function AiSettingsPage() {
                             </Flex>
                           </Stack>
                         </Box>
+
+                        {hostedQwenInferenceSetup ? (
+                          <Box
+                            borderWidth="1px"
+                            borderColor="blue.100"
+                            borderRadius="md"
+                            bg="blue.012"
+                            p={3}
+                          >
+                            <Stack spacing={3}>
+                              <Box>
+                                <Text fontWeight={600} fontSize="sm">
+                                  {t('Hosted Qwen 3.6 inference')}
+                                </Text>
+                                <Text color="muted" fontSize="sm" mt={1}>
+                                  {t(hostedQwenInferenceSetup.description, {
+                                    model: QWEN36_35B_A3B_MODEL,
+                                  })}
+                                </Text>
+                              </Box>
+                              <Text color="muted" fontSize="xs">
+                                {t(hostedQwenInferenceSetup.pricing)}
+                              </Text>
+                              <Flex gap={2} flexWrap="wrap">
+                                {hostedQwenInferenceSetup.links.map((item) => (
+                                  <ExternalLink
+                                    key={item.href}
+                                    href={item.href}
+                                    h="7"
+                                    fontSize="sm"
+                                  >
+                                    {t(item.label)}
+                                  </ExternalLink>
+                                ))}
+                              </Flex>
+                            </Stack>
+                          </Box>
+                        ) : null}
 
                         <SettingsFormControl>
                           <SettingsFormLabel>{t('API key')}</SettingsFormLabel>

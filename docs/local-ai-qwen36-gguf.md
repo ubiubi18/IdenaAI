@@ -1,5 +1,30 @@
 # Local AI: Qwen3.6 27B Claude Opus Distilled GGUF
 
+## Hosted Qwen3.6 35B-A3B
+
+Most desktops will not run `Qwen/Qwen3.6-35B-A3B` comfortably as a local
+multimodal model. IdenaAI therefore exposes a first-class hosted preset:
+
+```text
+Provider: Qwen 3.6 via DeepInfra
+Model:    Qwen/Qwen3.6-35B-A3B
+API:      https://api.deepinfra.com/v1/openai
+```
+
+The AI settings page links directly to DeepInfra credits, DeepInfra API keys,
+the model API docs, OpenRouter credits, and Hugging Face billing. Keep
+provider-side prepaid credits or hard limits enabled; IdenaAI's daily API cap is
+a local guardrail only.
+
+Pricing snapshot checked on 2026-07-03:
+
+```text
+DeepInfra public tier: about $0.15 / 1M input tokens and $0.95 / 1M output tokens
+OpenRouter listing:    about $0.14-$0.15 / 1M input and about $1.00 / 1M output
+```
+
+## Local 27B GGUF Target
+
 IdenaAI's recommended text-only Ollama target is:
 
 ```text
