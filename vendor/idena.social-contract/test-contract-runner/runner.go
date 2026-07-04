@@ -6,7 +6,6 @@ import (
 	"github.com/idena-network/idena-contract-runner/chain"
 	"github.com/idena-network/idena-go/blockchain"
 	"github.com/idena-network/idena-go/common"
-	"github.com/idena-network/idena-go/common/hexutil"
 	"github.com/idena-network/idena-go/core/mempool"
 	"github.com/idena-network/idena-go/core/state"
 	"github.com/idena-network/idena-go/crypto"
@@ -34,7 +33,7 @@ func NewRunner() *Runner {
 
 func (r *Runner) Start() error {
 	key, _ := crypto.GenerateKey()
-	log.Info("Generated god address", "addr", crypto.PubkeyToAddress(key.PublicKey).Hex(), "key", hexutil.Encode(crypto.FromECDSA(key)))
+	log.Info("Generated god address", "addr", crypto.PubkeyToAddress(key.PublicKey).Hex())
 
 	r.chain = chain.NewMemBlockchain(key)
 	if err := r.startRPC(); err != nil {
