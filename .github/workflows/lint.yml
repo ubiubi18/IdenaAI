@@ -1,6 +1,9 @@
 name: Lint and tests
 
-on: push
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,3 +27,14 @@ jobs:
 
       - name: Run release check
         run: npm run release:check
+
+      - name: Run unit tests
+        run: npm test -- --runInBand
+
+      - name: Install embedded social dependencies
+        run: npm ci --prefix vendor/idena.social-ui
+
+      - name: Check embedded social UI
+        run: |
+          npm run lint --prefix vendor/idena.social-ui
+          npm test --prefix vendor/idena.social-ui

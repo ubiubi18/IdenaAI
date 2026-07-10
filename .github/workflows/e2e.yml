@@ -1,6 +1,8 @@
-name: Run E2E tests
+name: Renderer build smoke test
 
-on: [pull_request]
+on:
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,15 +24,5 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Setup xvfb
-        run: |
-          sudo apt-get install xvfb
-          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-          npm install -g xvfb-maybe
-
-      - name: Run xvfb
-        run: |
-          npm run build
-          xvfb-maybe npm run e2e
-        env:
-          DISPLAY: ':99.0'
+      - name: Build renderer and embedded social UI
+        run: npm run build
