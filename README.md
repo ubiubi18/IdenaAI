@@ -1,4 +1,4 @@
-# IdenaAI v0.0.9
+# IdenaAI v0.0.11
 
 IdenaAI is an experimental desktop fork of `idena-desktop` for validation,
 FLIP, local AI, and rehearsal research.
@@ -7,7 +7,66 @@ It is not a hardened wallet release, not a trusted installer distribution, and
 not a guarantee of validation success. Build and inspect it locally. Use it at
 your own risk.
 
-## v0.0.9 Changelog
+## Current source status
+
+This repository has no published GitHub release artifacts. Tags document source
+milestones; they are not signed or supported desktop installers. The `main`
+branch also contains runtime and node hardening newer than the `v0.0.11` tag.
+
+### Foundation updates after v0.0.11
+
+- The desktop foundation now targets Node `24.18.0`, npm `11.16.0`, Electron
+  `43.1.0`, and Next.js `16.2.10` with reproducible install and release checks.
+- Managed node builds use exact `idena-go` and `idena-wasm-binding` commits from
+  `scripts/source-manifest.json` instead of copied or loosely downloaded
+  binaries.
+- Node RPC keys are stored in user-only files, RPC is bound to loopback by
+  default, renderer persistence is restricted, and packaged output is checked
+  for private data and unexpected artifacts.
+- Full unit, lint, privacy, dependency, Electron-safety, source-integrity, and
+  renderer-build gates run before release packaging.
+
+### Benefits
+
+- A newer, smaller, and more auditable desktop/node foundation for validation,
+  local AI, provider, and knowledge-index research.
+- Reproducible source pins make it possible to identify the exact node and Wasm
+  runtime under test.
+- Local privacy and provider-budget controls reduce accidental exposure and
+  unbounded app-side usage.
+
+### Risks and tradeoffs
+
+- This is the AI research repository, not the AI-free clean desktop fork. It has
+  a substantially larger attack, privacy, model, and provider surface.
+- Autosolve, report review, and story generation can be wrong or late and can
+  affect a real validation outcome. Rehearsal tests cannot reproduce all
+  mainnet timing and provider failures.
+- API calls can incur external costs; local accounting cannot cap a provider
+  account. Configure hard provider-side limits and use separate low-value keys.
+- Local models, downloaded binaries, indexed knowledge, IPFS content, and
+  imported teacher data require independent license and trust review.
+- No source hardening can turn an unsigned local build into a production wallet
+  release. Keep valuable identities and assets out of experimental profiles.
+
+## v0.0.11 Status
+
+- Added the trusted knowledge-index scaffold while keeping unfinished Knowledge
+  RAG UI out of the application.
+- Kept storage and trust decisions local to each node; public shard metadata is
+  advisory rather than a global trust decision.
+- Hardened oracle voting option indexes so stale or non-contiguous UI IDs do not
+  produce invalid contract vote indexes.
+
+## v0.0.10 Status
+
+- Hardened short-session fallback behavior and made degraded provider runs
+  visible instead of silently producing zero-token results.
+- Stopped carrying stale generated bootnodes between managed node starts.
+- Moved the managed node RPC key out of process arguments into a `0600` file,
+  bound RPC to loopback, and restricted node runtime/configuration files.
+
+## v0.0.9 Validation Changelog
 
 Validation-safety release for the next real on-chain test.
 
@@ -53,7 +112,7 @@ Install and run:
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
-npm install
+npm ci
 npm start
 ```
 
