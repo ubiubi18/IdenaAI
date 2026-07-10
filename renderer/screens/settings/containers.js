@@ -14,7 +14,7 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import {useTranslation} from 'react-i18next'
-import QrCode from 'qrcode.react'
+import {QRCodeSVG as QrCode} from 'qrcode.react'
 import {useMachine} from '@xstate/react'
 import {createMachine} from 'xstate'
 import {assign} from 'xstate/lib/actions'

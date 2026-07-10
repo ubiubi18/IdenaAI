@@ -8341,7 +8341,11 @@ export default function AiHumanTeacherPage() {
   ])
 
   const startAnnotationFlow = React.useCallback(async () => {
-    const nextEpoch = String(epoch || '').trim()
+    const nextEpochNumber = Number(epoch)
+    const nextEpoch =
+      Number.isSafeInteger(nextEpochNumber) && nextEpochNumber >= 0
+        ? String(nextEpochNumber)
+        : ''
 
     if (!nextEpoch) {
       setError(t('Enter an epoch before starting annotation.'))
@@ -8388,7 +8392,10 @@ export default function AiHumanTeacherPage() {
       setSelectedTaskId(pickPreferredTaskId(nextWorkspace, selectedTaskId))
 
       if (queryAction === 'start') {
-        router.replace(`/settings/ai-human-teacher?epoch=${nextEpoch}`)
+        router.replace({
+          pathname: '/settings/ai-human-teacher',
+          query: {epoch: nextEpoch},
+        })
       }
     } catch (nextError) {
       setError(formatErrorMessage(nextError))

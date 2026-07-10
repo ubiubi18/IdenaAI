@@ -1,13 +1,23 @@
 #!/usr/bin/env node
 
 const fs = require('fs')
+const crypto = require('crypto')
+const os = require('os')
 const path = require('path')
 const {spawnSync} = require('child_process')
 
 const ROOT = path.join(__dirname, '..')
 const PINNED_NODE_VERSION = '1.1.2'
 const MIN_NODE_BINARY_SIZE = 1024 * 1024
-const DEFAULT_GO_TOOLCHAIN = process.env.IDENA_GO_GOTOOLCHAIN || 'go1.19.13'
+const DEFAULT_GO_TOOLCHAIN = process.env.IDENA_GO_GOTOOLCHAIN || 'go1.26.5'
+
+function readOptionValue(argv, index, option) {
+  const value = argv[index + 1]
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${option} requires a value`)
+  }
+  return value
+}
 
 function parseArgs(argv) {
   const options = {
@@ -19,11 +29,11 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--platform') {
+      options.platform = readOptionValue(argv, index, arg)
       index += 1
-      options.platform = argv[index]
     } else if (arg === '--arch') {
+      options.arch = readOptionValue(argv, index, arg)
       index += 1
-      options.arch = argv[index]
     } else if (!options.output) {
       options.output = arg
     } else {
@@ -116,32 +126,54 @@ function bindingLibName(platform, arch) {
   return ''
 }
 
+function verifyBindingArtifact(bindingDir, libName) {
+  const archivePath = path.join(bindingDir, 'lib', libName)
+  const manifestPath = path.join(bindingDir, 'lib', 'SHA256SUMS')
+  if (!fs.existsSync(archivePath) || !fs.existsSync(manifestPath)) {
+    throw new Error(`verified wasm binding artifact is missing: ${libName}`)
+  }
+
+  const checksums = fs
+    .readFileSync(manifestPath, 'utf8')
+    .split(/\r?\n/u)
+    .map((line) => line.trim().split(/\s+/u))
+  const manifestEntry = checksums.find(([, name]) => name === libName)
+  if (!manifestEntry || !/^[0-9a-f]{64}$/u.test(manifestEntry[0])) {
+    throw new Error(`wasm binding checksum is missing: ${libName}`)
+  }
+
+  const actualChecksum = crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(archivePath))
+    .digest('hex')
+  if (actualChecksum !== manifestEntry[0]) {
+    throw new Error(`wasm binding checksum mismatch: ${libName}`)
+  }
+}
+
 function goCommand() {
   return process.platform === 'win32' ? 'go.exe' : 'go'
 }
 
-function windowsMsysUcrtBinCandidates() {
-  if (process.platform !== 'win32') return []
+function windowsMsysUcrtBinCandidates(
+  env = process.env,
+  platform = process.platform
+) {
+  if (platform !== 'win32') return []
 
   const candidates = [
     'C:\\msys64\\ucrt64\\bin',
-    process.env.LOCALAPPDATA &&
-      path.join(
-        process.env.LOCALAPPDATA,
-        'Programs',
-        'msys64',
-        'ucrt64',
-        'bin'
-      ),
-    process.env.ProgramFiles &&
-      path.join(process.env.ProgramFiles, 'msys64', 'ucrt64', 'bin'),
-    process.env['ProgramFiles(x86)'] &&
-      path.join(process.env['ProgramFiles(x86)'], 'msys64', 'ucrt64', 'bin'),
+    'C:\\ProgramData\\chocolatey\\lib\\mingw\\tools\\install\\mingw64\\bin',
+    env.LOCALAPPDATA &&
+      path.join(env.LOCALAPPDATA, 'Programs', 'msys64', 'ucrt64', 'bin'),
+    env.ProgramFiles && path.join(env.ProgramFiles, 'msys64', 'ucrt64', 'bin'),
+    env['ProgramFiles(x86)'] &&
+      path.join(env['ProgramFiles(x86)'], 'msys64', 'ucrt64', 'bin'),
   ].filter(Boolean)
 
   const wingetPackagesDir =
-    process.env.LOCALAPPDATA &&
-    path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Packages')
+    env.LOCALAPPDATA &&
+    path.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Packages')
   try {
     if (wingetPackagesDir && fs.existsSync(wingetPackagesDir)) {
       fs.readdirSync(wingetPackagesDir, {withFileTypes: true})
@@ -161,6 +193,23 @@ function windowsMsysUcrtBinCandidates() {
   }
 
   return candidates
+}
+
+function assertNativeBuildTarget(
+  options,
+  runtime = {platform: process.platform, arch: process.arch}
+) {
+  if (options.platform !== runtime.platform) {
+    throw new Error(
+      `cross-platform node builds are not supported by this script: requested ${options.platform}, running on ${runtime.platform}`
+    )
+  }
+
+  if (options.arch !== runtime.arch) {
+    throw new Error(
+      `cross-architecture node builds are not supported by this script: requested ${options.arch}, running on ${runtime.arch}`
+    )
+  }
 }
 
 function pathEnvKey(env = process.env) {
@@ -208,6 +257,8 @@ function getBinaryVersion(binaryPath) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2))
+  assertNativeBuildTarget(options)
+
   let idenaGoDir = findSourceDir('IDENAAI_IDENA_GO_DIR', 'idena-go', 'go.mod')
   let wasmBindingDir = findSourceDir(
     'IDENAAI_IDENA_WASM_BINDING_DIR',
@@ -233,44 +284,57 @@ function main() {
   }
 
   const libName = bindingLibName(options.platform, options.arch)
-  if (!libName || !fs.existsSync(path.join(wasmBindingDir, 'lib', libName))) {
+  if (!libName) {
     throw new Error(
       `missing idena-wasm-binding static library for ${options.platform}/${options.arch}: ${libName}`
     )
   }
+  verifyBindingArtifact(wasmBindingDir, libName)
 
   fs.mkdirSync(path.dirname(options.output), {recursive: true})
 
-  const localWasmBinding = relativePath(idenaGoDir, wasmBindingDir)
-  run(
-    goCommand(),
-    [
-      'mod',
-      'edit',
-      `-replace=github.com/idena-network/idena-wasm-binding=${localWasmBinding}`,
-    ],
-    {
-      cwd: idenaGoDir,
-    }
+  const localWasmBinding = path.resolve(wasmBindingDir)
+  const modDir = fs.mkdtempSync(path.join(os.tmpdir(), 'idena-ai-mod-'))
+  const modFile = path.join(modDir, 'idena.mod')
+  fs.copyFileSync(path.join(idenaGoDir, 'go.mod'), modFile)
+  fs.copyFileSync(
+    path.join(idenaGoDir, 'go.sum'),
+    path.join(modDir, 'idena.sum')
   )
 
-  const env = buildEnv()
+  try {
+    run(
+      goCommand(),
+      [
+        'mod',
+        'edit',
+        `-modfile=${modFile}`,
+        `-replace=github.com/idena-network/idena-wasm-binding=${localWasmBinding}`,
+      ],
+      {cwd: idenaGoDir}
+    )
 
-  run(
-    goCommand(),
-    [
-      'build',
-      '-ldflags',
-      `-X main.version=${PINNED_NODE_VERSION}`,
-      '-o',
-      path.resolve(options.output),
-      '.',
-    ],
-    {
-      cwd: idenaGoDir,
-      env,
-    }
-  )
+    run(
+      goCommand(),
+      [
+        'build',
+        `-modfile=${modFile}`,
+        '-mod=readonly',
+        '-trimpath',
+        '-ldflags',
+        `-s -w -X main.version=${PINNED_NODE_VERSION}`,
+        '-o',
+        path.resolve(options.output),
+        '.',
+      ],
+      {
+        cwd: idenaGoDir,
+        env: buildEnv(),
+      }
+    )
+  } finally {
+    fs.rmSync(modDir, {recursive: true, force: true})
+  }
 
   const stats = fs.statSync(options.output)
   if (!stats || stats.size < MIN_NODE_BINARY_SIZE) {
@@ -295,9 +359,22 @@ function main() {
   console.log(`Done. Node binary written to: ${path.resolve(options.output)}`)
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(`[build-node-from-sources] ${error.message}`)
-  process.exit(1)
+if (require.main === module) {
+  try {
+    main()
+  } catch (error) {
+    console.error(`[build-node-from-sources] ${error.message}`)
+    process.exit(1)
+  }
+}
+
+module.exports = {
+  assertNativeBuildTarget,
+  bindingLibName,
+  normalizeArchForBinding,
+  parseArgs,
+  pathEnvKey,
+  relativePath,
+  verifyBindingArtifact,
+  windowsMsysUcrtBinCandidates,
 }

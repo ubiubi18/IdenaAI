@@ -44,8 +44,8 @@ billing unless you have audited the code and accepted the risk.
 Requirements:
 
 - macOS, Windows, or Linux
-- Node.js `24.15.x`
-- npm `11.12.x`
+- Node.js `24.18.x`
+- npm `11.16.x`
 - Git
 
 Install and run:
@@ -72,6 +72,20 @@ For source-built node work:
 npm run setup:sources
 npm run build:node
 ```
+
+## Source Mirrors and Smaller Checkouts
+
+`npm run setup:sources` reads `scripts/source-manifest.json` and creates
+shallow, single-revision checkouts of `idena-go` and `idena-wasm-binding`.
+Each checkout is verified against the exact commit and required files recorded
+in the manifest. This keeps setup reproducible without copying full repository
+histories or prebuilt libraries into this repository.
+
+Run `npm run update:sources` after intentionally changing a manifest pin. An
+existing plain source directory is reused only when every required file is
+present; an existing Git checkout is fetched with depth 1 and then verified.
+Large generated binaries belong in release artifacts or Git LFS, not regular
+Git history. Run `npm run audit:artifacts` before publishing changes.
 
 Packaged builds are developer/debugging artifacts. The source run is the
 preferred path for research and auditing.
@@ -157,14 +171,14 @@ esac
 export PATH="$NODE24_BIN:$PATH"
 ```
 
-Step 4: verify Node and npm. Continue only if Node is `v24.15.0` or newer on
+Step 4: verify Node and npm. Continue only if Node is `v24.18.0` or newer on
 the Node 24 line. Node 25+ is intentionally rejected by this repo.
 
 ```bash
 node -v
 npm -v
-npm install -g npm@11.12.0
-node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 15) { throw new Error(`IdenaAI requires Node v24.15.0 or newer on Node 24, got ${process.versions.node}`) }'
+npm install -g npm@11.16.0
+node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 18) { throw new Error(`IdenaAI requires Node v24.18.0 or newer on Node 24, got ${process.versions.node}`) }'
 npm -v
 git --version
 python3 --version
@@ -302,16 +316,16 @@ installer may open a separate installer window.
 
 ```powershell
 winget install --id Git.Git -e
-winget install --id OpenJS.NodeJS.LTS -e --version 24.15.0
+winget install --id OpenJS.NodeJS.LTS -e --version 24.18.0
 winget install --id Python.Python.3.12 -e
 winget install --id GoLang.Go -e
 winget install --id MSYS2.MSYS2 -e
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-If `winget` cannot find the exact Node `24.15.0` package, run
+If `winget` cannot find the exact Node `24.18.0` package, run
 `winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 4
-shows Node `v24.15.0` or a newer `v24.x` release. Do not use NVM for Windows for
+shows Node `v24.18.0` or a newer `v24.x` release. Do not use NVM for Windows for
 this setup if it fails on your PC.
 
 Step 3: install the MinGW toolchain inside MSYS2 and add the detected
@@ -380,7 +394,7 @@ gcc --version
 ```
 
 Step 4: close PowerShell, reopen it, then verify Node and npm. Continue only if
-Node is `v24.15.0` or newer on the Node 24 line. Node 25+ is intentionally
+Node is `v24.18.0` or newer on the Node 24 line. Node 25+ is intentionally
 rejected by this repo.
 
 ```powershell
@@ -389,16 +403,16 @@ node -v
 npm -v
 
 $nodeVersion = [version]((node -v).TrimStart("v"))
-if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.15.0") {
-  throw "IdenaAI requires Node v24.15.0 or newer on Node 24, got v$nodeVersion"
+if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.18.0") {
+  throw "IdenaAI requires Node v24.18.0 or newer on Node 24, got v$nodeVersion"
 }
 
-npm install -g npm@11.12.0
+npm install -g npm@11.16.0
 npm -v
 
 $npmVersion = [version](npm -v)
-if ($npmVersion -lt [version]"11.12.0") {
-  throw "IdenaAI requires npm 11.12.0 or newer, got $npmVersion"
+if ($npmVersion -lt [version]"11.16.0") {
+  throw "IdenaAI requires npm 11.16.0 or newer, got $npmVersion"
 }
 
 git --version
@@ -521,7 +535,7 @@ own successful rehearsal history. If you do use a VPS, use a dedicated server,
 encrypt/back up keys yourself, keep API spending limits low, and keep the
 remote desktop open while validation is running.
 
-Step 1: install base packages, Node 24, npm 11.12, Go, and Electron runtime
+Step 1: install base packages, Node 24, npm 11.16, Go, and Electron runtime
 libraries.
 
 ```bash
@@ -530,7 +544,7 @@ sudo apt-get install -y ca-certificates curl git build-essential python3 python3
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs golang-go
-sudo npm install -g npm@11.12.0
+sudo npm install -g npm@11.16.0
 
 if apt-cache show libasound2t64 >/dev/null 2>&1; then
   ASOUND_PACKAGE=libasound2t64
