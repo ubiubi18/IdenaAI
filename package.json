@@ -164,7 +164,7 @@
     }
   },
   "devDependencies": {
-    "@babel/core": "^7.6.0",
+    "@babel/core": "^7.29.6",
     "@electron/rebuild": "^4.0.4",
     "@testing-library/react": "^9.1.4",
     "@toast-ui/react-image-editor": "^1.0.1",
