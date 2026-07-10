@@ -6,7 +6,7 @@
       "path": "idena-go",
       "url": "https://github.com/ubiubi18/idena-go.git",
       "ref": "master",
-      "commit": "2893c9ac32ec6129b93bc29910264c7917d0ea5f",
+      "commit": "d287cd7351ffc1a2fd704280ce3a47baea827cbc",
       "requiredFiles": ["go.mod", "main.go"]
     },
     {
@@ -14,7 +14,7 @@
       "path": "idena-wasm-binding",
       "url": "https://github.com/ubiubi18/idena-wasm-binding.git",
       "ref": "master",
-      "commit": "693035128c8c1f0828c6a16fb5515791bcd2df53",
+      "commit": "f7c71ce32d86c8ed26e74935265c95768b0230d0",
       "requiredFiles": ["go.mod", "lib", "lib/SHA256SUMS"]
     }
   ]
