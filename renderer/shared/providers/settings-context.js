@@ -4,6 +4,7 @@ import {usePersistence} from '../hooks/use-persistent-state'
 import {loadPersistentState} from '../utils/persist'
 import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
 import useLogger from '../hooks/use-logger'
+import {randomApiKey} from '../utils/random-api-key'
 import {AVAILABLE_LANGS} from '../../i18n'
 import {emitRpcConnectionChanged} from '../utils/rpc-connection-events'
 import {
@@ -26,11 +27,7 @@ const UPDATE_LOCAL_AI_SETTINGS = 'UPDATE_LOCAL_AI_SETTINGS'
 const EPHEMERAL_EXTERNAL_NODE_STORAGE_KEY =
   'idena-ephemeral-external-node-connection'
 const DEFAULT_RUN_INTERNAL_NODE = false
-
-const randomKey = () =>
-  Math.random().toString(36).substring(2, 13) +
-  Math.random().toString(36).substring(2, 13) +
-  Math.random().toString(36).substring(2, 15)
+let runtimeEphemeralExternalNode = null
 
 const CHANGE_LANGUAGE = 'CHANGE_LANGUAGE'
 
@@ -133,41 +130,26 @@ function normalizeEphemeralExternalNode(value) {
 }
 
 function loadEphemeralExternalNode() {
-  if (typeof window === 'undefined' || !window.sessionStorage) {
-    return null
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.removeItem(EPHEMERAL_EXTERNAL_NODE_STORAGE_KEY)
+    } catch {
+      // Ignore cleanup failures; credentials still remain memory-only here.
+    }
   }
 
-  try {
-    return normalizeEphemeralExternalNode(
-      JSON.parse(
-        window.sessionStorage.getItem(EPHEMERAL_EXTERNAL_NODE_STORAGE_KEY) ||
-          'null'
-      )
-    )
-  } catch {
-    return null
-  }
+  return runtimeEphemeralExternalNode
 }
 
 function persistEphemeralExternalNode(value) {
-  if (typeof window === 'undefined' || !window.sessionStorage) {
-    return
-  }
+  runtimeEphemeralExternalNode = normalizeEphemeralExternalNode(value)
 
-  try {
-    const normalized = normalizeEphemeralExternalNode(value)
-
-    if (!normalized) {
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
       window.sessionStorage.removeItem(EPHEMERAL_EXTERNAL_NODE_STORAGE_KEY)
-      return
+    } catch {
+      // Ignore cleanup failures; credentials still remain memory-only here.
     }
-
-    window.sessionStorage.setItem(
-      EPHEMERAL_EXTERNAL_NODE_STORAGE_KEY,
-      JSON.stringify(normalized)
-    )
-  } catch {
-    // ignore session-only persistence failures
   }
 }
 
@@ -387,7 +369,7 @@ const initialState = {
   uiVersion: global.appVersion,
   useExternalNode: false,
   runInternalNode: DEFAULT_RUN_INTERNAL_NODE,
-  internalApiKey: randomKey(),
+  internalApiKey: randomApiKey(),
   externalApiKey: '',
   lng: AVAILABLE_LANGS[0],
   autoActivateMining: true,
@@ -512,7 +494,7 @@ export function SettingsProvider({children}) {
 
   useEffect(() => {
     if (!state.internalApiKey) {
-      dispatch({type: SET_INTERNAL_KEY, data: randomKey()})
+      dispatch({type: SET_INTERNAL_KEY, data: randomApiKey()})
     }
   })
 

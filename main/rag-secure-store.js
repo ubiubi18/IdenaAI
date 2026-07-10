@@ -264,7 +264,7 @@ async function acquireFileLock(lockPath, options = {}) {
   )
   const startedAt = Date.now()
 
-  while (true) {
+  for (;;) {
     try {
       await fs.ensureDir(path.dirname(lockPath))
       const handle = await nodeFs.promises.open(lockPath, 'wx', 0o600)

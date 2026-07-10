@@ -49,6 +49,7 @@ import {
 import {EpochPeriod, IdentityStatus} from '../../shared/types'
 
 let validationSessionStoreState = {}
+let validationSecretStoreState = {}
 
 function createValidationSessionStore() {
   return {
@@ -67,6 +68,24 @@ function createValidationSessionStore() {
     },
     persistState(state) {
       validationSessionStoreState = state ? {...state} : {}
+    },
+  }
+}
+
+function createValidationSecretStore() {
+  return {
+    loadState() {
+      return {...validationSecretStoreState}
+    },
+    loadValue(key) {
+      return validationSecretStoreState[key] || null
+    },
+    persistItem(key, value) {
+      if (value == null) delete validationSecretStoreState[key]
+      else validationSecretStoreState[key] = value
+    },
+    persistState(state) {
+      validationSecretStoreState = state ? {...state} : {}
     },
   }
 }
@@ -667,9 +686,11 @@ describe('computeValidationCeremonyReadiness', () => {
 describe('validation session id persistence', () => {
   beforeEach(() => {
     validationSessionStoreState = {}
+    validationSecretStoreState = {}
     window.idena = {
       storage: {
         validationSession: createValidationSessionStore(),
+        validationSecret: createValidationSecretStore(),
       },
     }
     window.sessionStorage.clear()
@@ -894,9 +915,11 @@ describe('canValidate', () => {
 describe('scoped validation state persistence', () => {
   beforeEach(() => {
     validationSessionStoreState = {}
+    validationSecretStoreState = {}
     window.idena = {
       storage: {
         validationSession: createValidationSessionStore(),
+        validationSecret: createValidationSecretStore(),
       },
     }
     window.sessionStorage.clear()

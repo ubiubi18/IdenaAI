@@ -38,6 +38,7 @@ const persistenceStoreNames = {
   settings: 'settings',
   flipFilter: 'flipFilter',
   validationSession: 'validation2',
+  validationSecret: 'validationSecret',
   validationResults: 'validationResults',
   flipArchive: 'flipArchive',
   validationNotification: 'validationNotification',
@@ -503,6 +504,9 @@ function createStorageBridge() {
     flipFilter: createPersistenceStore(persistenceStoreNames.flipFilter),
     validationSession: createPersistenceStore(
       persistenceStoreNames.validationSession
+    ),
+    validationSecret: createPersistenceStore(
+      persistenceStoreNames.validationSecret
     ),
     validationResults: createPersistenceStore(
       persistenceStoreNames.validationResults

@@ -1485,7 +1485,6 @@ function NodeSettings() {
       rehearsalAiProviderLabel,
       assertRemoteProviderBudgetAvailable,
       handleProviderBudgetError,
-      settings.aiSolver?.onchainAutoSubmitConsentAt,
       settings.aiSolver,
       showRehearsalAiToast,
       t,

@@ -20,8 +20,11 @@ declare global {
 
 export const DESKTOP_BOOTSTRAP_MESSAGE = 'IDENA_SOCIAL_BOOTSTRAP';
 export const DESKTOP_BOOTSTRAP_READY_MESSAGE = 'IDENA_SOCIAL_READY';
+export const DESKTOP_CHANNEL_INIT_MESSAGE = 'IDENA_SOCIAL_CHANNEL_INIT';
 export const DESKTOP_RPC_REQUEST_MESSAGE = 'IDENA_SOCIAL_RPC_REQUEST';
 export const DESKTOP_RPC_RESPONSE_MESSAGE = 'IDENA_SOCIAL_RPC_RESPONSE';
+
+let desktopMessagePort: MessagePort | null = null;
 
 export const readDesktopBootstrap = (): DesktopBootstrap => {
     if (typeof window === 'undefined') {
@@ -51,6 +54,9 @@ export const installDesktopBootstrapListener = (
         onBootstrap(nextBootstrap);
     };
 
+    let connectedPort: MessagePort | null = null;
+    let handlePortMessage: ((event: MessageEvent) => void) | null = null;
+
     const handleMessage = (event: MessageEvent) => {
         if (event.source !== window.parent) {
             return;
@@ -61,11 +67,36 @@ export const installDesktopBootstrapListener = (
                 ? event.data
                 : null;
 
-        if (!payload || payload.type !== DESKTOP_BOOTSTRAP_MESSAGE) {
+        const port = event.ports && event.ports[0];
+
+        if (
+            !payload ||
+            payload.type !== DESKTOP_CHANNEL_INIT_MESSAGE ||
+            !port
+        ) {
             return;
         }
 
-        applyBootstrap(payload.payload);
+        if (connectedPort && handlePortMessage) {
+            connectedPort.removeEventListener('message', handlePortMessage);
+            connectedPort.close();
+        }
+
+        connectedPort = port;
+        desktopMessagePort = port;
+        handlePortMessage = (portEvent: MessageEvent) => {
+            const portPayload =
+                portEvent?.data && typeof portEvent.data === 'object'
+                    ? portEvent.data
+                    : null;
+
+            if (portPayload?.type === DESKTOP_BOOTSTRAP_MESSAGE) {
+                applyBootstrap(portPayload.payload);
+            }
+        };
+        port.addEventListener('message', handlePortMessage);
+        port.start();
+        port.postMessage({type: DESKTOP_BOOTSTRAP_READY_MESSAGE});
     };
 
     window.addEventListener('message', handleMessage);
@@ -81,6 +112,13 @@ export const installDesktopBootstrapListener = (
 
     return () => {
         window.removeEventListener('message', handleMessage);
+        if (connectedPort && handlePortMessage) {
+            connectedPort.removeEventListener('message', handlePortMessage);
+            connectedPort.close();
+        }
+        if (desktopMessagePort === connectedPort) {
+            desktopMessagePort = null;
+        }
     };
 };
 
@@ -91,7 +129,14 @@ export const createDesktopRpcClient = (
     timeout = 15000,
 ) =>
     async (method: string, params: any[], skipStateUpdate?: boolean) => {
-        if (typeof window === 'undefined' || !window.parent || window.parent === window) {
+        const port = desktopMessagePort;
+
+        if (
+            typeof window === 'undefined' ||
+            !window.parent ||
+            window.parent === window ||
+            !port
+        ) {
             !skipStateUpdate && setNodeAvailable(false);
             return { error: { message: 'desktop_rpc_parent_unavailable' } };
         }
@@ -102,7 +147,7 @@ export const createDesktopRpcClient = (
             let finished = false;
 
             const cleanup = () => {
-                window.removeEventListener('message', handleMessage);
+                port.removeEventListener('message', handleMessage);
                 window.clearTimeout(timer);
             };
 
@@ -122,10 +167,6 @@ export const createDesktopRpcClient = (
             };
 
             const handleMessage = (event: MessageEvent) => {
-                if (event.source !== window.parent) {
-                    return;
-                }
-
                 const payload =
                     event && event.data && typeof event.data === 'object'
                         ? event.data
@@ -146,17 +187,14 @@ export const createDesktopRpcClient = (
                 finish({ error: { message: 'desktop_rpc_timeout' } });
             }, timeout);
 
-            window.addEventListener('message', handleMessage);
-            window.parent.postMessage(
-                {
-                    type: DESKTOP_RPC_REQUEST_MESSAGE,
-                    payload: {
-                        requestId,
-                        method,
-                        params: Array.isArray(params) ? params : [],
-                    },
+            port.addEventListener('message', handleMessage);
+            port.postMessage({
+                type: DESKTOP_RPC_REQUEST_MESSAGE,
+                payload: {
+                    requestId,
+                    method,
+                    params: Array.isArray(params) ? params : [],
                 },
-                '*',
-            );
+            });
         });
     };
