@@ -5,6 +5,11 @@ on:
     tags:
       - v*
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Semver tag to release, for example v1.2.3
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -24,54 +29,35 @@ jobs:
             electron_builder_args: --win --publish always
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Set tag
         id: refs
-        run: echo "tag=${GITHUB_REF#refs/*/}" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_REF_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          tag="${RELEASE_REF_NAME#refs/tags/}"
+          if [[ ! "${tag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Unsupported release tag: ${tag}" >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: 24.15.0
+          node-version: 24.18.0
           cache: npm
 
-      - name: Install Linux canvas deps
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.5
 
-      - name: Install Windows canvas deps
-        if: matrix.os == 'windows-latest'
-        run: |
-          choco install -y gtk-runtime libjpeg-turbo 7zip curl visualstudio2019-workload-vctools mingw
-          "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          # npm config set msvs_version 2019
-          curl -LO http://ftp.gnome.org/pub/GNOME/binaries/win64/gtk+/2.22/gtk+-bundle_2.22.1-20101229_win64.zip
-          7z x gtk+-bundle_2.22.1-20101229_win64.zip -y -oC:\GTK
-
-      - name: Install macOS canvas deps
-        if: matrix.os == 'macos-latest'
-        run: brew install pkg-config cairo pango libpng jpeg giflib librsvg
-
-      - name: Install macOS node build toolchain
-        if: matrix.os == 'macos-latest'
-        run: |
-          if ! command -v go >/dev/null 2>&1; then
-            brew install go
-          fi
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-          fi
-          rustup target add aarch64-apple-darwin
-          go version
-          rustc --version
-
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
 
       - name: Verify source mirror clone
@@ -80,21 +66,34 @@ jobs:
       - name: Prepare source mirrors
         run: npm run setup:sources
 
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.19.13
-
       - name: Run release check
         run: npm run release:check
 
+      - name: Run unit tests
+        run: npm test -- --runInBand
+
+      - name: Install embedded social dependencies
+        run: npm ci --prefix vendor/idena.social-ui
+
+      - name: Check embedded social UI
+        run: |
+          npm run lint --prefix vendor/idena.social-ui
+          npm test --prefix vendor/idena.social-ui
+
       - name: Bump version
-        run: npm --no-git-tag-version version --allow-same-version ${{ steps.refs.outputs.tag }}
+        env:
+          RELEASE_TAG: ${{ steps.refs.outputs.tag }}
+        run: npm --no-git-tag-version version --allow-same-version "${RELEASE_TAG}"
+        shell: bash
 
       - name: Build renderer
         run: npm run build
 
-      - name: Build & release
-        run: node scripts/run-electron-builder.js ${{ matrix.electron_builder_args }}
+      - name: Build and release
         env:
+          ELECTRON_BUILDER_ARGS: ${{ matrix.electron_builder_args }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          read -r -a electron_builder_args <<< "${ELECTRON_BUILDER_ARGS}"
+          node scripts/run-electron-builder.js "${electron_builder_args[@]}"
+        shell: bash
