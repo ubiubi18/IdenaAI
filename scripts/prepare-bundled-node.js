@@ -137,17 +137,14 @@ function main() {
     run(process.execPath, [path.join(ROOT, 'scripts', 'setup-sources.js')])
   }
 
-  if (process.platform === 'darwin' && process.arch === 'arm64') {
-    run('/bin/bash', [
-      path.join(ROOT, 'scripts', 'build-node-macos-arm64.sh'),
-      TARGET_FILE,
-    ])
-  } else {
-    run(process.execPath, [
-      path.join(ROOT, 'scripts', 'build-node-from-sources.js'),
-      TARGET_FILE,
-    ])
-  }
+  run(process.execPath, [
+    path.join(ROOT, 'scripts', 'build-node-from-sources.js'),
+    TARGET_FILE,
+    '--platform',
+    process.platform,
+    '--arch',
+    process.arch,
+  ])
 
   if (!isUsableNodeBinary(TARGET_FILE)) {
     throw new Error('prepared bundled idena-go binary is missing or invalid')
