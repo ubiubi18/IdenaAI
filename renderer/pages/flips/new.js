@@ -1790,10 +1790,8 @@ export default function NewFlipPage() {
     () => ({...DEFAULT_AI_SOLVER_SETTINGS, ...(settings.aiSolver || {})}),
     [settings.aiSolver]
   )
-  const providerDailyBudgetStatus = useMemo(
-    () => getAiProviderDailyBudgetStatus(aiSolverSettings),
-    [aiSolverSettings, generationCostLedger]
-  )
+  const providerDailyBudgetStatus =
+    getAiProviderDailyBudgetStatus(aiSolverSettings)
   const enableOptionalAiFeatures = useCallback(() => {
     updateAiSolverSettings({enabled: true})
   }, [updateAiSolverSettings])

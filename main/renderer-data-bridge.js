@@ -16,12 +16,14 @@ const {
   loadPersistenceValueFromDb,
   persistPersistenceItemToDb,
 } = require('./persistence-store')
+const {decryptSecureState, encryptSecureState} = require('./secure-persistence')
 
 const dbRegistry = new Map()
 const persistenceStoreNames = new Set([
   'settings',
   'flipFilter',
   'validation2',
+  'validationSecret',
   'validationResults',
   'flipArchive',
   'validationNotification',
@@ -167,7 +169,8 @@ function dispatchInvites(action, payload = {}) {
   }
 }
 
-function dispatchPersistence(action, payload = {}) {
+function dispatchPersistence(action, inputPayload, secureStorage) {
+  const payload = inputPayload || {}
   const storeName = String(payload.storeName || '').trim()
 
   if (!persistenceStoreNames.has(storeName)) {
@@ -175,17 +178,41 @@ function dispatchPersistence(action, payload = {}) {
   }
 
   const db = prepareDb(storeName)
+  const isSecureStore = storeName === 'validationSecret'
+  const loadState = () =>
+    isSecureStore
+      ? decryptSecureState(db.getState() || {}, secureStorage)
+      : db.getState() || {}
+  const persistState = (state) => {
+    const nextState = isSecureStore
+      ? encryptSecureState(state, secureStorage)
+      : state
+    db.setState(nextState).write()
+    return true
+  }
 
   switch (action) {
     case 'loadState':
-      return db.getState() || {}
+      return loadState()
     case 'loadValue':
+      if (isSecureStore) {
+        const state = loadState()
+        return Object.prototype.hasOwnProperty.call(state, payload.key)
+          ? state[payload.key]
+          : null
+      }
       return loadPersistenceValueFromDb(db, payload.key)
     case 'persistItem':
+      if (isSecureStore) {
+        const state = loadState()
+        const nextState = {...state}
+        if (payload.value == null) delete nextState[payload.key]
+        else nextState[payload.key] = payload.value
+        return persistState(nextState)
+      }
       return persistPersistenceItemToDb(db, payload.key, payload.value)
     case 'persistState':
-      db.setState(payload.state).write()
-      return true
+      return persistState(payload.state)
     default:
       throw new Error(`Unsupported persistence action: ${action}`)
   }
@@ -231,7 +258,7 @@ async function dispatchStorage(payload = {}) {
   }
 }
 
-function registerRendererDataBridge({onTrusted, handleTrusted}) {
+function registerRendererDataBridge({onTrusted, handleTrusted, secureStorage}) {
   onTrusted(FLIPS_SYNC_COMMAND, (event, action, payload) => {
     event.returnValue = toIpcCloneable(
       runSync(() => dispatchFlips(action, payload))
@@ -246,7 +273,7 @@ function registerRendererDataBridge({onTrusted, handleTrusted}) {
 
   onTrusted(PERSISTENCE_SYNC_COMMAND, (event, action, payload) => {
     event.returnValue = toIpcCloneable(
-      runSync(() => dispatchPersistence(action, payload))
+      runSync(() => dispatchPersistence(action, payload, secureStorage))
     )
   })
 

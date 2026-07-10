@@ -121,7 +121,7 @@ export const getRpcClient = (nodeDetails: NodeDetails, setNodeAvailable: React.D
             console.error(error);
             return { error };
         }
-};
+    };
 export type RpcClient = ReturnType<typeof getRpcClient>;
 
 
@@ -414,7 +414,7 @@ export const getTransactionDetailsRpc = async (
     const transactionReceipts = await Promise.all(transactions.map((transaction) => rpcClient('bcn_txReceipt', [transaction.txHash])));
 
     const filteredReceipts = transactionReceipts.filter((receipt) =>
-        (receipt.error && (() => { throw 'rpc unavailable' })()) ||
+        (receipt.error && (() => { throw 'rpc unavailable'; })()) ||
         receipt.result &&
         receipt.result.success === true &&
         receipt.result.contract === contractAddress.toLowerCase() &&
@@ -425,7 +425,7 @@ export const getTransactionDetailsRpc = async (
     const transactionDetails = filteredReceipts.map(receipt => ({ eventArgs: receipt.result.events?.[0]?.args, eventArgs2nd: receipt.result.events?.[1]?.args, method: receipt.result.method, contractAddress, ...reducedTxs[receipt.result.txHash] }));
 
     return transactionDetails;
-}
+};
 
 type GetTransactionDetailsIndexerApiInput = { txHash: string, timestamp: number, blockHeight?: number, contractAddress?: string };
 export const getTransactionDetailsIndexerApi = async (
@@ -435,7 +435,7 @@ export const getTransactionDetailsIndexerApi = async (
     const transactionReceipts = await Promise.all(transactions.map((transaction) => getTxEventsWithIdenaIndexerApi(inputIdenaIndexerApiUrl, transaction.txHash, 10)));
 
     const filteredReceipts = transactionReceipts.map((tx, index) => ({ ...tx, txHash: transactions[index].txHash })).filter((receipt) =>
-        (receipt.error && (() => { throw 'indexer api unavailable' })()) ||
+        (receipt.error && (() => { throw 'indexer api unavailable'; })()) ||
         receipt.result
     );
 
@@ -443,7 +443,7 @@ export const getTransactionDetailsIndexerApi = async (
     const transactionDetails = filteredReceipts.map(receipt => ({ eventArgs: receipt.result?.[0]?.data, eventArgs2nd: receipt.result?.[1]?.data, method: receipt.result?.[0]?.eventName, ...reducedTxs[receipt.txHash] }));
 
     return transactionDetails;
-}
+};
 
 export const getNewPosterAndPost = async (
     transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number, contractAddress?: string },
@@ -476,7 +476,7 @@ export const getNewPosterAndPost = async (
 
     const postIdRaw = hexToDecimal(eventArgs[1]);
 
-    let postId = prefixContractPostId(postIdRaw, postIdPrefix);
+    const postId = prefixContractPostId(postIdRaw, postIdPrefix);
 
     if (postsRef.current[postId]) {
         return { continued: true };
@@ -533,7 +533,7 @@ export const getNewPosterAndPost = async (
     }
 
     return { newPost, posterPromise, mediaPromise, messagePromise };
-}
+};
 
 const getMessage = async (postId: string, message: string, rpcClient: RpcClient) => {
     if (message.startsWith('ipfs://')) {
@@ -655,7 +655,7 @@ const isValidImageUrlCheck = (url: string, wait = 2000): Promise<boolean> => {
 
         img.src = url;
     });
-}
+};
 
 export const processTip = async (
     transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number, contractAddress?: string },
@@ -704,7 +704,7 @@ export const processTip = async (
     const updatedPostTips = {
         totalAmount: (tipsRef.current[postId]?.totalAmount ?? 0) + amount,
         tips: isRecurseForward ? [ newTip, ...(tipsRef.current[postId]?.tips ?? []) ] : [ ...(tipsRef.current[postId]?.tips ?? []), newTip ],
-    }
+    };
 
     let posterPromise: Promise<Poster> | undefined;
 
@@ -713,7 +713,7 @@ export const processTip = async (
     }
 
     return { postId, newTip, updatedPostTips, posterPromise };
-}
+};
 
 export const getPoster = async (rpcClient: RpcClient, posterAddress: string) => {
     const { result: getDnaIdentityResult, error: getDnaIdentityError } = await rpcClient('dna_identity', [posterAddress]);
@@ -785,7 +785,7 @@ export const deOrphanReplyPosts = (
         newDeOrphanedReplyPosts[newKey] = childDetails.deOrphanedId;
         newPosts[childDetails.deOrphanedId] = { ...postsRef[childDetails.deOrphanedId], orphaned: false };
     }
-}
+};
 
 export const getBlockHeightFromTxHash = async (txHash: string, rpcClient: RpcClient) => {
     const { result: getTransactionResult, error: getTransactionError } = await rpcClient('bcn_transaction', [txHash]);
@@ -952,7 +952,7 @@ export const getNonceAndEpoch = async (rpcClient: RpcClient, address: string) =>
     const { result: epochResult } = responses[1];
 
     return { nonce: getBalanceResult.mempoolNonce + 1, epoch: epochResult.epoch as number };
-}
+};
 
 export const storeFileToIpfs = async (rpcClient: RpcClient, bytes: Uint8Array, address: string) => {
     const fileHexData = toHexString(bytes);
@@ -975,7 +975,7 @@ export const getPostIdFromChannelId = (timestamp: number, channelId: string, dis
     const { postIdPrefix } = getContractEra(timestamp, contractAddress);
     const discussionPostIdRaw = channelId.split(discussPrefix)[1];
     return prefixContractPostId(discussionPostIdRaw, postIdPrefix);
-}
+};
 
 export const getNewPostLatestActivity = (
     isRecurseForward: boolean,
@@ -1025,4 +1025,4 @@ export const getNewPostLatestActivity = (
     }
 
     return newPostLatestActivity;
-}
+};

@@ -1,8 +1,7 @@
 const low = require('lowdb')
-const FileSync = require('lowdb/adapters/FileSync')
-const {dbPath} = require('./setup')
+const {createPrivateFileAdapter, dbPath} = require('./setup')
 
-const adapter = new FileSync(dbPath('flips.json'))
+const adapter = createPrivateFileAdapter(dbPath('flips.json'))
 const db = low(adapter)
 
 db.defaults({flips: []}).write()

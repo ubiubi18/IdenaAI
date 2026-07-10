@@ -180,11 +180,17 @@ function LatestPosts() {
     }, [proposalMode, proposalPrefillText]);
 
     useEffect(() => {
-        if (submittingPost === 'main') {
+        if (submittingPost !== 'main') {
+            return undefined;
+        }
+
+        const clearDraftTimer = window.setTimeout(() => {
             setMainDraftText('');
             setMainComposerCostEstimate(null);
             setMainComposerCostEstimateError('');
-        }
+        }, 0);
+
+        return () => window.clearTimeout(clearDraftTimer);
     }, [
         setMainComposerCostEstimate,
         setMainComposerCostEstimateError,
@@ -193,8 +199,6 @@ function LatestPosts() {
 
     useEffect(() => {
         let canceled = false;
-        let timeoutId: ReturnType<typeof setTimeout>;
-
         const runEstimate = async () => {
             setMainComposerCostEstimateError('');
 
@@ -230,7 +234,7 @@ function LatestPosts() {
             }
         };
 
-        timeoutId = setTimeout(runEstimate, 350);
+        const timeoutId = setTimeout(runEstimate, 350);
 
         return () => {
             canceled = true;
