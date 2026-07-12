@@ -96,6 +96,11 @@ const PROVIDER_CONFIG_DEFAULTS = {
     modelsPath: '/models',
     authHeader: 'Authorization',
     authPrefix: 'Bearer',
+    extraBody: {
+      chat_template_kwargs: {
+        enable_thinking: false,
+      },
+    },
   },
 }
 
