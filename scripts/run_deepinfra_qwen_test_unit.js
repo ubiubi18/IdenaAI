@@ -36,8 +36,16 @@ Options:
   --user-data-dir <path>      App profile dir. Default: ${defaultUserDataDir()}
   --model <id>                Model id. Default: ${DEFAULT_MODEL}
   --max-flips <n>             Max flips to run. Default: 20
-  --batch-size <n>            Batch size. Default: 20
+  --batch-size <n>            Batch size. Default: 1
   --max-cost-usd <amount>     Local budget stop for the run. Default: 5
+  --deadline-ms <n>           Per-batch deadline. Default: 180000
+  --request-timeout-ms <n>    Per-request timeout. Default: 180000
+  --max-retries <n>           Provider retries. Default: 0
+  --max-output-tokens <n>     Completion token cap. Default: 1024
+  --inter-flip-delay-ms <n>   Delay between flips. Default: 650
+  --flip-vision-mode <mode>   composite, frames_single_pass, or frames_two_pass
+  --enable-probability-ensemble
+  --disable-probability-ensemble
   --output <path>             Write full JSON result to this path
   --dequeue                   Remove tested flips from the local queue
   --provider-test-only        Only test the provider connection
@@ -77,8 +85,15 @@ function parseArgs(argv) {
     userDataDir: defaultUserDataDir(),
     model: DEFAULT_MODEL,
     maxFlips: 20,
-    batchSize: 20,
+    batchSize: 1,
     maxCostUsd: 5,
+    deadlineMs: 180000,
+    requestTimeoutMs: 180000,
+    maxRetries: 0,
+    maxOutputTokens: 1024,
+    interFlipDelayMs: 650,
+    flipVisionMode: 'composite',
+    probabilityEnsembleEnabled: false,
     outputPath: null,
     dequeue: false,
     providerTestOnly: false,
@@ -108,6 +123,56 @@ function parseArgs(argv) {
         arg
       )
       index += 1
+    } else if (arg === '--deadline-ms') {
+      options.deadlineMs = toPositiveInt(
+        readValue(argv, index, arg),
+        180000,
+        arg
+      )
+      index += 1
+    } else if (arg === '--request-timeout-ms') {
+      options.requestTimeoutMs = toPositiveInt(
+        readValue(argv, index, arg),
+        180000,
+        arg
+      )
+      index += 1
+    } else if (arg === '--max-retries') {
+      options.maxRetries = toNonNegativeNumber(
+        readValue(argv, index, arg),
+        0,
+        arg
+      )
+      index += 1
+    } else if (arg === '--max-output-tokens') {
+      options.maxOutputTokens = toNonNegativeNumber(
+        readValue(argv, index, arg),
+        1024,
+        arg
+      )
+      index += 1
+    } else if (arg === '--inter-flip-delay-ms') {
+      options.interFlipDelayMs = toNonNegativeNumber(
+        readValue(argv, index, arg),
+        650,
+        arg
+      )
+      index += 1
+    } else if (arg === '--flip-vision-mode') {
+      const mode = readValue(argv, index, arg).trim()
+      if (
+        !['composite', 'frames_single_pass', 'frames_two_pass'].includes(mode)
+      ) {
+        throw new Error(
+          `${arg} must be composite, frames_single_pass, or frames_two_pass`
+        )
+      }
+      options.flipVisionMode = mode
+      index += 1
+    } else if (arg === '--enable-probability-ensemble') {
+      options.probabilityEnsembleEnabled = true
+    } else if (arg === '--disable-probability-ensemble') {
+      options.probabilityEnsembleEnabled = false
     } else if (arg === '--output') {
       options.outputPath = path.resolve(readValue(argv, index, arg))
       index += 1
@@ -240,7 +305,16 @@ async function main() {
     {
       provider: PROVIDER,
       model: options.model,
-      benchmarkProfile: 'strict',
+      benchmarkProfile: 'custom',
+      deadlineMs: options.deadlineMs,
+      requestTimeoutMs: options.requestTimeoutMs,
+      maxRetries: options.maxRetries,
+      maxOutputTokens: options.maxOutputTokens,
+      interFlipDelayMs: options.interFlipDelayMs,
+      flipVisionMode: options.flipVisionMode,
+      probabilityEnsembleEnabled: options.probabilityEnsembleEnabled,
+      probabilityRuns: options.probabilityEnsembleEnabled ? 3 : 1,
+      probabilityUseSwappedOrder: options.probabilityEnsembleEnabled,
       maxFlips: options.maxFlips,
       batchSize: options.batchSize,
       dequeue: options.dequeue,
