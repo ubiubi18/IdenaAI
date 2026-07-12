@@ -1,0 +1,36 @@
+title = "IdenaAI secret scanning policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated ImageAccess obfuscator text, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "match"
+paths = ['''(^|/)renderer/screens/flips/ImageAccess\.js$''']
+regexes = ['''ImageAccess from a 2D array''']
+
+[[allowlists]]
+description = "Public legacy Idena swarm constant"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "match"
+paths = ['''(^|/)idena-go/config/flags\.go$''']
+regexes = ['''DefaultSwarmKey\s*=\s*"''']
+
+[[allowlists]]
+description = "Fixed legacy VRF unit-test vector"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "match"
+paths = ['''(^|/)idena-go/crypto/vrf/p256/p256_test\.go$''']
+regexes = ['''privKey\s*=\s*`''']
+
+[[allowlists]]
+description = "Fixed legacy IPFS unit-test swarm value"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "match"
+paths = ['''(^|/)idena-go/ipfs/ipfs_test\.go$''']
+regexes = ['''SwarmKey:\s*"''']
