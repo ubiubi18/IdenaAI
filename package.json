@@ -53,6 +53,7 @@
     "test": "jest",
     "test:local-rag": "jest main/local-rag --runInBand",
     "test:source-rag": "jest main/source-rag --runInBand",
+    "test:qwen-deepinfra": "node scripts/run_deepinfra_qwen_test_unit.js",
     "rag:demo": "node scripts/local-rag-demo.js",
     "rag:source-env": "node scripts/source-rag-test-env.js",
     "test:idena-go:validation": "idena-go/scripts/run-go-toolchain.sh test ./config ./database ./api ./core/ceremony",
