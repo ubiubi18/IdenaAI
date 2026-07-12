@@ -20,6 +20,10 @@ branch also contains runtime and node hardening newer than the `v0.0.11` tag.
 - Managed node builds use exact `idena-go` and `idena-wasm-binding` commits from
   `scripts/source-manifest.json` instead of copied or loosely downloaded
   binaries.
+- The source manifest, embedded contract runner, and embedded social UI are
+  constrained by `compatibility/stack-lock.json`. This composes the reviewed
+  desktop, contract-runner, and social-UI profiles without changing the legacy
+  chain's genesis, network ID, gossip protocol, reward rules, or consensus.
 - Node RPC keys are stored in user-only files, RPC is bound to loopback by
   default, renderer persistence is restricted, and packaged output is checked
   for private data and unexpected artifacts.
@@ -139,6 +143,10 @@ shallow, single-revision checkouts of `idena-go` and `idena-wasm-binding`.
 Each checkout is verified against the exact commit and required files recorded
 in the manifest. This keeps setup reproducible without copying full repository
 histories or prebuilt libraries into this repository.
+
+The shared lock is a release candidate. Do not describe an IdenaAI build as
+legacy-compatible until the lock's replay, P2P, Wasm differential,
+cross-architecture, and independent rebuild gates have passed.
 
 Run `npm run update:sources` after intentionally changing a manifest pin. An
 existing plain source directory is reused only when every required file is
