@@ -562,6 +562,15 @@ function reduceStoryBoilerplate(text) {
     .trim()
 }
 
+function unwrapStoryPanelFieldLabel(text) {
+  return String(text || '')
+    .trim()
+    .replace(/^["'“”]?(?:panel[_\s-]*\d+|description)["'“”]?\s*:\s*/i, '')
+    .replace(/^["'“”]\s*/, '')
+    .replace(/\s*["'“”]\s*,?\s*$/i, '')
+    .trim()
+}
+
 function normalizeKeywords(payload) {
   const source = Array.isArray(payload && payload.keywords)
     ? payload.keywords
@@ -1784,7 +1793,9 @@ function normalizeStoryPanel(value, index) {
             ''
         )
       : String(value || '')
-  const normalized = reduceStoryBoilerplate(text.trim().replace(/\s+/g, ' '))
+  const normalized = reduceStoryBoilerplate(
+    unwrapStoryPanelFieldLabel(text).replace(/\s+/g, ' ')
+  )
   if (normalized) {
     return normalized
   }
