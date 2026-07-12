@@ -44,6 +44,8 @@ Options:
   --max-output-tokens <n>     Completion token cap. Default: 1024
   --inter-flip-delay-ms <n>   Delay between flips. Default: 650
   --flip-vision-mode <mode>   composite, frames_single_pass, or frames_two_pass
+  --enable-thinking           Allow DeepInfra Qwen thinking tokens
+  --disable-thinking          Keep DeepInfra Qwen thinking disabled. Default
   --enable-probability-ensemble
   --disable-probability-ensemble
   --output <path>             Write full JSON result to this path
@@ -93,6 +95,7 @@ function parseArgs(argv) {
     maxOutputTokens: 1024,
     interFlipDelayMs: 650,
     flipVisionMode: 'composite',
+    thinkingEnabled: false,
     probabilityEnsembleEnabled: false,
     outputPath: null,
     dequeue: false,
@@ -169,6 +172,10 @@ function parseArgs(argv) {
       }
       options.flipVisionMode = mode
       index += 1
+    } else if (arg === '--enable-thinking') {
+      options.thinkingEnabled = true
+    } else if (arg === '--disable-thinking') {
+      options.thinkingEnabled = false
     } else if (arg === '--enable-probability-ensemble') {
       options.probabilityEnsembleEnabled = true
     } else if (arg === '--disable-probability-ensemble') {
@@ -261,6 +268,9 @@ async function main() {
   console.log(
     `Using ${PROVIDER} ${options.model} with profile ${options.userDataDir}`
   )
+  console.log(
+    `Qwen thinking: ${options.thinkingEnabled ? 'enabled' : 'disabled'}`
+  )
 
   if (!options.skipProviderTest) {
     const providerResult = await bridge.testProvider({
@@ -301,10 +311,21 @@ async function main() {
     )}`
   )
 
+  const providerConfig = options.thinkingEnabled
+    ? {
+        extraBody: {
+          chat_template_kwargs: {
+            enable_thinking: true,
+          },
+        },
+      }
+    : null
+
   const result = await testUnit.run(
     {
       provider: PROVIDER,
       model: options.model,
+      providerConfig,
       benchmarkProfile: 'custom',
       deadlineMs: options.deadlineMs,
       requestTimeoutMs: options.requestTimeoutMs,
@@ -345,6 +366,7 @@ async function main() {
       `deepinfra-qwen36-run-${Date.now()}.json`
     )
   await fs.ensureDir(path.dirname(outputPath))
+  result.qwenThinkingEnabled = options.thinkingEnabled
   await fs.writeJson(outputPath, result, {spaces: 2})
   await fs.chmod(outputPath, 0o600).catch(() => {})
 
