@@ -1,9 +1,8 @@
 const low = require('lowdb')
-const FileSync = require('lowdb/adapters/FileSync')
 const {nanoid} = require('nanoid')
-const {dbPath} = require('./setup')
+const {createPrivateFileAdapter, dbPath} = require('./setup')
 
-const adapter = new FileSync(dbPath('invites.json'))
+const adapter = createPrivateFileAdapter(dbPath('invites.json'))
 const db = low(adapter)
 
 // Set some defaults (required if your JSON file is empty)

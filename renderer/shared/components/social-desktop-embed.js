@@ -24,6 +24,7 @@ const SOCIAL_HISTORY_MODE_SESSION_STORAGE_KEY =
 const SOCIAL_HISTORY_MODE_LEGACY_STORAGE_KEY = 'idenaSocialDesktopHistoryModeV2'
 const SOCIAL_BOOTSTRAP_MESSAGE_TYPE = 'IDENA_SOCIAL_BOOTSTRAP'
 const SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE = 'IDENA_SOCIAL_READY'
+const SOCIAL_CHANNEL_INIT_MESSAGE_TYPE = 'IDENA_SOCIAL_CHANNEL_INIT'
 const SOCIAL_RPC_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_REQUEST'
 const SOCIAL_RPC_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_RESPONSE'
 const SOCIAL_RPC_MAX_REQUEST_ID_LENGTH = 128
@@ -240,6 +241,7 @@ export default function SocialDesktopEmbed({
   const [historyMode, setHistoryMode] = React.useState('indexer-api')
   const [showTechnicalDetails, setShowTechnicalDetails] = React.useState(false)
   const iframeRef = React.useRef(null)
+  const messagePortRef = React.useRef(null)
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -307,141 +309,150 @@ export default function SocialDesktopEmbed({
   }, [historyMode])
 
   const postBootstrapToIframe = React.useCallback(() => {
-    const frameWindow = iframeRef.current?.contentWindow
+    const port = messagePortRef.current
 
-    if (!frameWindow) {
+    if (!port) {
       return false
     }
 
-    frameWindow.postMessage(
-      {
-        type: SOCIAL_BOOTSTRAP_MESSAGE_TYPE,
-        payload: bootstrap,
-      },
-      '*'
-    )
+    port.postMessage({
+      type: SOCIAL_BOOTSTRAP_MESSAGE_TYPE,
+      payload: bootstrap,
+    })
 
     return true
   }, [bootstrap])
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return
+  const handlePortMessage = React.useCallback(async (port, event) => {
+    const nextPayload =
+      event.data && typeof event.data === 'object' ? event.data : null
 
-    setBootstrapReady(false)
-
-    const handleMessage = (event) => {
-      if (event.source !== iframeRef.current?.contentWindow) {
-        return
-      }
-
-      if (event.data?.type !== SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE) {
-        return
-      }
-
-      if (postBootstrapToIframe()) {
-        setBootstrapReady(true)
-      }
+    if (nextPayload?.type === SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE) {
+      setBootstrapReady(true)
+      return
     }
 
-    window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
-  }, [postBootstrapToIframe, iframeNonce])
+    if (nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE) {
+      return
+    }
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return
+    const {requestId, method, params} =
+      nextPayload.payload && typeof nextPayload.payload === 'object'
+        ? nextPayload.payload
+        : {}
 
-    const handleRpcRequest = async (event) => {
-      if (event.source !== iframeRef.current?.contentWindow) {
-        return
+    if (typeof requestId !== 'string' || typeof method !== 'string') {
+      return
+    }
+
+    const validationError = validateSocialRpcRequest(requestId, method, params)
+
+    if (validationError) {
+      port.postMessage({
+        type: SOCIAL_RPC_RESPONSE_MESSAGE_TYPE,
+        payload: {
+          requestId,
+          response: {error: {message: validationError}},
+        },
+      })
+      return
+    }
+
+    let responsePayload = {}
+
+    try {
+      const socialBridge =
+        window.idena &&
+        window.idena.social &&
+        typeof window.idena.social.rpc === 'function'
+          ? window.idena.social
+          : null
+
+      if (!socialBridge) {
+        throw new Error('social_rpc_bridge_unavailable')
       }
 
-      const nextPayload =
-        event.data && typeof event.data === 'object' ? event.data : null
-
-      if (nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE) {
-        return
-      }
-
-      const {requestId, method, params} =
-        nextPayload.payload && typeof nextPayload.payload === 'object'
-          ? nextPayload.payload
-          : {}
-
-      if (typeof requestId !== 'string' || typeof method !== 'string') {
-        return
-      }
-
-      const validationError = validateSocialRpcRequest(
+      responsePayload = await socialBridge.rpc({
         requestId,
         method,
-        params
-      )
+        params: Array.isArray(params) ? params : [],
+      })
+    } catch (error) {
+      responsePayload = {
+        error: {message: error?.message || 'social_rpc_proxy_failed'},
+      }
+    }
 
-      if (validationError) {
-        iframeRef.current?.contentWindow?.postMessage(
-          {
-            type: SOCIAL_RPC_RESPONSE_MESSAGE_TYPE,
-            payload: {
-              requestId,
-              response: {
-                error: {
-                  message: validationError,
-                },
-              },
-            },
-          },
-          '*'
-        )
+    port.postMessage({
+      type: SOCIAL_RPC_RESPONSE_MESSAGE_TYPE,
+      payload: {requestId, response: responsePayload},
+    })
+  }, [])
+
+  const closeMessagePort = React.useCallback(() => {
+    if (messagePortRef.current) {
+      messagePortRef.current.close()
+      messagePortRef.current = null
+    }
+  }, [])
+
+  const initializeIframeChannel = React.useCallback(() => {
+    const frameWindow = iframeRef.current?.contentWindow
+
+    if (!frameWindow || typeof window.MessageChannel !== 'function') {
+      return false
+    }
+
+    closeMessagePort()
+    setBootstrapReady(false)
+
+    const channel = new window.MessageChannel()
+    messagePortRef.current = channel.port1
+    channel.port1.onmessage = (event) => {
+      handlePortMessage(channel.port1, event)
+    }
+    channel.port1.start()
+
+    // The wildcard is limited to a capability-port transfer with no payload.
+    // All bootstrap and RPC data then stays on the private MessageChannel.
+    frameWindow.postMessage({type: SOCIAL_CHANNEL_INIT_MESSAGE_TYPE}, '*', [
+      channel.port2,
+    ])
+    channel.port1.postMessage({
+      type: SOCIAL_BOOTSTRAP_MESSAGE_TYPE,
+      payload: bootstrap,
+    })
+
+    return true
+  }, [bootstrap, closeMessagePort, handlePortMessage])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+
+    const handleReadyMessage = (event) => {
+      if (
+        event.source !== iframeRef.current?.contentWindow ||
+        event.data?.type !== SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE ||
+        bootstrapReady
+      ) {
         return
       }
 
-      let responsePayload = {}
-
-      try {
-        const socialBridge =
-          window.idena &&
-          window.idena.social &&
-          typeof window.idena.social.rpc === 'function'
-            ? window.idena.social
-            : null
-
-        if (!socialBridge) {
-          throw new Error('social_rpc_bridge_unavailable')
-        }
-
-        responsePayload = await socialBridge.rpc({
-          requestId,
-          method,
-          params: Array.isArray(params) ? params : [],
-        })
-      } catch (error) {
-        responsePayload = {
-          error: {
-            message: error?.message || 'social_rpc_proxy_failed',
-          },
-        }
-      }
-
-      iframeRef.current?.contentWindow?.postMessage(
-        {
-          type: SOCIAL_RPC_RESPONSE_MESSAGE_TYPE,
-          payload: {
-            requestId,
-            response: responsePayload,
-          },
-        },
-        '*'
-      )
+      initializeIframeChannel()
     }
 
-    window.addEventListener('message', handleRpcRequest)
-    return () => window.removeEventListener('message', handleRpcRequest)
-  }, [])
+    window.addEventListener('message', handleReadyMessage)
+    return () => window.removeEventListener('message', handleReadyMessage)
+  }, [bootstrapReady, initializeIframeChannel])
 
   React.useEffect(() => {
-    if (postBootstrapToIframe()) {
-      setBootstrapReady(true)
-    }
+    setBootstrapReady(false)
+    closeMessagePort()
+    return closeMessagePort
+  }, [closeMessagePort, iframeNonce])
+
+  React.useEffect(() => {
+    postBootstrapToIframe()
   }, [postBootstrapToIframe])
 
   const usingIndexerFallback = historyMode === 'indexer-api'
@@ -631,9 +642,7 @@ export default function SocialDesktopEmbed({
               referrerPolicy="no-referrer"
               sandbox="allow-scripts allow-popups"
               onLoad={() => {
-                if (postBootstrapToIframe()) {
-                  setBootstrapReady(true)
-                }
+                if (!messagePortRef.current) initializeIframeChannel()
               }}
             />
             {!bootstrapReady && (

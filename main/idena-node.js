@@ -18,7 +18,7 @@ const pinnedNodeTag = `v${pinnedNodeVersion}`
 const defaultNodeReleaseRepos = ['ubiubi18/idena-go']
 const idenaChainDbFolder = 'idenachain.db'
 const minNodeBinarySize = 1024 * 1024
-const localNodeBuildToolchain = 'go1.19.13'
+const localNodeBuildToolchain = 'go1.26.5'
 const defaultNodeVerbosity = 3
 const devNodeVerbosity = 4
 const peerAssistInitialDelayMs = 12 * 1000
@@ -1196,11 +1196,6 @@ async function buildLocalPinnedNode(tempNodeFile, onProgress) {
     PATH: [process.env.PATH || '', cargoBinDir].join(path.delimiter),
   }
   const desktopRoot = path.resolve(__dirname, '..')
-  const desktopBuildScript = path.join(
-    desktopRoot,
-    'scripts',
-    'build-node-macos-arm64.sh'
-  )
   const genericBuildScript = path.join(
     desktopRoot,
     'scripts',
@@ -1221,27 +1216,24 @@ async function buildLocalPinnedNode(tempNodeFile, onProgress) {
   }
 
   if (
-    process.platform === 'darwin' &&
-    process.arch === 'arm64' &&
-    !desktopBuildScript.includes('.asar') &&
-    fs.existsSync(desktopBuildScript)
-  ) {
-    await runCommand(
-      '/usr/bin/arch',
-      ['-arm64', '/bin/bash', desktopBuildScript, tempNodeFile],
-      {
-        cwd: desktopRoot,
-        env,
-      }
-    )
-  } else if (
     !genericBuildScript.includes('.asar') &&
     fs.existsSync(genericBuildScript)
   ) {
-    await runCommand(process.execPath, [genericBuildScript, tempNodeFile], {
-      cwd: desktopRoot,
-      env,
-    })
+    await runCommand(
+      process.execPath,
+      [
+        genericBuildScript,
+        tempNodeFile,
+        '--platform',
+        process.platform,
+        '--arch',
+        process.arch,
+      ],
+      {
+        cwd: desktopRoot,
+        env: {...env, ELECTRON_RUN_AS_NODE: '1'},
+      }
+    )
   } else {
     const repoDir = findLocalNodeRepo()
     if (!repoDir) {
