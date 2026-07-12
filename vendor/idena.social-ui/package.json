@@ -8,14 +8,14 @@
 		"lint": "eslint .",
 		"preview": "vite preview",
 		"lint:fix": "eslint --fix .",
-		"test": "npx vitest run"
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@bufbuild/protobuf": "^2.10.2",
 		"@tailwindcss/vite": "^4.1.17",
 		"bn.js": "^5.2.2",
 		"decimal.js": "^10.6.0",
-		"idena-sdk-js-lite": "^0.2.0",
+		"idena-sdk-js-lite": "https://github.com/ubiubi18/idena-sdk-js-lite/archive/7850d97f63f36d5b8e542c8528104abd8d43e938.tar.gz",
 		"image-type": "^6.1.0",
 		"is-svg": "^6.1.0",
 		"js-sha3": "^0.9.3",
@@ -23,7 +23,6 @@
 		"react-dom": "^19.2.0",
 		"react-modal": "^3.16.3",
 		"react-router": "^7.13.0",
-		"secp256k1": "^5.0.1",
 		"tailwindcss": "^4.1.17"
 	},
 	"devDependencies": {
@@ -32,7 +31,6 @@
 		"@types/react": "^19.2.5",
 		"@types/react-dom": "^19.2.3",
 		"@types/react-modal": "^3.16.3",
-		"@types/secp256k1": "^4.0.7",
 		"@vitejs/plugin-react": "^5.1.1",
 		"eslint": "^9.39.1",
 		"eslint-plugin-react-hooks": "^7.0.1",
@@ -44,5 +42,9 @@
 		"typescript-eslint": "^8.46.4",
 		"vite": "^7.2.4",
 		"vitest": "^4.0.16"
+	},
+	"allowScripts": {
+		"esbuild@0.28.1": true,
+		"fsevents": false
 	}
 }

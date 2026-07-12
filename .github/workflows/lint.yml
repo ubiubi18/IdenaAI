@@ -1,6 +1,12 @@
 name: Lint and tests
 
-on: push
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   lint-test:
@@ -8,12 +14,12 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: 24.15.0
+          node-version: 24.18.0
           cache: npm
 
       - name: Install deps
@@ -21,3 +27,14 @@ jobs:
 
       - name: Run release check
         run: npm run release:check
+
+      - name: Run unit tests
+        run: npm test -- --runInBand
+
+      - name: Install embedded social dependencies
+        run: npm ci --prefix vendor/idena.social-ui
+
+      - name: Check embedded social UI
+        run: |
+          npm run lint --prefix vendor/idena.social-ui
+          npm test --prefix vendor/idena.social-ui

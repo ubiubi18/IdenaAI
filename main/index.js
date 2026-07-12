@@ -8,6 +8,7 @@ const {
   Tray,
   Menu,
   nativeTheme,
+  safeStorage,
   screen,
   shell,
   // eslint-disable-next-line import/no-extraneous-dependencies
@@ -19,6 +20,9 @@ const semver = require('semver')
 const {zoomIn, zoomOut, resetZoom} = require('./utils')
 const loadRoute = require('./utils/routes')
 const httpClient = require('./utils/fetch-client')
+const {applyPrivateFileCreationMask} = require('./private-files')
+
+applyPrivateFileCreationMask()
 
 const {DEV_SERVER_ORIGIN} = loadRoute
 
@@ -309,7 +313,11 @@ function onTrusted(channel, listener) {
   })
 }
 
-registerRendererDataBridge({onTrusted, handleTrusted})
+registerRendererDataBridge({
+  onTrusted,
+  handleTrusted,
+  secureStorage: safeStorage,
+})
 
 function normalizeExternalUrl(value) {
   try {

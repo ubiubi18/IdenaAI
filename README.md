@@ -1,4 +1,4 @@
-# IdenaAI v0.0.9
+# IdenaAI v0.0.11
 
 IdenaAI is an experimental desktop fork of `idena-desktop` for validation,
 FLIP, local AI, and rehearsal research.
@@ -7,7 +7,66 @@ It is not a hardened wallet release, not a trusted installer distribution, and
 not a guarantee of validation success. Build and inspect it locally. Use it at
 your own risk.
 
-## v0.0.9 Changelog
+## Current source status
+
+This repository has no published GitHub release artifacts. Tags document source
+milestones; they are not signed or supported desktop installers. The `main`
+branch also contains runtime and node hardening newer than the `v0.0.11` tag.
+
+### Foundation updates after v0.0.11
+
+- The desktop foundation now targets Node `24.18.0`, npm `11.16.0`, Electron
+  `43.1.0`, and Next.js `16.2.10` with reproducible install and release checks.
+- Managed node builds use exact `idena-go` and `idena-wasm-binding` commits from
+  `scripts/source-manifest.json` instead of copied or loosely downloaded
+  binaries.
+- Node RPC keys are stored in user-only files, RPC is bound to loopback by
+  default, renderer persistence is restricted, and packaged output is checked
+  for private data and unexpected artifacts.
+- Full unit, lint, privacy, dependency, Electron-safety, source-integrity, and
+  renderer-build gates run before release packaging.
+
+### Benefits
+
+- A newer, smaller, and more auditable desktop/node foundation for validation,
+  local AI, provider, and knowledge-index research.
+- Reproducible source pins make it possible to identify the exact node and Wasm
+  runtime under test.
+- Local privacy and provider-budget controls reduce accidental exposure and
+  unbounded app-side usage.
+
+### Risks and tradeoffs
+
+- This is the AI research repository, not the AI-free clean desktop fork. It has
+  a substantially larger attack, privacy, model, and provider surface.
+- Autosolve, report review, and story generation can be wrong or late and can
+  affect a real validation outcome. Rehearsal tests cannot reproduce all
+  mainnet timing and provider failures.
+- API calls can incur external costs; local accounting cannot cap a provider
+  account. Configure hard provider-side limits and use separate low-value keys.
+- Local models, downloaded binaries, indexed knowledge, IPFS content, and
+  imported teacher data require independent license and trust review.
+- No source hardening can turn an unsigned local build into a production wallet
+  release. Keep valuable identities and assets out of experimental profiles.
+
+## v0.0.11 Status
+
+- Added the trusted knowledge-index scaffold while keeping unfinished Knowledge
+  RAG UI out of the application.
+- Kept storage and trust decisions local to each node; public shard metadata is
+  advisory rather than a global trust decision.
+- Hardened oracle voting option indexes so stale or non-contiguous UI IDs do not
+  produce invalid contract vote indexes.
+
+## v0.0.10 Status
+
+- Hardened short-session fallback behavior and made degraded provider runs
+  visible instead of silently producing zero-token results.
+- Stopped carrying stale generated bootnodes between managed node starts.
+- Moved the managed node RPC key out of process arguments into a `0600` file,
+  bound RPC to loopback, and restricted node runtime/configuration files.
+
+## v0.0.9 Validation Changelog
 
 Validation-safety release for the next real on-chain test.
 
@@ -44,8 +103,8 @@ billing unless you have audited the code and accepted the risk.
 Requirements:
 
 - macOS, Windows, or Linux
-- Node.js `24.15.x`
-- npm `11.12.x`
+- Node.js `24.18.x`
+- npm `11.16.x`
 - Git
 
 Install and run:
@@ -53,7 +112,7 @@ Install and run:
 ```bash
 git clone https://github.com/ubiubi18/IdenaAI.git
 cd IdenaAI
-npm install
+npm ci
 npm start
 ```
 
@@ -72,6 +131,20 @@ For source-built node work:
 npm run setup:sources
 npm run build:node
 ```
+
+## Source Mirrors and Smaller Checkouts
+
+`npm run setup:sources` reads `scripts/source-manifest.json` and creates
+shallow, single-revision checkouts of `idena-go` and `idena-wasm-binding`.
+Each checkout is verified against the exact commit and required files recorded
+in the manifest. This keeps setup reproducible without copying full repository
+histories or prebuilt libraries into this repository.
+
+Run `npm run update:sources` after intentionally changing a manifest pin. An
+existing plain source directory is reused only when every required file is
+present; an existing Git checkout is fetched with depth 1 and then verified.
+Large generated binaries belong in release artifacts or Git LFS, not regular
+Git history. Run `npm run audit:artifacts` before publishing changes.
 
 Packaged builds are developer/debugging artifacts. The source run is the
 preferred path for research and auditing.
@@ -157,14 +230,14 @@ esac
 export PATH="$NODE24_BIN:$PATH"
 ```
 
-Step 4: verify Node and npm. Continue only if Node is `v24.15.0` or newer on
+Step 4: verify Node and npm. Continue only if Node is `v24.18.0` or newer on
 the Node 24 line. Node 25+ is intentionally rejected by this repo.
 
 ```bash
 node -v
 npm -v
-npm install -g npm@11.12.0
-node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 15) { throw new Error(`IdenaAI requires Node v24.15.0 or newer on Node 24, got ${process.versions.node}`) }'
+npm install -g npm@11.16.0
+node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 18) { throw new Error(`IdenaAI requires Node v24.18.0 or newer on Node 24, got ${process.versions.node}`) }'
 npm -v
 git --version
 python3 --version
@@ -302,16 +375,16 @@ installer may open a separate installer window.
 
 ```powershell
 winget install --id Git.Git -e
-winget install --id OpenJS.NodeJS.LTS -e --version 24.15.0
+winget install --id OpenJS.NodeJS.LTS -e --version 24.18.0
 winget install --id Python.Python.3.12 -e
 winget install --id GoLang.Go -e
 winget install --id MSYS2.MSYS2 -e
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-If `winget` cannot find the exact Node `24.15.0` package, run
+If `winget` cannot find the exact Node `24.18.0` package, run
 `winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 4
-shows Node `v24.15.0` or a newer `v24.x` release. Do not use NVM for Windows for
+shows Node `v24.18.0` or a newer `v24.x` release. Do not use NVM for Windows for
 this setup if it fails on your PC.
 
 Step 3: install the MinGW toolchain inside MSYS2 and add the detected
@@ -380,7 +453,7 @@ gcc --version
 ```
 
 Step 4: close PowerShell, reopen it, then verify Node and npm. Continue only if
-Node is `v24.15.0` or newer on the Node 24 line. Node 25+ is intentionally
+Node is `v24.18.0` or newer on the Node 24 line. Node 25+ is intentionally
 rejected by this repo.
 
 ```powershell
@@ -389,16 +462,16 @@ node -v
 npm -v
 
 $nodeVersion = [version]((node -v).TrimStart("v"))
-if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.15.0") {
-  throw "IdenaAI requires Node v24.15.0 or newer on Node 24, got v$nodeVersion"
+if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.18.0") {
+  throw "IdenaAI requires Node v24.18.0 or newer on Node 24, got v$nodeVersion"
 }
 
-npm install -g npm@11.12.0
+npm install -g npm@11.16.0
 npm -v
 
 $npmVersion = [version](npm -v)
-if ($npmVersion -lt [version]"11.12.0") {
-  throw "IdenaAI requires npm 11.12.0 or newer, got $npmVersion"
+if ($npmVersion -lt [version]"11.16.0") {
+  throw "IdenaAI requires npm 11.16.0 or newer, got $npmVersion"
 }
 
 git --version
@@ -521,7 +594,7 @@ own successful rehearsal history. If you do use a VPS, use a dedicated server,
 encrypt/back up keys yourself, keep API spending limits low, and keep the
 remote desktop open while validation is running.
 
-Step 1: install base packages, Node 24, npm 11.12, Go, and Electron runtime
+Step 1: install base packages, Node 24, npm 11.16, Go, and Electron runtime
 libraries.
 
 ```bash
@@ -530,7 +603,7 @@ sudo apt-get install -y ca-certificates curl git build-essential python3 python3
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs golang-go
-sudo npm install -g npm@11.12.0
+sudo npm install -g npm@11.16.0
 
 if apt-cache show libasound2t64 >/dev/null 2>&1; then
   ASOUND_PACKAGE=libasound2t64

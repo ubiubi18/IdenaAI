@@ -5,6 +5,7 @@ const path = require('path')
 const pino = require('pino')
 
 const appDataPath = require('./app-data-path')
+const {hardenPrivateFile} = require('./private-files')
 
 function getRuntimeSystemVersion() {
   if (typeof process.getSystemVersion === 'function') {
@@ -23,6 +24,7 @@ function getLogFilePath() {
   }
 }
 
+const logFile = getLogFilePath()
 const logger = pino(
   {
     level: process.env.LOG_LEVEL || 'debug',
@@ -88,7 +90,8 @@ const logger = pino(
     ],
     timestamp: () => `,"time":"${new Date().toISOString()}"`,
   },
-  getLogFilePath()
+  logFile
 )
+hardenPrivateFile(logFile)
 
 module.exports = logger

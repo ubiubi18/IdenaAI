@@ -30,6 +30,7 @@ import {normalizeRehearsalSeedFlipMetaByHash} from '../rehearsal-benchmark'
 
 const DISMISSED_VALIDATION_SCREEN_STORAGE_KEY = 'didCloseValidationScreen'
 const DISMISSED_LOTTERY_SCREEN_STORAGE_KEY = 'didCloseLotteryScreen'
+let runtimeDismissedValidationScreen = null
 export const SESSION_AUTO_LOTTERY_RETURN_LEAD_MS = 5 * 1000
 // In the real protocol, public flip keys are first broadcast at short-session
 // start, so a rehearsal run can legitimately have assigned-but-not-ready flips
@@ -122,7 +123,7 @@ export function rememberDismissedValidationScreen({
   scopeKey = '',
   reason = '',
 } = {}) {
-  if (typeof window === 'undefined' || !window.sessionStorage) {
+  if (typeof window === 'undefined') {
     return null
   }
 
@@ -132,49 +133,35 @@ export function rememberDismissedValidationScreen({
     .toLowerCase()
 
   if (!normalizedScopeKey || !normalizedReason) {
-    window.sessionStorage.removeItem(DISMISSED_VALIDATION_SCREEN_STORAGE_KEY)
+    runtimeDismissedValidationScreen = null
+    try {
+      window.sessionStorage?.removeItem(DISMISSED_VALIDATION_SCREEN_STORAGE_KEY)
+    } catch {
+      // Ignore cleanup failures; the dismissal remains memory-only.
+    }
     return null
   }
 
-  const nextDismissal = {
+  runtimeDismissedValidationScreen = {
     scopeKey: normalizedScopeKey,
     reason: normalizedReason,
   }
 
-  window.sessionStorage.setItem(
-    DISMISSED_VALIDATION_SCREEN_STORAGE_KEY,
-    JSON.stringify(nextDismissal)
-  )
-
-  return nextDismissal
+  return runtimeDismissedValidationScreen
 }
 
 export function readDismissedValidationScreen() {
-  if (typeof window === 'undefined' || !window.sessionStorage) {
+  if (typeof window === 'undefined') {
     return null
   }
 
   try {
-    const value = JSON.parse(
-      window.sessionStorage.getItem(DISMISSED_VALIDATION_SCREEN_STORAGE_KEY)
-    )
-
-    if (
-      value &&
-      typeof value === 'object' &&
-      String(value.scopeKey || '').trim() &&
-      String(value.reason || '').trim()
-    ) {
-      return {
-        scopeKey: String(value.scopeKey).trim(),
-        reason: String(value.reason).trim().toLowerCase(),
-      }
-    }
+    window.sessionStorage?.removeItem(DISMISSED_VALIDATION_SCREEN_STORAGE_KEY)
   } catch {
-    return null
+    // Ignore cleanup failures; the dismissal remains memory-only.
   }
 
-  return null
+  return runtimeDismissedValidationScreen
 }
 
 export function shouldSuppressValidationAutoOpen({
