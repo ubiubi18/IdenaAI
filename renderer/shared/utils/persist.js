@@ -4,6 +4,7 @@ const PERSISTENCE_STORE_MAP = {
   settings: 'settings',
   flipFilter: 'flipFilter',
   validation2: 'validationSession',
+  validationSecret: 'validationSecret',
   validationResults: 'validationResults',
   flipArchive: 'flipArchive',
   validationNotification: 'validationNotification',
@@ -62,10 +63,8 @@ export function persistItem(dbName, key, value) {
     getPersistenceStore(dbName).persistItem(key, value)
   } catch {
     getSharedGlobal('logger', console).error(
-      'error writing to file: ',
-      dbName,
-      key,
-      value
+      'error writing persistent item:',
+      storageLogContext(dbName, key)
     )
   }
 }
@@ -75,10 +74,16 @@ export function persistState(name, state) {
     getPersistenceStore(name).persistState(state)
   } catch {
     getSharedGlobal('logger', console).error(
-      'error writing to file: ',
-      name,
-      state
+      'error writing persistent state:',
+      storageLogContext(name)
     )
+  }
+}
+
+function storageLogContext(name, key) {
+  return {
+    name,
+    ...(typeof key === 'undefined' ? {} : {key}),
   }
 }
 

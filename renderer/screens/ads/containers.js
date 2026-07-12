@@ -606,7 +606,7 @@ export const AdForm = React.forwardRef(({ad, onSubmit, ...props}, ref) => {
                   borderColor: 'gray.300',
                 }}
               >
-                <option> </option>
+                <option value="">{t('Any')}</option>
                 {AVAILABLE_LANGS.map((lang) => (
                   <option key={lang}>{lang}</option>
                 ))}
@@ -643,7 +643,7 @@ export const AdForm = React.forwardRef(({ad, onSubmit, ...props}, ref) => {
                   borderColor: 'gray.100',
                 }}
               >
-                <option> </option>
+                <option value="">{t('Any')}</option>
                 {Object.entries(OS).map(([k, v]) => (
                   <option key={v} value={v}>
                     {k}
@@ -1313,7 +1313,7 @@ export function CreateCampaignDrawer({ad, onSuccess, ...props}) {
                       borderColor: 'gray.100',
                     }}
                   >
-                    <option> </option>
+                    <option value="">{t('Any')}</option>
                     {AVAILABLE_LANGS.map((lang) => (
                       <option key={lang}>{lang}</option>
                     ))}
@@ -1350,7 +1350,7 @@ export function CreateCampaignDrawer({ad, onSuccess, ...props}) {
                       borderColor: 'gray.100',
                     }}
                   >
-                    <option> </option>
+                    <option value="">{t('Any')}</option>
                     {Object.entries(OS).map(([k, v]) => (
                       <option key={v} value={v}>
                         {k}

@@ -63,9 +63,26 @@ const writeLocalStorage = (key: string, value: string) => {
     }
 };
 
+const sensitiveBrowserStorageKeys = [
+    'nodeKey',
+    'saveEncryptedKey',
+    'encryptedPrivateKey',
+    'savePassword',
+    'password',
+];
+
+sensitiveBrowserStorageKeys.forEach(key => {
+    try {
+        window.localStorage.removeItem(key);
+        window.sessionStorage.removeItem(key);
+    } catch {
+        // Storage may be unavailable inside the sandboxed desktop frame.
+    }
+});
+
 const initSettings = {
     nodeUrl: initialDesktopBootstrap.nodeUrl || readLocalStorage('nodeUrl') || defaultNodeUrl,
-    nodeKey: readLocalStorage('nodeKey') || defaultNodeApiKey,
+    nodeKey: defaultNodeApiKey,
     sendingTxs: initialDesktopBootstrap.sendingTxs || readLocalStorage('makePostsWith') || 'rpc',
     postersAddress: readLocalStorage('postersAddress') || zeroAddress,
     findingPastPosts: initialDesktopBootstrap.findingPastPosts || readLocalStorage('findPostsWith') || readLocalStorage('findPastPostsWith') || 'rpc',
@@ -294,7 +311,7 @@ function App() {
         };
 
         rerender && forceUpdate();
-    }
+    };
 
     const setRpcClient = (idenaNodeUrl: string, idenaNodeApiKey: string, setNodeAvailable: React.Dispatch<React.SetStateAction<boolean>>) => {
         rpcClientRef.current = isDesktopOnchainMode
@@ -314,7 +331,6 @@ function App() {
             }
 
             writeLocalStorage('nodeUrl', idenaNodeUrl);
-            writeLocalStorage('nodeKey', idenaNodeApiKey);
 
             if (!initialBlock) {
                 const { result: getLastBlockResult } = inputFindingPastPosts === 'indexer-api'
@@ -1004,7 +1020,9 @@ function App() {
             const postTextareaElement = document.getElementById(`post-input-${location}`) as HTMLTextAreaElement;
             const postMediaAttachment = postMediaAttachmentsRef.current[location];
 
-            let { inputText, media, mediaType } = getTextAndMediaForPost(postTextareaElement, postMediaAttachment);
+            const postPayload = getTextAndMediaForPost(postTextareaElement, postMediaAttachment);
+            const {inputText} = postPayload;
+            let {media, mediaType} = postPayload;
 
             if (!inputText && !postMediaAttachment) {
                 showFlashNotice('warning', 'No text or media provided.');
@@ -1042,7 +1060,7 @@ function App() {
                 }, 1000);
             });
         }
-    }
+    };
 
     const submitPostHandler = async (location: string, replyToPostId?: string, channelId?: string, storeTextIpfs?: boolean, storeMediaIpfs?: boolean) => {
         if (!nodeAvailable) {
@@ -1216,302 +1234,302 @@ function App() {
             style={isDesktopOnchainMode ? { width: '100%', maxWidth: '100%' } : undefined}
         >
             {!isDesktopOnchainMode && (
-            <div className="hidden lg:flex flex-none justify-end">
-                <div className="w-[280px] min-w-[280px] ml-2 mr-1 flex flex-col">
-                    <div className="text-[28px] mb-3">
-                        <Link to="/">idena.social</Link>
-                    </div>
-                    <MenuComponent postersAddress={postersAddress} />
-                    <div className="mb-4" />
-                    <div className="mb-4 text-[14px]">
-                        <div className="flex flex-col">
-                            <div className="flex flex-row mb-2 gap-1">
-                                <p className="w-13 flex-none text-right">Rpc url:</p>
-                                <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeUrl} onChange={e => setInputNodeUrl(e.target.value)} />
-                            </div>
-                            <div className="flex flex-row mb-1 gap-1">
-                                <p className="w-13 flex-none text-right">Api key:</p>
-                                <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeKey} onChange={e => setInputNodeKey(e.target.value)} />
-                            </div>
-                            {!nodeAvailable && <p className="ml-14 text-[11px] text-red-400">Node Unavailable. Please try again.</p>}
+                <div className="hidden lg:flex flex-none justify-end">
+                    <div className="w-[280px] min-w-[280px] ml-2 mr-1 flex flex-col">
+                        <div className="text-[28px] mb-3">
+                            <Link to="/">idena.social</Link>
                         </div>
-                        <div className="flex flex-row">
-                            <button className={`h-7 w-16 ml-14 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputNodeApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputNodeApplied(!inputNodeApplied)}>{inputNodeApplied ? 'Change' : 'Apply!'}</button>
-                            {!inputNodeApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
-                        </div>
-                        {isDesktopOnchainMode && (
-                            <p className="ml-14 mt-1 text-[11px] text-stone-400">
+                        <MenuComponent postersAddress={postersAddress} />
+                        <div className="mb-4" />
+                        <div className="mb-4 text-[14px]">
+                            <div className="flex flex-col">
+                                <div className="flex flex-row mb-2 gap-1">
+                                    <p className="w-13 flex-none text-right">Rpc url:</p>
+                                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeUrl} onChange={e => setInputNodeUrl(e.target.value)} />
+                                </div>
+                                <div className="flex flex-row mb-1 gap-1">
+                                    <p className="w-13 flex-none text-right">Api key:</p>
+                                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeKey} onChange={e => setInputNodeKey(e.target.value)} />
+                                </div>
+                                {!nodeAvailable && <p className="ml-14 text-[11px] text-red-400">Node Unavailable. Please try again.</p>}
+                            </div>
+                            <div className="flex flex-row">
+                                <button className={`h-7 w-16 ml-14 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputNodeApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputNodeApplied(!inputNodeApplied)}>{inputNodeApplied ? 'Change' : 'Apply!'}</button>
+                                {!inputNodeApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                            </div>
+                            {isDesktopOnchainMode && (
+                                <p className="ml-14 mt-1 text-[11px] text-stone-400">
                                 Embedded in idena-desktop. Uses your current node settings and defaults to on-chain RPC only.
-                            </p>
-                        )}
-                    </div>
-                    <hr className="mb-3 text-gray-500" />
-                    <div className="flex flex-col mb-6">
-                        <p>Make posts with:</p>
-                        <div className="flex flex-row gap-2">
-                            <input id="useRpc" type="radio" name="useRpc" value="rpc" checked={inputSendingTxs === 'rpc'} onChange={handleInputSendingTxsToggle} />
-                            <label htmlFor="useRpc" className="flex-none text-right">RPC</label>
+                                </p>
+                            )}
                         </div>
-                        {inputSendingTxs === 'rpc' && viewOnlyNode && <p className="ml-4.5 text-[11px] text-red-400">Your RPC is View-Only. Posting, liking, and tipping are disabled until the node exposes a writable account.</p>}
-                        {!isDesktopOnchainMode && (
+                        <hr className="mb-3 text-gray-500" />
+                        <div className="flex flex-col mb-6">
+                            <p>Make posts with:</p>
                             <div className="flex flex-row gap-2">
-                                <input id="notUseRpc" type="radio" name="useRpc" value="idena-app" checked={inputSendingTxs === 'idena-app'} onChange={handleInputSendingTxsToggle} />
-                                <label htmlFor="notUseRpc" className="flex-none text-right">Use Idena App</label>
+                                <input id="useRpc" type="radio" name="useRpc" value="rpc" checked={inputSendingTxs === 'rpc'} onChange={handleInputSendingTxsToggle} />
+                                <label htmlFor="useRpc" className="flex-none text-right">RPC</label>
                             </div>
-                        )}
-                        {!isDesktopOnchainMode && inputSendingTxs === 'idena-app' && (
-                            <div className="flex flex-col ml-5 text-[14px]">
-                                <p className="mb-1">Your Idena Address:</p>
-                                <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
-                                {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled)</p>}
-                                <div className="flex flex-row">
-                                    <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputPostersAddressApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
-                                    {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                            {inputSendingTxs === 'rpc' && viewOnlyNode && <p className="ml-4.5 text-[11px] text-red-400">Your RPC is View-Only. Posting, liking, and tipping are disabled until the node exposes a writable account.</p>}
+                            {!isDesktopOnchainMode && (
+                                <div className="flex flex-row gap-2">
+                                    <input id="notUseRpc" type="radio" name="useRpc" value="idena-app" checked={inputSendingTxs === 'idena-app'} onChange={handleInputSendingTxsToggle} />
+                                    <label htmlFor="notUseRpc" className="flex-none text-right">Use Idena App</label>
                                 </div>
-                            </div>
-                        )}
-                    </div>
-                    <hr className="mb-3 text-gray-500" />
-                    <div className="flex flex-col mb-6">
-                        <p>Find posts with:</p>
-                        <div className="flex flex-row gap-2">
-                            <input id="findPastPostsWith" type="radio" name="inputFindingPastPosts" value="rpc" checked={inputFindingPastPosts === 'rpc'} onChange={handleInputFindingPastPostsToggle} />
-                            <label htmlFor="findPastPostsWith" className="flex-none text-right">RPC</label>
+                            )}
+                            {!isDesktopOnchainMode && inputSendingTxs === 'idena-app' && (
+                                <div className="flex flex-col ml-5 text-[14px]">
+                                    <p className="mb-1">Your Idena Address:</p>
+                                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
+                                    {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled)</p>}
+                                    <div className="flex flex-row">
+                                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputPostersAddressApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
+                                        {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                        <div className="flex flex-row gap-2">
-                            <input id="notUseFindPastBlocksWithTxsApi" type="radio" name="inputFindingPastPosts" value="indexer-api" checked={inputFindingPastPosts === 'indexer-api'} onChange={handleInputFindingPastPostsToggle} />
-                            <label htmlFor="notUseFindPastBlocksWithTxsApi" className="flex-none text-right">Use official Idena indexer fallback</label>
-                            <span
-                                className="mt-[1px] text-[11px] text-gray-400 hover:cursor-help"
-                                title="This option only helps read older history. It calls the official Idena indexer at https://api.idena.io when your own node RPC does not return enough past posts. Posting, liking, tipping and image uploads still use your own node RPC."
-                            >
+                        <hr className="mb-3 text-gray-500" />
+                        <div className="flex flex-col mb-6">
+                            <p>Find posts with:</p>
+                            <div className="flex flex-row gap-2">
+                                <input id="findPastPostsWith" type="radio" name="inputFindingPastPosts" value="rpc" checked={inputFindingPastPosts === 'rpc'} onChange={handleInputFindingPastPostsToggle} />
+                                <label htmlFor="findPastPostsWith" className="flex-none text-right">RPC</label>
+                            </div>
+                            <div className="flex flex-row gap-2">
+                                <input id="notUseFindPastBlocksWithTxsApi" type="radio" name="inputFindingPastPosts" value="indexer-api" checked={inputFindingPastPosts === 'indexer-api'} onChange={handleInputFindingPastPostsToggle} />
+                                <label htmlFor="notUseFindPastBlocksWithTxsApi" className="flex-none text-right">Use official Idena indexer fallback</label>
+                                <span
+                                    className="mt-[1px] text-[11px] text-gray-400 hover:cursor-help"
+                                    title="This option only helps read older history. It calls the official Idena indexer at https://api.idena.io when your own node RPC does not return enough past posts. Posting, liking, tipping and image uploads still use your own node RPC."
+                                >
                                 ⓘ
-                            </span>
-                        </div>
-                        {isDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
-                            <div className="flex flex-col ml-5 text-[14px]">
-                                <p className="text-[11px] text-stone-400">
+                                </span>
+                            </div>
+                            {isDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
+                                <div className="flex flex-col ml-5 text-[14px]">
+                                    <p className="text-[11px] text-stone-400">
                                     Official fallback reader:
-                                </p>
-                                <input
-                                    className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500"
-                                    disabled={true}
-                                    value={officialIndexerApiUrl}
-                                    readOnly={true}
-                                />
-                                <p className="text-[11px] text-stone-400">
+                                    </p>
+                                    <input
+                                        className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500"
+                                        disabled={true}
+                                        value={officialIndexerApiUrl}
+                                        readOnly={true}
+                                    />
+                                    <p className="text-[11px] text-stone-400">
                                     Read-only fallback for older posts. Posting still uses your node RPC.
-                                </p>
-                            </div>
-                        )}
-                        {!isDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
-                            <div className="flex flex-col ml-5 text-[14px]">
-                                <div className="flex flex-row gap-1">
-                                    <p className="mb-1 w-13 flex-none text-right">Api Url:</p>
-                                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputIdenaIndexerApiUrlApplied} value={inputIdenaIndexerApiUrl} onChange={e => setInputIdenaIndexerApiUrl(e.target.value)} />
+                                    </p>
                                 </div>
-                                {indexerApiUrlInvalid && <p className="ml-14 text-[11px] text-red-400">Invalid Api Url.</p>}
-                                <div className="flex flex-row">
-                                    <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputIdenaIndexerApiUrlApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputIdenaIndexerApiUrlApplied(!inputIdenaIndexerApiUrlApplied)}>{inputIdenaIndexerApiUrlApplied ? 'Change' : 'Apply'}</button>
-                                    {!inputIdenaIndexerApiUrlApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                            )}
+                            {!isDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
+                                <div className="flex flex-col ml-5 text-[14px]">
+                                    <div className="flex flex-row gap-1">
+                                        <p className="mb-1 w-13 flex-none text-right">Api Url:</p>
+                                        <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputIdenaIndexerApiUrlApplied} value={inputIdenaIndexerApiUrl} onChange={e => setInputIdenaIndexerApiUrl(e.target.value)} />
+                                    </div>
+                                    {indexerApiUrlInvalid && <p className="ml-14 text-[11px] text-red-400">Invalid Api Url.</p>}
+                                    <div className="flex flex-row">
+                                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputIdenaIndexerApiUrlApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputIdenaIndexerApiUrlApplied(!inputIdenaIndexerApiUrlApplied)}>{inputIdenaIndexerApiUrlApplied ? 'Change' : 'Apply'}</button>
+                                        {!inputIdenaIndexerApiUrlApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                                    </div>
                                 </div>
+                            )}
+                        </div>
+                        <div className="mb-3 text-gray-500">
+                            <hr />
+                            <div className="flex flex-row gap-1">
+                                <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
+                                <p className="text-[14px]/7">|</p>
+                                <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank" rel="noopener noreferrer">Attributions</a></p>
                             </div>
-                        )}
-                    </div>
-                    <div className="mb-3 text-gray-500">
-                        <hr />
-                        <div className="flex flex-row gap-1">
-                            <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
-                            <p className="text-[14px]/7">|</p>
-                            <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank" rel="noopener noreferrer">Attributions</a></p>
                         </div>
                     </div>
                 </div>
-            </div>
             )}
             <div className="min-w-0 flex-1">
                 <div
                     className={`mx-auto w-full ${isDesktopOnchainMode ? 'max-w-[1480px]' : 'max-w-[1080px]'}`}
                     style={isDesktopOnchainMode ? { width: '100%', maxWidth: '1480px' } : undefined}
                 >
-                {!isDesktopOnchainMode && (
-                    <div className="lg:hidden mb-3">
-                        <div className="text-[26px] mb-1">
-                            <Link to="/">idena.social</Link>
-                        </div>
-                        <div className="flex flex-row gap-3">
-                            <div className="min-w-8">
-                                <img
-                                    src={menuWhiteSvg}
-                                    className={'h-8 p-[5px] mr-0.5 inline-block rounded-md hover:bg-gray-400/30 hover:cursor-pointer' + (mobileMenuOpen ? ' bg-gray-400/30' : '')}
-                                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                                />
+                    {!isDesktopOnchainMode && (
+                        <div className="lg:hidden mb-3">
+                            <div className="text-[26px] mb-1">
+                                <Link to="/">idena.social</Link>
                             </div>
-                            <div className="flex flex-row gap-1 whitespace-nowrap">
-                                <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
-                                <p className="text-[14px]/7">|</p>
-                                <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank" rel="noopener noreferrer">Attributions</a></p>
+                            <div className="flex flex-row gap-3">
+                                <div className="min-w-8">
+                                    <img
+                                        src={menuWhiteSvg}
+                                        className={'h-8 p-[5px] mr-0.5 inline-block rounded-md hover:bg-gray-400/30 hover:cursor-pointer' + (mobileMenuOpen ? ' bg-gray-400/30' : '')}
+                                        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                                    />
+                                </div>
+                                <div className="flex flex-row gap-1 whitespace-nowrap">
+                                    <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
+                                    <p className="text-[14px]/7">|</p>
+                                    <p className="my-1 text-[14px]"><a className="hover:underline" href={attributionsUrl} target="_blank" rel="noopener noreferrer">Attributions</a></p>
+                                </div>
                             </div>
+                            {mobileMenuOpen && (
+                                <div className="mt-2 mb-4">
+                                    <MenuComponent postersAddress={postersAddress} />
+                                </div>
+                            )}
                         </div>
-                        {mobileMenuOpen && (
-                            <div className="mt-2 mb-4">
-                                <MenuComponent postersAddress={postersAddress} />
+                    )}
+                    {flashNotice && (
+                        <div
+                            className={`mb-3 flex items-start justify-between gap-3 rounded-md border px-4 py-3 text-[14px] ${
+                                flashNotice.type === 'error'
+                                    ? 'border-red-400/40 bg-red-500/10 text-red-100'
+                                    : flashNotice.type === 'success'
+                                        ? 'border-green-400/40 bg-green-500/10 text-green-100'
+                                        : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
+                            }`}
+                            role="status"
+                            aria-live="polite"
+                        >
+                            <p>{flashNotice.text}</p>
+                            <button
+                                className="cursor-pointer text-[12px] font-semibold uppercase tracking-wide text-inherit opacity-80 hover:opacity-100"
+                                onClick={clearFlashNotice}
+                            >
+                            Dismiss
+                            </button>
+                        </div>
+                    )}
+                    <div className={`mb-3 rounded-md border px-4 py-3 text-[13px] ${activeSocialContract.legacy ? 'border-amber-400/40 bg-amber-500/10 text-amber-100' : 'border-stone-700 bg-stone-900/70 text-stone-200'}`}>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <p>
+                                <strong>Contract target:</strong> {activeSocialContract.label}
+                            </p>
+                            <a
+                                className="text-blue-400 hover:underline"
+                                href={`https://scan.idena.io/contract/${activeSocialContract.address}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                            scan
+                            </a>
+                            <button
+                                className="rounded-sm bg-white/10 px-2 py-1 text-[12px] hover:bg-white/20"
+                                onClick={() => setAdvancedContractControlsOpen(!advancedContractControlsOpen)}
+                            >
+                                {advancedContractControlsOpen ? 'Hide advanced contract target' : 'Advanced contract target'}
+                            </button>
+                        </div>
+                        {activeSocialContract.legacy && (
+                            <p className="mt-2 text-[12px]">
+                            Legacy target is active. Posts, likes, tips, copied transactions, and fee estimates go to this old contract until you switch back to the current contract.
+                            </p>
+                        )}
+                        {advancedContractControlsOpen && (
+                            <div className="mt-3 border-t border-stone-700 pt-3">
+                                <p className="text-[12px] text-stone-300">
+                                Use this only when you deliberately want to call an old idena.social contract. Old contracts can have different behavior and may not be where normal users expect new posts.
+                                </p>
+                                <label className="mt-2 flex items-start gap-2 text-[12px]">
+                                    <input
+                                        className="mt-0.5"
+                                        type="checkbox"
+                                        checked={legacyContractRiskAccepted}
+                                        onChange={(event) => setLegacyContractRiskAccepted(event.target.checked)}
+                                    />
+                                    <span>I understand this can send on-chain calls to a legacy contract.</span>
+                                </label>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <select
+                                        className="min-w-[260px] rounded-sm border border-stone-600 bg-stone-950 px-2 py-1 text-[12px] text-stone-100"
+                                        value={inputSocialContractId}
+                                        onChange={(event) => setInputSocialContractId(event.target.value as SocialContractId)}
+                                    >
+                                        {SOCIAL_CONTRACTS.map((contract) => (
+                                            <option key={contract.id} value={contract.id}>
+                                                {contract.label} - {contract.address}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        className="rounded-sm bg-white/10 px-3 py-1 text-[12px] hover:bg-white/20"
+                                        onClick={handleApplySocialContract}
+                                    >
+                                    Apply contract target
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
-                )}
-                {flashNotice && (
-                    <div
-                        className={`mb-3 flex items-start justify-between gap-3 rounded-md border px-4 py-3 text-[14px] ${
-                            flashNotice.type === 'error'
-                                ? 'border-red-400/40 bg-red-500/10 text-red-100'
-                                : flashNotice.type === 'success'
-                                    ? 'border-green-400/40 bg-green-500/10 text-green-100'
-                                    : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
-                        }`}
-                        role="status"
-                        aria-live="polite"
-                    >
-                        <p>{flashNotice.text}</p>
-                        <button
-                            className="cursor-pointer text-[12px] font-semibold uppercase tracking-wide text-inherit opacity-80 hover:opacity-100"
-                            onClick={clearFlashNotice}
-                        >
-                            Dismiss
-                        </button>
-                    </div>
-                )}
-                <div className={`mb-3 rounded-md border px-4 py-3 text-[13px] ${activeSocialContract.legacy ? 'border-amber-400/40 bg-amber-500/10 text-amber-100' : 'border-stone-700 bg-stone-900/70 text-stone-200'}`}>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <p>
-                            <strong>Contract target:</strong> {activeSocialContract.label}
-                        </p>
-                        <a
-                            className="text-blue-400 hover:underline"
-                            href={`https://scan.idena.io/contract/${activeSocialContract.address}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                        >
-                            scan
-                        </a>
-                        <button
-                            className="rounded-sm bg-white/10 px-2 py-1 text-[12px] hover:bg-white/20"
-                            onClick={() => setAdvancedContractControlsOpen(!advancedContractControlsOpen)}
-                        >
-                            {advancedContractControlsOpen ? 'Hide advanced contract target' : 'Advanced contract target'}
-                        </button>
-                    </div>
-                    {activeSocialContract.legacy && (
-                        <p className="mt-2 text-[12px]">
-                            Legacy target is active. Posts, likes, tips, copied transactions, and fee estimates go to this old contract until you switch back to the current contract.
-                        </p>
-                    )}
-                    {advancedContractControlsOpen && (
-                        <div className="mt-3 border-t border-stone-700 pt-3">
-                            <p className="text-[12px] text-stone-300">
-                                Use this only when you deliberately want to call an old idena.social contract. Old contracts can have different behavior and may not be where normal users expect new posts.
-                            </p>
-                            <label className="mt-2 flex items-start gap-2 text-[12px]">
-                                <input
-                                    className="mt-0.5"
-                                    type="checkbox"
-                                    checked={legacyContractRiskAccepted}
-                                    onChange={(event) => setLegacyContractRiskAccepted(event.target.checked)}
-                                />
-                                <span>I understand this can send on-chain calls to a legacy contract.</span>
-                            </label>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <select
-                                    className="min-w-[260px] rounded-sm border border-stone-600 bg-stone-950 px-2 py-1 text-[12px] text-stone-100"
-                                    value={inputSocialContractId}
-                                    onChange={(event) => setInputSocialContractId(event.target.value as SocialContractId)}
-                                >
-                                    {SOCIAL_CONTRACTS.map((contract) => (
-                                        <option key={contract.id} value={contract.id}>
-                                            {contract.label} - {contract.address}
-                                        </option>
-                                    ))}
-                                </select>
-                                <button
-                                    className="rounded-sm bg-white/10 px-3 py-1 text-[12px] hover:bg-white/20"
-                                    onClick={handleApplySocialContract}
-                                >
-                                    Apply contract target
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-                <Outlet
-                    context={{
-                        inputNodeApplied,
-                        inputNodeUrl,
-                        setInputNodeUrl,
-                        nodeAvailable,
-                        inputNodeKey,
-                        setInputNodeKey,
-                        setInputNodeApplied,
-                        inputSendingTxs,
-                        handleInputSendingTxsToggle,
-                        viewOnlyNode,
-                        inputPostersAddressApplied,
-                        inputPostersAddress,
-                        setInputPostersAddress,
-                        postersAddressInvalid,
-                        setInputPostersAddressApplied,
-                        inputFindingPastPosts,
-                        handleInputFindingPastPostsToggle,
-                        inputIdenaIndexerApiUrlApplied,
-                        inputIdenaIndexerApiUrl,
-                        setInputIdenaIndexerApiUrl,
-                        indexerApiUrlInvalid,
-                        setInputIdenaIndexerApiUrlApplied,
-                        embeddedDesktopOnchainMode: isDesktopOnchainMode,
-                        officialIndexerApiUrl,
-                        currentBlockCaptured,
-                        latestPosts,
-                        latestActivity,
-                        postsRef,
-                        postersRef,
-                        replyPostsTreeRef,
-                        deOrphanedReplyPostsTreeRef,
-                        discussPrefix,
-                        scanningPastBlocks,
-                        setScanningPastBlocks,
-                        noMorePastBlocks,
-                        pastBlockCaptured,
-                        SET_NEW_POSTS_ADDED_DELAY,
-                        inputPostDisabled,
-                        copyPostTxHandler,
-                        submitPostHandler,
-                        submitLikeHandler,
-                        submittingPost,
-                        submittingLike,
-                        submittingTip,
-                        browserStateHistoryRef,
-                        setBrowserStateHistorySettings,
-                        handleOpenLikesModal,
-                        handleOpenTipsModal,
-                        handleOpenSendTipModal,
-                        handleOpenAddMediaModal,
-                        handleOpenRpcMakePostModal,
-                        handleExpandImageModal,
-                        tipsRef,
-                        setPostMediaAttachmentHandler,
-                        postMediaAttachmentsRef,
-                        makePostsWith: inputSendingTxs,
-                        estimatePostCostHandler,
-                        mainComposerCostEstimate,
-                        setMainComposerCostEstimate,
-                        mainComposerCostEstimateError,
-                        setMainComposerCostEstimateError,
-                        mainComposerCostEstimateLoading,
-                        setMainComposerCostEstimateLoading,
-                        desktopBootstrap,
-                        activeSocialContract,
-                        activeContractAddress,
-                    }}
-                />
+                    <Outlet
+                        context={{
+                            inputNodeApplied,
+                            inputNodeUrl,
+                            setInputNodeUrl,
+                            nodeAvailable,
+                            inputNodeKey,
+                            setInputNodeKey,
+                            setInputNodeApplied,
+                            inputSendingTxs,
+                            handleInputSendingTxsToggle,
+                            viewOnlyNode,
+                            inputPostersAddressApplied,
+                            inputPostersAddress,
+                            setInputPostersAddress,
+                            postersAddressInvalid,
+                            setInputPostersAddressApplied,
+                            inputFindingPastPosts,
+                            handleInputFindingPastPostsToggle,
+                            inputIdenaIndexerApiUrlApplied,
+                            inputIdenaIndexerApiUrl,
+                            setInputIdenaIndexerApiUrl,
+                            indexerApiUrlInvalid,
+                            setInputIdenaIndexerApiUrlApplied,
+                            embeddedDesktopOnchainMode: isDesktopOnchainMode,
+                            officialIndexerApiUrl,
+                            currentBlockCaptured,
+                            latestPosts,
+                            latestActivity,
+                            postsRef,
+                            postersRef,
+                            replyPostsTreeRef,
+                            deOrphanedReplyPostsTreeRef,
+                            discussPrefix,
+                            scanningPastBlocks,
+                            setScanningPastBlocks,
+                            noMorePastBlocks,
+                            pastBlockCaptured,
+                            SET_NEW_POSTS_ADDED_DELAY,
+                            inputPostDisabled,
+                            copyPostTxHandler,
+                            submitPostHandler,
+                            submitLikeHandler,
+                            submittingPost,
+                            submittingLike,
+                            submittingTip,
+                            browserStateHistoryRef,
+                            setBrowserStateHistorySettings,
+                            handleOpenLikesModal,
+                            handleOpenTipsModal,
+                            handleOpenSendTipModal,
+                            handleOpenAddMediaModal,
+                            handleOpenRpcMakePostModal,
+                            handleExpandImageModal,
+                            tipsRef,
+                            setPostMediaAttachmentHandler,
+                            postMediaAttachmentsRef,
+                            makePostsWith: inputSendingTxs,
+                            estimatePostCostHandler,
+                            mainComposerCostEstimate,
+                            setMainComposerCostEstimate,
+                            mainComposerCostEstimateError,
+                            setMainComposerCostEstimateError,
+                            mainComposerCostEstimateLoading,
+                            setMainComposerCostEstimateLoading,
+                            desktopBootstrap,
+                            activeSocialContract,
+                            activeContractAddress,
+                        }}
+                    />
                 </div>
             </div>
             <div onClick={(e) => e.stopPropagation()}>

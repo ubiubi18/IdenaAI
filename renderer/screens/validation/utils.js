@@ -1,7 +1,6 @@
 import {State} from 'xstate'
 import dayjs, {isDayjs} from 'dayjs'
 import {
-  persistItem,
   persistState,
   loadPersistentState,
   loadPersistentStateValue,
@@ -436,14 +435,14 @@ function dropStoredValidationSession() {
 }
 
 function persistValidationPayload({
-  liveValidationSession = null,
+  liveValidationSession,
   meta = null,
   snapshot = null,
 } = {}) {
   const nextPayload = {}
 
-  if (liveValidationSession) {
-    nextPayload[VALIDATION_SESSION_PERSIST_KEY] = liveValidationSession
+  if (typeof liveValidationSession !== 'undefined') {
+    persistState('validationSecret', liveValidationSession)
   }
 
   if (snapshot) {
@@ -475,24 +474,14 @@ function readStoredValidationSession(scopeKey = '') {
     }
 
     const persistedValue = normalizeStoredValidationSession(
-      loadPersistentStateValue('validation2', VALIDATION_SESSION_PERSIST_KEY)
+      loadPersistentState('validationSecret')
     )
 
     if (persistedValue && (!scopeKey || persistedValue.scopeKey === scopeKey)) {
       return persistedValue
     }
 
-    const storageValue = window.sessionStorage
-      ? window.sessionStorage.getItem(VALIDATION_SESSION_STORAGE_KEY)
-      : null
-
-    if (!storageValue) {
-      return null
-    }
-
-    const parsedValue = normalizeStoredValidationSession(
-      JSON.parse(storageValue)
-    )
+    const parsedValue = getStoredValidationStatePayload().liveValidationSession
 
     if (parsedValue && (!scopeKey || parsedValue.scopeKey === scopeKey)) {
       return parsedValue
@@ -518,14 +507,7 @@ function persistValidationSession(session) {
       scope.__idenaValidationSession = session
     }
 
-    if (window.sessionStorage) {
-      window.sessionStorage.setItem(
-        VALIDATION_SESSION_STORAGE_KEY,
-        JSON.stringify(session)
-      )
-    }
-
-    persistItem('validation2', VALIDATION_SESSION_PERSIST_KEY, session)
+    persistState('validationSecret', session)
   } catch {
     return session
   }
@@ -597,14 +579,23 @@ export function getCurrentValidationSessionId({
         })
       ) {
         runtimeValidationSession = storedSession
+        persistState('validationSecret', storedSession)
+        const legacyPayload = getStoredValidationStatePayload()
+        if (legacyPayload.liveValidationSession) {
+          persistValidationPayload({
+            meta: legacyPayload.meta,
+            snapshot: legacyPayload.snapshot,
+          })
+        }
         return storedSession.sessionId
       }
 
-      const persistedPayload = getStoredValidationStatePayload()
+      const stalePayload = getStoredValidationStatePayload()
       dropStoredValidationSession()
       persistValidationPayload({
-        meta: persistedPayload.meta,
-        snapshot: persistedPayload.snapshot,
+        liveValidationSession: null,
+        meta: stalePayload.meta,
+        snapshot: stalePayload.snapshot,
       })
     }
   } catch {
@@ -626,6 +617,7 @@ export function __resetValidationSessionStateForTests({
   try {
     if (clearStorage) {
       persistState('validation2', null)
+      persistState('validationSecret', null)
     }
   } catch {
     // ignore test cleanup failures
@@ -641,6 +633,7 @@ export function resetValidationSessionState() {
 
   try {
     persistState('validation2', null)
+    persistState('validationSecret', null)
   } catch {
     // ignore runtime cleanup failures
   }
@@ -1011,7 +1004,6 @@ export function persistScopedValidationState(state, scope) {
   }
 
   persistState('validation2', {
-    [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
     [VALIDATION_STATE_META_KEY]: normalizeValidationStateMeta(scope),
     [VALIDATION_STATE_SNAPSHOT_KEY]: persistableState,
   })
@@ -1040,7 +1032,6 @@ export function persistValidationState(state, scope = null) {
     }
 
     persistState('validation2', {
-      [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
       [VALIDATION_STATE_META_KEY]: persistedPayload.meta,
       [VALIDATION_STATE_SNAPSHOT_KEY]: persistableState,
     })
@@ -1061,7 +1052,6 @@ export function persistValidationSucceededState(context = {}, scope = null) {
   }
 
   persistState('validation2', {
-    [VALIDATION_SESSION_PERSIST_KEY]: persistedPayload.liveValidationSession,
     [VALIDATION_STATE_META_KEY]: meta,
     [VALIDATION_STATE_SNAPSHOT_KEY]: {
       value: 'validationSucceeded',
@@ -1270,14 +1260,11 @@ export function canOpenValidationCeremonyLocalResults(validationState) {
 }
 
 export function clearValidationState(scope = null) {
-  const persistedPayload = getStoredValidationStatePayload()
+  const storedSession = readStoredValidationSession()
   const preservedSession =
-    persistedPayload.liveValidationSession &&
-    matchesStoredValidationSessionScope(
-      persistedPayload.liveValidationSession.scopeKey,
-      scope
-    )
-      ? persistedPayload.liveValidationSession
+    storedSession &&
+    matchesStoredValidationSessionScope(storedSession.scopeKey, scope)
+      ? storedSession
       : null
 
   if (!preservedSession) {

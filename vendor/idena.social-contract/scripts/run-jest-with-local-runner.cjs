@@ -14,7 +14,7 @@ const runnerUrl = process.env.IDENA_CONTRACT_RUNNER_URL || 'http://localhost:333
 const parsedRunnerUrl = new URL(runnerUrl);
 const runnerHost = parsedRunnerUrl.hostname || 'localhost';
 const runnerPort = parsedRunnerUrl.port || (parsedRunnerUrl.protocol === 'https:' ? '443' : '80');
-const defaultToolchain = process.env.IDENA_CONTRACT_RUNNER_GOTOOLCHAIN || 'go1.19.13';
+const defaultToolchain = process.env.IDENA_CONTRACT_RUNNER_GOTOOLCHAIN || 'go1.26.5';
 
 function runnerEnv() {
   const env = {

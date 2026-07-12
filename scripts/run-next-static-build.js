@@ -58,5 +58,4 @@ function cleanRendererBuildOutput() {
 }
 
 cleanRendererBuildOutput()
-runNext(['build', 'renderer'])
-runNext(['export', 'renderer'])
+runNext(['build', '--webpack', 'renderer'])

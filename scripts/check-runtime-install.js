@@ -3,7 +3,7 @@
 const {devDependencies} = require('../package.json')
 
 const TARGET_NODE_MAJOR = 24
-const MIN_NODE_VERSION = [24, 15, 0]
+const MIN_NODE_VERSION = [24, 18, 0]
 
 function parseNodeVersion(value) {
   return String(value || '')
