@@ -462,6 +462,10 @@ function buildOpenAiPayloadVariants({
 function extractOpenAiRawText(message) {
   const parsed = message && message.parsed
   const content = message && message.content
+  const reasoningContent =
+    message && typeof message.reasoning_content === 'string'
+      ? message.reasoning_content
+      : ''
   const functionCall = message && message.function_call
   const toolCalls =
     message && Array.isArray(message.tool_calls) ? message.tool_calls : []
@@ -518,7 +522,12 @@ function extractOpenAiRawText(message) {
     return stringifyJsonLike(content)
   }
 
-  return String(content || '')
+  const rawContent = String(content || '').trim()
+  if (rawContent) {
+    return rawContent
+  }
+
+  return reasoningContent.trim()
 }
 
 function extractOpenAiProviderMeta(responseData) {
