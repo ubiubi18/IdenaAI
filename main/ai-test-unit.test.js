@@ -52,6 +52,12 @@ function createMockAiProviderBridge() {
           skipped: 0,
           left: flips.length,
           right: 0,
+          costs: {
+            estimatedUsd: 0.01 * flips.length,
+            actualUsd: 0.01 * flips.length,
+            itemsWithEstimated: flips.length,
+            itemsWithActual: flips.length,
+          },
           diagnostics: {
             swapped: 0,
             notSwapped: flips.length,
@@ -179,6 +185,12 @@ describe('ai-test-unit bridge', () => {
       expectedSkip: 0,
       accuracyLabeled: 0.5,
       accuracyAnswered: 0.5,
+    })
+    expect(runResult.summary.costs).toMatchObject({
+      estimatedUsd: 0.02,
+      actualUsd: 0.02,
+      itemsWithEstimated: 2,
+      itemsWithActual: 2,
     })
     expect(aiProviderBridge.solveFlipBatch).toHaveBeenCalledTimes(2)
 
