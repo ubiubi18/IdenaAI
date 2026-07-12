@@ -7,6 +7,14 @@ const {spawnSync} = require('child_process')
 const ROOT = path.join(__dirname, '..')
 const MANIFEST_FILE = path.join(__dirname, 'source-manifest.json')
 
+function readOptionValue(argv, index, option) {
+  const value = argv[index + 1]
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${option} requires a value`)
+  }
+  return value
+}
+
 function parseArgs(argv) {
   const options = {
     check: false,
@@ -21,8 +29,8 @@ function parseArgs(argv) {
     } else if (arg === '--update') {
       options.update = true
     } else if (arg === '--target-root') {
+      options.targetRoot = path.resolve(readOptionValue(argv, index, arg))
       index += 1
-      options.targetRoot = path.resolve(argv[index])
     } else {
       throw new Error(`Unknown argument: ${arg}`)
     }
@@ -105,14 +113,30 @@ function verifyGitCheckout(source, dir) {
 
 function cloneSource(source, dir) {
   fs.mkdirSync(path.dirname(dir), {recursive: true})
-  run('git', ['clone', '--depth', '1', '--branch', source.ref, source.url, dir])
+  fs.mkdirSync(dir)
+  run('git', ['init'], {cwd: dir})
+  run('git', ['remote', 'add', 'origin', source.url], {cwd: dir})
+  fetchSource(source, dir)
+  run('git', ['checkout', '--detach', 'FETCH_HEAD'], {cwd: dir})
   verifyGitCheckout(source, dir)
 }
 
 function updateGitSource(source, dir) {
-  run('git', ['fetch', '--depth', '1', 'origin', source.ref], {cwd: dir})
-  run('git', ['checkout', 'FETCH_HEAD'], {cwd: dir})
+  fetchSource(source, dir)
+  run('git', ['checkout', '--detach', 'FETCH_HEAD'], {cwd: dir})
   verifyGitCheckout(source, dir)
+}
+
+function sourceFetchRef(source) {
+  return source.commit || source.ref
+}
+
+function fetchSource(source, dir) {
+  const revision = sourceFetchRef(source)
+  if (!revision) {
+    throw new Error(`${source.name}: source commit or ref is required`)
+  }
+  run('git', ['fetch', '--depth', '1', 'origin', revision], {cwd: dir})
 }
 
 function ensureSource(source, options) {
@@ -150,9 +174,17 @@ function main() {
   console.log('[setup-sources] Source setup complete.')
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(`[setup-sources] ${error.message}`)
-  process.exit(1)
+if (require.main === module) {
+  try {
+    main()
+  } catch (error) {
+    console.error(`[setup-sources] ${error.message}`)
+    process.exit(1)
+  }
+}
+
+module.exports = {
+  parseArgs,
+  sourceFetchRef,
+  sourcePath,
 }
