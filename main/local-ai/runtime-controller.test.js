@@ -46,14 +46,17 @@ describe('managed local runtime server args', () => {
 
 describe('managed local runtime environment', () => {
   it('disables Xet for managed downloads and runtime startup', () => {
-    const env = buildManagedRuntimeEnv('/tmp/idena-managed-runtime')
+    const runtimeRoot = path.join(os.tmpdir(), 'idena-managed-runtime')
+    const hfHome = path.join(runtimeRoot, 'hf-home')
+    const env = buildManagedRuntimeEnv(runtimeRoot)
 
     expect(env).toMatchObject({
-      HF_HOME: '/tmp/idena-managed-runtime/hf-home',
-      HUGGINGFACE_HUB_CACHE: '/tmp/idena-managed-runtime/hf-home/hub',
-      TRANSFORMERS_CACHE: '/tmp/idena-managed-runtime/hf-home/transformers',
+      HF_HOME: hfHome,
+      HUGGINGFACE_HUB_CACHE: path.join(hfHome, 'hub'),
+      TRANSFORMERS_CACHE: path.join(hfHome, 'transformers'),
       HF_HUB_DISABLE_TELEMETRY: '1',
       HF_HUB_DISABLE_XET: '1',
+      MPLBACKEND: process.env.MPLBACKEND || 'Agg',
       PYTHONUNBUFFERED: '1',
     })
   })
@@ -61,11 +64,19 @@ describe('managed local runtime environment', () => {
 
 describe('managed local runtime snapshot download process discovery', () => {
   it('matches only Hugging Face snapshot download workers for the same target path', () => {
-    const snapshotDir =
-      '/tmp/idena-test/local-ai/managed-runtime/molmo2-o/mlx-vlm/model-snapshot'
+    const snapshotDir = path.join(
+      os.tmpdir(),
+      'idena-test',
+      'local-ai',
+      'managed-runtime',
+      'molmo2-o',
+      'mlx-vlm',
+      'model-snapshot'
+    )
+    const otherSnapshotDir = path.join(os.tmpdir(), 'other-model')
     const psOutput = `
       111 /opt/homebrew/bin/python -c from huggingface_hub import snapshot_download ${snapshotDir}
-      222 /opt/homebrew/bin/python -c from huggingface_hub import snapshot_download /tmp/other-model
+      222 /opt/homebrew/bin/python -c from huggingface_hub import snapshot_download ${otherSnapshotDir}
       333 node renderer/server.js snapshot_download ${snapshotDir}
     `
 

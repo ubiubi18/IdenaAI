@@ -1046,15 +1046,8 @@ describe('local-ai sidecar', () => {
       sidecar.chat({
         runtimeType: 'ollama',
         baseUrl: 'http://127.0.0.1:11434',
-        model: 'llama3.1:8b',
-        visionModel: 'reasoner-lab:latest',
-        messages: [
-          {
-            role: 'user',
-            content: 'Describe the attached image.',
-            images: ['data:image/png;base64,AAA='],
-          },
-        ],
+        model: 'reasoner-lab:latest',
+        input: 'Say hello.',
       })
     ).resolves.toMatchObject({
       ok: false,

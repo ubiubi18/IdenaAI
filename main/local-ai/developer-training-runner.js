@@ -317,6 +317,10 @@ function resolveCommandParts() {
             ]),
             {
               encoding: 'utf8',
+              env: {
+                ...process.env,
+                MPLBACKEND: process.env.MPLBACKEND || 'Agg',
+              },
             }
           )
 
@@ -577,7 +581,10 @@ async function runPythonScript({
   return new Promise((resolve, reject) => {
     const child = spawn(command, finalArgs, {
       cwd,
-      env,
+      env: {
+        ...env,
+        MPLBACKEND: env.MPLBACKEND || 'Agg',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const stdoutCollector = createOutputCollector()

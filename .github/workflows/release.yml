@@ -25,7 +25,7 @@ jobs:
             electron_builder_args: --mac --publish always
           - os: ubuntu-latest
             electron_builder_args: --linux --publish always
-          - os: windows-latest
+          - os: windows-2022
             electron_builder_args: --win --publish always
     steps:
       - name: Check out
