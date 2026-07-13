@@ -317,13 +317,16 @@ export function RequiredFlipPlaceholder({title}) {
   const {t} = useTranslation()
   return (
     <Box cursor="pointer">
-      <NextLink href="/flips/new" passHref>
-        <Link display="inline-block" _hover={null}>
-          <EmptyFlipBox>
-            <FlipPlaceholder />
-          </EmptyFlipBox>
-        </Link>
-      </NextLink>
+      <Link
+        as={NextLink}
+        href="/flips/new"
+        display="inline-block"
+        _hover={null}
+      >
+        <EmptyFlipBox>
+          <FlipPlaceholder />
+        </EmptyFlipBox>
+      </Link>
       <Box mt={4}>
         <FlipCardTitle>{title}</FlipCardTitle>
         <FlipCardSubtitle>{t('Required')}</FlipCardSubtitle>
@@ -350,13 +353,16 @@ export function OptionalFlipPlaceholder({title, isDisabled}) {
           </Tooltip>
         </EmptyFlipBox>
       ) : (
-        <NextLink href="/flips/new" passHref>
-          <Link display="inline-block" _hover={null}>
-            <EmptyFlipBox>
-              <FlipPlaceholder />
-            </EmptyFlipBox>
-          </Link>
-        </NextLink>
+        <Link
+          as={NextLink}
+          href="/flips/new"
+          display="inline-block"
+          _hover={null}
+        >
+          <EmptyFlipBox>
+            <FlipPlaceholder />
+          </EmptyFlipBox>
+        </Link>
       )}
       <Box mt={4}>
         <FlipCardTitle>{title}</FlipCardTitle>
