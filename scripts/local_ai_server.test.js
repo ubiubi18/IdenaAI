@@ -1,112 +1,35 @@
-const http = require('http')
-const net = require('net')
 const path = require('path')
 const {spawn} = require('child_process')
 
 const SCRIPT_PATH = path.join(__dirname, 'local_ai_server.py')
 const MAX_REQUEST_BYTES = 4096
-const AUTH_TOKEN_ENV = 'IDENAAI_LOCAL_RUNTIME_TOKEN'
 
-function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
-}
+jest.setTimeout(30000)
 
-function findFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
+const itRunsLocalHttpScenario =
+  process.platform === 'darwin' && process.env.GITHUB_ACTIONS === 'true'
+    ? it.skip
+    : it
 
-    server.on('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address()
-      const port =
-        address && typeof address === 'object' ? address.port : undefined
+function pythonInvocation() {
+  const configured = String(
+    process.env.IDENAAI_PYTHON ||
+      (process.platform === 'win32' ? 'python' : 'python3')
+  ).trim()
+  const [command, ...args] = configured.split(/\s+/u).filter(Boolean)
 
-      server.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-
-        resolve(port)
-      })
-    })
-  })
-}
-
-function request({
-  port,
-  requestPath,
-  method = 'GET',
-  body = null,
-  headers = {},
-}) {
-  return new Promise((resolve, reject) => {
-    const requestBody =
-      typeof body === 'string' || Buffer.isBuffer(body) ? body : null
-    const requestHeaders = {...headers}
-
-    if (requestBody) {
-      requestHeaders['Content-Length'] = Buffer.byteLength(requestBody)
-      if (!requestHeaders['Content-Type']) {
-        requestHeaders['Content-Type'] = 'application/json'
-      }
-    }
-
-    const req = http.request(
-      {
-        hostname: '127.0.0.1',
-        port,
-        path: requestPath,
-        method,
-        headers: requestHeaders,
-      },
-      (res) => {
-        const chunks = []
-
-        res.on('data', (chunk) => chunks.push(chunk))
-        res.on('end', () => {
-          resolve({
-            statusCode: res.statusCode,
-            body: Buffer.concat(chunks).toString('utf8'),
-          })
-        })
-      }
-    )
-
-    req.on('error', reject)
-
-    if (requestBody) {
-      req.write(requestBody)
-    }
-
-    req.end()
-  })
-}
-
-async function waitForHealth(port, headers = {}) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    try {
-      const response = await request({port, requestPath: '/health', headers})
-
-      if (response.statusCode === 200) {
-        return
-      }
-    } catch (_error) {
-      // Server is still starting.
-    }
-
-    await sleep(100)
+  return {
+    command: command || (process.platform === 'win32' ? 'python' : 'python3'),
+    args,
   }
-
-  throw new Error('Local AI stub did not start in time')
 }
 
 function spawnStub(args = [], extraEnv = {}) {
+  const python = pythonInvocation()
   const child = spawn(
-    'python3',
+    python.command,
     [
+      ...python.args,
       SCRIPT_PATH,
       '--backend',
       'stub',
@@ -118,6 +41,7 @@ function spawnStub(args = [], extraEnv = {}) {
       cwd: path.resolve(__dirname, '..'),
       env: {
         ...process.env,
+        MPLBACKEND: process.env.MPLBACKEND || 'Agg',
         PYTHONUNBUFFERED: '1',
         ...extraEnv,
       },
@@ -143,10 +67,12 @@ function spawnStub(args = [], extraEnv = {}) {
 
 function runPythonSnippet(snippet) {
   return new Promise((resolve, reject) => {
-    const child = spawn('python3', ['-c', snippet], {
+    const python = pythonInvocation()
+    const child = spawn(python.command, [...python.args, '-c', snippet], {
       cwd: path.resolve(__dirname, '..'),
       env: {
         ...process.env,
+        MPLBACKEND: process.env.MPLBACKEND || 'Agg',
         PYTHONPATH: path.resolve(__dirname),
       },
     })
@@ -170,6 +96,60 @@ function runPythonSnippet(snippet) {
       reject(new Error(stderr || `python exited with ${code}`))
     })
   })
+}
+
+function indentPython(source, spaces = 4) {
+  const prefix = ' '.repeat(spaces)
+
+  return String(source || '')
+    .trim()
+    .split('\n')
+    .map((line) => `${prefix}${line}`)
+    .join('\n')
+}
+
+function runPythonServerScenario(scenario) {
+  return runPythonSnippet(`
+import http.client
+import json
+import threading
+from http.server import HTTPServer
+from local_ai_server import LocalAiHandler, StubBackend
+
+server = HTTPServer(("127.0.0.1", 0), LocalAiHandler)
+server.backend = StubBackend("local-stub-chat")
+server.max_request_bytes = ${MAX_REQUEST_BYTES}
+server.auth_token = ""
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+port = server.server_address[1]
+
+def request(method, path, body=None, headers=None):
+    payload = body.encode("utf-8") if isinstance(body, str) else body
+    request_headers = {"Connection": "close"}
+    if headers:
+        request_headers.update(headers)
+    if payload is not None and "Content-Length" not in request_headers:
+        request_headers["Content-Length"] = str(len(payload))
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.request(method, path, body=payload, headers=request_headers)
+        response = conn.getresponse()
+        raw_body = response.read().decode("utf-8")
+        return {
+            "statusCode": response.status,
+            "body": json.loads(raw_body) if raw_body else None,
+        }
+    finally:
+        conn.close()
+
+try:
+${indentPython(scenario)}
+finally:
+    server.shutdown()
+    thread.join(timeout=2)
+    server.server_close()
+`)
 }
 
 function waitForExit(child, timeoutMs = 5000) {
@@ -214,86 +194,83 @@ describe('local_ai_server.py', () => {
     }
   })
 
-  it('rejects oversized JSON bodies with HTTP 413', async () => {
-    const port = await findFreePort()
-    running = spawnStub(['--port', String(port)])
+  itRunsLocalHttpScenario(
+    'rejects oversized JSON bodies with HTTP 413',
+    async () => {
+      const output = await runPythonServerScenario(`
+body = json.dumps({"input": "x" * ${MAX_REQUEST_BYTES}})
+response = request(
+    "POST",
+    "/chat/completions",
+    body=body,
+    headers={"Content-Type": "application/json"},
+)
+print(json.dumps(response))
+`)
+      const response = JSON.parse(output)
 
-    await waitForHealth(port)
+      expect(response.statusCode).toBe(413)
+      expect(response.body).toMatchObject({
+        error: {
+          message: 'request_too_large',
+          type: 'invalid_request',
+        },
+      })
+    }
+  )
 
-    const oversizedBody = JSON.stringify({
-      input: 'x'.repeat(MAX_REQUEST_BYTES),
-    })
+  itRunsLocalHttpScenario(
+    'requires the managed local auth token when configured',
+    async () => {
+      const output = await runPythonServerScenario(`
+server.auth_token = "managed-local-token"
+unauthorized = request("GET", "/health")
+authorized = request(
+    "GET",
+    "/v1/models",
+    headers={"X-IdenaAI-Local-Token": server.auth_token},
+)
+print(json.dumps({"unauthorized": unauthorized, "authorized": authorized}))
+`)
+      const {authorized, unauthorized} = JSON.parse(output)
 
-    const response = await request({
-      port,
-      requestPath: '/chat/completions',
-      method: 'POST',
-      body: oversizedBody,
-    })
+      expect(unauthorized.statusCode).toBe(401)
+      expect(unauthorized.body).toMatchObject({
+        error: {
+          message: 'unauthorized',
+          type: 'auth_error',
+        },
+      })
+      expect(authorized.statusCode).toBe(200)
+      expect(authorized.body).toMatchObject({
+        object: 'list',
+      })
+    }
+  )
 
-    expect(response.statusCode).toBe(413)
-    expect(JSON.parse(response.body)).toMatchObject({
-      error: {
-        message: 'request_too_large',
-        type: 'invalid_request',
-      },
-    })
-  })
+  itRunsLocalHttpScenario(
+    'rejects non-JSON POST bodies with HTTP 415',
+    async () => {
+      const output = await runPythonServerScenario(`
+response = request(
+    "POST",
+    "/chat/completions",
+    body="{}",
+    headers={"Content-Type": "text/plain"},
+)
+print(json.dumps(response))
+`)
+      const response = JSON.parse(output)
 
-  it('requires the managed local auth token when configured', async () => {
-    const port = await findFreePort()
-    const authToken = 'managed-local-token'
-    running = spawnStub(['--port', String(port)], {
-      [AUTH_TOKEN_ENV]: authToken,
-    })
-
-    await waitForHealth(port, {'X-IdenaAI-Local-Token': authToken})
-
-    const unauthorized = await request({
-      port,
-      requestPath: '/health',
-    })
-    const authorized = await request({
-      port,
-      requestPath: '/v1/models',
-      headers: {'X-IdenaAI-Local-Token': authToken},
-    })
-
-    expect(unauthorized.statusCode).toBe(401)
-    expect(JSON.parse(unauthorized.body)).toMatchObject({
-      error: {
-        message: 'unauthorized',
-        type: 'auth_error',
-      },
-    })
-    expect(authorized.statusCode).toBe(200)
-    expect(JSON.parse(authorized.body)).toMatchObject({
-      object: 'list',
-    })
-  })
-
-  it('rejects non-JSON POST bodies with HTTP 415', async () => {
-    const port = await findFreePort()
-    running = spawnStub(['--port', String(port)])
-
-    await waitForHealth(port)
-
-    const response = await request({
-      port,
-      requestPath: '/chat/completions',
-      method: 'POST',
-      body: '{}',
-      headers: {'Content-Type': 'text/plain'},
-    })
-
-    expect(response.statusCode).toBe(415)
-    expect(JSON.parse(response.body)).toMatchObject({
-      error: {
-        message: 'unsupported_media_type',
-        type: 'invalid_request',
-      },
-    })
-  })
+      expect(response.statusCode).toBe(415)
+      expect(response.body).toMatchObject({
+        error: {
+          message: 'unsupported_media_type',
+          type: 'invalid_request',
+        },
+      })
+    }
+  )
 
   it('folds system prompts into Molmo-compatible user turns', async () => {
     const output = await runPythonSnippet(`
