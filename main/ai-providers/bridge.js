@@ -1486,6 +1486,10 @@ async function runPythonFlipStoryPipelineDefault({
       ),
       maxBuffer: 4 * 1024 * 1024,
       cwd: path.dirname(PYTHON_FLIP_PIPELINE_SCRIPT),
+      env: {
+        ...process.env,
+        MPLBACKEND: process.env.MPLBACKEND || 'Agg',
+      },
     }
   )
 
