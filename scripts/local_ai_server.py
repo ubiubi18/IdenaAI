@@ -460,7 +460,8 @@ class TransformersChatBackend:
         model_revision="",
         allow_local_image_paths=False,
     ):
-        from transformers import AutoModelForImageTextToText, AutoProcessor
+        import transformers
+        from transformers import AutoProcessor
         import torch
 
         self.model_source_id = str(model_id or "").strip()
@@ -479,13 +480,29 @@ class TransformersChatBackend:
             trust_remote_code=trust_remote_code,
             padding_side="left",
         )
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            self.model_source,
-            trust_remote_code=trust_remote_code,
-            dtype="auto",
-            low_cpu_mem_usage=True,
-            device_map="auto",
-        )
+        last_error = None
+        for class_name in (
+            "AutoModelForImageTextToText",
+            "AutoModelForMultimodalLM",
+            "AutoModelForCausalLM",
+        ):
+            model_class = getattr(transformers, class_name, None)
+            if model_class is None:
+                continue
+
+            try:
+                self.model = model_class.from_pretrained(
+                    self.model_source,
+                    trust_remote_code=trust_remote_code,
+                    dtype="auto",
+                    low_cpu_mem_usage=True,
+                    device_map="auto",
+                )
+                break
+            except Exception as error:
+                last_error = error
+        else:
+            raise last_error or RuntimeError("transformers_model_load_failed")
 
     def health(self):
         return {

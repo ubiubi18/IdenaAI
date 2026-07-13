@@ -66,6 +66,9 @@ import {
   KIMI_K2_6_LOCAL_BASE_URL,
   KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
   KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+  QWEN36_35B_A3B_LOCAL_BASE_URL,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
   MOLMO2_O_RESEARCH_RUNTIME_MODEL,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
@@ -77,6 +80,7 @@ import {
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
   buildKimiK26ExtremeLocalPreset,
+  buildQwen3635BLocalPreset,
   buildManagedLocalRuntimePreset,
   buildMolmo2OResearchPreset,
   buildMolmo24BCompactPreset,
@@ -408,6 +412,15 @@ const LOCAL_AI_MEMORY_REFERENCE_PROFILES = [
       'This is already in workstation territory. Real live-session use will be fragile below the comfortable range.',
   },
   {
+    value: QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+    label: `Install local ${QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL}`,
+    shortLabel: 'Qwen3.6 35B-A3B local',
+    minimumGiB: 64,
+    comfortableGiB: 96,
+    detail:
+      'Managed heavy install path. IdenaAI downloads the pinned Hugging Face snapshot, verifies the model shards, and starts a loopback local endpoint.',
+  },
+  {
     value: 'xl-70b',
     label: 'Very large local model (~70B class)',
     shortLabel: '70B-class local model',
@@ -435,6 +448,7 @@ const LOCAL_AI_MODEL_CEILING_GUIDE = [
   {label: 'around Qwen3.6 27B Q4_K_M', comfortableGiB: 36},
   {label: 'around 13B-class local models', comfortableGiB: 48},
   {label: 'around 34B-class local models', comfortableGiB: 96},
+  {label: 'around local Qwen3.6 35B-A3B endpoints', comfortableGiB: 96},
   {label: 'around 70B-class local models', comfortableGiB: 128},
   {label: 'around Kimi K2.6-class 1T MoE models', comfortableGiB: 800},
 ]
@@ -925,10 +939,13 @@ function isManagedLocalRuntime(localAi = {}) {
 }
 
 function isExperimentalManagedLocalRuntime(runtimeFamily = '') {
+  const normalizedFamily = String(runtimeFamily || '')
+    .trim()
+    .toLowerCase()
+
   return (
-    String(runtimeFamily || '')
-      .trim()
-      .toLowerCase() === INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY
+    normalizedFamily === INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY ||
+    normalizedFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY
   )
 }
 
@@ -1024,6 +1041,8 @@ function getManagedLocalRuntimeName(t, runtimeFamily = '') {
       return t('Molmo2-4B compact runtime')
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return t('InternVL3.5-8B experimental runtime')
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return t('Qwen3.6-35B-A3B managed runtime')
     case 'molmo2-o':
     default:
       return t('Molmo2-O research runtime')
@@ -1042,6 +1061,8 @@ function getManagedLocalRuntimeTitle(t, runtimeFamily = '') {
       return t('Managed Molmo2-4B compact runtime')
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return t('Experimental InternVL3.5-8B runtime')
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return t('Install Qwen3.6-35B-A3B locally')
     case 'molmo2-o':
     default:
       return t('Managed Molmo2-O research runtime')
@@ -1066,6 +1087,10 @@ function getManagedLocalRuntimeDescription(t, runtimeFamily = '') {
       return t(
         'Experimental pinned alternative through the generic transformers runtime. Expect substantially higher RAM pressure than Molmo2-4B, and on 32 GB desktops this can still be tight even when the estimator stays green.'
       )
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return t(
+        'Managed heavy install for Qwen/Qwen3.6-35B-A3B. IdenaAI downloads the pinned Hugging Face snapshot, verifies the shards, installs the local transformers runtime, and starts a loopback OpenAI-compatible endpoint. This is for workstation or server-class GPU setups, not normal laptops.'
+      )
     case 'molmo2-o':
     default:
       return t(
@@ -1075,11 +1100,23 @@ function getManagedLocalRuntimeDescription(t, runtimeFamily = '') {
 }
 
 function getManagedLocalRuntimeTrustNote(t, runtimeFamily = '') {
-  return isExperimentalManagedLocalRuntime(runtimeFamily)
-    ? t(
-        'Experimental path: this pinned InternVL build uses the generic transformers runtime and can still be too heavy for a 32 GB desktop once the node and other apps are open.'
-      )
-    : ''
+  const normalizedFamily = String(runtimeFamily || '')
+    .trim()
+    .toLowerCase()
+
+  if (normalizedFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY) {
+    return t(
+      'Heavy install path: Qwen 35B downloads about 67 GiB of model files and usually needs workstation/server-class GPU memory. Most users should use DeepInfra for this model instead.'
+    )
+  }
+
+  if (isExperimentalManagedLocalRuntime(runtimeFamily)) {
+    return t(
+      'Experimental path: this pinned InternVL build uses the generic transformers runtime and can still be too heavy for a 32 GB desktop once the node and other apps are open.'
+    )
+  }
+
+  return ''
 }
 
 function buildRecommendedRuntimePresetForBackend(
@@ -1630,6 +1667,9 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
   const isKimiK26LocalEndpoint =
     runtimeFamily === KIMI_K2_6_LOCAL_RUNTIME_FAMILY ||
     String(localAi?.model || '').trim() === KIMI_K2_6_LOCAL_RUNTIME_MODEL
+  const isQwen3635BLocalEndpoint =
+    runtimeFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY ||
+    String(localAi?.model || '').trim() === QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL
 
   if (managedRuntime) {
     return {
@@ -1657,6 +1697,22 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
       ),
       endpointReadOnly: false,
       startLabel: t('Connect to local Kimi endpoint'),
+    }
+  }
+
+  if (isQwen3635BLocalEndpoint) {
+    return {
+      title: t('Local Qwen3.6 35B-A3B endpoint'),
+      description: t(
+        'This is a connector for Qwen/Qwen3.6-35B-A3B running on hardware you control. It is practical for workstation or server-class GPU setups, not normal laptops.'
+      ),
+      endpointLabel: t('Local Qwen server endpoint'),
+      endpointHelper: t(
+        'Expected default: {{baseUrl}} with /v1/chat/completions or /chat/completions. Keep it loopback-only and start vLLM, SGLang, llama.cpp, or another compatible server outside IdenaAI.',
+        {baseUrl: QWEN36_35B_A3B_LOCAL_BASE_URL}
+      ),
+      endpointReadOnly: false,
+      startLabel: t('Connect to local Qwen endpoint'),
     }
   }
 
@@ -2174,12 +2230,14 @@ export default function AiSettingsPage() {
       const managedRuntimeMemoryReference = managedRuntime
         ? resolveManagedLocalRuntimeMemoryReference(nextLocalAi.runtimeFamily)
         : ''
+      const nextRuntimeFamily = String(nextLocalAi.runtimeFamily || '')
+        .trim()
+        .toLowerCase()
       const localRuntimeMemoryReference =
         !managedRuntime &&
-        String(nextLocalAi.runtimeFamily || '')
-          .trim()
-          .toLowerCase() === KIMI_K2_6_LOCAL_RUNTIME_FAMILY
-          ? KIMI_K2_6_LOCAL_RUNTIME_FAMILY
+        (nextRuntimeFamily === KIMI_K2_6_LOCAL_RUNTIME_FAMILY ||
+          nextRuntimeFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY)
+          ? nextRuntimeFamily
           : ''
 
       if (openSetup) {
@@ -2534,6 +2592,18 @@ export default function AiSettingsPage() {
         localAiPatch: buildInternVl358BExperimentalPreset(),
         preparingMessage: t(
           'Preparing the experimental InternVL3.5-8B runtime now. Progress will appear below.'
+        ),
+      }),
+    [startLocalAiWithSettings, t]
+  )
+
+  const applyQwen3635BLocalSetup = useCallback(
+    () =>
+      startLocalAiWithSettings({
+        localAiPatch: buildQwen3635BLocalPreset(),
+        enableLocalProvider: true,
+        preparingMessage: t(
+          'Preparing the managed Qwen 3.6 35B runtime now. IdenaAI will download and verify the pinned Hugging Face snapshot before starting the local endpoint.'
         ),
       }),
     [startLocalAiWithSettings, t]
@@ -3968,6 +4038,10 @@ export default function AiSettingsPage() {
       normalizedSystemReserveGiB,
       t,
     ]
+  )
+  const activeManagedRuntimeTrustNote = useMemo(
+    () => getManagedLocalRuntimeTrustNote(t, localAi.runtimeFamily),
+    [localAi.runtimeFamily, t]
   )
   const managedRuntimeTrustWarning = useMemo(
     () =>
@@ -6553,11 +6627,9 @@ export default function AiSettingsPage() {
                     )}
                   </Text>
                 ) : null}
-                {isExperimentalManagedLocalRuntime(localAi.runtimeFamily) ? (
+                {activeManagedRuntimeTrustNote ? (
                   <Text color="orange.600" fontSize="sm" mt={1}>
-                    {t(
-                      'Experimental path: this pinned InternVL build uses the generic transformers runtime and can still be too heavy for a 32 GB desktop once the node and other apps are open.'
-                    )}
+                    {activeManagedRuntimeTrustNote}
                   </Text>
                 ) : null}
                 {!localAiEndpointSafety.safe && (
@@ -6575,6 +6647,13 @@ export default function AiSettingsPage() {
                 >
                   {t('Use Qwen/Ollama default')}
                 </PrimaryButton>
+                <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
+                  onClick={applyQwen3635BLocalSetup}
+                  isLoading={isStartingLocalAi}
+                >
+                  {t('Install Qwen3.6 35B locally')}
+                </SecondaryButton>
                 <SecondaryButton
                   isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyMolmo24BCompactSetup}

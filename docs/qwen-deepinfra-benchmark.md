@@ -43,8 +43,8 @@ python3 scripts/preload_ai_test_unit_queue.py \
   --source qwen-thinking-skip20
 ```
 
-Use `--user-data-dir <path>` when testing a non-default app profile, for example
-`/home/pohw/.config/IdenaAI` on the Hetzner benchmark host.
+Use `--user-data-dir <path>` when testing a non-default app profile, for
+example `$HOME/.config/IdenaAI` on a Linux benchmark host.
 
 ## Run Qwen With Thinking
 

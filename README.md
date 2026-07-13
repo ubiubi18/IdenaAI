@@ -1,4 +1,4 @@
-# IdenaAI v0.0.11
+# IdenaAI v0.1.0
 
 IdenaAI is an experimental desktop fork of `idena-desktop` for validation,
 FLIP, local AI, and rehearsal research.
@@ -11,11 +11,11 @@ your own risk.
 
 This repository has no published GitHub release artifacts. Tags document source
 milestones; they are not signed or supported desktop installers. The `main`
-branch also contains runtime and node hardening newer than the `v0.0.11` tag.
+branch tracks the `v0.1.0` source line.
 
-### Foundation updates after v0.0.11
+### Foundation updates in v0.1.0
 
-- The desktop foundation now targets Node `24.18.0`, npm `11.16.0`, Electron
+- The desktop foundation now targets Node `24.18.0` LTS, npm `11.16.0`, Electron
   `43.1.0`, and Next.js `16.2.10` with reproducible install and release checks.
 - Managed node builds use exact `idena-go` and `idena-wasm-binding` commits from
   `scripts/source-manifest.json` instead of copied or loosely downloaded
@@ -49,7 +49,7 @@ branch also contains runtime and node hardening newer than the `v0.0.11` tag.
 - No source hardening can turn an unsigned local build into a production wallet
   release. Keep valuable identities and assets out of experimental profiles.
 
-## v0.0.11 Status
+## v0.1.0 Status
 
 - Added the trusted knowledge-index scaffold while keeping unfinished Knowledge
   RAG UI out of the application.
@@ -77,8 +77,8 @@ Validation-safety release for the next real on-chain test.
 - Probability-ensemble tracking was hardened further across short and long
   validation paths so side/order mapping stays auditable.
 - This line is ready for the next on-chain test, but rehearsal cannot prove
-  every live-chain timing and provider edge case. IdenaAI will move to v0.1.0
-  only after the first successful 100% on-chain test run.
+  every live-chain timing and provider edge case. IdenaAI remains experimental
+  even after the v0.1.0 source line.
 - Use at your own risk. Autosolve decisions, hosted provider spending, node
   operation, IPFS data, and validation outcomes remain the user's
   responsibility.
@@ -103,7 +103,7 @@ billing unless you have audited the code and accepted the risk.
 Requirements:
 
 - macOS, Windows, or Linux
-- Node.js `24.18.x`
+- Node.js `24.18.x` LTS
 - npm `11.16.x`
 - Git
 
@@ -131,6 +131,47 @@ For source-built node work:
 npm run setup:sources
 npm run build:node
 ```
+
+## Qwen 3.6 Model Options
+
+IdenaAI v0.1.0 exposes `Qwen/Qwen3.6-35B-A3B` in two practical ways.
+
+Hosted inference is the route most people should use:
+
+1. Open `Settings -> AI`.
+2. Turn on AI and choose `Use external API provider`.
+3. Pick `Qwen 3.6 via DeepInfra`.
+4. Add a DeepInfra API key with `Set key`.
+5. Use `Test connection` before running rehearsal or real-session autosolve.
+
+This sends requests to DeepInfra's OpenAI-compatible endpoint and does not
+install the model locally. The settings page links to DeepInfra credits, API
+keys, and the model page so billing and key setup are close to the provider
+choice. IdenaAI can track local usage and stop itself at a local daily cap, but
+only the provider dashboard can enforce a real spending limit.
+
+Local install is available for machines that can actually run the model:
+
+1. Open `Settings -> AI`.
+2. Choose the Local AI route.
+3. Click `Install Qwen3.6 35B locally`.
+4. Review the trust prompt before the managed runtime downloads model files.
+
+The managed local install downloads the pinned Hugging Face snapshot for
+`Qwen/Qwen3.6-35B-A3B` at revision
+`995ad96eacd98c81ed38be0c5b274b04031597b0`, verifies the safetensor shards,
+and starts a loopback OpenAI-compatible runtime. The verified model payload is
+about 67 GiB before runtime overhead. Treat this as a workstation/server-class
+GPU route; normal laptops should use DeepInfra or another hosted provider.
+
+Advanced local operators can also run Qwen externally through vLLM, SGLang,
+KTransformers, Docker Model Runner, or another OpenAI-compatible loopback
+server, then point IdenaAI's local runtime endpoint at that service.
+
+Hosted inference is not local model training. Local AI capture, human-teacher
+review, and future adapter/fine-tune workflows remain separate from DeepInfra
+or OpenAI inference. Captures stay local unless you explicitly export or share
+them.
 
 ## Source Mirrors and Smaller Checkouts
 
@@ -222,22 +263,22 @@ Step 3: install the required developer dependencies without NVM.
 brew update
 brew install git node@24 python@3.12 go
 
-NODE24_BIN="$(brew --prefix node@24)/bin"
+NODE_BIN="$(brew --prefix node@24)/bin"
 case ":$PATH:" in
-  *":$NODE24_BIN:"*) ;;
-  *) echo "export PATH=\"$NODE24_BIN:\$PATH\"" >> ~/.zprofile ;;
+  *":$NODE_BIN:"*) ;;
+  *) echo "export PATH=\"$NODE_BIN:\$PATH\"" >> ~/.zprofile ;;
 esac
-export PATH="$NODE24_BIN:$PATH"
+export PATH="$NODE_BIN:$PATH"
 ```
 
 Step 4: verify Node and npm. Continue only if Node is `v24.18.0` or newer on
-the Node 24 line. Node 25+ is intentionally rejected by this repo.
+the Node 24 LTS line. Node 25+ is intentionally rejected by this repo.
 
 ```bash
 node -v
 npm -v
 npm install -g npm@11.16.0
-node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 18) { throw new Error(`IdenaAI requires Node v24.18.0 or newer on Node 24, got ${process.versions.node}`) }'
+node -e 'const v=process.versions.node.split(".").map(Number); if (v[0] !== 24 || v[1] < 18) { throw new Error(`IdenaAI requires Node v24.18.0 or newer on Node 24 LTS, got ${process.versions.node}`) }'
 npm -v
 git --version
 python3 --version
@@ -292,21 +333,23 @@ IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO=1 \
 npm start
 ```
 
-Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
+Step 9: inside the Electron app, configure a hosted provider for real-session
+autosolve.
 
 1. Open `Settings -> AI`.
 2. Turn on AI.
 3. Choose `Use external API provider`.
-4. Set `Main AI provider` to `OpenAI`.
-5. Paste your own OpenAI API key with `Set key`.
-6. Choose the OpenAI model you intend to pay for, for example `gpt-5.5`, or
-   enter your own OpenAI model id.
+4. For Qwen, set `Main AI provider` to `Qwen 3.6 via DeepInfra`.
+5. Paste your own DeepInfra API key with `Set key`.
+6. Keep the model as `Qwen/Qwen3.6-35B-A3B`, or choose OpenAI/another
+   compatible provider if that is the provider you intend to pay for.
 7. Click `Test connection` and continue only after it succeeds.
 
-OpenAI autosolve can spend API money and sends validation flip content to
-OpenAI for model inference. Keep provider spending limits low, do not commit or
-share your API key, and do not run this on a real identity until you understand
-the cost and privacy tradeoff.
+Hosted autosolve can spend API money and sends validation flip content to the
+selected provider for model inference. Keep provider spending limits low, do
+not commit or share your API key, and do not run this on a real identity until
+you understand the cost and privacy tradeoff. IdenaAI's local daily API cap is
+a local guardrail only; it is not a provider-side spending limit.
 
 Step 10: still inside the Electron app, check all of these before clicking
 `Enable auto-solve next session`:
@@ -315,7 +358,7 @@ Step 10: still inside the Electron app, check all of these before clicking
   `IdenaAI-runtime`
 - the app shows the real identity you intend to validate
 - the node is mainnet, synced, and eligible for the next validation
-- `Settings -> AI -> Test connection` succeeds with OpenAI
+- `Settings -> AI -> Test connection` succeeds with the selected provider
 - the IdenaAI window, Terminal, internet connection, and computer stay awake
   through the ceremony
 - `Validation -> Enable auto-solve next session` is clicked only after every
@@ -384,8 +427,8 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait
 
 If `winget` cannot find the exact Node `24.18.0` package, run
 `winget install --id OpenJS.NodeJS.LTS -e` instead, but continue only if Step 4
-shows Node `v24.18.0` or a newer `v24.x` release. Do not use NVM for Windows for
-this setup if it fails on your PC.
+shows Node `v24.18.0` or a newer `v24.x` LTS release. Do not use NVM for
+Windows for this setup if it fails on your PC.
 
 Step 3: install the MinGW toolchain inside MSYS2 and add the detected
 `ucrt64\bin` directory to the user path.
@@ -453,8 +496,8 @@ gcc --version
 ```
 
 Step 4: close PowerShell, reopen it, then verify Node and npm. Continue only if
-Node is `v24.18.0` or newer on the Node 24 line. Node 25+ is intentionally
-rejected by this repo.
+Node is `v24.18.0` or newer on the Node 24 LTS line. Node 25+ is
+intentionally rejected by this repo.
 
 ```powershell
 Get-Command node
@@ -463,7 +506,7 @@ npm -v
 
 $nodeVersion = [version]((node -v).TrimStart("v"))
 if ($nodeVersion.Major -ne 24 -or $nodeVersion -lt [version]"24.18.0") {
-  throw "IdenaAI requires Node v24.18.0 or newer on Node 24, got v$nodeVersion"
+  throw "IdenaAI requires Node v24.18.0 or newer on Node 24 LTS, got v$nodeVersion"
 }
 
 npm install -g npm@11.16.0
@@ -550,21 +593,23 @@ npm start
 The override above only applies to the current PowerShell window. Close that
 PowerShell window when you are done with the real-session run.
 
-Step 9: inside the Electron app, configure OpenAI for real-session autosolve.
+Step 9: inside the Electron app, configure a hosted provider for real-session
+autosolve.
 
 1. Open `Settings -> AI`.
 2. Turn on AI.
 3. Choose `Use external API provider`.
-4. Set `Main AI provider` to `OpenAI`.
-5. Paste your own OpenAI API key with `Set key`.
-6. Choose the OpenAI model you intend to pay for, for example `gpt-5.5`, or
-   enter your own OpenAI model id.
+4. For Qwen, set `Main AI provider` to `Qwen 3.6 via DeepInfra`.
+5. Paste your own DeepInfra API key with `Set key`.
+6. Keep the model as `Qwen/Qwen3.6-35B-A3B`, or choose OpenAI/another
+   compatible provider if that is the provider you intend to pay for.
 7. Click `Test connection` and continue only after it succeeds.
 
-OpenAI autosolve can spend API money and sends validation flip content to
-OpenAI for model inference. Keep provider spending limits low, do not commit or
-share your API key, and do not run this on a real identity until you understand
-the cost and privacy tradeoff.
+Hosted autosolve can spend API money and sends validation flip content to the
+selected provider for model inference. Keep provider spending limits low, do
+not commit or share your API key, and do not run this on a real identity until
+you understand the cost and privacy tradeoff. IdenaAI's local daily API cap is
+a local guardrail only; it is not a provider-side spending limit.
 
 Step 10: still inside the Electron app, check all of these before clicking
 `Enable auto-solve next session`:
@@ -572,7 +617,7 @@ Step 10: still inside the Electron app, check all of these before clicking
 - the startup log points to `%APPDATA%\IdenaAI`, not `IdenaAI-runtime`
 - the app shows the real identity you intend to validate
 - the node is mainnet, synced, and eligible for the next validation
-- `Settings -> AI -> Test connection` succeeds with OpenAI
+- `Settings -> AI -> Test connection` succeeds with the selected provider
 - the IdenaAI window, PowerShell, internet connection, and computer stay awake
   through the ceremony
 - `Validation -> Enable auto-solve next session` is clicked only after every
@@ -594,7 +639,7 @@ own successful rehearsal history. If you do use a VPS, use a dedicated server,
 encrypt/back up keys yourself, keep API spending limits low, and keep the
 remote desktop open while validation is running.
 
-Step 1: install base packages, Node 24, npm 11.16, Go, and Electron runtime
+Step 1: install base packages, Node 24 LTS, npm 11.16, Go, and Electron runtime
 libraries.
 
 ```bash
@@ -832,8 +877,19 @@ and does not make third-party IPFS content safe.
 Local AI support is research-grade.
 
 - Local chat/code paths can use Ollama-compatible local models.
+- `Qwen/Qwen3.6-35B-A3B` is available as a managed local install for
+  workstation/server-class machines, with a pinned and verified Hugging Face
+  snapshot.
+- The same Qwen model is available without local install through the
+  `Qwen 3.6 via DeepInfra` hosted provider preset.
+- External local runtimes can be connected when they expose an
+  OpenAI-compatible loopback `/v1/chat/completions` endpoint.
 - Local AI avoids hosted provider billing but depends on your hardware.
+- Hosted provider inference avoids local GPU requirements but sends prompts to
+  the selected provider and can spend provider credits.
 - Local model licenses must be audited before redistribution or bundled use.
+- DeepInfra/OpenAI-style inference is not local training; human-teacher capture
+  and adapter training workflows are separate and opt-in.
 - The AGInt / IdenaAI AGInt Core research fork is separate from this main app
   integration line.
 
