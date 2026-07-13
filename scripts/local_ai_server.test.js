@@ -56,11 +56,15 @@ function request({
   method = 'GET',
   body = null,
   headers = {},
+  timeoutMs = 5000,
 }) {
   return new Promise((resolve, reject) => {
     const requestBody =
       typeof body === 'string' || Buffer.isBuffer(body) ? body : null
-    const requestHeaders = {...headers}
+    const requestHeaders = {
+      Connection: 'close',
+      ...headers,
+    }
 
     if (requestBody) {
       requestHeaders['Content-Length'] = Buffer.byteLength(requestBody)
@@ -91,6 +95,13 @@ function request({
     )
 
     req.on('error', reject)
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(
+        new Error(
+          `${method} ${requestPath} timed out after ${timeoutMs}ms on port ${port}`
+        )
+      )
+    })
 
     if (requestBody) {
       req.write(requestBody)
@@ -110,20 +121,42 @@ async function waitForHealth(port, headers = {}, running = null) {
       )
     }
 
-    try {
-      const response = await request({port, requestPath: '/health', headers})
+    const waitingForReadyOutput =
+      running &&
+      typeof running.getStdout === 'function' &&
+      !running.getStdout().includes(' listening on ')
 
-      if (response.statusCode === 200) {
-        return
+    if (!waitingForReadyOutput) {
+      try {
+        const response = await request({
+          port,
+          requestPath: '/health',
+          headers,
+          timeoutMs: 1000,
+        })
+
+        if (response.statusCode === 200) {
+          return
+        }
+      } catch (_error) {
+        // Server is still starting.
       }
-    } catch (_error) {
-      // Server is still starting.
     }
 
     await sleep(100)
   }
 
-  throw new Error('Local AI stub did not start in time')
+  throw new Error(
+    `Local AI stub did not start in time on port ${port}\nstdout:\n${
+      running && typeof running.getStdout === 'function'
+        ? running.getStdout()
+        : ''
+    }\nstderr:\n${
+      running && typeof running.getStderr === 'function'
+        ? running.getStderr()
+        : ''
+    }`
+  )
 }
 
 function spawnStub(args = [], extraEnv = {}) {
