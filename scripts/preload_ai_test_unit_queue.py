@@ -13,7 +13,9 @@ import argparse
 import base64
 import io
 import json
+import os
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -142,6 +144,19 @@ def ensure_queue(path: Path) -> List[dict]:
     return obj if isinstance(obj, list) else []
 
 
+def default_user_data_dir() -> Path:
+    env_path = os.environ.get("IDENA_DESKTOP_USER_DATA_DIR")
+    if env_path:
+        return Path(env_path).expanduser()
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "IdenaAI"
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
+        return Path(appdata) / "IdenaAI"
+    return Path.home() / ".config" / "IdenaAI"
+
+
 def queue_entry(flip: dict, source: str) -> dict:
     now_ms = int(time.time() * 1000)
     entry = {
@@ -165,8 +180,13 @@ def main() -> int:
     parser.add_argument("--input", nargs="+", required=True, help="input JSON file(s)")
     parser.add_argument(
         "--queue-path",
-        default=str(Path.home() / "Library/Application Support/Idena/ai-benchmark/test-unit-flips.json"),
-        help="queue file path",
+        default=None,
+        help="queue file path (default: <user-data-dir>/ai-benchmark/test-unit-flips.json)",
+    )
+    parser.add_argument(
+        "--user-data-dir",
+        default=str(default_user_data_dir()),
+        help="IdenaAI profile dir used when --queue-path is not set",
     )
     parser.add_argument("--source", default="flip-challenge-import", help="queue source label")
     parser.add_argument(
@@ -182,7 +202,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    queue_path = Path(args.queue_path)
+    queue_path = (
+        Path(args.queue_path).expanduser()
+        if args.queue_path
+        else Path(args.user_data_dir).expanduser()
+        / "ai-benchmark"
+        / "test-unit-flips.json"
+    )
     queue_path.parent.mkdir(parents=True, exist_ok=True)
     queue = [] if args.replace else ensure_queue(queue_path)
 

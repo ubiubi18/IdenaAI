@@ -111,32 +111,44 @@ function verifyGitCheckout(source, dir) {
   console.log(`[setup-sources] ${source.name}: ${current}`)
 }
 
+function sourceFetchRef(source) {
+  const revision = source.commit || source.ref
+  if (!revision) {
+    throw new Error(`${source.name}: source commit or ref is required`)
+  }
+  return revision
+}
+
+function fetchSource(source, dir) {
+  const revision = sourceFetchRef(source)
+  run('git', ['fetch', '--depth', '1', 'origin', revision], {cwd: dir})
+  run('git', ['checkout', '--detach', 'FETCH_HEAD'], {cwd: dir})
+}
+
 function cloneSource(source, dir) {
   fs.mkdirSync(path.dirname(dir), {recursive: true})
-  fs.mkdirSync(dir)
-  run('git', ['init'], {cwd: dir})
-  run('git', ['remote', 'add', 'origin', source.url], {cwd: dir})
-  fetchSource(source, dir)
-  run('git', ['checkout', '--detach', 'FETCH_HEAD'], {cwd: dir})
+  if (source.commit) {
+    fs.mkdirSync(dir, {recursive: true})
+    run('git', ['init'], {cwd: dir})
+    run('git', ['remote', 'add', 'origin', source.url], {cwd: dir})
+    fetchSource(source, dir)
+  } else {
+    run('git', [
+      'clone',
+      '--depth',
+      '1',
+      '--branch',
+      sourceFetchRef(source),
+      source.url,
+      dir,
+    ])
+  }
   verifyGitCheckout(source, dir)
 }
 
 function updateGitSource(source, dir) {
   fetchSource(source, dir)
-  run('git', ['checkout', '--detach', 'FETCH_HEAD'], {cwd: dir})
   verifyGitCheckout(source, dir)
-}
-
-function sourceFetchRef(source) {
-  return source.commit || source.ref
-}
-
-function fetchSource(source, dir) {
-  const revision = sourceFetchRef(source)
-  if (!revision) {
-    throw new Error(`${source.name}: source commit or ref is required`)
-  }
-  run('git', ['fetch', '--depth', '1', 'origin', revision], {cwd: dir})
 }
 
 function ensureSource(source, options) {

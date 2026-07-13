@@ -111,6 +111,7 @@ const AI_PROVIDER_DEFAULT_MODELS = {
   mistral: 'mistral-large-latest',
   groq: 'llama-3.2-90b-vision-preview',
   deepseek: 'deepseek-chat',
+  deepinfra: 'Qwen/Qwen3.6-35B-A3B',
   openrouter: 'openai/gpt-4o-mini',
   moonshot: 'kimi-k2.6',
   'openai-compatible': 'gpt-4o-mini',
@@ -559,11 +560,13 @@ function BenchmarkResearchBanner() {
                 }}
               />
             </Stack>
-            <NextLink href="/settings/ai" passHref>
-              <Link color={aiEnabled ? 'orange.800' : 'blue.800'}>
-                {t('AI settings')}
-              </Link>
-            </NextLink>
+            <Link
+              as={NextLink}
+              href="/settings/ai"
+              color={aiEnabled ? 'orange.800' : 'blue.800'}
+            >
+              {t('AI settings')}
+            </Link>
           </Stack>
         </Flex>
       </Alert>
@@ -580,6 +583,7 @@ function BenchmarkResearchBanner() {
           {value: 'mistral', label: 'Mistral'},
           {value: 'groq', label: 'Groq'},
           {value: 'deepseek', label: 'DeepSeek'},
+          {value: 'deepinfra', label: 'Qwen 3.6 via DeepInfra'},
           {value: 'openrouter', label: 'OpenRouter'},
           {value: 'moonshot', label: 'Moonshot Kimi'},
           {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
@@ -1409,9 +1413,13 @@ function UpdateExternalNodeDialog() {
       <DialogBody>
         <Text>
           Please, run built-in at the{' '}
-          <NextLink href="/settings/node" passHref>
-            <Link onClick={hideExternalNodeUpdateModal}>settings</Link>
-          </NextLink>{' '}
+          <Link
+            as={NextLink}
+            href="/settings/node"
+            onClick={hideExternalNodeUpdateModal}
+          >
+            settings
+          </Link>{' '}
           page to enjoy automatic updates.
         </Text>
         <Text>{t('Otherwise, please update your remote node manually.')}</Text>

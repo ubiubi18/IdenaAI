@@ -72,6 +72,105 @@ describe('openai provider adapter', () => {
     expect(result.usage.totalTokens).toBe(135)
   })
 
+  test('adds provider extra body fields without overriding core chat payload', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          choices: [
+            {
+              message: {
+                content: '{"answer":"right","confidence":0.9}',
+              },
+            },
+          ],
+        },
+      }),
+    }
+
+    await callOpenAi({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'Qwen/Qwen3.6-35B-A3B',
+      flip: {
+        hash: 'flip-extra-body',
+        leftImage: 'data:image/png;base64,AAA',
+        rightImage: 'data:image/png;base64,BBB',
+      },
+      prompt: 'test prompt',
+      profile: {
+        temperature: 0,
+        maxOutputTokens: 100,
+        requestTimeoutMs: 5000,
+      },
+      providerConfig: {
+        extraBody: {
+          chat_template_kwargs: {
+            enable_thinking: false,
+          },
+          model: 'attacker-model',
+          messages: [],
+        },
+      },
+    })
+
+    expect(httpClient.post).toHaveBeenCalledTimes(1)
+    const payload = httpClient.post.mock.calls[0][1]
+    expect(payload.model).toBe('Qwen/Qwen3.6-35B-A3B')
+    expect(payload.messages).toHaveLength(1)
+    expect(payload.chat_template_kwargs).toEqual({
+      enable_thinking: false,
+    })
+  })
+
+  test('uses reasoning_content when provider returns empty content', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          choices: [
+            {
+              message: {
+                content: '',
+                reasoning_content: '{"answer":"left","confidence":0.88}',
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 120,
+            completion_tokens: 90,
+            total_tokens: 210,
+          },
+        },
+      }),
+    }
+
+    const result = await callOpenAi({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'Qwen/Qwen3.6-35B-A3B',
+      flip: {
+        hash: 'flip-reasoning-content',
+        leftImage: 'data:image/png;base64,AAA',
+        rightImage: 'data:image/png;base64,BBB',
+      },
+      prompt: 'test prompt',
+      profile: {
+        temperature: 0,
+        maxOutputTokens: 100,
+        requestTimeoutMs: 5000,
+      },
+      providerConfig: {
+        extraBody: {
+          chat_template_kwargs: {
+            enable_thinking: true,
+          },
+        },
+      },
+    })
+
+    expect(result.rawText).toBe('{"answer":"left","confidence":0.88}')
+    expect(result.usage.totalTokens).toBe(210)
+  })
+
   test('rejects unsafe provider base URLs', async () => {
     const httpClient = {
       post: jest.fn(),

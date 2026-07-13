@@ -465,31 +465,29 @@ function NavItem({href, icon, children, badge, featured = false}) {
       _focus={{outline: 'none'}}
     >
       <Icon as={icon} boxSize="5" />
-      <NextLink href={href} passHref>
-        <LinkOverlay display="block" w="full">
-          {badge ? (
-            <Flex align="center" justify="space-between" w="full" gap={2}>
-              <Text as="span" noOfLines={1}>
-                {children}
-              </Text>
-              <Badge
-                bg={badgeBg}
-                color={badgeColor}
-                borderRadius="full"
-                px={2}
-                py="0.5"
-                fontSize="2xs"
-                fontWeight={600}
-                textTransform="uppercase"
-              >
-                {badge}
-              </Badge>
-            </Flex>
-          ) : (
-            children
-          )}
-        </LinkOverlay>
-      </NextLink>
+      <LinkOverlay as={NextLink} href={href} display="block" w="full">
+        {badge ? (
+          <Flex align="center" justify="space-between" w="full" gap={2}>
+            <Text as="span" noOfLines={1}>
+              {children}
+            </Text>
+            <Badge
+              bg={badgeBg}
+              color={badgeColor}
+              borderRadius="full"
+              px={2}
+              py="0.5"
+              fontSize="2xs"
+              fontWeight={600}
+              textTransform="uppercase"
+            >
+              {badge}
+            </Badge>
+          </Flex>
+        ) : (
+          children
+        )}
+      </LinkOverlay>
     </LinkBox>
   )
 }
@@ -898,9 +896,13 @@ function CurrentTask({epoch, validationStart, period, identity}) {
 
 function CurrentTaskLink({href, ...props}) {
   return (
-    <NextLink href={href} passHref>
-      <Link color="white" _hover={{textDecoration: 'none'}} {...props} />
-    </NextLink>
+    <Link
+      as={NextLink}
+      href={href}
+      color="white"
+      _hover={{textDecoration: 'none'}}
+      {...props}
+    />
   )
 }
 

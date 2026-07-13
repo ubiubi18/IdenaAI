@@ -1208,6 +1208,37 @@ describe('createAiProviderBridge', () => {
     )
   })
 
+  it('supports DeepInfra Qwen provider defaults', async () => {
+    const httpClient = {
+      post: jest
+        .fn()
+        .mockResolvedValue({data: {choices: [{message: {content: '{}'}}]}}),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'deepinfra', apiKey: 'di-test-key'})
+
+    const result = await bridge.testProvider({
+      provider: 'deepinfra',
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      provider: 'deepinfra',
+      model: 'Qwen/Qwen3.6-35B-A3B',
+    })
+    expect(httpClient.post).toHaveBeenCalledWith(
+      'https://api.deepinfra.com/v1/openai/chat/completions',
+      expect.objectContaining({
+        model: 'Qwen/Qwen3.6-35B-A3B',
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer di-test-key',
+        }),
+      })
+    )
+  })
+
   it('does not globally side-swap normal live solve batches', async () => {
     const invokeProvider = jest
       .fn()
@@ -2921,6 +2952,82 @@ describe('createAiProviderBridge', () => {
     expect(result.stories[0].title).toBe('Porch giant curl')
     expect(result.stories[0].panels[0].toLowerCase()).toContain('curl')
     expect(result.stories[0].panels[1].toLowerCase()).toContain('giant')
+    expect(result.metrics.fallback_used).toBe(false)
+  })
+
+  it('strips JSON field labels from provider story panel strings', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: JSON.stringify({
+        stories: [
+          {
+            title: 'Window cup rescue',
+            story_summary:
+              'A cup sits by a window, wind opens the window, the cup slides onto a cloth, and the person secures both.',
+            panels: [
+              {
+                panel: 1,
+                role: 'before',
+                description:
+                  '"panel_1": "A person places a white cup on a sunny window sill beside a folded cloth.",',
+                required_visibles: ['person', 'cup', 'window'],
+                state_change_from_previous: 'n/a',
+              },
+              {
+                panel: 2,
+                role: 'trigger',
+                description:
+                  '"panel_2": "A gust pushes the window open and the cup begins sliding away from the sill.",',
+                required_visibles: ['open window', 'sliding cup', 'gust'],
+                state_change_from_previous:
+                  'The window is open and the cup has started moving.',
+              },
+              {
+                panel: 3,
+                role: 'reaction',
+                description:
+                  '"panel_3": "The cup lands upright on the folded cloth while the person reaches for the window latch.",',
+                required_visibles: ['cup', 'folded cloth', 'person'],
+                state_change_from_previous:
+                  'The cup has moved from the sill onto the cloth.',
+              },
+              {
+                panel: 4,
+                role: 'after',
+                description:
+                  '"panel_4": "The window is latched shut and the person carries away the dry cup with the cloth underneath.",',
+                required_visibles: ['latched window', 'person', 'dry cup'],
+                state_change_from_previous:
+                  'The window is secured and the cup is safely carried away.',
+              },
+            ],
+          },
+        ],
+      }),
+      usage: {
+        promptTokens: 44,
+        completionTokens: 41,
+        totalTokens: 85,
+      },
+    })
+
+    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+    bridge.setProviderKey({provider: 'deepinfra', apiKey: 'di-test-key'})
+
+    const result = await bridge.generateStoryOptions({
+      provider: 'deepinfra',
+      model: 'Qwen/Qwen3.6-35B-A3B',
+      fastStoryMode: true,
+      storyOptionCount: 1,
+      keywords: ['window', 'cup'],
+      includeNoise: false,
+      hasCustomStory: false,
+    })
+
+    expect(result.stories).toHaveLength(1)
+    expect(result.stories[0].panels[0]).toBe(
+      'A person places a white cup on a sunny window sill beside a folded cloth.'
+    )
+    expect(result.stories[0].panels[1]).not.toMatch(/panel_2/i)
     expect(result.metrics.fallback_used).toBe(false)
   })
 
@@ -6104,6 +6211,28 @@ describe('createAiProviderBridge', () => {
       })
     ).rejects.toThrow(
       'AI image search is not available for provider: moonshot. Supported providers: openai-compatible and gemini.'
+    )
+  })
+
+  it('does not route DeepInfra Qwen through image generation endpoints', async () => {
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient: {
+        post: jest.fn(),
+        get: jest.fn(),
+      },
+    })
+    bridge.setProviderKey({provider: 'deepinfra', apiKey: 'di-test-key'})
+
+    await expect(
+      bridge.generateImageSearchResults({
+        provider: 'deepinfra',
+        model: 'Qwen/Qwen3.6-35B-A3B',
+        imageModel: 'Qwen/Qwen3.6-35B-A3B',
+        prompt: 'draw a simple scene',
+        maxImages: 1,
+      })
+    ).rejects.toThrow(
+      'AI image search is not available for provider: deepinfra. Supported providers: openai-compatible and gemini.'
     )
   })
 

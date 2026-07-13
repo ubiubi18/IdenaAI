@@ -29,6 +29,10 @@ const KIMI_K2_6_LOCAL_BASE_URL = 'http://127.0.0.1:30000'
 const KIMI_K2_6_LOCAL_RUNTIME_FAMILY = 'kimi-k2.6-local'
 const KIMI_K2_6_LOCAL_RUNTIME_MODEL = 'moonshotai/Kimi-K2.6'
 const KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL = 'moonshotai/Kimi-K2.6'
+const QWEN36_35B_A3B_LOCAL_BASE_URL = 'http://127.0.0.1:31000'
+const QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY = 'qwen3.6-35b-a3b-local'
+const QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL = 'Qwen/Qwen3.6-35B-A3B'
+const QWEN36_35B_A3B_LOCAL_RUNTIME_VISION_MODEL = 'Qwen/Qwen3.6-35B-A3B'
 const QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL =
   'idenaai-qwen36-27b-claude-opus:q4km'
 const QWEN36_27B_CLAUDE_OPUS_HF_OLLAMA_MODEL =
@@ -43,7 +47,8 @@ const MANAGED_MOLMO2_RUNTIME_FAMILIES = [
 ]
 const MANAGED_LOCAL_RUNTIME_FAMILIES = MANAGED_MOLMO2_RUNTIME_FAMILIES.concat(
   INTERNVL3_5_1B_RESEARCH_RUNTIME_FAMILY,
-  INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY
+  INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY
 )
 const DEFAULT_MANAGED_LOCAL_RUNTIME_FAMILY = MOLMO2_4B_RESEARCH_RUNTIME_FAMILY
 const MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES = {
@@ -83,8 +88,17 @@ const MANAGED_LOCAL_RUNTIME_INSTALL_PROFILES = {
     minimumGiB: 24,
     comfortableGiB: 32,
   },
+  [QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY]: {
+    runtimeFamily: QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+    displayName: 'Qwen3.6-35B-A3B managed runtime',
+    modelId: QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
+    revision: '995ad96eacd98c81ed38be0c5b274b04031597b0',
+    downloadSizeLabel: '~67 GiB',
+    minimumGiB: 64,
+    comfortableGiB: 96,
+  },
 }
-const MANAGED_LOCAL_RUNTIME_TRUST_VERSION = 2
+const MANAGED_LOCAL_RUNTIME_TRUST_VERSION = 3
 const DEFAULT_LOCAL_AI_OLLAMA_MODEL = QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL
 const DEFAULT_LOCAL_AI_OLLAMA_VISION_MODEL = ''
 const RECOMMENDED_LOCAL_AI_OLLAMA_MODEL = QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL
@@ -808,6 +822,17 @@ function buildKimiK26ExtremeLocalPreset() {
   }
 }
 
+function buildQwen3635BLocalPreset() {
+  return {
+    ...buildLocalAiRuntimePreset(LOCAL_RUNTIME_SERVICE_BACKEND),
+    baseUrl: QWEN36_35B_A3B_LOCAL_BASE_URL,
+    endpoint: QWEN36_35B_A3B_LOCAL_BASE_URL,
+    runtimeFamily: QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+    model: QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
+    visionModel: QWEN36_35B_A3B_LOCAL_RUNTIME_VISION_MODEL,
+  }
+}
+
 function buildManagedLocalRuntimePreset(runtimeFamily = '') {
   const normalizedFamily =
     trimString(runtimeFamily).toLowerCase() ||
@@ -820,6 +845,8 @@ function buildManagedLocalRuntimePreset(runtimeFamily = '') {
       return buildInternVl351BLightPreset()
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return buildInternVl358BExperimentalPreset()
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return buildQwen3635BLocalPreset()
     case MOLMO2_O_RESEARCH_RUNTIME_FAMILY:
       return buildMolmo2OResearchPreset()
     default:
@@ -839,6 +866,8 @@ function resolveManagedLocalRuntimeMemoryReference(runtimeFamily = '') {
       return 'internvl3.5-1b'
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return 'internvl3.5-8b'
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY
     case MOLMO2_O_RESEARCH_RUNTIME_FAMILY:
       return 'molmo2-o-7b'
     default:
@@ -864,6 +893,8 @@ function getManagedLocalRuntimeFamilyForMemoryReference(memoryReference = '') {
       return INTERNVL3_5_1B_RESEARCH_RUNTIME_FAMILY
     case 'internvl3.5-8b':
       return INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY
     default:
       return ''
   }
@@ -1160,6 +1191,10 @@ module.exports = {
   KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
   KIMI_K2_6_LOCAL_RUNTIME_MODEL,
   KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL,
+  QWEN36_35B_A3B_LOCAL_BASE_URL,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_VISION_MODEL,
   QWEN36_27B_CLAUDE_OPUS_OLLAMA_MODEL,
   QWEN36_27B_CLAUDE_OPUS_HF_OLLAMA_MODEL,
   QWEN36_27B_CLAUDE_OPUS_GGUF_REPO,
@@ -1177,6 +1212,7 @@ module.exports = {
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
   buildKimiK26ExtremeLocalPreset,
+  buildQwen3635BLocalPreset,
   buildManagedLocalRuntimePreset,
   buildManagedMolmo2RuntimePreset,
   resolveManagedLocalRuntimeMemoryReference,
