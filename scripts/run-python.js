@@ -23,7 +23,10 @@ if (!command) {
 
 const child = spawn(command, prefixArgs.concat(args), {
   cwd: process.cwd(),
-  env: process.env,
+  env: {
+    ...process.env,
+    MPLBACKEND: process.env.MPLBACKEND || 'Agg',
+  },
   stdio: 'inherit',
 })
 
