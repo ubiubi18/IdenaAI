@@ -258,6 +258,21 @@ describe('managed local runtime flavor selection', () => {
     })
   })
 
+  it('requires explicit trust approval before starting the managed Qwen3.6-35B runtime', async () => {
+    const controller = createDefaultRuntimeController()
+
+    await expect(
+      controller.start({
+        runtimeBackend: 'local-runtime-service',
+        runtimeFamily: 'qwen3.6-35b-a3b-local',
+        baseUrl: 'http://127.0.0.1:31000',
+        model: 'Qwen/Qwen3.6-35B-A3B',
+      })
+    ).rejects.toMatchObject({
+      code: 'managed_runtime_trust_required',
+    })
+  })
+
   it('rejects unsafe Ollama executable path overrides', async () => {
     const controller = createDefaultRuntimeController()
 
@@ -287,7 +302,7 @@ describe('managed local runtime flavor selection', () => {
         runtimeFamily: 'molmo2-o',
         baseUrl: 'http://127.0.0.1:8080',
         model: 'allenai/Molmo2-O-7B',
-        managedRuntimeTrustVersion: 2,
+        managedRuntimeTrustVersion: 3,
         managedRuntimePythonPath: '/bin/bash',
       })
     ).rejects.toMatchObject({
@@ -314,7 +329,7 @@ describe('managed local runtime flavor selection', () => {
         runtimeFamily: 'internvl3.5-8b',
         baseUrl: 'http://127.0.0.1:8080',
         model: 'OpenGVLab/InternVL3_5-8B-HF',
-        managedRuntimeTrustVersion: 2,
+        managedRuntimeTrustVersion: 3,
       })
     ).rejects.toMatchObject({
       code: 'managed_runtime_disk_space_low',

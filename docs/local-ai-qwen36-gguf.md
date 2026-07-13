@@ -1,4 +1,4 @@
-# Local AI: Qwen3.6 27B Claude Opus Distilled GGUF
+# Local AI: Qwen3.6 35B-A3B And 27B GGUF
 
 ## Hosted Qwen3.6 35B-A3B
 
@@ -62,7 +62,40 @@ target, the `qwen3.5:9b` fast local-chat fallback, the managed local runtime
 profiles, and the legacy Phi sidecar migration marker. Hosted AI providers are
 outside this local-model license gate.
 
-## Local Install
+## Managed Local 35B Install
+
+IdenaAI v0.1.0 also exposes `Qwen/Qwen3.6-35B-A3B` as an installable managed
+local runtime:
+
+```text
+Settings -> AI -> Local AI -> Install Qwen3.6 35B locally
+```
+
+The managed install uses the pinned Hugging Face snapshot:
+
+```text
+Model:    Qwen/Qwen3.6-35B-A3B
+Revision: 995ad96eacd98c81ed38be0c5b274b04031597b0
+License:  Apache-2.0
+Payload:  about 67 GiB of verified safetensor shards
+```
+
+The app requires an explicit trust prompt before starting the managed runtime.
+It downloads the snapshot, verifies the declared files, prepares the local
+Python/Transformers runtime, and exposes an OpenAI-compatible loopback service
+for IdenaAI. This is intended for workstation/server-class GPU machines. Most
+users should prefer the hosted DeepInfra preset.
+
+Advanced operators can run the same model outside the managed installer with
+vLLM, SGLang, KTransformers, Docker Model Runner, or another
+OpenAI-compatible local server, then point IdenaAI's local runtime endpoint at
+that loopback service.
+
+DeepInfra/OpenAI-style inference is not local model training. IdenaAI's local
+capture and human-teacher review flows can collect training candidates, but
+adapter training or fine-tuning remains a separate local workflow.
+
+## Local 27B GGUF Install
 
 After the GGUF exists in `downloads/local-ai/rico03-qwen36-27b-claude-opus-q4km/`, create the Ollama model:
 
@@ -94,7 +127,10 @@ strategy answers still need human distance and local review.
 ## Runtime Notes
 
 - Ollama endpoint: `http://127.0.0.1:11434`
-- llama.cpp server endpoint can be used through the custom local runtime service path if it exposes OpenAI-compatible `/v1/chat/completions`.
+- The managed 35B runtime uses a loopback OpenAI-compatible endpoint owned by
+  IdenaAI.
+- llama.cpp server endpoints can be used through the custom local runtime
+  service path if they expose OpenAI-compatible `/v1/chat/completions`.
 - LM Studio can run the same GGUF manually; connect IdenaAI only to a loopback OpenAI-compatible endpoint.
 - This is a text/reasoning model. Keep a separate vision runtime for screenshot/image-heavy flip analysis.
 - Some Qwen-distilled GGUFs emit a leading `<think>...</think>` block even when thinking is disabled. IdenaAI strips complete leading reasoning blocks before strict JSON/action parsing, but capped or malformed reasoning output is still treated as a model error.
