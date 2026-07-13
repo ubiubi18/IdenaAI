@@ -554,11 +554,9 @@ export function GoogleTranslateButton({
 
 export function TextLink({href, children, ...props}) {
   return (
-    <NextLink href={href} passHref>
-      <Link color="blue.500" {...props}>
-        {children}
-      </Link>
-    </NextLink>
+    <Link as={NextLink} href={href} color="blue.500" {...props}>
+      {children}
+    </Link>
   )
 }
 
@@ -615,9 +613,9 @@ export const IconLink = React.forwardRef(
         {isDisabled ? (
           <Text as="span">{children}</Text>
         ) : (
-          <NextLink ref={ref} href={href} passHref>
-            <LinkOverlay>{children}</LinkOverlay>
-          </NextLink>
+          <LinkOverlay as={NextLink} ref={ref} href={href}>
+            {children}
+          </LinkOverlay>
         )}
       </LinkBox>
     )

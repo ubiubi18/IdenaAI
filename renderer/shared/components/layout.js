@@ -560,11 +560,13 @@ function BenchmarkResearchBanner() {
                 }}
               />
             </Stack>
-            <NextLink href="/settings/ai" passHref>
-              <Link color={aiEnabled ? 'orange.800' : 'blue.800'}>
-                {t('AI settings')}
-              </Link>
-            </NextLink>
+            <Link
+              as={NextLink}
+              href="/settings/ai"
+              color={aiEnabled ? 'orange.800' : 'blue.800'}
+            >
+              {t('AI settings')}
+            </Link>
           </Stack>
         </Flex>
       </Alert>
@@ -1411,9 +1413,13 @@ function UpdateExternalNodeDialog() {
       <DialogBody>
         <Text>
           Please, run built-in at the{' '}
-          <NextLink href="/settings/node" passHref>
-            <Link onClick={hideExternalNodeUpdateModal}>settings</Link>
-          </NextLink>{' '}
+          <Link
+            as={NextLink}
+            href="/settings/node"
+            onClick={hideExternalNodeUpdateModal}
+          >
+            settings
+          </Link>{' '}
           page to enjoy automatic updates.
         </Text>
         <Text>{t('Otherwise, please update your remote node manually.')}</Text>

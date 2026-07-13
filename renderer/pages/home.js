@@ -810,85 +810,84 @@ function HomeFeaturedCard({
   stampColorScheme = 'purple',
 }) {
   return (
-    <NextLink href={href} passHref>
-      <Box
-        as="a"
-        display="block"
-        borderWidth="1px"
-        borderColor="gray.100"
-        borderRadius="lg"
-        px={3}
-        py={2}
-        flex={1}
-        bg="gray.50"
-        cursor="pointer"
-        transition="all 0.15s ease"
-        _hover={{
-          borderColor: 'blue.100',
-          bg: 'white',
-          boxShadow: '0 6px 18px 0 rgba(76, 124, 240, 0.08)',
-        }}
-        _focusVisible={{
-          outline: 'none',
-          borderColor: 'blue.300',
-          boxShadow: '0 0 0 3px rgba(76, 124, 240, 0.18)',
-        }}
-      >
-        <HStack spacing={3} justify="space-between" align="center" minW={0}>
-          <HStack spacing={3} align="center" minW={0}>
-            <Flex
-              align="center"
-              justify="center"
-              boxSize={9}
-              borderRadius="lg"
-              bg="white"
-              color="brandBlue.500"
-              flexShrink={0}
-              boxShadow="inset 0 0 0 1px rgba(76, 124, 240, 0.08)"
-            >
-              {icon}
-            </Flex>
-            <Stack spacing={1} minW={0}>
-              <HStack spacing={2} align="center">
-                <Heading as="h3" fontSize="md" fontWeight={600}>
-                  {title}
-                </Heading>
-                {stamp ? (
-                  <Badge
-                    colorScheme={stampColorScheme}
-                    borderRadius="full"
-                    px={2}
-                    py="0.5"
-                    fontSize="2xs"
-                    textTransform="uppercase"
-                  >
-                    {stamp}
-                  </Badge>
-                ) : null}
-              </HStack>
-              {context ? (
-                <Text color="muted" fontSize="xs" lineHeight="base">
-                  {context}
-                </Text>
-              ) : null}
-            </Stack>
-          </HStack>
-          <HStack
-            spacing={2}
+    <Box
+      as={NextLink}
+      href={href}
+      display="block"
+      borderWidth="1px"
+      borderColor="gray.100"
+      borderRadius="lg"
+      px={3}
+      py={2}
+      flex={1}
+      bg="gray.50"
+      cursor="pointer"
+      transition="all 0.15s ease"
+      _hover={{
+        borderColor: 'blue.100',
+        bg: 'white',
+        boxShadow: '0 6px 18px 0 rgba(76, 124, 240, 0.08)',
+      }}
+      _focusVisible={{
+        outline: 'none',
+        borderColor: 'blue.300',
+        boxShadow: '0 0 0 3px rgba(76, 124, 240, 0.18)',
+      }}
+    >
+      <HStack spacing={3} justify="space-between" align="center" minW={0}>
+        <HStack spacing={3} align="center" minW={0}>
+          <Flex
             align="center"
+            justify="center"
+            boxSize={9}
+            borderRadius="lg"
+            bg="white"
             color="brandBlue.500"
             flexShrink={0}
-            borderRadius="md"
-            px={2}
-            py={1.5}
+            boxShadow="inset 0 0 0 1px rgba(76, 124, 240, 0.08)"
           >
             {icon}
-            <Text as="span" fontWeight={500}>
-              {cta}
-            </Text>
-          </HStack>
+          </Flex>
+          <Stack spacing={1} minW={0}>
+            <HStack spacing={2} align="center">
+              <Heading as="h3" fontSize="md" fontWeight={600}>
+                {title}
+              </Heading>
+              {stamp ? (
+                <Badge
+                  colorScheme={stampColorScheme}
+                  borderRadius="full"
+                  px={2}
+                  py="0.5"
+                  fontSize="2xs"
+                  textTransform="uppercase"
+                >
+                  {stamp}
+                </Badge>
+              ) : null}
+            </HStack>
+            {context ? (
+              <Text color="muted" fontSize="xs" lineHeight="base">
+                {context}
+              </Text>
+            ) : null}
+          </Stack>
         </HStack>
-      </Box>
-    </NextLink>
+        <HStack
+          spacing={2}
+          align="center"
+          color="brandBlue.500"
+          flexShrink={0}
+          borderRadius="md"
+          px={2}
+          py={1.5}
+        >
+          {icon}
+          <Text as="span" fontWeight={500}>
+            {cta}
+          </Text>
+        </HStack>
+      </HStack>
+    </Box>
   )
 }
