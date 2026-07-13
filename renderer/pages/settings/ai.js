@@ -29,6 +29,7 @@ import {
   Dialog,
   DialogBody,
   DialogFooter,
+  ExternalLink,
   Input,
   Progress,
   Select,
@@ -65,6 +66,9 @@ import {
   KIMI_K2_6_LOCAL_BASE_URL,
   KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
   KIMI_K2_6_LOCAL_RUNTIME_MODEL,
+  QWEN36_35B_A3B_LOCAL_BASE_URL,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
   MOLMO2_O_RESEARCH_RUNTIME_MODEL,
   MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
   MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
@@ -76,6 +80,7 @@ import {
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
   buildKimiK26ExtremeLocalPreset,
+  buildQwen3635BLocalPreset,
   buildManagedLocalRuntimePreset,
   buildMolmo2OResearchPreset,
   buildMolmo24BCompactPreset,
@@ -104,7 +109,50 @@ const DEFAULT_MODELS = {
   deepseek: 'deepseek-chat',
   openrouter: 'openai/gpt-4o-mini',
   moonshot: 'kimi-k2.6',
+  deepinfra: 'Qwen/Qwen3.6-35B-A3B',
 }
+
+const QWEN36_35B_A3B_MODEL = 'Qwen/Qwen3.6-35B-A3B'
+const QWEN36_35B_A3B_OPENROUTER_MODEL = 'qwen/qwen3.6-35b-a3b'
+
+const DEEPINFRA_QWEN_INFERENCE_LINKS = [
+  {
+    label: 'Add DeepInfra credits',
+    href: 'https://deepinfra.com/dash/billing',
+  },
+  {
+    label: 'Create DeepInfra API key',
+    href: 'https://deepinfra.com/dash/api_keys',
+  },
+  {
+    label: 'DeepInfra Qwen API docs',
+    href: 'https://deepinfra.com/Qwen/Qwen3.6-35B-A3B/api',
+  },
+]
+
+const OPENROUTER_QWEN_INFERENCE_LINKS = [
+  {
+    label: 'OpenRouter credits',
+    href: 'https://openrouter.ai/settings/credits',
+  },
+  {
+    label: 'OpenRouter Qwen listing',
+    href: 'https://openrouter.ai/qwen/qwen3.6-35b-a3b',
+  },
+]
+
+const HUGGINGFACE_QWEN_INFERENCE_LINK = {
+  label: 'Hugging Face billing',
+  href: 'https://huggingface.co/settings/billing',
+}
+
+const HOSTED_QWEN_INFERENCE_LINKS = [
+  ...DEEPINFRA_QWEN_INFERENCE_LINKS,
+  ...OPENROUTER_QWEN_INFERENCE_LINKS,
+  {
+    ...HUGGINGFACE_QWEN_INFERENCE_LINK,
+  },
+]
 
 const MODEL_PRESETS = {
   'local-ai': [],
@@ -150,12 +198,14 @@ const MODEL_PRESETS = {
   ],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   openrouter: [
+    QWEN36_35B_A3B_OPENROUTER_MODEL,
     'openai/gpt-4o-mini',
     'openai/gpt-4.1-mini',
     'anthropic/claude-3.7-sonnet',
     'google/gemini-2.0-flash-001',
   ],
   moonshot: ['kimi-k2.6'],
+  deepinfra: [QWEN36_35B_A3B_MODEL],
 }
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
@@ -175,6 +225,7 @@ const MAIN_PROVIDER_OPTIONS = [
   {value: 'mistral', label: 'Mistral'},
   {value: 'groq', label: 'Groq'},
   {value: 'deepseek', label: 'DeepSeek'},
+  {value: 'deepinfra', label: 'Qwen 3.6 via DeepInfra'},
   {value: 'openrouter', label: 'OpenRouter'},
   {value: 'moonshot', label: 'Moonshot Kimi'},
   {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
@@ -361,6 +412,15 @@ const LOCAL_AI_MEMORY_REFERENCE_PROFILES = [
       'This is already in workstation territory. Real live-session use will be fragile below the comfortable range.',
   },
   {
+    value: QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+    label: `Install local ${QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL}`,
+    shortLabel: 'Qwen3.6 35B-A3B local',
+    minimumGiB: 64,
+    comfortableGiB: 96,
+    detail:
+      'Managed heavy install path. IdenaAI downloads the pinned Hugging Face snapshot, verifies the model shards, and starts a loopback local endpoint.',
+  },
+  {
     value: 'xl-70b',
     label: 'Very large local model (~70B class)',
     shortLabel: '70B-class local model',
@@ -388,6 +448,7 @@ const LOCAL_AI_MODEL_CEILING_GUIDE = [
   {label: 'around Qwen3.6 27B Q4_K_M', comfortableGiB: 36},
   {label: 'around 13B-class local models', comfortableGiB: 48},
   {label: 'around 34B-class local models', comfortableGiB: 96},
+  {label: 'around local Qwen3.6 35B-A3B endpoints', comfortableGiB: 96},
   {label: 'around 70B-class local models', comfortableGiB: 128},
   {label: 'around Kimi K2.6-class 1T MoE models', comfortableGiB: 800},
 ]
@@ -714,6 +775,60 @@ function isCustomConfigProvider(provider) {
   return provider === 'openai-compatible'
 }
 
+function getHostedQwenInferenceSetup(provider, model) {
+  const normalizedProvider = String(provider || '')
+    .trim()
+    .toLowerCase()
+  const normalizedModel = String(model || '')
+    .trim()
+    .toLowerCase()
+
+  const isQwenModel =
+    normalizedModel === QWEN36_35B_A3B_MODEL.toLowerCase() ||
+    normalizedModel === QWEN36_35B_A3B_OPENROUTER_MODEL
+
+  if (normalizedProvider === 'deepinfra') {
+    return {
+      description:
+        '{{model}} is wired as the hosted Qwen default. DeepInfra uses an OpenAI-compatible API, so loading a DeepInfra key here is enough to test and run it.',
+      pricing:
+        'Pricing snapshot checked 2026-07-03: DeepInfra public tier is about $0.15 per 1M input tokens and $0.95 per 1M output tokens. Keep provider-side credits or hard budgets enabled; the daily cap above is only local.',
+      links: [
+        ...DEEPINFRA_QWEN_INFERENCE_LINKS,
+        HUGGINGFACE_QWEN_INFERENCE_LINK,
+      ],
+    }
+  }
+
+  if (
+    normalizedProvider === 'openrouter' &&
+    normalizedModel === QWEN36_35B_A3B_OPENROUTER_MODEL
+  ) {
+    return {
+      description:
+        'The selected OpenRouter model routes to hosted Qwen 3.6 35B-A3B. Load an OpenRouter key here, then manage credits in OpenRouter.',
+      pricing:
+        'Pricing snapshot checked 2026-07-03: OpenRouter lists this model at about $0.14-$0.15 per 1M input tokens and about $1.00 per 1M output tokens. Keep provider-side credits or hard budgets enabled; the daily cap above is only local.',
+      links: [
+        ...OPENROUTER_QWEN_INFERENCE_LINKS,
+        HUGGINGFACE_QWEN_INFERENCE_LINK,
+      ],
+    }
+  }
+
+  if (isQwenModel) {
+    return {
+      description:
+        'The selected model matches the hosted Qwen 3.6 35B-A3B preset. Load a compatible provider key here, then use the provider links below for billing and model setup.',
+      pricing:
+        'Pricing snapshot checked 2026-07-03: hosted Qwen 3.6 35B-A3B is roughly $0.15 per 1M input tokens and about $0.95-$1.00 per 1M output tokens on the listed inference providers. Keep provider-side credits or hard budgets enabled; the daily cap above is only local.',
+      links: HOSTED_QWEN_INFERENCE_LINKS,
+    }
+  }
+
+  return null
+}
+
 function buildProviderConfigForBridge(aiSolver, provider) {
   if (!isCustomConfigProvider(provider)) {
     return null
@@ -824,10 +939,13 @@ function isManagedLocalRuntime(localAi = {}) {
 }
 
 function isExperimentalManagedLocalRuntime(runtimeFamily = '') {
+  const normalizedFamily = String(runtimeFamily || '')
+    .trim()
+    .toLowerCase()
+
   return (
-    String(runtimeFamily || '')
-      .trim()
-      .toLowerCase() === INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY
+    normalizedFamily === INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY ||
+    normalizedFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY
   )
 }
 
@@ -923,6 +1041,8 @@ function getManagedLocalRuntimeName(t, runtimeFamily = '') {
       return t('Molmo2-4B compact runtime')
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return t('InternVL3.5-8B experimental runtime')
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return t('Qwen3.6-35B-A3B managed runtime')
     case 'molmo2-o':
     default:
       return t('Molmo2-O research runtime')
@@ -941,6 +1061,8 @@ function getManagedLocalRuntimeTitle(t, runtimeFamily = '') {
       return t('Managed Molmo2-4B compact runtime')
     case INTERNVL3_5_8B_RESEARCH_RUNTIME_FAMILY:
       return t('Experimental InternVL3.5-8B runtime')
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return t('Install Qwen3.6-35B-A3B locally')
     case 'molmo2-o':
     default:
       return t('Managed Molmo2-O research runtime')
@@ -965,6 +1087,10 @@ function getManagedLocalRuntimeDescription(t, runtimeFamily = '') {
       return t(
         'Experimental pinned alternative through the generic transformers runtime. Expect substantially higher RAM pressure than Molmo2-4B, and on 32 GB desktops this can still be tight even when the estimator stays green.'
       )
+    case QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY:
+      return t(
+        'Managed heavy install for Qwen/Qwen3.6-35B-A3B. IdenaAI downloads the pinned Hugging Face snapshot, verifies the shards, installs the local transformers runtime, and starts a loopback OpenAI-compatible endpoint. This is for workstation or server-class GPU setups, not normal laptops.'
+      )
     case 'molmo2-o':
     default:
       return t(
@@ -974,11 +1100,23 @@ function getManagedLocalRuntimeDescription(t, runtimeFamily = '') {
 }
 
 function getManagedLocalRuntimeTrustNote(t, runtimeFamily = '') {
-  return isExperimentalManagedLocalRuntime(runtimeFamily)
-    ? t(
-        'Experimental path: this pinned InternVL build uses the generic transformers runtime and can still be too heavy for a 32 GB desktop once the node and other apps are open.'
-      )
-    : ''
+  const normalizedFamily = String(runtimeFamily || '')
+    .trim()
+    .toLowerCase()
+
+  if (normalizedFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY) {
+    return t(
+      'Heavy install path: Qwen 35B downloads about 67 GiB of model files and usually needs workstation/server-class GPU memory. Most users should use DeepInfra for this model instead.'
+    )
+  }
+
+  if (isExperimentalManagedLocalRuntime(runtimeFamily)) {
+    return t(
+      'Experimental path: this pinned InternVL build uses the generic transformers runtime and can still be too heavy for a 32 GB desktop once the node and other apps are open.'
+    )
+  }
+
+  return ''
 }
 
 function buildRecommendedRuntimePresetForBackend(
@@ -1529,6 +1667,9 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
   const isKimiK26LocalEndpoint =
     runtimeFamily === KIMI_K2_6_LOCAL_RUNTIME_FAMILY ||
     String(localAi?.model || '').trim() === KIMI_K2_6_LOCAL_RUNTIME_MODEL
+  const isQwen3635BLocalEndpoint =
+    runtimeFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY ||
+    String(localAi?.model || '').trim() === QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL
 
   if (managedRuntime) {
     return {
@@ -1556,6 +1697,22 @@ function describeLocalAiSelection(localAi, runtimeUrl, t) {
       ),
       endpointReadOnly: false,
       startLabel: t('Connect to local Kimi endpoint'),
+    }
+  }
+
+  if (isQwen3635BLocalEndpoint) {
+    return {
+      title: t('Local Qwen3.6 35B-A3B endpoint'),
+      description: t(
+        'This is a connector for Qwen/Qwen3.6-35B-A3B running on hardware you control. It is practical for workstation or server-class GPU setups, not normal laptops.'
+      ),
+      endpointLabel: t('Local Qwen server endpoint'),
+      endpointHelper: t(
+        'Expected default: {{baseUrl}} with /v1/chat/completions or /chat/completions. Keep it loopback-only and start vLLM, SGLang, llama.cpp, or another compatible server outside IdenaAI.',
+        {baseUrl: QWEN36_35B_A3B_LOCAL_BASE_URL}
+      ),
+      endpointReadOnly: false,
+      startLabel: t('Connect to local Qwen endpoint'),
     }
   }
 
@@ -2073,12 +2230,14 @@ export default function AiSettingsPage() {
       const managedRuntimeMemoryReference = managedRuntime
         ? resolveManagedLocalRuntimeMemoryReference(nextLocalAi.runtimeFamily)
         : ''
+      const nextRuntimeFamily = String(nextLocalAi.runtimeFamily || '')
+        .trim()
+        .toLowerCase()
       const localRuntimeMemoryReference =
         !managedRuntime &&
-        String(nextLocalAi.runtimeFamily || '')
-          .trim()
-          .toLowerCase() === KIMI_K2_6_LOCAL_RUNTIME_FAMILY
-          ? KIMI_K2_6_LOCAL_RUNTIME_FAMILY
+        (nextRuntimeFamily === KIMI_K2_6_LOCAL_RUNTIME_FAMILY ||
+          nextRuntimeFamily === QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY)
+          ? nextRuntimeFamily
           : ''
 
       if (openSetup) {
@@ -2433,6 +2592,18 @@ export default function AiSettingsPage() {
         localAiPatch: buildInternVl358BExperimentalPreset(),
         preparingMessage: t(
           'Preparing the experimental InternVL3.5-8B runtime now. Progress will appear below.'
+        ),
+      }),
+    [startLocalAiWithSettings, t]
+  )
+
+  const applyQwen3635BLocalSetup = useCallback(
+    () =>
+      startLocalAiWithSettings({
+        localAiPatch: buildQwen3635BLocalPreset(),
+        enableLocalProvider: true,
+        preparingMessage: t(
+          'Preparing the managed Qwen 3.6 35B runtime now. IdenaAI will download and verify the pinned Hugging Face snapshot before starting the local endpoint.'
         ),
       }),
     [startLocalAiWithSettings, t]
@@ -3369,6 +3540,9 @@ export default function AiSettingsPage() {
   )
   const activeModel =
     aiSolver.model || resolveDefaultModelForProvider(activeProvider, localAi)
+  const hostedQwenInferenceSetup =
+    !isLocalAiPrimaryProvider &&
+    getHostedQwenInferenceSetup(activeProvider, activeModel)
   const presetValue = modelPresets.includes(activeModel)
     ? activeModel
     : 'custom'
@@ -3865,6 +4039,10 @@ export default function AiSettingsPage() {
       t,
     ]
   )
+  const activeManagedRuntimeTrustNote = useMemo(
+    () => getManagedLocalRuntimeTrustNote(t, localAi.runtimeFamily),
+    [localAi.runtimeFamily, t]
+  )
   const managedRuntimeTrustWarning = useMemo(
     () =>
       describeManagedRuntimeSystemWarning({
@@ -3907,7 +4085,7 @@ export default function AiSettingsPage() {
     updateAiSolverSettings,
   ])
   const externalProviderChoice = isLocalAiPrimaryProvider
-    ? 'openai'
+    ? 'deepinfra'
     : activeProvider
   const remoteProviderAutosolverArmed = Boolean(
     aiSolver.enabled &&
@@ -3917,10 +4095,10 @@ export default function AiSettingsPage() {
   const remoteProviderAutosolverLabel = formatAiProviderLabel(activeProvider)
   const externalAiSummary = aiSolver.enabled
     ? t(
-        'Insert one or multiple AI provider API keys here. For OpenAI testing, use a prepaid key without automatic top-up when possible.'
+        'Insert one or multiple AI provider API keys here. For hosted Qwen or OpenAI testing, use provider-side credits or hard budgets when possible.'
       )
     : t(
-        'Use this when you want an external AI provider via API instead of a local runtime. For OpenAI testing, a prepaid key without automatic top-up is recommended.'
+        'Use this when you want an external AI provider via API instead of a local runtime. Hosted Qwen is the default practical path for desktops that cannot run the model locally.'
       )
   const enableExternalProviderSetup = useCallback(() => {
     pendingProviderSetupRevealRef.current = true
@@ -4772,6 +4950,44 @@ export default function AiSettingsPage() {
                             </Flex>
                           </Stack>
                         </Box>
+
+                        {hostedQwenInferenceSetup ? (
+                          <Box
+                            borderWidth="1px"
+                            borderColor="blue.100"
+                            borderRadius="md"
+                            bg="blue.012"
+                            p={3}
+                          >
+                            <Stack spacing={3}>
+                              <Box>
+                                <Text fontWeight={600} fontSize="sm">
+                                  {t('Hosted Qwen 3.6 inference')}
+                                </Text>
+                                <Text color="muted" fontSize="sm" mt={1}>
+                                  {t(hostedQwenInferenceSetup.description, {
+                                    model: QWEN36_35B_A3B_MODEL,
+                                  })}
+                                </Text>
+                              </Box>
+                              <Text color="muted" fontSize="xs">
+                                {t(hostedQwenInferenceSetup.pricing)}
+                              </Text>
+                              <Flex gap={2} flexWrap="wrap">
+                                {hostedQwenInferenceSetup.links.map((item) => (
+                                  <ExternalLink
+                                    key={item.href}
+                                    href={item.href}
+                                    h="7"
+                                    fontSize="sm"
+                                  >
+                                    {t(item.label)}
+                                  </ExternalLink>
+                                ))}
+                              </Flex>
+                            </Stack>
+                          </Box>
+                        ) : null}
 
                         <SettingsFormControl>
                           <SettingsFormLabel>{t('API key')}</SettingsFormLabel>
@@ -6411,11 +6627,9 @@ export default function AiSettingsPage() {
                     )}
                   </Text>
                 ) : null}
-                {isExperimentalManagedLocalRuntime(localAi.runtimeFamily) ? (
+                {activeManagedRuntimeTrustNote ? (
                   <Text color="orange.600" fontSize="sm" mt={1}>
-                    {t(
-                      'Experimental path: this pinned InternVL build uses the generic transformers runtime and can still be too heavy for a 32 GB desktop once the node and other apps are open.'
-                    )}
+                    {activeManagedRuntimeTrustNote}
                   </Text>
                 ) : null}
                 {!localAiEndpointSafety.safe && (
@@ -6433,6 +6647,13 @@ export default function AiSettingsPage() {
                 >
                   {t('Use Qwen/Ollama default')}
                 </PrimaryButton>
+                <SecondaryButton
+                  isDisabled={remoteProviderAutosolverArmed}
+                  onClick={applyQwen3635BLocalSetup}
+                  isLoading={isStartingLocalAi}
+                >
+                  {t('Install Qwen3.6 35B locally')}
+                </SecondaryButton>
                 <SecondaryButton
                   isDisabled={remoteProviderAutosolverArmed}
                   onClick={applyMolmo24BCompactSetup}

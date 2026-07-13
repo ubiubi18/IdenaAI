@@ -38,27 +38,41 @@ function getRpcBridge() {
 export function createRpcCaller({url, key} = {}) {
   return async function (method, ...params) {
     const rpcBridge = getRpcBridge()
-    const response = rpcBridge
-      ? await rpcBridge.call({
-          method,
-          params,
-          id: 1,
+    let response
+
+    if (rpcBridge) {
+      response = await rpcBridge.call({
+        method,
+        params,
+        id: 1,
+      })
+    } else {
+      const fallbackUrl = String(url || '').trim()
+
+      if (!fallbackUrl) {
+        const error = new Error(
+          'RPC bridge is unavailable and no RPC URL is configured'
+        )
+        error.code = 'RPC_BRIDGE_UNAVAILABLE'
+        throw error
+      }
+
+      response = await (
+        await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            method,
+            params,
+            id: 1,
+            key,
+          }),
         })
-      : await (
-          await fetch(url, {
-            method: 'POST',
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              method,
-              params,
-              id: 1,
-              key,
-            }),
-          })
-        ).json()
+      ).json()
+    }
 
     const {result, error} = response
     if (error) throw new Error(error.message)

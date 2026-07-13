@@ -10,6 +10,7 @@ const PROVIDERS = {
   DeepSeek: 'deepseek',
   OpenRouter: 'openrouter',
   Moonshot: 'moonshot',
+  DeepInfra: 'deepinfra',
 }
 
 const DEFAULT_MODELS = {
@@ -24,6 +25,7 @@ const DEFAULT_MODELS = {
   [PROVIDERS.DeepSeek]: 'deepseek-chat',
   [PROVIDERS.OpenRouter]: 'openai/gpt-4o-mini',
   [PROVIDERS.Moonshot]: 'kimi-k2.6',
+  [PROVIDERS.DeepInfra]: 'Qwen/Qwen3.6-35B-A3B',
 }
 
 const PROVIDER_CONFIG_DEFAULTS = {
@@ -88,6 +90,18 @@ const PROVIDER_CONFIG_DEFAULTS = {
     authPrefix: 'Bearer',
     omitTemperature: true,
   },
+  [PROVIDERS.DeepInfra]: {
+    baseUrl: 'https://api.deepinfra.com/v1/openai',
+    chatPath: '/chat/completions',
+    modelsPath: '/models',
+    authHeader: 'Authorization',
+    authPrefix: 'Bearer',
+    extraBody: {
+      chat_template_kwargs: {
+        enable_thinking: false,
+      },
+    },
+  },
 }
 
 const OPENAI_COMPATIBLE_PROVIDERS = [
@@ -99,6 +113,7 @@ const OPENAI_COMPATIBLE_PROVIDERS = [
   PROVIDERS.DeepSeek,
   PROVIDERS.OpenRouter,
   PROVIDERS.Moonshot,
+  PROVIDERS.DeepInfra,
 ]
 
 const STRICT_PROFILE = {

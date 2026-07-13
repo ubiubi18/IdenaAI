@@ -227,11 +227,25 @@ function createAiTestUnitBridge({logger, aiProviderBridge, dependencies = {}}) {
   }
 
   function summarizeBatches(batches) {
-    return batches.reduce(
+    const totals = batches.reduce(
       (acc, batch) => {
         const summary = batch.summary || {}
         const diagnostics = summary.diagnostics || {}
         const tokens = summary.tokens || {}
+        const costs = summary.costs || {}
+        const estimatedUsd = Number(costs.estimatedUsd)
+        const actualUsd = Number(costs.actualUsd)
+        const hasEstimated =
+          costs.estimatedUsd != null && Number.isFinite(estimatedUsd)
+        const hasActual = costs.actualUsd != null && Number.isFinite(actualUsd)
+        const estimatedItems = Math.max(
+          0,
+          toInt(costs.itemsWithEstimated, hasEstimated ? 1 : 0)
+        )
+        const actualItems = Math.max(
+          0,
+          toInt(costs.itemsWithActual, hasActual ? 1 : 0)
+        )
         return {
           totalFlips: acc.totalFlips + (summary.totalFlips || 0),
           elapsedMs: acc.elapsedMs + (summary.elapsedMs || 0),
@@ -245,6 +259,13 @@ function createAiTestUnitBridge({logger, aiProviderBridge, dependencies = {}}) {
             totalTokens: acc.tokens.totalTokens + (tokens.totalTokens || 0),
             flipsWithUsage:
               acc.tokens.flipsWithUsage + (tokens.flipsWithUsage || 0),
+          },
+          costs: {
+            estimatedUsd:
+              acc.costs.estimatedUsd + (hasEstimated ? estimatedUsd : 0),
+            actualUsd: acc.costs.actualUsd + (hasActual ? actualUsd : 0),
+            itemsWithEstimated: acc.costs.itemsWithEstimated + estimatedItems,
+            itemsWithActual: acc.costs.itemsWithActual + actualItems,
           },
           diagnostics: {
             swapped: acc.diagnostics.swapped + (diagnostics.swapped || 0),
@@ -278,6 +299,12 @@ function createAiTestUnitBridge({logger, aiProviderBridge, dependencies = {}}) {
           totalTokens: 0,
           flipsWithUsage: 0,
         },
+        costs: {
+          estimatedUsd: 0,
+          actualUsd: 0,
+          itemsWithEstimated: 0,
+          itemsWithActual: 0,
+        },
         diagnostics: {
           swapped: 0,
           notSwapped: 0,
@@ -292,6 +319,20 @@ function createAiTestUnitBridge({logger, aiProviderBridge, dependencies = {}}) {
         },
       }
     )
+
+    return {
+      ...totals,
+      costs: {
+        estimatedUsd:
+          totals.costs.itemsWithEstimated > 0
+            ? totals.costs.estimatedUsd
+            : null,
+        actualUsd:
+          totals.costs.itemsWithActual > 0 ? totals.costs.actualUsd : null,
+        itemsWithEstimated: totals.costs.itemsWithEstimated,
+        itemsWithActual: totals.costs.itemsWithActual,
+      },
+    }
   }
 
   function evaluateResults({selectedFlips, batches}) {

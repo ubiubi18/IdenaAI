@@ -169,6 +169,8 @@ function formatAiProviderLabel(value) {
       return 'OpenRouter'
     case 'moonshot':
       return 'Moonshot Kimi'
+    case 'deepinfra':
+      return 'DeepInfra Qwen'
     default:
       return provider
   }

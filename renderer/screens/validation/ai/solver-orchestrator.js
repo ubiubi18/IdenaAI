@@ -778,6 +778,7 @@ function normalizeConsultProvider(value) {
       'mistral',
       'groq',
       'deepseek',
+      'deepinfra',
       'openrouter',
       'moonshot',
     ].includes(provider)

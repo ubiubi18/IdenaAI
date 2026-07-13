@@ -1,6 +1,7 @@
 const {
   buildLocalAiRuntimePayload,
   checkAiProviderReadiness,
+  formatAiProviderLabel,
   formatMissingAiProviders,
   getRequiredAiProviders,
 } = require('./ai-provider-readiness')
@@ -66,6 +67,10 @@ describe('ai-provider-readiness', () => {
     expect(
       formatMissingAiProviders(['openai', 'moonshot', 'gemini', 'openai', ''])
     ).toBe('openai, Moonshot Kimi, gemini')
+  })
+
+  it('formats the hosted Qwen provider label', () => {
+    expect(formatAiProviderLabel('deepinfra')).toBe('DeepInfra Qwen')
   })
 
   it('keeps the local AI enabled flag in the runtime payload', () => {

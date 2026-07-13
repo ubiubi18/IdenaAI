@@ -47,12 +47,17 @@ const {
   KIMI_K2_6_LOCAL_RUNTIME_FAMILY,
   KIMI_K2_6_LOCAL_RUNTIME_MODEL,
   KIMI_K2_6_LOCAL_RUNTIME_VISION_MODEL,
+  QWEN36_35B_A3B_LOCAL_BASE_URL,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
+  QWEN36_35B_A3B_LOCAL_RUNTIME_VISION_MODEL,
   buildLocalAiSettings,
   buildMolmo2OResearchPreset,
   buildMolmo24BCompactPreset,
   buildInternVl351BLightPreset,
   buildInternVl358BExperimentalPreset,
   buildKimiK26ExtremeLocalPreset,
+  buildQwen3635BLocalPreset,
   buildManagedLocalAiTrustApprovalPatch,
   buildManagedLocalRuntimePreset,
   buildLocalAiRepairPreset,
@@ -396,12 +401,40 @@ describe('local-ai settings schema', () => {
     ).toBe('')
   })
 
+  it('builds a local Qwen 3.6 35B endpoint preset without managed install', () => {
+    expect(buildQwen3635BLocalPreset()).toMatchObject({
+      runtimeBackend: 'local-runtime-service',
+      baseUrl: QWEN36_35B_A3B_LOCAL_BASE_URL,
+      endpoint: QWEN36_35B_A3B_LOCAL_BASE_URL,
+      runtimeType: 'sidecar',
+      runtimeFamily: QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+      model: QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
+      visionModel: QWEN36_35B_A3B_LOCAL_RUNTIME_VISION_MODEL,
+    })
+    expect(
+      getManagedLocalRuntimeFamilyForMemoryReference(
+        QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY
+      )
+    ).toBe(QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY)
+  })
+
   it('uses compact Molmo2-4B as the managed local runtime default', () => {
     expect(buildManagedLocalRuntimePreset()).toMatchObject({
       runtimeBackend: 'local-runtime-service',
       runtimeFamily: MOLMO2_4B_RESEARCH_RUNTIME_FAMILY,
       model: MOLMO2_4B_RESEARCH_RUNTIME_MODEL,
       visionModel: MOLMO2_4B_RESEARCH_RUNTIME_VISION_MODEL,
+    })
+  })
+
+  it('builds Qwen 3.6 35B as an installable managed runtime preset', () => {
+    expect(
+      buildManagedLocalRuntimePreset(QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY)
+    ).toMatchObject({
+      runtimeBackend: 'local-runtime-service',
+      runtimeFamily: QWEN36_35B_A3B_LOCAL_RUNTIME_FAMILY,
+      model: QWEN36_35B_A3B_LOCAL_RUNTIME_MODEL,
+      visionModel: QWEN36_35B_A3B_LOCAL_RUNTIME_VISION_MODEL,
     })
   })
 
