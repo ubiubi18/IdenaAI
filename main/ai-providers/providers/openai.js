@@ -282,6 +282,28 @@ function buildOpenAiPayload({
   return payload
 }
 
+function providerExtraBody(providerConfig = {}) {
+  const extraBody = providerConfig && providerConfig.extraBody
+  if (!extraBody || typeof extraBody !== 'object' || Array.isArray(extraBody)) {
+    return null
+  }
+  return extraBody
+}
+
+function applyProviderExtraBody(payload, providerConfig = {}) {
+  const extraBody = providerExtraBody(providerConfig)
+  if (!extraBody) {
+    return payload
+  }
+
+  // Provider defaults may add compatibility flags, but the generated payload
+  // remains authoritative for core chat fields and safety-controlled options.
+  return {
+    ...extraBody,
+    ...payload,
+  }
+}
+
 function dedupePayloadVariants(payloads) {
   const seen = new Set()
   const result = []
@@ -331,7 +353,7 @@ function buildOpenAiPayloadVariants({
   ).trim()
   const includeTemperature = !(providerConfig && providerConfig.omitTemperature)
 
-  return dedupePayloadVariants([
+  const payloads = [
     buildOpenAiPayload({
       model,
       prompt,
@@ -432,12 +454,18 @@ function buildOpenAiPayloadVariants({
       serviceTier,
       reasoningEffort,
     }),
-  ])
+  ].map((payload) => applyProviderExtraBody(payload, providerConfig))
+
+  return dedupePayloadVariants(payloads)
 }
 
 function extractOpenAiRawText(message) {
   const parsed = message && message.parsed
   const content = message && message.content
+  const reasoningContent =
+    message && typeof message.reasoning_content === 'string'
+      ? message.reasoning_content
+      : ''
   const functionCall = message && message.function_call
   const toolCalls =
     message && Array.isArray(message.tool_calls) ? message.tool_calls : []
@@ -494,7 +522,12 @@ function extractOpenAiRawText(message) {
     return stringifyJsonLike(content)
   }
 
-  return String(content || '')
+  const rawContent = String(content || '').trim()
+  if (rawContent) {
+    return rawContent
+  }
+
+  return reasoningContent.trim()
 }
 
 function extractOpenAiProviderMeta(responseData) {

@@ -13,6 +13,7 @@ const managedInternVl351BManifest = require('./managed-internvl3.5-1b-manifest.j
 const managedMolmo2OManifest = require('./managed-molmo2-manifest.json')
 const managedMolmo24BManifest = require('./managed-molmo2-4b-manifest.json')
 const managedInternVl358BManifest = require('./managed-internvl3.5-8b-manifest.json')
+const managedQwen3635BA3BManifest = require('./managed-qwen3.6-35b-a3b-manifest.json')
 
 function normalizeManagedManifestVerifyFiles(verifyFiles) {
   return verifyFiles &&
@@ -123,6 +124,16 @@ const MANAGED_LOCAL_RUNTIMES = {
     defaultRevision: '741a7d03020411e666c6109218ab71e08151ef86',
     preferredFlavor: 'transformers',
     transformersRequirements: MANAGED_INTERNVL_TRANSFORMERS_REQUIREMENTS,
+  }),
+  'qwen3.6-35b-a3b-local': buildManagedRuntimeConfig({
+    runtimeFamily: 'qwen3.6-35b-a3b-local',
+    runtimeRootName: 'qwen3.6-35b-a3b',
+    displayName: 'Qwen3.6-35B-A3B',
+    manifest: managedQwen3635BA3BManifest,
+    defaultModel: 'Qwen/Qwen3.6-35B-A3B',
+    defaultRevision: '995ad96eacd98c81ed38be0c5b274b04031597b0',
+    preferredFlavor: 'transformers',
+    transformersRequirements: MANAGED_GENERIC_TRANSFORMERS_REQUIREMENTS,
   }),
 }
 const DEFAULT_MANAGED_MOLMO2_RUNTIME_FAMILY =
