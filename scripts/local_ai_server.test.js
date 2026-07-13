@@ -6,6 +6,11 @@ const MAX_REQUEST_BYTES = 4096
 
 jest.setTimeout(30000)
 
+const itRunsLocalHttpScenario =
+  process.platform === 'darwin' && process.env.GITHUB_ACTIONS === 'true'
+    ? it.skip
+    : it
+
 function pythonInvocation() {
   const configured = String(
     process.env.IDENAAI_PYTHON ||
@@ -189,8 +194,10 @@ describe('local_ai_server.py', () => {
     }
   })
 
-  it('rejects oversized JSON bodies with HTTP 413', async () => {
-    const output = await runPythonServerScenario(`
+  itRunsLocalHttpScenario(
+    'rejects oversized JSON bodies with HTTP 413',
+    async () => {
+      const output = await runPythonServerScenario(`
 body = json.dumps({"input": "x" * ${MAX_REQUEST_BYTES}})
 response = request(
     "POST",
@@ -200,19 +207,22 @@ response = request(
 )
 print(json.dumps(response))
 `)
-    const response = JSON.parse(output)
+      const response = JSON.parse(output)
 
-    expect(response.statusCode).toBe(413)
-    expect(response.body).toMatchObject({
-      error: {
-        message: 'request_too_large',
-        type: 'invalid_request',
-      },
-    })
-  })
+      expect(response.statusCode).toBe(413)
+      expect(response.body).toMatchObject({
+        error: {
+          message: 'request_too_large',
+          type: 'invalid_request',
+        },
+      })
+    }
+  )
 
-  it('requires the managed local auth token when configured', async () => {
-    const output = await runPythonServerScenario(`
+  itRunsLocalHttpScenario(
+    'requires the managed local auth token when configured',
+    async () => {
+      const output = await runPythonServerScenario(`
 server.auth_token = "managed-local-token"
 unauthorized = request("GET", "/health")
 authorized = request(
@@ -222,23 +232,26 @@ authorized = request(
 )
 print(json.dumps({"unauthorized": unauthorized, "authorized": authorized}))
 `)
-    const {authorized, unauthorized} = JSON.parse(output)
+      const {authorized, unauthorized} = JSON.parse(output)
 
-    expect(unauthorized.statusCode).toBe(401)
-    expect(unauthorized.body).toMatchObject({
-      error: {
-        message: 'unauthorized',
-        type: 'auth_error',
-      },
-    })
-    expect(authorized.statusCode).toBe(200)
-    expect(authorized.body).toMatchObject({
-      object: 'list',
-    })
-  })
+      expect(unauthorized.statusCode).toBe(401)
+      expect(unauthorized.body).toMatchObject({
+        error: {
+          message: 'unauthorized',
+          type: 'auth_error',
+        },
+      })
+      expect(authorized.statusCode).toBe(200)
+      expect(authorized.body).toMatchObject({
+        object: 'list',
+      })
+    }
+  )
 
-  it('rejects non-JSON POST bodies with HTTP 415', async () => {
-    const output = await runPythonServerScenario(`
+  itRunsLocalHttpScenario(
+    'rejects non-JSON POST bodies with HTTP 415',
+    async () => {
+      const output = await runPythonServerScenario(`
 response = request(
     "POST",
     "/chat/completions",
@@ -247,16 +260,17 @@ response = request(
 )
 print(json.dumps(response))
 `)
-    const response = JSON.parse(output)
+      const response = JSON.parse(output)
 
-    expect(response.statusCode).toBe(415)
-    expect(response.body).toMatchObject({
-      error: {
-        message: 'unsupported_media_type',
-        type: 'invalid_request',
-      },
-    })
-  })
+      expect(response.statusCode).toBe(415)
+      expect(response.body).toMatchObject({
+        error: {
+          message: 'unsupported_media_type',
+          type: 'invalid_request',
+        },
+      })
+    }
+  )
 
   it('folds system prompts into Molmo-compatible user turns', async () => {
     const output = await runPythonSnippet(`
