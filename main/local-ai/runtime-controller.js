@@ -499,7 +499,9 @@ function parseManagedSnapshotDownloadProcesses(psOutput, snapshotDir) {
     return []
   }
 
-  const normalizedSnapshotDir = path.resolve(requestedSnapshotDir)
+  const normalizedSnapshotDir = path
+    .resolve(requestedSnapshotDir)
+    .replace(/\\/g, '/')
 
   return String(psOutput || '')
     .split(/\r?\n/u)
@@ -512,13 +514,14 @@ function parseManagedSnapshotDownloadProcesses(psOutput, snapshotDir) {
 
       const pid = Number.parseInt(match[1], 10)
       const command = match[2]
+      const normalizedCommand = command.replace(/\\/g, '/')
 
       if (
         !Number.isFinite(pid) ||
         pid === process.pid ||
-        !command.includes('snapshot_download') ||
-        !command.includes('huggingface_hub') ||
-        !command.includes(normalizedSnapshotDir)
+        !normalizedCommand.includes('snapshot_download') ||
+        !normalizedCommand.includes('huggingface_hub') ||
+        !normalizedCommand.includes(normalizedSnapshotDir)
       ) {
         return null
       }
@@ -1311,6 +1314,7 @@ function buildManagedRuntimeEnv(runtimeRoot, extra = {}) {
     PIP_DISABLE_PIP_VERSION_CHECK: '1',
     PIP_NO_PYTHON_VERSION_WARNING: '1',
     PIP_REQUIRE_VIRTUALENV: '1',
+    MPLBACKEND: process.env.MPLBACKEND || 'Agg',
     PYTHONUNBUFFERED: '1',
     PYTORCH_ENABLE_MPS_FALLBACK: '1',
     ...extra,

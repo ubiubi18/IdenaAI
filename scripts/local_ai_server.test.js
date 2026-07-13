@@ -7,10 +7,25 @@ const SCRIPT_PATH = path.join(__dirname, 'local_ai_server.py')
 const MAX_REQUEST_BYTES = 4096
 const AUTH_TOKEN_ENV = 'IDENAAI_LOCAL_RUNTIME_TOKEN'
 
+jest.setTimeout(30000)
+
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
+}
+
+function pythonInvocation() {
+  const configured = String(
+    process.env.IDENAAI_PYTHON ||
+      (process.platform === 'win32' ? 'python' : 'python3')
+  ).trim()
+  const [command, ...args] = configured.split(/\s+/u).filter(Boolean)
+
+  return {
+    command: command || (process.platform === 'win32' ? 'python' : 'python3'),
+    args,
+  }
 }
 
 function findFreePort() {
@@ -85,8 +100,16 @@ function request({
   })
 }
 
-async function waitForHealth(port, headers = {}) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+async function waitForHealth(port, headers = {}, running = null) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (running && running.child && running.child.exitCode !== null) {
+      throw new Error(
+        `Local AI stub exited before health check: exit ${
+          running.child.exitCode
+        }\n${running.getStderr()}`
+      )
+    }
+
     try {
       const response = await request({port, requestPath: '/health', headers})
 
@@ -104,9 +127,11 @@ async function waitForHealth(port, headers = {}) {
 }
 
 function spawnStub(args = [], extraEnv = {}) {
+  const python = pythonInvocation()
   const child = spawn(
-    'python3',
+    python.command,
     [
+      ...python.args,
       SCRIPT_PATH,
       '--backend',
       'stub',
@@ -118,6 +143,7 @@ function spawnStub(args = [], extraEnv = {}) {
       cwd: path.resolve(__dirname, '..'),
       env: {
         ...process.env,
+        MPLBACKEND: process.env.MPLBACKEND || 'Agg',
         PYTHONUNBUFFERED: '1',
         ...extraEnv,
       },
@@ -143,10 +169,12 @@ function spawnStub(args = [], extraEnv = {}) {
 
 function runPythonSnippet(snippet) {
   return new Promise((resolve, reject) => {
-    const child = spawn('python3', ['-c', snippet], {
+    const python = pythonInvocation()
+    const child = spawn(python.command, [...python.args, '-c', snippet], {
       cwd: path.resolve(__dirname, '..'),
       env: {
         ...process.env,
+        MPLBACKEND: process.env.MPLBACKEND || 'Agg',
         PYTHONPATH: path.resolve(__dirname),
       },
     })
@@ -218,7 +246,7 @@ describe('local_ai_server.py', () => {
     const port = await findFreePort()
     running = spawnStub(['--port', String(port)])
 
-    await waitForHealth(port)
+    await waitForHealth(port, {}, running)
 
     const oversizedBody = JSON.stringify({
       input: 'x'.repeat(MAX_REQUEST_BYTES),
@@ -247,7 +275,7 @@ describe('local_ai_server.py', () => {
       [AUTH_TOKEN_ENV]: authToken,
     })
 
-    await waitForHealth(port, {'X-IdenaAI-Local-Token': authToken})
+    await waitForHealth(port, {'X-IdenaAI-Local-Token': authToken}, running)
 
     const unauthorized = await request({
       port,
@@ -276,7 +304,7 @@ describe('local_ai_server.py', () => {
     const port = await findFreePort()
     running = spawnStub(['--port', String(port)])
 
-    await waitForHealth(port)
+    await waitForHealth(port, {}, running)
 
     const response = await request({
       port,
