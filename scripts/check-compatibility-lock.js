@@ -2,6 +2,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const {loadAndVerifyPromotionEvidence} = require('./check-promotion-evidence')
 
 const ROOT = path.resolve(__dirname, '..')
 const LOCK_PATH = path.join(ROOT, 'compatibility', 'stack-lock.json')
@@ -111,7 +112,7 @@ function verifyLockIdentity(lock) {
   if (
     lock.schema !== 1 ||
     lock.releaseId !== 'idena-mainnet-legacy-compat-2026.07.12-rc3' ||
-    lock.status !== 'candidate'
+    !['candidate', 'promoted'].includes(lock.status)
   ) {
     throw new Error('Unexpected compatibility lock identity')
   }
@@ -317,12 +318,16 @@ function parseArgs(argv) {
   return options
 }
 
-function requirePromoted(lock) {
+function requirePromoted(
+  lock,
+  verifyEvidence = loadAndVerifyPromotionEvidence
+) {
   if (lock.status !== 'promoted') {
     throw new Error(
       'Compatibility stack is still a candidate; release promotion gates have not been completed'
     )
   }
+  verifyEvidence(lock)
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -335,7 +340,9 @@ function main(argv = process.argv.slice(2)) {
     readJson(SOCIAL_LOCK_PATH),
     readRegular(CONTRACT_RUNNER_MOD_PATH)
   )
-  if (options.requirePromoted) requirePromoted(lock)
+  if (lock.status === 'promoted' || options.requirePromoted) {
+    requirePromoted(lock)
+  }
   console.log('IdenaAI compatibility lock passed')
 }
 
