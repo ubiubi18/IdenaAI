@@ -6,6 +6,7 @@ const {
   parseArgs,
   sourceFetchRef,
   sourcePath,
+  requireGitCheckout,
   verifyGitCheckout,
 } = require('./setup-sources')
 
@@ -85,6 +86,21 @@ describe('setup sources script', () => {
       fs.writeFileSync(path.join(sourceDir, 'untracked.txt'), 'untrusted\n')
       expect(() => verifyGitCheckout(source, sourceDir)).toThrow(
         'source checkout has uncommitted changes'
+      )
+    } finally {
+      fs.rmSync(sourceDir, {recursive: true, force: true})
+    }
+  })
+
+  it('rejects plain source directories that have no verifiable commit', () => {
+    const sourceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'idena-plain-source-')
+    )
+
+    try {
+      fs.writeFileSync(path.join(sourceDir, 'go.mod'), 'module example.test\n')
+      expect(() => requireGitCheckout({name: 'idena-go'}, sourceDir)).toThrow(
+        'is not a verifiable Git checkout'
       )
     } finally {
       fs.rmSync(sourceDir, {recursive: true, force: true})
