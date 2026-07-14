@@ -104,6 +104,17 @@ function verifyGitCheckout(source, dir) {
     )
   }
 
+  const status = run(
+    'git',
+    ['status', '--porcelain=v1', '--untracked-files=all'],
+    {cwd: dir, capture: true}
+  )
+  if (status) {
+    throw new Error(
+      `${source.name}: source checkout has uncommitted changes; refusing to treat it as pinned source`
+    )
+  }
+
   if (!requiredFilesPresent(source, dir)) {
     throw new Error(`${source.name}: checkout is missing required files`)
   }
@@ -199,4 +210,5 @@ module.exports = {
   parseArgs,
   sourceFetchRef,
   sourcePath,
+  verifyGitCheckout,
 }
