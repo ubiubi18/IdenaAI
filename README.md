@@ -9,9 +9,15 @@ your own risk.
 
 ## Current source status
 
-This repository has no published GitHub release artifacts. Tags document source
-milestones; they are not signed or supported desktop installers. The `main`
-branch tracks the `v0.1.0` source line.
+The GitHub `v0.1.0` release contains developer build artifacts for Linux, macOS,
+and Windows. They are unsigned, unnotarized, unsupported, and must not be
+treated as trusted wallet installers. Tags document source milestones; the
+`main` branch tracks the `v0.1.0` source line.
+
+The published `v0.1.0` workflow ran from commit `6567d4498973741a48cf7fc22efac631f9afcfa3`.
+That tag was moved during release bring-up, so it is not sufficient as immutable
+provenance. Verify the commit and GitHub-provided asset digest. The current
+release workflow refuses to reuse an existing published tag.
 
 ### Foundation updates in v0.1.0
 
@@ -24,6 +30,9 @@ branch tracks the `v0.1.0` source line.
   constrained by `compatibility/stack-lock.json`. This composes the reviewed
   desktop, contract-runner, and social-UI profiles without changing the legacy
   chain's genesis, network ID, gossip protocol, reward rules, or consensus.
+- The lock remains a candidate manifest. Its listed differential, P2P,
+  cross-architecture, and independent-rebuild gates are promotion requirements;
+  this repository's regular CI does not by itself prove that all have passed.
 - Node RPC keys are stored in user-only files, RPC is bound to loopback by
   default, renderer persistence is restricted, and packaged output is checked
   for private data and unexpected artifacts.
@@ -110,6 +119,7 @@ Requirements:
 - Node.js `24.18.x` LTS
 - npm `11.16.x`
 - Git
+- Python `3.11+` for optional Python data, inspection, and flip pipelines
 
 This is not a hardened wallet release, not a signed installer distribution, and
 not a guarantee of validation success. Use it only after reading the code and
@@ -117,9 +127,10 @@ understanding the risk.
 
 ## Current Status
 
-`v0.1.0` is a source milestone. There are no supported release binaries in this
-repository. The safest way to evaluate the app is to clone the source, install
-dependencies, run the checks, and start Electron locally.
+`v0.1.0` is a source milestone. Its GitHub release binaries are experimental
+developer artifacts, not supported or trusted installers. The safest way to
+evaluate the app is to clone the source, verify the exact commit and dependency
+locks, run the checks, and start Electron locally.
 
 What works for research:
 
