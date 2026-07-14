@@ -30,11 +30,13 @@ release workflow refuses to reuse an existing published tag.
   constrained by `compatibility/stack-lock.json`. This composes the reviewed
   desktop, contract-runner, and social-UI profiles without changing the legacy
   chain's genesis, network ID, gossip protocol, reward rules, or consensus.
-- The lock remains a candidate manifest. Its listed differential, P2P,
-  cross-architecture, and independent-rebuild gates are promotion requirements;
-  this repository's regular CI does not by itself prove that all have passed.
-- Tagged releases fail closed while that manifest remains a candidate. Promotion
-  requires a reviewed lock and checker update backed by the listed evidence.
+- The lock remains a candidate manifest. CI now runs the fixed Wasm receipt and
+  gas vectors on Linux and macOS for x64 and arm64 and compares two isolated
+  Linux node rebuilds. Live legacy block/RPC, state replay, and mixed-node P2P
+  interoperability remain external promotion requirements.
+- Tagged releases fail closed while that manifest remains a candidate. A
+  promoted lock must pin a reviewed evidence manifest and checksum-bound reports
+  for every required gate; stale, incomplete, or modified evidence is rejected.
 - Node RPC keys are stored in user-only files, RPC is bound to loopback by
   default, renderer persistence is restricted, and packaged output is checked
   for private data and unexpected artifacts.
@@ -245,6 +247,19 @@ npm run setup:sources
 npm run update:sources
 npm run build:node
 npm run doctor
+```
+
+Compatibility evidence and promotion requirements are documented in
+[`compatibility/README.md`](compatibility/README.md). The local evidence scripts
+can be run with explicit, non-secret builder identities:
+
+```bash
+npm run compatibility:build-evidence -- \
+  --builder-id local-a \
+  --report build/compatibility/local-a.json
+npm run compatibility:check-build-evidence -- \
+  build/compatibility/local-a.json \
+  build/compatibility/local-b.json
 ```
 
 ## AI Provider Setup

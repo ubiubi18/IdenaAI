@@ -11,6 +11,7 @@ const ROOT = path.join(__dirname, '..')
 const PINNED_NODE_VERSION = '1.1.2'
 const MIN_NODE_BINARY_SIZE = 1024 * 1024
 const DEFAULT_GO_TOOLCHAIN = process.env.IDENA_GO_GOTOOLCHAIN || 'go1.26.5'
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/u
 
 function readOptionValue(argv, index, option) {
   const value = argv[index + 1]
@@ -81,6 +82,38 @@ function run(command, args, options = {}) {
 function relativePath(fromDir, toDir) {
   const relative = path.relative(fromDir, toDir) || '.'
   return relative.startsWith('.') ? relative : `.${path.sep}${relative}`
+}
+
+function linkerFlags({
+  arch,
+  bindingCommit,
+  goToolchain,
+  platform,
+  sourceCommit,
+}) {
+  if (
+    !COMMIT_PATTERN.test(sourceCommit || '') ||
+    !COMMIT_PATTERN.test(bindingCommit || '') ||
+    !/^[a-z0-9._-]+$/u.test(goToolchain || '') ||
+    !/^[a-z0-9_-]+$/u.test(platform || '') ||
+    !/^[a-z0-9_-]+$/u.test(arch || '')
+  ) {
+    throw new Error('node build inputs contain an invalid compatibility pin')
+  }
+  const buildId = crypto
+    .createHash('sha256')
+    .update(
+      [
+        `idena-go=${sourceCommit}`,
+        `idena-wasm-binding=${bindingCommit}`,
+        `go=${goToolchain}`,
+        `platform=${platform}`,
+        `arch=${arch}`,
+        `version=${PINNED_NODE_VERSION}`,
+      ].join('\n')
+    )
+    .digest('hex')
+  return `-buildid=idena-go/${buildId} -s -w -X main.version=${PINNED_NODE_VERSION}`
 }
 
 function findSourceDir(envKey, defaultName, requiredFile) {
@@ -302,6 +335,12 @@ function main() {
   const sourceManifest = readManifest()
   verifyPinnedBuildSource(sourceManifest, 'idena-go', idenaGoDir)
   verifyPinnedBuildSource(sourceManifest, 'idena-wasm-binding', wasmBindingDir)
+  const nodeSource = sourceManifest.sources.find(
+    (source) => source.name === 'idena-go'
+  )
+  const bindingSource = sourceManifest.sources.find(
+    (source) => source.name === 'idena-wasm-binding'
+  )
 
   const libName = bindingLibName(options.platform, options.arch)
   if (!libName) {
@@ -313,7 +352,10 @@ function main() {
 
   fs.mkdirSync(path.dirname(options.output), {recursive: true})
 
-  const localWasmBinding = path.resolve(wasmBindingDir)
+  const localWasmBinding = relativePath(
+    idenaGoDir,
+    path.resolve(wasmBindingDir)
+  )
   const modDir = fs.mkdtempSync(path.join(os.tmpdir(), 'idena-ai-mod-'))
   const modFile = path.join(modDir, 'idena.mod')
   fs.copyFileSync(path.join(idenaGoDir, 'go.mod'), modFile)
@@ -342,7 +384,13 @@ function main() {
         '-mod=readonly',
         '-trimpath',
         '-ldflags',
-        `-s -w -X main.version=${PINNED_NODE_VERSION}`,
+        linkerFlags({
+          arch: options.arch,
+          bindingCommit: bindingSource.commit,
+          goToolchain: DEFAULT_GO_TOOLCHAIN,
+          platform: options.platform,
+          sourceCommit: nodeSource.commit,
+        }),
         '-o',
         path.resolve(options.output),
         '.',
@@ -391,6 +439,7 @@ if (require.main === module) {
 module.exports = {
   assertNativeBuildTarget,
   bindingLibName,
+  linkerFlags,
   normalizeArchForBinding,
   parseArgs,
   pathEnvKey,
