@@ -1,5 +1,17 @@
+const fs = require('fs')
+const os = require('os')
 const path = require('path')
-const {parseArgs, sourceFetchRef, sourcePath} = require('./setup-sources')
+const {execFileSync} = require('child_process')
+const {
+  parseArgs,
+  sourceFetchRef,
+  sourcePath,
+  verifyGitCheckout,
+} = require('./setup-sources')
+
+function git(cwd, args) {
+  return execFileSync('git', args, {cwd, encoding: 'utf8'}).trim()
+}
 
 describe('setup sources script', () => {
   it('parses check, update, and target root options', () => {
@@ -36,5 +48,46 @@ describe('setup sources script', () => {
     expect(sourceFetchRef({ref: 'vibe/clean-modern-fork'})).toBe(
       'vibe/clean-modern-fork'
     )
+  })
+
+  it('rejects modified or untracked files in a pinned source checkout', () => {
+    const sourceDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'idena-source-verification-')
+    )
+
+    try {
+      git(sourceDir, ['init', '--initial-branch=main'])
+      fs.writeFileSync(path.join(sourceDir, 'go.mod'), 'module example.test\n')
+      git(sourceDir, ['add', 'go.mod'])
+      git(sourceDir, [
+        '-c',
+        'user.name=Idena Test',
+        '-c',
+        'user.email=idena-test@example.invalid',
+        'commit',
+        '-m',
+        'fixture',
+      ])
+
+      const source = {
+        name: 'idena-go',
+        commit: git(sourceDir, ['rev-parse', 'HEAD']),
+        requiredFiles: ['go.mod'],
+      }
+      expect(() => verifyGitCheckout(source, sourceDir)).not.toThrow()
+
+      fs.appendFileSync(path.join(sourceDir, 'go.mod'), '\n// modified\n')
+      expect(() => verifyGitCheckout(source, sourceDir)).toThrow(
+        'source checkout has uncommitted changes'
+      )
+
+      git(sourceDir, ['checkout', '--', 'go.mod'])
+      fs.writeFileSync(path.join(sourceDir, 'untracked.txt'), 'untrusted\n')
+      expect(() => verifyGitCheckout(source, sourceDir)).toThrow(
+        'source checkout has uncommitted changes'
+      )
+    } finally {
+      fs.rmSync(sourceDir, {recursive: true, force: true})
+    }
   })
 })
