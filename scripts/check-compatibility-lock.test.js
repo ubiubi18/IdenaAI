@@ -83,4 +83,34 @@ describe('IdenaAI compatibility lock', () => {
       )
     ).toThrow('Compatibility lock changed a legacy-chain invariant')
   })
+
+  it('rejects a missing differential promotion gate', () => {
+    const changed = clone(lock)
+    changed.requiredGates = changed.requiredGates.filter(
+      (gate) => gate !== 'legacy-modern-p2p-interoperability'
+    )
+    expect(() =>
+      verifyCompatibilityLock(
+        changed,
+        sources,
+        socialPackage,
+        socialLock,
+        runnerGoMod
+      )
+    ).toThrow('Compatibility lock changed the required promotion gates')
+  })
+
+  it('rejects unreviewed toolchain drift', () => {
+    const changed = clone(lock)
+    changed.toolchains.rust = 'nightly'
+    expect(() =>
+      verifyCompatibilityLock(
+        changed,
+        sources,
+        socialPackage,
+        socialLock,
+        runnerGoMod
+      )
+    ).toThrow('Compatibility lock changed the reviewed toolchain set')
+  })
 })
