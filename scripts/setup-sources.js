@@ -70,7 +70,15 @@ function sourcePath(source, targetRoot) {
 }
 
 function isGitCheckout(dir) {
-  return fs.existsSync(path.join(dir, '.git'))
+  try {
+    const metadata = fs.lstatSync(path.join(dir, '.git'))
+    return (
+      !metadata.isSymbolicLink() &&
+      (metadata.isDirectory() || metadata.isFile())
+    )
+  } catch {
+    return false
+  }
 }
 
 function requiredFilesPresent(source, dir) {
@@ -79,16 +87,10 @@ function requiredFilesPresent(source, dir) {
   )
 }
 
-function describeExistingPlainDirectory(source, dir) {
-  if (requiredFilesPresent(source, dir)) {
-    console.log(
-      `[setup-sources] ${source.name}: using existing source directory at ${dir}`
-    )
-    return true
-  }
-
+function requireGitCheckout(source, dir) {
+  if (isGitCheckout(dir)) return
   throw new Error(
-    `${source.name}: ${dir} exists but is missing required source files`
+    `${source.name}: ${dir} is not a verifiable Git checkout; move it aside before setting up pinned sources`
   )
 }
 
@@ -173,10 +175,7 @@ function ensureSource(source, options) {
     return
   }
 
-  if (!isGitCheckout(dir)) {
-    describeExistingPlainDirectory(source, dir)
-    return
-  }
+  requireGitCheckout(source, dir)
 
   if (options.update || !options.check) {
     updateGitSource(source, dir)
@@ -209,6 +208,7 @@ if (require.main === module) {
 module.exports = {
   parseArgs,
   readManifest,
+  requireGitCheckout,
   sourceFetchRef,
   sourcePath,
   verifyGitCheckout,
