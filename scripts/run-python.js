@@ -47,15 +47,28 @@ function requireSupportedPython(command, prefixArgs, run = spawnSync) {
   return version
 }
 
+function parseConfiguredRuntime(configured, platform = process.platform) {
+  const requested = String(configured || '').trim()
+  if (!requested) return null
+
+  if (platform === 'win32') {
+    const launcher = requested.match(/^(py(?:\.exe)?)\s+(-3(?:\.\d+)?)$/iu)
+    if (launcher) {
+      return {command: launcher[1], prefixArgs: [launcher[2]]}
+    }
+  }
+
+  return {command: requested, prefixArgs: []}
+}
+
 function resolvePythonRuntime(
   configured,
   platform = process.platform,
   run = spawnSync
 ) {
-  const requested = String(configured || '').trim()
+  const requested = parseConfiguredRuntime(configured, platform)
   if (requested) {
-    const [command, ...prefixArgs] = requested.split(/\s+/g).filter(Boolean)
-    if (!command) throw new Error('IDENAAI_PYTHON resolved to an empty command')
+    const {command, prefixArgs} = requested
     return {
       command,
       prefixArgs,
@@ -134,6 +147,7 @@ if (require.main === module) main()
 
 module.exports = {
   isSupportedPythonVersion,
+  parseConfiguredRuntime,
   parsePythonVersion,
   requireSupportedPython,
   resolvePythonRuntime,

@@ -1,5 +1,6 @@
 const {
   isSupportedPythonVersion,
+  parseConfiguredRuntime,
   parsePythonVersion,
   requireSupportedPython,
   resolvePythonRuntime,
@@ -42,5 +43,30 @@ describe('run-python runtime gate', () => {
     expect(() => resolvePythonRuntime('python3', 'darwin', run)).toThrow(
       'requires Python 3.11 or newer'
     )
+  })
+
+  it('preserves configured executable paths containing spaces', () => {
+    const executable = 'C:\\Program Files\\Python312\\python.exe'
+    const run = jest.fn((command) => {
+      if (command === executable) return {status: 0, stdout: '3.12.11\n'}
+      return {error: new Error('missing'), status: null, stdout: ''}
+    })
+
+    expect(parseConfiguredRuntime(executable, 'win32')).toEqual({
+      command: executable,
+      prefixArgs: [],
+    })
+    expect(resolvePythonRuntime(executable, 'win32', run)).toEqual({
+      command: executable,
+      prefixArgs: [],
+      version: [3, 12, 11],
+    })
+  })
+
+  it('supports the standard versioned Windows Python launcher form', () => {
+    expect(parseConfiguredRuntime('py -3.12', 'win32')).toEqual({
+      command: 'py',
+      prefixArgs: ['-3.12'],
+    })
   })
 })
