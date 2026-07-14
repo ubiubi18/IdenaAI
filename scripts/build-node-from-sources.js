@@ -5,6 +5,7 @@ const crypto = require('crypto')
 const os = require('os')
 const path = require('path')
 const {spawnSync} = require('child_process')
+const {readManifest, verifyGitCheckout} = require('./setup-sources')
 
 const ROOT = path.join(__dirname, '..')
 const PINNED_NODE_VERSION = '1.1.2'
@@ -102,6 +103,21 @@ function findSourceDir(envKey, defaultName, requiredFile) {
 
 function ensureDefaultSources() {
   run(process.execPath, [path.join(ROOT, 'scripts', 'setup-sources.js')])
+}
+
+function verifyPinnedBuildSource(
+  manifest,
+  sourceName,
+  sourceDir,
+  verify = verifyGitCheckout
+) {
+  const matches = (manifest.sources || []).filter(
+    (source) => source.name === sourceName
+  )
+  if (manifest.version !== 1 || matches.length !== 1) {
+    throw new Error(`source manifest has no unique ${sourceName} pin`)
+  }
+  verify(matches[0], sourceDir)
 }
 
 function normalizeArchForBinding(arch) {
@@ -283,6 +299,10 @@ function main() {
     throw new Error('idena-wasm-binding source directory is missing')
   }
 
+  const sourceManifest = readManifest()
+  verifyPinnedBuildSource(sourceManifest, 'idena-go', idenaGoDir)
+  verifyPinnedBuildSource(sourceManifest, 'idena-wasm-binding', wasmBindingDir)
+
   const libName = bindingLibName(options.platform, options.arch)
   if (!libName) {
     throw new Error(
@@ -376,5 +396,6 @@ module.exports = {
   pathEnvKey,
   relativePath,
   verifyBindingArtifact,
+  verifyPinnedBuildSource,
   windowsMsysUcrtBinCandidates,
 }
