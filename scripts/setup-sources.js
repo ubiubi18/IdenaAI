@@ -208,6 +208,7 @@ if (require.main === module) {
 
 module.exports = {
   parseArgs,
+  readManifest,
   sourceFetchRef,
   sourcePath,
   verifyGitCheckout,
