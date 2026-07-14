@@ -44,6 +44,7 @@ describe('electron builder output staging', () => {
       fs.mkdirSync(stagedOutput)
       fs.mkdirSync(destination)
       fs.writeFileSync(path.join(stagedOutput, 'artifact.txt'), 'current\n')
+      fs.symlinkSync('artifact.txt', path.join(stagedOutput, 'artifact-link'))
       fs.writeFileSync(path.join(destination, 'stale.txt'), 'stale\n')
 
       copyStagedOutput(stagedOutput, destination)
@@ -51,6 +52,9 @@ describe('electron builder output staging', () => {
       expect(
         fs.readFileSync(path.join(destination, 'artifact.txt'), 'utf8')
       ).toBe('current\n')
+      expect(fs.readlinkSync(path.join(destination, 'artifact-link'))).toBe(
+        'artifact.txt'
+      )
       expect(fs.existsSync(path.join(destination, 'stale.txt'))).toBe(false)
     } finally {
       fs.rmSync(fixtureRoot, {recursive: true, force: true})

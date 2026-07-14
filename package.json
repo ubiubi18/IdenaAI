@@ -96,6 +96,8 @@
       "!logs/**",
       "!build",
       "!build/**",
+      "!dist",
+      "!dist/**",
       "!coverage",
       "!coverage/**",
       "!.nyc_output",
