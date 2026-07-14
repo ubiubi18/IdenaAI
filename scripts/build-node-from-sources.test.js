@@ -9,6 +9,7 @@ const {
   pathEnvKey,
   relativePath,
   verifyBindingArtifact,
+  verifyPinnedBuildSource,
   windowsMsysUcrtBinCandidates,
 } = require('./build-node-from-sources')
 
@@ -129,5 +130,31 @@ describe('build node from sources script', () => {
       'checksum mismatch'
     )
     fs.rmSync(bindingDir, {recursive: true, force: true})
+  })
+
+  it('verifies every build source against its unique manifest pin', () => {
+    const manifest = {
+      version: 1,
+      sources: [
+        {
+          name: 'idena-go',
+          commit: 'a'.repeat(40),
+          requiredFiles: ['go.mod'],
+        },
+      ],
+    }
+    const verify = jest.fn()
+
+    verifyPinnedBuildSource(manifest, 'idena-go', '/tmp/idena-go', verify)
+    expect(verify).toHaveBeenCalledWith(manifest.sources[0], '/tmp/idena-go')
+
+    expect(() =>
+      verifyPinnedBuildSource(
+        {...manifest, sources: manifest.sources.concat(manifest.sources[0])},
+        'idena-go',
+        '/tmp/idena-go',
+        verify
+      )
+    ).toThrow('source manifest has no unique idena-go pin')
   })
 })
