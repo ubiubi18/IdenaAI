@@ -33,6 +33,8 @@ release workflow refuses to reuse an existing published tag.
 - The lock remains a candidate manifest. Its listed differential, P2P,
   cross-architecture, and independent-rebuild gates are promotion requirements;
   this repository's regular CI does not by itself prove that all have passed.
+- Tagged releases fail closed while that manifest remains a candidate. Promotion
+  requires a reviewed lock and checker update backed by the listed evidence.
 - Node RPC keys are stored in user-only files, RPC is bound to loopback by
   default, renderer persistence is restricted, and packaged output is checked
   for private data and unexpected artifacts.
