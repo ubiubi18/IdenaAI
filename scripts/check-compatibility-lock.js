@@ -26,6 +26,51 @@ const CONTRACT_RUNNER_MOD_PATH = path.join(
   'go.mod'
 )
 const SHA1_PATTERN = /^[0-9a-f]{40}$/u
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u
+
+const EXPECTED_COMPONENTS = {
+  'idena-go': ['node', 'https://github.com/ubiubi18/idena-go.git'],
+  'idena-wasm-binding': [
+    'native-binding',
+    'https://github.com/ubiubi18/idena-wasm-binding.git',
+  ],
+  'idena-wasm': [
+    'contract-runtime',
+    'https://github.com/ubiubi18/idena-wasm.git',
+  ],
+  wasmer: ['wasm-engine', 'https://github.com/ubiubi18/wasmer.git'],
+  'idena-sdk-js-lite': [
+    'transaction-sdk',
+    'https://github.com/ubiubi18/idena-sdk-js-lite.git',
+  ],
+}
+
+const EXPECTED_TOOLCHAINS = {
+  go: '1.26.5',
+  rust: '1.97.0',
+  node: '24.18.0',
+  npm: '11.16.0',
+}
+
+const EXPECTED_ARTIFACTS = new Set([
+  'libidena_wasm_linux_amd64.a',
+  'libidena_wasm_linux_aarch64.a',
+  'libidena_wasm_darwin_amd64.a',
+  'libidena_wasm_darwin_arm64.a',
+  'libidena_wasm_windows_amd64.a',
+])
+
+const REQUIRED_GATES = [
+  'stack-lock-validation',
+  'legacy-block-rpc-differential',
+  'legacy-state-replay-differential',
+  'legacy-modern-p2p-interoperability',
+  'wasm-receipt-and-gas-differential',
+  'wasm-cross-architecture-determinism',
+  'independent-rebuild-digest-match',
+  'secret-scan',
+  'dependency-policy',
+]
 
 const LEGACY_INVARIANTS = {
   baselineCommit: '938be81dbdeff85f888f4337060a8ebabb12e5b5',
@@ -71,6 +116,8 @@ function verifyLockIdentity(lock) {
     throw new Error('Unexpected compatibility lock identity')
   }
   if (
+    lock.legacyBaseline?.repository !==
+      'https://github.com/idena-network/idena-go.git' ||
     lock.legacyBaseline?.nodeVersion !== '1.1.2' ||
     lock.legacyBaseline?.commit !== LEGACY_INVARIANTS.baselineCommit
   ) {
@@ -109,7 +156,62 @@ function verifyCompatibilityLock(
     if (components.has(component.name)) {
       throw new Error(`Duplicate compatibility component: ${component.name}`)
     }
+    const expected = Object.hasOwn(EXPECTED_COMPONENTS, component.name)
+      ? EXPECTED_COMPONENTS[component.name]
+      : null
+    if (
+      !expected ||
+      component.role !== expected[0] ||
+      component.repository !== expected[1]
+    ) {
+      throw new Error(`Unexpected compatibility component: ${component.name}`)
+    }
+    if (
+      component.name === 'idena-go' &&
+      component.runtimeCodeCommit !== component.commit
+    ) {
+      throw new Error('idena-go runtime code pin does not match its source pin')
+    }
     components.set(component.name, component.commit)
+  }
+  if (components.size !== Object.keys(EXPECTED_COMPONENTS).length) {
+    throw new Error('Compatibility lock has an incomplete component set')
+  }
+
+  if (
+    !lock.toolchains ||
+    Object.keys(lock.toolchains).length !==
+      Object.keys(EXPECTED_TOOLCHAINS).length ||
+    Object.entries(EXPECTED_TOOLCHAINS).some(
+      ([name, version]) => lock.toolchains[name] !== version
+    )
+  ) {
+    throw new Error('Compatibility lock changed the reviewed toolchain set')
+  }
+
+  const gates = lock.requiredGates || []
+  if (
+    gates.length !== REQUIRED_GATES.length ||
+    new Set(gates).size !== REQUIRED_GATES.length ||
+    REQUIRED_GATES.some((gate) => !gates.includes(gate))
+  ) {
+    throw new Error('Compatibility lock changed the required promotion gates')
+  }
+
+  const artifacts = new Set()
+  for (const artifact of lock.artifacts || []) {
+    if (
+      !artifact?.name ||
+      !EXPECTED_ARTIFACTS.has(artifact.name) ||
+      artifacts.has(artifact.name) ||
+      !SHA256_PATTERN.test(artifact.sha256 || '')
+    ) {
+      throw new Error('Compatibility lock contains an invalid artifact pin')
+    }
+    artifacts.add(artifact.name)
+  }
+  if (artifacts.size !== EXPECTED_ARTIFACTS.size) {
+    throw new Error('Compatibility lock has an incomplete artifact set')
   }
 
   const desktopPins = requirePinSet(lock, 'idena-desktop', [
@@ -123,6 +225,12 @@ function verifyCompatibilityLock(
   const socialUiPins = requirePinSet(lock, 'idena-social-ui', [
     'idena-sdk-js-lite',
   ])
+  for (const consumer of ['idena-web', 'idena-indexer', 'P2poolBTC']) {
+    const pins = requirePinSet(lock, consumer, ['idena-go'])
+    if (pins['idena-go'] !== components.get('idena-go')) {
+      throw new Error(`${consumer} drifted from the reviewed node pin`)
+    }
+  }
 
   for (const name of ['idena-go', 'idena-wasm-binding']) {
     if (
