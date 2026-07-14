@@ -40,6 +40,8 @@ release workflow refuses to reuse an existing published tag.
   for private data and unexpected artifacts.
 - Full unit, lint, privacy, dependency, Electron-safety, source-integrity, and
   renderer-build gates run before release packaging.
+- Release builders run read-only and upload artifacts to a separate publisher;
+  the publisher creates one release and includes a `SHA256SUMS` manifest.
 
 ### Benefits
 
