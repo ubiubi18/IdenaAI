@@ -179,7 +179,10 @@ function shouldStageBuilderOutput(
 function copyStagedOutput(stagedOutput, destination) {
   fs.rmSync(destination, {recursive: true, force: true})
   fs.mkdirSync(path.dirname(destination), {recursive: true})
-  fs.cpSync(stagedOutput, destination, {recursive: true})
+  fs.cpSync(stagedOutput, destination, {
+    recursive: true,
+    verbatimSymlinks: true,
+  })
 }
 
 function runElectronBuilder(argv = process.argv.slice(2)) {
