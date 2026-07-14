@@ -127,4 +127,22 @@ describe('IdenaAI compatibility lock', () => {
     )
     expect(() => parseArgs(['--unknown'])).toThrow('Unknown argument')
   })
+
+  it('requires pinned evidence before accepting a promoted stack', () => {
+    const promoted = clone(lock)
+    promoted.status = 'promoted'
+    const verifyEvidence = jest.fn()
+
+    expect(() =>
+      verifyCompatibilityLock(
+        promoted,
+        sources,
+        socialPackage,
+        socialLock,
+        runnerGoMod
+      )
+    ).not.toThrow()
+    expect(() => requirePromoted(promoted, verifyEvidence)).not.toThrow()
+    expect(verifyEvidence).toHaveBeenCalledWith(promoted)
+  })
 })
