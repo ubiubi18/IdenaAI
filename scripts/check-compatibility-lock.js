@@ -305,17 +305,47 @@ function verifyCompatibilityLock(
   }
 }
 
-function main() {
+function parseArgs(argv) {
+  const options = {requirePromoted: false}
+  for (const arg of argv) {
+    if (arg === '--require-promoted') {
+      options.requirePromoted = true
+    } else {
+      throw new Error(`Unknown argument: ${arg}`)
+    }
+  }
+  return options
+}
+
+function requirePromoted(lock) {
+  if (lock.status !== 'promoted') {
+    throw new Error(
+      'Compatibility stack is still a candidate; release promotion gates have not been completed'
+    )
+  }
+}
+
+function main(argv = process.argv.slice(2)) {
+  const options = parseArgs(argv)
+  const lock = readJson(LOCK_PATH)
   verifyCompatibilityLock(
-    readJson(LOCK_PATH),
+    lock,
     readJson(SOURCES_PATH),
     readJson(SOCIAL_PACKAGE_PATH),
     readJson(SOCIAL_LOCK_PATH),
     readRegular(CONTRACT_RUNNER_MOD_PATH)
   )
+  if (options.requirePromoted) requirePromoted(lock)
   console.log('IdenaAI compatibility lock passed')
 }
 
-if (require.main === module) main()
+if (require.main === module) {
+  try {
+    main()
+  } catch (error) {
+    console.error(`[compatibility-lock] ${error.message}`)
+    process.exit(1)
+  }
+}
 
-module.exports = {verifyCompatibilityLock}
+module.exports = {parseArgs, requirePromoted, verifyCompatibilityLock}
