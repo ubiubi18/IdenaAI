@@ -5,7 +5,11 @@ const lock = require('../compatibility/stack-lock.json')
 const sources = require('./source-manifest.json')
 const socialPackage = require('../vendor/idena.social-ui/package.json')
 const socialLock = require('../vendor/idena.social-ui/package-lock.json')
-const {verifyCompatibilityLock} = require('./check-compatibility-lock')
+const {
+  parseArgs,
+  requirePromoted,
+  verifyCompatibilityLock,
+} = require('./check-compatibility-lock')
 
 const runnerGoMod = fs.readFileSync(
   path.join(
@@ -112,5 +116,15 @@ describe('IdenaAI compatibility lock', () => {
         runnerGoMod
       )
     ).toThrow('Compatibility lock changed the reviewed toolchain set')
+  })
+
+  it('blocks releases while the compatibility stack is a candidate', () => {
+    expect(parseArgs(['--require-promoted'])).toEqual({
+      requirePromoted: true,
+    })
+    expect(() => requirePromoted(lock)).toThrow(
+      'release promotion gates have not been completed'
+    )
+    expect(() => parseArgs(['--unknown'])).toThrow('Unknown argument')
   })
 })
