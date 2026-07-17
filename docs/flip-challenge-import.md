@@ -29,7 +29,7 @@ Output format:
 
 ## One-time dependency
 ```bash
-python3 -m pip install --user pyarrow
+python3.11 -m pip install --user -r requirements.txt
 ```
 
 ## Example imports

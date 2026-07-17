@@ -12,39 +12,113 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  release-preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.refs.outputs.tag }}
+      commit: ${{ steps.refs.outputs.commit }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Validate immutable release tag
+        id: refs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_REF_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_REF_NAME#refs/tags/}"
+          if [[ ! "${tag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Unsupported release tag: ${tag}" >&2
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "refs/tags/${tag}")" != "tag" ]]; then
+            echo "Release tag must be annotated: ${tag}" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-list -n 1 "refs/tags/${tag}")" != "$(git rev-parse HEAD)" ]]; then
+            echo "Checked-out commit does not match release tag: ${tag}" >&2
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          trap 'rm -f "${response_file}"' EXIT
+          status="$(curl --silent --show-error --location \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+          case "${status}" in
+            404) ;;
+            200)
+              echo "Refusing to overwrite published release tag: ${tag}" >&2
+              exit 1
+              ;;
+            *)
+              echo "GitHub release lookup failed with HTTP ${status}" >&2
+              cat "${response_file}" >&2
+              exit 1
+              ;;
+          esac
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+
+      - name: Require approved compatibility stack
+        run: node scripts/check-compatibility-lock.js --require-approved
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Audit optional Python dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit==2.10.1
+          python -m pip_audit --requirement requirements.txt --progress-spinner off
+
   release:
+    needs: release-preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-latest
-            electron_builder_args: --mac --publish always
+            artifact_name: release-macos
+            electron_builder_args: --mac --publish never
           - os: ubuntu-latest
-            electron_builder_args: --linux --publish always
+            artifact_name: release-linux
+            electron_builder_args: --linux --publish never
           - os: windows-2022
-            electron_builder_args: --win --publish always
+            artifact_name: release-windows
+            electron_builder_args: --win --publish never
     steps:
       - name: Check out
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-
-      - name: Set tag
-        id: refs
-        env:
-          RELEASE_REF_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-        run: |
-          tag="${RELEASE_REF_NAME#refs/tags/}"
-          if [[ ! "${tag}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-            echo "Unsupported release tag: ${tag}" >&2
-            exit 1
-          fi
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-        shell: bash
+          persist-credentials: false
+          ref: ${{ needs.release-preflight.outputs.commit }}
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -82,18 +156,72 @@ jobs:
 
       - name: Bump version
         env:
-          RELEASE_TAG: ${{ steps.refs.outputs.tag }}
+          RELEASE_TAG: ${{ needs.release-preflight.outputs.tag }}
         run: npm --no-git-tag-version version --allow-same-version "${RELEASE_TAG}"
         shell: bash
 
       - name: Build renderer
         run: npm run build
 
-      - name: Build and release
+      - name: Build release artifacts
         env:
           ELECTRON_BUILDER_ARGS: ${{ matrix.electron_builder_args }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           read -r -a electron_builder_args <<< "${ELECTRON_BUILDER_ARGS}"
           node scripts/run-electron-builder.js "${electron_builder_args[@]}"
+        shell: bash
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.deb
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.blockmap
+            dist/*.yml
+            dist/*.yaml
+            !dist/builder-debug.yml
+            !dist/builder-effective-config.yml
+            !dist/builder-effective-config.yaml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs:
+      - release-preflight
+      - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          mapfile -d '' assets < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z)
+          if (( ${#assets[@]} == 0 )); then
+            echo "No release assets were downloaded" >&2
+            exit 1
+          fi
+          printf '%s\0' "${assets[@]}" | xargs -0 sha256sum > SHA256SUMS
+          assets+=(./SHA256SUMS)
+          gh release create "${RELEASE_TAG}" "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "${RELEASE_TAG}" \
+            --notes-from-tag
         shell: bash
