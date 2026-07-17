@@ -14,13 +14,9 @@ var _0x143b = function (_0x54b9a6, _0x53eccd) {
     if (_0x143b['nYUegT'] === undefined) {
         (function () {
             var _0x2ac550 = function () {
-                var _0x50e697;
-                try {
-                    _0x50e697 = Function('return\x20(function()\x20' + '{}.constructor(\x22return\x20this\x22)(\x20)' + ');')();
-                } catch (_0x3147a5) {
-                    _0x50e697 = window;
-                }
-                return _0x50e697;
+                if (typeof globalThis !== 'undefined') return globalThis;
+                if (typeof window !== 'undefined') return window;
+                return {};
             };
             var _0x434bbe = _0x2ac550();
             var _0x500a9a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';

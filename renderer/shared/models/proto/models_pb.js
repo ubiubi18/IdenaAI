@@ -9,7 +9,7 @@
 
 var jspb = require('google-protobuf');
 var goog = jspb;
-var global = Function('return this')();
+var global = typeof globalThis !== 'undefined' ? globalThis : this;
 
 goog.exportSymbol('proto.models.ProtoAd', null, global);
 goog.exportSymbol('proto.models.ProtoAdBurnKey', null, global);
