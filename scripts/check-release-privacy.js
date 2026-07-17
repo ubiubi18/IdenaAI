@@ -6,6 +6,7 @@ const {execFileSync} = require('child_process')
 
 const SCANNED_PREFIXES = [
   '.github/',
+  'compatibility/',
   'docs/',
   'main/',
   'renderer/',
@@ -14,6 +15,7 @@ const SCANNED_PREFIXES = [
 ]
 
 const SCANNED_FILES = new Set([
+  '.gitleaks.toml',
   '.env.example',
   'package.json',
   'README.md',

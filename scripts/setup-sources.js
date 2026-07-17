@@ -7,6 +7,14 @@ const {spawnSync} = require('child_process')
 const ROOT = path.join(__dirname, '..')
 const MANIFEST_FILE = path.join(__dirname, 'source-manifest.json')
 
+function readOptionValue(argv, index, option) {
+  const value = argv[index + 1]
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${option} requires a value`)
+  }
+  return value
+}
+
 function parseArgs(argv) {
   const options = {
     check: false,
@@ -21,8 +29,8 @@ function parseArgs(argv) {
     } else if (arg === '--update') {
       options.update = true
     } else if (arg === '--target-root') {
+      options.targetRoot = path.resolve(readOptionValue(argv, index, arg))
       index += 1
-      options.targetRoot = path.resolve(argv[index])
     } else {
       throw new Error(`Unknown argument: ${arg}`)
     }
@@ -62,7 +70,15 @@ function sourcePath(source, targetRoot) {
 }
 
 function isGitCheckout(dir) {
-  return fs.existsSync(path.join(dir, '.git'))
+  try {
+    const metadata = fs.lstatSync(path.join(dir, '.git'))
+    return (
+      !metadata.isSymbolicLink() &&
+      (metadata.isDirectory() || metadata.isFile())
+    )
+  } catch {
+    return false
+  }
 }
 
 function requiredFilesPresent(source, dir) {
@@ -71,16 +87,10 @@ function requiredFilesPresent(source, dir) {
   )
 }
 
-function describeExistingPlainDirectory(source, dir) {
-  if (requiredFilesPresent(source, dir)) {
-    console.log(
-      `[setup-sources] ${source.name}: using existing source directory at ${dir}`
-    )
-    return true
-  }
-
+function requireGitCheckout(source, dir) {
+  if (isGitCheckout(dir)) return
   throw new Error(
-    `${source.name}: ${dir} exists but is missing required source files`
+    `${source.name}: ${dir} is not a verifiable Git checkout; move it aside before setting up pinned sources`
   )
 }
 
@@ -96,6 +106,17 @@ function verifyGitCheckout(source, dir) {
     )
   }
 
+  const status = run(
+    'git',
+    ['status', '--porcelain=v1', '--untracked-files=all'],
+    {cwd: dir, capture: true}
+  )
+  if (status) {
+    throw new Error(
+      `${source.name}: source checkout has uncommitted changes; refusing to treat it as pinned source`
+    )
+  }
+
   if (!requiredFilesPresent(source, dir)) {
     throw new Error(`${source.name}: checkout is missing required files`)
   }
@@ -103,18 +124,17 @@ function verifyGitCheckout(source, dir) {
   console.log(`[setup-sources] ${source.name}: ${current}`)
 }
 
-function sourceFetchTarget(source) {
-  const target = source.commit || source.ref
-  if (!target) {
-    throw new Error(`${source.name}: source is missing commit or ref`)
+function sourceFetchRef(source) {
+  const revision = source.commit || source.ref
+  if (!revision) {
+    throw new Error(`${source.name}: source commit or ref is required`)
   }
-  return target
+  return revision
 }
 
 function fetchSource(source, dir) {
-  run('git', ['fetch', '--depth', '1', 'origin', sourceFetchTarget(source)], {
-    cwd: dir,
-  })
+  const revision = sourceFetchRef(source)
+  run('git', ['fetch', '--depth', '1', 'origin', revision], {cwd: dir})
   run('git', ['checkout', '--detach', 'FETCH_HEAD'], {cwd: dir})
 }
 
@@ -131,7 +151,7 @@ function cloneSource(source, dir) {
       '--depth',
       '1',
       '--branch',
-      sourceFetchTarget(source),
+      sourceFetchRef(source),
       source.url,
       dir,
     ])
@@ -155,10 +175,7 @@ function ensureSource(source, options) {
     return
   }
 
-  if (!isGitCheckout(dir)) {
-    describeExistingPlainDirectory(source, dir)
-    return
-  }
+  requireGitCheckout(source, dir)
 
   if (options.update || !options.check) {
     updateGitSource(source, dir)
@@ -179,9 +196,20 @@ function main() {
   console.log('[setup-sources] Source setup complete.')
 }
 
-try {
-  main()
-} catch (error) {
-  console.error(`[setup-sources] ${error.message}`)
-  process.exit(1)
+if (require.main === module) {
+  try {
+    main()
+  } catch (error) {
+    console.error(`[setup-sources] ${error.message}`)
+    process.exit(1)
+  }
+}
+
+module.exports = {
+  parseArgs,
+  readManifest,
+  requireGitCheckout,
+  sourceFetchRef,
+  sourcePath,
+  verifyGitCheckout,
 }
