@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const {execFileSync, spawnSync} = require('child_process')
 
@@ -30,6 +31,7 @@ const ARCH_FLAGS = new Set([
   '--armv7l',
   '--universal',
 ])
+const UNSAFE_SHELL_PATH = /[\0\r\n"'`$;&|<>]/u
 
 function detectMacMachineArch() {
   try {
@@ -148,46 +150,126 @@ function ensureWindowsBundleForTarget(argv) {
   process.exit(1)
 }
 
-const args = process.argv.slice(2)
-
-if (shouldAppendMacArch(args)) {
-  const targetArch = detectMacMachineArch()
-  args.push(targetArch === 'arm64' ? '--arm64' : '--x64')
-  console.log(
-    `[electron-builder-wrapper] Detected macOS machine architecture ${targetArch}; packaging target set to ${targetArch}.`
+function hasExplicitOutputDirectory(argv) {
+  return argv.some((arg) =>
+    /^(?:-c|--config)\.directories\.output(?:=|$)/u.test(arg)
   )
 }
 
-if (shouldPreparePlatformBundle(args)) {
-  const prepareResult = spawnSync(process.execPath, [PREPARE_BUNDLED_NODE], {
-    cwd: ROOT,
-    env: process.env,
-    stdio: 'inherit',
+function shouldStageBuilderOutput(
+  argv,
+  root = ROOT,
+  platform = process.platform
+) {
+  if (platform !== 'darwin' || hasExplicitOutputDirectory(argv)) {
+    return false
+  }
+
+  const targetsMac = includesAny(argv, MAC_PLATFORM_FLAGS)
+  const targetsAnotherPlatform =
+    includesAny(argv, WIN_PLATFORM_FLAGS) ||
+    includesAny(argv, LINUX_PLATFORM_FLAGS)
+  if (!targetsMac && targetsAnotherPlatform) {
+    return false
+  }
+
+  return UNSAFE_SHELL_PATH.test(path.resolve(root, 'dist'))
+}
+
+function copyStagedOutput(stagedOutput, destination) {
+  fs.rmSync(destination, {recursive: true, force: true})
+  fs.mkdirSync(path.dirname(destination), {recursive: true})
+  fs.cpSync(stagedOutput, destination, {
+    recursive: true,
+    verbatimSymlinks: true,
   })
+}
 
-  if (prepareResult.error) {
-    console.error(
-      `preparing bundled Idena node failed: ${prepareResult.error.message}`
+function runElectronBuilder(argv = process.argv.slice(2)) {
+  const args = argv.slice()
+
+  if (shouldAppendMacArch(args)) {
+    const targetArch = detectMacMachineArch()
+    args.push(targetArch === 'arm64' ? '--arm64' : '--x64')
+    console.log(
+      `[electron-builder-wrapper] Detected macOS machine architecture ${targetArch}; packaging target set to ${targetArch}.`
     )
-    process.exit(1)
   }
 
-  if (prepareResult.status !== 0) {
-    process.exit(prepareResult.status || 1)
+  if (shouldPreparePlatformBundle(args)) {
+    const prepareResult = spawnSync(process.execPath, [PREPARE_BUNDLED_NODE], {
+      cwd: ROOT,
+      env: process.env,
+      stdio: 'inherit',
+    })
+
+    if (prepareResult.error) {
+      console.error(
+        `preparing bundled Idena node failed: ${prepareResult.error.message}`
+      )
+      return 1
+    }
+
+    if (prepareResult.status !== 0) {
+      return prepareResult.status || 1
+    }
+  }
+
+  ensureWindowsBundleForTarget(args)
+
+  let stagedOutput = ''
+  const destination = path.join(ROOT, 'dist')
+  if (shouldStageBuilderOutput(args)) {
+    stagedOutput = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'idena-ai-electron-builder-')
+    )
+    if (UNSAFE_SHELL_PATH.test(stagedOutput)) {
+      throw new Error('Temporary Electron Builder path is shell-unsafe')
+    }
+    args.push(`-c.directories.output=${stagedOutput}`)
+    console.log(
+      `[electron-builder-wrapper] Staging output outside shell-unsafe checkout path: ${stagedOutput}`
+    )
+  }
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [ELECTRON_BUILDER_CLI, ...args],
+      {
+        cwd: ROOT,
+        env: process.env,
+        stdio: 'inherit',
+      }
+    )
+
+    if (result.error) {
+      console.error(`electron-builder failed: ${result.error.message}`)
+      return 1
+    }
+    if (result.status !== 0) {
+      return result.status || 1
+    }
+
+    if (stagedOutput) {
+      copyStagedOutput(stagedOutput, destination)
+      console.log(
+        `[electron-builder-wrapper] Copied staged output to ${destination}`
+      )
+    }
+    return 0
+  } finally {
+    if (stagedOutput) {
+      fs.rmSync(stagedOutput, {recursive: true, force: true})
+    }
   }
 }
 
-ensureWindowsBundleForTarget(args)
+if (require.main === module) process.exit(runElectronBuilder())
 
-const result = spawnSync(process.execPath, [ELECTRON_BUILDER_CLI, ...args], {
-  cwd: ROOT,
-  env: process.env,
-  stdio: 'inherit',
-})
-
-if (result.error) {
-  console.error(`electron-builder failed: ${result.error.message}`)
-  process.exit(1)
+module.exports = {
+  copyStagedOutput,
+  hasExplicitOutputDirectory,
+  runElectronBuilder,
+  shouldStageBuilderOutput,
 }
-
-process.exit(result.status || 0)
