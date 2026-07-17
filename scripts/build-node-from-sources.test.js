@@ -5,10 +5,12 @@ const path = require('path')
 const {
   assertNativeBuildTarget,
   bindingLibName,
+  linkerFlags,
   parseArgs,
   pathEnvKey,
   relativePath,
   verifyBindingArtifact,
+  verifyPinnedBuildSource,
   windowsMsysUcrtBinCandidates,
 } = require('./build-node-from-sources')
 
@@ -83,6 +85,27 @@ describe('build node from sources script', () => {
     expect(relativePath('/repo/idena-go', '/repo/idena-go')).toBe('.')
   })
 
+  it('derives a deterministic linker build ID from all pinned inputs', () => {
+    const commit = 'a'.repeat(40)
+    const inputs = {
+      arch: 'arm64',
+      bindingCommit: 'b'.repeat(40),
+      goToolchain: 'go1.26.5',
+      platform: 'darwin',
+      sourceCommit: commit,
+    }
+    const flags = linkerFlags(inputs)
+    expect(flags).toMatch(/-buildid=idena-go\/[0-9a-f]{64}/u)
+    expect(flags).toContain('-X main.version=1.1.2')
+    expect(linkerFlags(inputs)).toBe(flags)
+    expect(linkerFlags({...inputs, bindingCommit: 'c'.repeat(40)})).not.toBe(
+      flags
+    )
+    expect(() => linkerFlags({...inputs, sourceCommit: 'main'})).toThrow(
+      'invalid compatibility pin'
+    )
+  })
+
   it('discovers Windows MSYS2 and Chocolatey toolchain candidates', () => {
     const candidates = windowsMsysUcrtBinCandidates(
       {
@@ -129,5 +152,31 @@ describe('build node from sources script', () => {
       'checksum mismatch'
     )
     fs.rmSync(bindingDir, {recursive: true, force: true})
+  })
+
+  it('verifies every build source against its unique manifest pin', () => {
+    const manifest = {
+      version: 1,
+      sources: [
+        {
+          name: 'idena-go',
+          commit: 'a'.repeat(40),
+          requiredFiles: ['go.mod'],
+        },
+      ],
+    }
+    const verify = jest.fn()
+
+    verifyPinnedBuildSource(manifest, 'idena-go', '/tmp/idena-go', verify)
+    expect(verify).toHaveBeenCalledWith(manifest.sources[0], '/tmp/idena-go')
+
+    expect(() =>
+      verifyPinnedBuildSource(
+        {...manifest, sources: manifest.sources.concat(manifest.sources[0])},
+        'idena-go',
+        '/tmp/idena-go',
+        verify
+      )
+    ).toThrow('source manifest has no unique idena-go pin')
   })
 })

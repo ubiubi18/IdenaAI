@@ -3,6 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const {spawnSync} = require('child_process')
+const {resolvePythonRuntime} = require('./run-python')
 
 const ROOT = path.join(__dirname, '..')
 const manifest = require('./source-manifest.json')
@@ -192,12 +193,17 @@ function main() {
       commandVersion('npm', ['--version'], windowsNodeToolCandidates('npm'))
     ) && ok
   ok = printStatus('git', commandVersion('git')) && ok
-  printInfo(
-    process.platform === 'win32' ? 'python' : 'python3',
-    process.platform === 'win32'
-      ? commandVersion('python')
-      : commandVersion('python3')
-  )
+  try {
+    const python = resolvePythonRuntime(process.env.IDENAAI_PYTHON)
+    printInfo(
+      'python tooling',
+      `${python.command} ${python.prefixArgs.join(' ')} (${python.version.join(
+        '.'
+      )})`.replace(/\s+/gu, ' ')
+    )
+  } catch (error) {
+    printInfo('python tooling', error.message)
+  }
   printInfo(
     'go',
     commandVersion('go', ['version'], windowsGoCommandCandidates())
