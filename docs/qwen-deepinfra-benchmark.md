@@ -20,7 +20,7 @@ result JSON, screenshots, or docs. The runner also accepts
 Install the importer dependencies if the machine does not already have them:
 
 ```bash
-python3 -m pip install --user pyarrow pillow
+python3.11 -m pip install --user -r requirements.txt
 ```
 
 Create a decoded FLIP-Challenge slice and preload it into the IdenaAI test-unit

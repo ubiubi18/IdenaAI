@@ -12,6 +12,9 @@ const syntaxCheckedFiles = [
   'scripts/check-release-artifacts.js',
   'scripts/check-dependency-footprint.js',
   'scripts/check-electron-safety.js',
+  'scripts/check-compatibility-lock.js',
+  'scripts/check-promotion-evidence.js',
+  'scripts/check-node-build-evidence.js',
   'scripts/sync-idena-social-ui.js',
   'scripts/run-next-static-build.js',
   'scripts/release-check.js',
@@ -19,6 +22,7 @@ const syntaxCheckedFiles = [
   'scripts/setup-flips.js',
   'scripts/source-doctor.js',
   'scripts/build-node-from-sources.js',
+  'scripts/build-node-evidence.js',
   'scripts/run-electron-builder.js',
   'scripts/prepare-bundled-node.js',
   'main/channels.js',
@@ -56,6 +60,9 @@ for (const filePath of syntaxCheckedFiles) {
   runStep(`Syntax check ${filePath}`, process.execPath, ['--check', filePath])
 }
 
+runStep('Compatibility lock audit', process.execPath, [
+  'scripts/check-compatibility-lock.js',
+])
 runStep('ESLint', npmCommand, ['run', 'lint', '--', '--format', 'unix'])
 runStep('Release metadata audit', npmCommand, ['run', 'audit:metadata'])
 runStep('Release artifact audit', npmCommand, ['run', 'audit:artifacts'])
