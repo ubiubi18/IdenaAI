@@ -1,9 +1,131 @@
 # IdenaAI v0.1.0
 
-IdenaAI is an experimental desktop research fork of `idena-desktop`. It brings
-AI-assisted flip solving, flip drafting, rehearsal validation networks, provider
-cost tracking, and local model runtime experiments into one auditable source
-checkout.
+IdenaAI is an experimental desktop fork of `idena-desktop` for validation,
+FLIP, local AI, and rehearsal research.
+
+It is not a hardened wallet release, not a trusted installer distribution, and
+not a guarantee of validation success. Build and inspect it locally. Use it at
+your own risk.
+
+## Current source status
+
+The GitHub `v0.1.0` release contains developer build artifacts for Linux, macOS,
+and Windows. They are unsigned, unnotarized, unsupported, and must not be
+treated as trusted wallet installers. Tags document source milestones; the
+`main` branch tracks the `v0.1.0` source line.
+
+The published `v0.1.0` workflow ran from commit `6567d4498973741a48cf7fc22efac631f9afcfa3`.
+That tag was moved during release bring-up, so it is not sufficient as immutable
+provenance. Verify the commit and GitHub-provided asset digest. The current
+release workflow refuses to reuse an existing published tag.
+
+### Foundation updates in v0.1.0
+
+- The desktop foundation now targets Node `24.18.0` LTS, npm `11.16.0`, Electron
+  `43.1.0`, and Next.js `16.2.10` with reproducible install and release checks.
+- Managed node builds use exact `idena-go` and `idena-wasm-binding` commits from
+  `scripts/source-manifest.json` instead of copied or loosely downloaded
+  binaries.
+- The source manifest, embedded contract runner, and embedded social UI are
+  constrained by `compatibility/stack-lock.json`. This composes the reviewed
+  desktop, contract-runner, and social-UI profiles without changing the legacy
+  chain's genesis, network ID, gossip protocol, reward rules, or consensus.
+- The lock remains a candidate manifest. CI now runs the fixed Wasm receipt and
+  gas vectors on Linux and macOS for x64 and arm64 and compares two isolated
+  Linux node rebuilds. Live legacy block/RPC, state replay, and mixed-node P2P
+  interoperability remain external promotion requirements.
+- Tagged releases fail closed while that manifest remains a candidate. An
+  approved lock must checksum-bind one reviewed evidence report for every
+  required gate; stale, incomplete, or modified evidence is rejected.
+- Node RPC keys are stored in user-only files, RPC is bound to loopback by
+  default, renderer persistence is restricted, and packaged output is checked
+  for private data and unexpected artifacts.
+- Full unit, lint, privacy, dependency, Electron-safety, source-integrity, and
+  renderer-build gates run before release packaging.
+- Release builders run read-only and upload artifacts to a separate publisher;
+  the publisher creates one release and includes a `SHA256SUMS` manifest.
+
+### Benefits
+
+- A newer, smaller, and more auditable desktop/node foundation for validation,
+  local AI, provider, and knowledge-index research.
+- Reproducible source pins make it possible to identify the exact node and Wasm
+  runtime under test.
+- Local privacy and provider-budget controls reduce accidental exposure and
+  unbounded app-side usage.
+
+### Risks and tradeoffs
+
+- This is the AI research repository, not the AI-free clean desktop fork. It has
+  a substantially larger attack, privacy, model, and provider surface.
+- Autosolve, report review, and story generation can be wrong or late and can
+  affect a real validation outcome. Rehearsal tests cannot reproduce all
+  mainnet timing and provider failures.
+- API calls can incur external costs; local accounting cannot cap a provider
+  account. Configure hard provider-side limits and use separate low-value keys.
+- Local models, downloaded binaries, indexed knowledge, IPFS content, and
+  imported teacher data require independent license and trust review.
+- No source hardening can turn an unsigned local build into a production wallet
+  release. Keep valuable identities and assets out of experimental profiles.
+
+## v0.1.0 Status
+
+- Added the trusted knowledge-index scaffold while keeping unfinished Knowledge
+  RAG UI out of the application.
+- Kept storage and trust decisions local to each node; public shard metadata is
+  advisory rather than a global trust decision.
+- Hardened oracle voting option indexes so stale or non-contiguous UI IDs do not
+  produce invalid contract vote indexes.
+
+## v0.0.10 Status
+
+- Hardened short-session fallback behavior and made degraded provider runs
+  visible instead of silently producing zero-token results.
+- Stopped carrying stale generated bootnodes between managed node starts.
+- Moved the managed node RPC key out of process arguments into a `0600` file,
+  bound RPC to loopback, and restricted node runtime/configuration files.
+
+## v0.0.9 Validation Changelog
+
+Validation-safety release for the next real on-chain test.
+
+- Short-session autosolve now sends each available flip to the provider as soon
+  as it appears, instead of waiting for every assigned flip to finish loading.
+- Short-session submission keeps a 10-second safety buffer and uses
+  deterministic fallback votes for remaining regular flips at cutoff.
+- Probability-ensemble tracking was hardened further across short and long
+  validation paths so side/order mapping stays auditable.
+- This line is ready for the next on-chain test, but rehearsal cannot prove
+  every live-chain timing and provider edge case. IdenaAI remains experimental
+  even after the v0.1.0 source line.
+- Use at your own risk. Autosolve decisions, hosted provider spending, node
+  operation, IPFS data, and validation outcomes remain the user's
+  responsibility.
+
+## Own Risk And Cost Responsibility
+
+Running IdenaAI, running a node, validating a real identity, autosolving,
+serving or inspecting IPFS data, and using hosted AI providers are all at your
+own risk.
+
+Local cost control is not provider-side cost control. IdenaAI can estimate
+usage, track local token accounting, warn locally, and stop calls from this app
+profile once its local budget cap is reached. It cannot control what OpenAI,
+Gemini, Anthropic, OpenRouter, or any other provider bills. Use prepaid keys,
+hard provider-side budgets, provider dashboards, and billing alerts.
+
+Do not use valuable identities, unattended validation, or auto top-up provider
+billing unless you have audited the code and accepted the risk.
+
+## Quick Start From Source
+
+Requirements:
+
+- macOS, Windows, or Linux
+- Node.js `24.18.x` LTS
+- npm `11.16.x`
+- Git
+- Python `3.11+` for optional Python data, inspection, and flip pipelines
 
 This is not a hardened wallet release, not a signed installer distribution, and
 not a guarantee of validation success. Use it only after reading the code and
@@ -11,9 +133,10 @@ understanding the risk.
 
 ## Current Status
 
-`v0.1.0` is a source milestone. There are no supported release binaries in this
-repository. The safest way to evaluate the app is to clone the source, install
-dependencies, run the checks, and start Electron locally.
+`v0.1.0` is a source milestone. Its GitHub release binaries are experimental
+developer artifacts, not supported or trusted installers. The safest way to
+evaluate the app is to clone the source, verify the exact commit and dependency
+locks, run the checks, and start Electron locally.
 
 What works for research:
 
@@ -124,6 +247,19 @@ npm run setup:sources
 npm run update:sources
 npm run build:node
 npm run doctor
+```
+
+Compatibility evidence and promotion requirements are documented in
+[`compatibility/README.md`](compatibility/README.md). The local evidence scripts
+can be run with explicit, non-secret builder identities:
+
+```bash
+npm run compatibility:build-evidence -- \
+  --builder-id local-a \
+  --report build/compatibility/local-a.json
+npm run compatibility:check-build-evidence -- \
+  build/compatibility/local-a.json \
+  build/compatibility/local-b.json
 ```
 
 ## AI Provider Setup
