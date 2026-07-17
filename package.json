@@ -206,7 +206,7 @@
     "lowdb": "^1.0.0",
     "mousetrap": "^1.6.3",
     "multiformats": "^9.7.1",
-    "nanoid": "^3.3.11",
+    "nanoid": "^3.3.16",
     "pino": "^5.13.2",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
