@@ -1,0 +1,11 @@
+title = "IdenaAI gitleaks config"
+
+[[allowlists]]
+description = "Generated image helper string table"
+condition = "AND"
+paths = [
+  '''renderer/screens/flips/ImageAccess\.js''',
+]
+regexes = [
+  '''var _0x3473 = \['Z2V0TWVhbg==', 'Z2V0UGl4ZWw='''',
+]
