@@ -9,6 +9,10 @@ const scannedExtensions = new Set(['.js', '.jsx', '.ts', '.tsx'])
 
 const blockedPatterns = [
   {
+    name: 'dynamic Function constructor',
+    regex: /\b(?:new\s+)?Function\s*\(/g,
+  },
+  {
     name: 'electron.remote namespace',
     regex: /\belectron\s*\.\s*remote\b/g,
   },
