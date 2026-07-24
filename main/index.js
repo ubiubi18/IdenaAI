@@ -107,6 +107,7 @@ const {
   AUTO_UPDATE_COMMAND,
   NODE_COMMAND,
   NODE_EVENT,
+  MANAGED_EXTERNAL_NODE_RESTART_COMMAND,
   APP_INFO_COMMAND,
   APP_PATH_COMMAND,
   AI_SOLVER_COMMAND,
@@ -114,6 +115,7 @@ const {
   AI_TEST_UNIT_EVENT,
   WINDOW_COMMAND,
 } = require('./channels')
+const {requestManagedExternalNodeRestart} = require('./managed-external-node')
 const {registerRendererDataBridge} = require('./renderer-data-bridge')
 const {createAiProviderBridge} = require('./ai-providers')
 const {createAiTestUnitBridge} = require('./ai-test-unit')
@@ -2783,6 +2785,15 @@ handleTrusted('validation-devnet.seed-flip', async (_event, hash) =>
 )
 
 handleTrusted('rpc.call', async (_event, payload) => performNodeRpc(payload))
+
+handleTrusted(MANAGED_EXTERNAL_NODE_RESTART_COMMAND, () => {
+  const result = requestManagedExternalNodeRestart({
+    settings: loadMainSettings(),
+    userDataPath: appDataPath('userData'),
+  })
+  logger.info('Managed external node restart requested')
+  return result
+})
 
 handleTrusted(AI_SOLVER_COMMAND, async (_event, command, payload) => {
   logger.info(`new ai solver command`, command, {
