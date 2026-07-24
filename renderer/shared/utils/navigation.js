@@ -14,7 +14,36 @@ function splitRoute(routePath) {
   }
 }
 
-export function resolvePackagedRouteHref(routePath, locationHref = null) {
+function resolveManagedStaticRootHref(locationUrl, explicitStaticRootHref) {
+  let staticRootHref = explicitStaticRootHref
+
+  if (
+    staticRootHref == null &&
+    typeof document !== 'undefined' &&
+    typeof document.querySelector === 'function'
+  ) {
+    staticRootHref = document.querySelector(
+      'base[data-idena-static-root]'
+    )?.href
+  }
+
+  if (!staticRootHref) {
+    return null
+  }
+
+  try {
+    const staticRootUrl = new URL(staticRootHref, locationUrl)
+    return staticRootUrl.protocol === 'file:' ? staticRootUrl : null
+  } catch {
+    return null
+  }
+}
+
+export function resolvePackagedRouteHref(
+  routePath,
+  locationHref = null,
+  staticRootHref = null
+) {
   const {pathname, query, hash} = splitRoute(routePath)
   const targetSegments = pathname.split('/').filter(Boolean)
   const targetFile = `${targetSegments.pop() || 'home'}.html`
@@ -31,6 +60,15 @@ export function resolvePackagedRouteHref(routePath, locationHref = null) {
 
     if (locationUrl.protocol !== 'file:') {
       return `/${pathname}${query}${hash}`
+    }
+
+    const staticRootUrl = resolveManagedStaticRootHref(
+      locationUrl,
+      staticRootHref
+    )
+
+    if (staticRootUrl) {
+      return new URL(`${pathname}.html${query}${hash}`, staticRootUrl).href
     }
 
     const outMarker = '/renderer/out/'
