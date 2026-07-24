@@ -3,6 +3,7 @@
 const {spawnSync} = require('child_process')
 const fs = require('fs')
 const path = require('path')
+const {rewriteNextStaticAssets} = require('./rewrite-next-static-assets')
 
 const projectRoot = path.join(__dirname, '..')
 
@@ -59,3 +60,10 @@ function cleanRendererBuildOutput() {
 
 cleanRendererBuildOutput()
 runNext(['build', '--webpack', 'renderer'])
+const rewriteResult = rewriteNextStaticAssets(
+  path.join(projectRoot, 'renderer', 'out')
+)
+console.log(
+  `[renderer-static] rewrote ${rewriteResult.htmlFiles} HTML files and ` +
+    `${rewriteResult.webpackRuntimeFiles} webpack runtime files`
+)

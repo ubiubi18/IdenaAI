@@ -3,7 +3,10 @@ import React from 'react'
 import {useTranslation} from 'react-i18next'
 import {Box, Flex, Stack, Text, useDisclosure, useToast} from '@chakra-ui/react'
 import SettingsLayout from '../../screens/settings/layout'
-import {useSettingsState} from '../../shared/providers/settings-context'
+import {
+  isManagedExternalNodeKeyImportEnabled,
+  useSettingsState,
+} from '../../shared/providers/settings-context'
 import {archiveFlips} from '../../screens/flips/utils'
 import {
   SettingsSection,
@@ -53,7 +56,12 @@ function Settings() {
       render: () => <Toast title={title} />,
     })
 
-  const {runInternalNode, useExternalNode} = useSettingsState()
+  const settings = useSettingsState()
+  const {runInternalNode, useExternalNode} = settings
+  const canImportManagedExternalNode =
+    isManagedExternalNodeKeyImportEnabled(settings)
+  const canImportPrivateKey =
+    (runInternalNode && !useExternalNode) || canImportManagedExternalNode
 
   const {
     isOpen: isOpenExportPk,
@@ -90,13 +98,15 @@ function Settings() {
             </Stack>
             <Stack isInline align="center">
               <Flex align="center">
-                {runInternalNode && !useExternalNode ? (
+                {canImportPrivateKey ? (
                   <SettingsLinkButton onClick={onOpenImportPk}>
                     {t('Import')}
                   </SettingsLinkButton>
                 ) : (
                   <Tooltip
-                    label={t('Import is not available for the external node')}
+                    label={t(
+                      'Import is available only for the built-in node or an explicitly managed loopback node'
+                    )}
                     placement="top"
                     shouldWrapChildren
                   >
@@ -162,6 +172,7 @@ function Settings() {
       <ImportPrivateKeyDialog
         isOpen={isOpenImportPk}
         onClose={onCloseImportPk}
+        managedExternalNode={canImportManagedExternalNode}
       />
     </SettingsLayout>
   )
