@@ -1481,10 +1481,34 @@ const aiSolverBridge = Object.freeze({
       'hasProviderKey',
       sanitizeAiSolverPayload(payload)
     ),
+  persistProviderKey: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'persistProviderKey',
+      sanitizeAiSolverPayload(payload)
+    ),
+  hasPersistentProviderKey: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'hasPersistentProviderKey',
+      sanitizeAiSolverPayload(payload)
+    ),
+  clearPersistentProviderKey: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'clearPersistentProviderKey',
+      sanitizeAiSolverPayload(payload)
+    ),
   testProvider: (payload) =>
     invokeCloneable(
       AI_SOLVER_COMMAND,
       'testProvider',
+      sanitizeAiSolverPayload(payload)
+    ),
+  testProviderFastMode: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'testProviderFastMode',
       sanitizeAiSolverPayload(payload)
     ),
   listModels: (payload) =>
