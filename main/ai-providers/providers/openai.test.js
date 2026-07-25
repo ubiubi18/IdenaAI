@@ -1,4 +1,4 @@
-const {callOpenAi, testOpenAiProvider} = require('./openai')
+const {callOpenAi, testOpenAiFastMode, testOpenAiProvider} = require('./openai')
 const {STORY_OPTIONS_OPENAI_RESPONSE_FORMAT} = require('../storySchema')
 
 function makeUnsupportedParameterError(param, message = '') {
@@ -492,6 +492,47 @@ describe('openai provider adapter', () => {
     expect(payload.max_tokens).toBeUndefined()
     expect(payload.max_completion_tokens).toBeUndefined()
     expect(payload.response_format).toBeUndefined()
+  })
+
+  test('probes the exact GPT-5.5 short-session fast request', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          service_tier: 'priority',
+          choices: [{message: {content: 'ok'}}],
+        },
+      }),
+    }
+
+    const result = await testOpenAiFastMode({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'gpt-5.5',
+      profile: {
+        requestTimeoutMs: 5000,
+      },
+      providerConfig: null,
+    })
+
+    expect(httpClient.post).toHaveBeenCalledTimes(1)
+    expect(httpClient.post.mock.calls[0][1]).toEqual({
+      model: 'gpt-5.5',
+      messages: [
+        {
+          role: 'user',
+          content: 'Reply with the single lowercase word ok.',
+        },
+      ],
+      max_completion_tokens: 16,
+      service_tier: 'priority',
+      reasoning_effort: 'low',
+    })
+    expect(result).toEqual({
+      requestedServiceTier: 'priority',
+      requestedReasoningEffort: 'low',
+      appliedServiceTier: 'priority',
+      priorityDowngraded: false,
+    })
   })
 
   test('passes through structured output schema and exposes provider refusal metadata', async () => {

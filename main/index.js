@@ -118,6 +118,9 @@ const {
 const {requestManagedExternalNodeRestart} = require('./managed-external-node')
 const {registerRendererDataBridge} = require('./renderer-data-bridge')
 const {createAiProviderBridge} = require('./ai-providers')
+const {
+  createPersistentCredentialClient,
+} = require('./ai-providers/persistent-credentials')
 const {createAiTestUnitBridge} = require('./ai-test-unit')
 const {prepareDb} = require('./stores/setup')
 const {createLocalAiFederated} = require('./local-ai/federated')
@@ -165,10 +168,12 @@ const localAiManager = createLocalAiManager({
   isDev,
   getModelReference: getMainLocalAiSettings,
 })
+const persistentCredentialClient = createPersistentCredentialClient()
 const aiProviderBridge = createAiProviderBridge(logger, {
   localAiManager,
   getLocalAiPayload: buildLocalAiFlipJudgePayload,
   requireProviderBudget: true,
+  persistentCredentialClient,
 })
 const aiTestUnitBridge = createAiTestUnitBridge({
   logger,
@@ -2041,6 +2046,7 @@ const createTray = () => {
 }
 
 async function bootstrapApp() {
+  await aiProviderBridge.initializePersistentProviderKeys()
   const i18nConfig = getI18nConfig()
 
   i18next.init(i18nConfig, (err) => {
@@ -2810,8 +2816,16 @@ handleTrusted(AI_SOLVER_COMMAND, async (_event, command, payload) => {
         return aiProviderBridge.clearProviderKey(payload)
       case 'hasProviderKey':
         return aiProviderBridge.hasProviderKey(payload)
+      case 'persistProviderKey':
+        return aiProviderBridge.persistProviderKey(payload)
+      case 'hasPersistentProviderKey':
+        return aiProviderBridge.hasPersistentProviderKey(payload)
+      case 'clearPersistentProviderKey':
+        return aiProviderBridge.clearPersistentProviderKey(payload)
       case 'testProvider':
         return aiProviderBridge.testProvider(payload)
+      case 'testProviderFastMode':
+        return aiProviderBridge.testProviderFastMode(payload)
       case 'listModels':
         return aiProviderBridge.listModels(payload)
       case 'generateImageSearchResults':

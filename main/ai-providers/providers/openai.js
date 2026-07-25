@@ -719,6 +719,57 @@ async function testOpenAiProvider({
   )
 }
 
+async function testOpenAiFastMode({
+  httpClient,
+  apiKey,
+  model,
+  profile,
+  providerConfig,
+  serviceTier = 'priority',
+  reasoningEffort = 'low',
+}) {
+  const endpoint = resolveOpenAiEndpoint(providerConfig)
+  const requestTimeoutMs = Math.max(
+    Number(profile && profile.requestTimeoutMs) || 0,
+    45 * 1000
+  )
+  const response = await httpClient.post(
+    endpoint,
+    {
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: 'Reply with the single lowercase word ok.',
+        },
+      ],
+      max_completion_tokens: 16,
+      service_tier: serviceTier,
+      reasoning_effort: reasoningEffort,
+    },
+    {
+      timeout: requestTimeoutMs,
+      headers: createAuthHeaders(apiKey, providerConfig),
+    }
+  )
+  const responseData = response && response.data
+  const appliedServiceTier = String(
+    (responseData && responseData.service_tier) || ''
+  )
+    .trim()
+    .toLowerCase()
+
+  return {
+    requestedServiceTier: serviceTier,
+    requestedReasoningEffort: reasoningEffort,
+    appliedServiceTier: appliedServiceTier || null,
+    priorityDowngraded:
+      serviceTier === 'priority' &&
+      Boolean(appliedServiceTier) &&
+      appliedServiceTier !== 'priority',
+  }
+}
+
 async function listOpenAiModels({httpClient, apiKey, profile, providerConfig}) {
   const endpoint = resolveOpenAiModelsEndpoint(providerConfig)
   const response = await httpClient.get(endpoint, {
@@ -823,5 +874,6 @@ module.exports = {
   callOpenAi,
   callOpenAiImage,
   testOpenAiProvider,
+  testOpenAiFastMode,
   listOpenAiModels,
 }

@@ -1126,6 +1126,7 @@ describe('createAiProviderBridge', () => {
       ok: true,
       provider: 'openai',
       hasKey: false,
+      source: null,
     })
 
     bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
@@ -1133,6 +1134,7 @@ describe('createAiProviderBridge', () => {
       ok: true,
       provider: 'openai',
       hasKey: true,
+      source: 'session',
     })
 
     bridge.clearProviderKey({provider: 'openai'})
@@ -1140,6 +1142,78 @@ describe('createAiProviderBridge', () => {
       ok: true,
       provider: 'openai',
       hasKey: false,
+      source: null,
+    })
+  })
+
+  it('loads, persists, and clears a host-bound OpenAI credential', async () => {
+    const persistentCredentialClient = {
+      loadProviderKey: jest.fn().mockResolvedValue({
+        supported: true,
+        hasKey: true,
+        apiKey: 'fixture-host-bound-credential',
+      }),
+      persistProviderKey: jest.fn().mockResolvedValue({
+        supported: true,
+        hasKey: true,
+      }),
+      hasPersistentProviderKey: jest.fn().mockResolvedValue({
+        ok: true,
+        provider: 'openai',
+        supported: true,
+        hasKey: true,
+      }),
+      clearPersistentProviderKey: jest.fn().mockResolvedValue({
+        supported: true,
+        hasKey: false,
+      }),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {
+      persistentCredentialClient,
+    })
+
+    await expect(bridge.initializePersistentProviderKeys()).resolves.toEqual({
+      ok: true,
+      supported: true,
+      loadedProviders: ['openai'],
+    })
+    expect(bridge.hasProviderKey({provider: 'openai'})).toEqual({
+      ok: true,
+      provider: 'openai',
+      hasKey: true,
+      source: 'host-credential',
+    })
+
+    await expect(
+      bridge.persistProviderKey({provider: 'openai'})
+    ).resolves.toEqual({
+      ok: true,
+      provider: 'openai',
+      supported: true,
+      hasKey: true,
+    })
+    expect(persistentCredentialClient.persistProviderKey).toHaveBeenCalledWith({
+      provider: 'openai',
+      apiKey: 'fixture-host-bound-credential',
+    })
+
+    await expect(
+      bridge.hasPersistentProviderKey({provider: 'openai'})
+    ).resolves.toMatchObject({
+      supported: true,
+      hasKey: true,
+    })
+    await expect(
+      bridge.clearPersistentProviderKey({provider: 'openai'})
+    ).resolves.toMatchObject({
+      supported: true,
+      hasKey: false,
+    })
+    expect(bridge.hasProviderKey({provider: 'openai'})).toEqual({
+      ok: true,
+      provider: 'openai',
+      hasKey: true,
+      source: 'session',
     })
   })
 
@@ -1175,6 +1249,38 @@ describe('createAiProviderBridge', () => {
         }),
       })
     )
+  })
+
+  it('reports whether the exact OpenAI short-session fast path is accepted', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          service_tier: 'priority',
+          choices: [{message: {content: 'ok'}}],
+        },
+      }),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({
+      provider: 'openai',
+      apiKey: 'fixture-provider-credential',
+    })
+
+    await expect(
+      bridge.testProviderFastMode({
+        provider: 'openai',
+        model: 'gpt-5.5',
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      provider: 'openai',
+      model: 'gpt-5.5',
+      accepted: true,
+      requestedServiceTier: 'priority',
+      requestedReasoningEffort: 'low',
+      appliedServiceTier: 'priority',
+      priorityDowngraded: false,
+    })
   })
 
   it('supports Moonshot Kimi provider defaults', async () => {
