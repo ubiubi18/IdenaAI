@@ -1805,6 +1805,7 @@ export default function AiSettingsPage() {
 
   const [apiKey, setApiKey] = useState('')
   const [isUpdatingKey, setIsUpdatingKey] = useState(false)
+  const [isUpdatingPersistentKey, setIsUpdatingPersistentKey] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isRefreshingModels, setIsRefreshingModels] = useState(false)
   const [isRefreshingAllModels, setIsRefreshingAllModels] = useState(false)
@@ -1919,6 +1920,12 @@ export default function AiSettingsPage() {
     activeProvider: 'openai',
     requiredProviders: [],
     missingProviders: [],
+    error: '',
+  })
+  const [providerPersistenceStatus, setProviderPersistenceStatus] = useState({
+    checking: true,
+    supported: false,
+    hasKey: false,
     error: '',
   })
   const [systemMemoryTelemetry, setSystemMemoryTelemetry] = useState(null)
@@ -3586,6 +3593,29 @@ export default function AiSettingsPage() {
   )
   const providerConfig = buildProviderConfigForBridge(aiSolver, activeProvider)
   const trimmedApiKey = String(apiKey || '').trim()
+  let providerPersistenceDescription = t(
+    'The key is memory-only. A restart or reboot will disarm OpenAI until you load the key again.'
+  )
+
+  if (providerPersistenceStatus.checking) {
+    providerPersistenceDescription = t('Checking encrypted host storage...')
+  } else if (providerPersistenceStatus.error) {
+    providerPersistenceDescription = t(
+      'Host credential storage failed closed: {{error}}',
+      {
+        error: providerPersistenceStatus.error,
+      }
+    )
+  } else if (!providerPersistenceStatus.supported) {
+    providerPersistenceDescription = t(
+      'Host credential storage is not configured on this installation.'
+    )
+  } else if (providerPersistenceStatus.hasKey) {
+    providerPersistenceDescription = t(
+      'An encrypted copy is bound to this host and will load when IdenaAI restarts. It is never written to settings or the repository.'
+    )
+  }
+
   const refreshProviderKeyStatus = useCallback(async () => {
     const bridge = ensureBridge()
     setProviderKeyStatus((prev) => ({
@@ -3620,9 +3650,67 @@ export default function AiSettingsPage() {
     }
   }, [activeProvider, aiSolver, localAi])
 
+  const refreshProviderPersistenceStatus = useCallback(async () => {
+    if (activeProvider !== 'openai') {
+      const unsupported = {
+        checking: false,
+        supported: false,
+        hasKey: false,
+        error: '',
+      }
+      setProviderPersistenceStatus(unsupported)
+      return unsupported
+    }
+
+    const bridge = ensureBridge()
+    if (typeof bridge.hasPersistentProviderKey !== 'function') {
+      const unsupported = {
+        checking: false,
+        supported: false,
+        hasKey: false,
+        error: '',
+      }
+      setProviderPersistenceStatus(unsupported)
+      return unsupported
+    }
+
+    setProviderPersistenceStatus((previous) => ({
+      ...previous,
+      checking: true,
+      error: '',
+    }))
+
+    try {
+      const result = await bridge.hasPersistentProviderKey({
+        provider: activeProvider,
+      })
+      const nextStatus = {
+        checking: false,
+        supported: result && result.supported === true,
+        hasKey: result && result.hasKey === true,
+        error: '',
+      }
+      setProviderPersistenceStatus(nextStatus)
+      return nextStatus
+    } catch (error) {
+      const failed = {
+        checking: false,
+        supported: true,
+        hasKey: false,
+        error: formatErrorForToast(error),
+      }
+      setProviderPersistenceStatus(failed)
+      return failed
+    }
+  }, [activeProvider])
+
   useEffect(() => {
     refreshProviderKeyStatus()
   }, [refreshProviderKeyStatus])
+
+  useEffect(() => {
+    refreshProviderPersistenceStatus()
+  }, [refreshProviderPersistenceStatus])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -5037,9 +5125,13 @@ export default function AiSettingsPage() {
                                 await refreshProviderKeyStatus()
                                 notify(
                                   t('Provider key cleared'),
-                                  t(
-                                    'The session key has been removed from memory.'
-                                  )
+                                  providerPersistenceStatus.hasKey
+                                    ? t(
+                                        'The key was removed from memory. The host-encrypted copy remains and will load again after restart unless you remove it below.'
+                                      )
+                                    : t(
+                                        'The session key has been removed from memory.'
+                                      )
                                 )
                               } catch (error) {
                                 notify(
@@ -5154,7 +5246,163 @@ export default function AiSettingsPage() {
                           >
                             {t('Test connection')}
                           </PrimaryButton>
+
+                          {activeProvider === 'openai' && (
+                            <SecondaryButton
+                              isDisabled={!providerKeyStatus.primaryReady}
+                              isLoading={isTesting}
+                              onClick={async () => {
+                                setIsTesting(true)
+                                try {
+                                  const bridge = ensureBridge()
+                                  const result =
+                                    await bridge.testProviderFastMode({
+                                      provider: activeProvider,
+                                      model:
+                                        aiSolver.shortSessionOpenAiFastModel ||
+                                        'gpt-5.5',
+                                      providerConfig,
+                                    })
+                                  notify(
+                                    result && result.accepted
+                                      ? t('GPT-5.5 fast path accepted')
+                                      : t('GPT-5.5 fast path downgraded'),
+                                    result && result.accepted
+                                      ? t(
+                                          '{{model}} accepted Priority processing and low reasoning in {{latency}} ms.',
+                                          {
+                                            model: result.model,
+                                            latency: result.latencyMs,
+                                          }
+                                        )
+                                      : t(
+                                          '{{model}} answered, but Priority processing was not confirmed. Applied tier: {{tier}}.',
+                                          {
+                                            model: result && result.model,
+                                            tier:
+                                              (result &&
+                                                result.appliedServiceTier) ||
+                                              t('unknown'),
+                                          }
+                                        ),
+                                    result && result.accepted
+                                      ? 'success'
+                                      : 'warning'
+                                  )
+                                } catch (error) {
+                                  notify(
+                                    t('GPT-5.5 fast-path test failed'),
+                                    formatErrorForToast(error),
+                                    'error'
+                                  )
+                                } finally {
+                                  setIsTesting(false)
+                                }
+                              }}
+                            >
+                              {t('Test fast path')}
+                            </SecondaryButton>
+                          )}
                         </Stack>
+
+                        {activeProvider === 'openai' && (
+                          <Box
+                            borderWidth="1px"
+                            borderColor={
+                              providerPersistenceStatus.hasKey
+                                ? 'green.200'
+                                : 'gray.200'
+                            }
+                            borderRadius="md"
+                            p={3}
+                          >
+                            <Flex
+                              align="center"
+                              justify="space-between"
+                              gap={4}
+                              flexWrap="wrap"
+                            >
+                              <Box maxW="lg">
+                                <Text fontWeight={600} fontSize="sm">
+                                  {t('Unattended host credential')}
+                                </Text>
+                                <Text color="muted" fontSize="sm" mt={1}>
+                                  {providerPersistenceDescription}
+                                </Text>
+                              </Box>
+                              <Stack isInline spacing={2}>
+                                {providerPersistenceStatus.hasKey ? (
+                                  <SecondaryButton
+                                    isLoading={isUpdatingPersistentKey}
+                                    onClick={async () => {
+                                      setIsUpdatingPersistentKey(true)
+                                      try {
+                                        const bridge = ensureBridge()
+                                        await bridge.clearPersistentProviderKey(
+                                          {
+                                            provider: activeProvider,
+                                          }
+                                        )
+                                        await refreshProviderPersistenceStatus()
+                                        notify(
+                                          t('Saved key removed'),
+                                          t(
+                                            'The host-encrypted copy was removed. The current in-memory session remains active until restart or Clear key.'
+                                          )
+                                        )
+                                      } catch (error) {
+                                        notify(
+                                          t('Unable to remove saved key'),
+                                          formatErrorForToast(error),
+                                          'error'
+                                        )
+                                      } finally {
+                                        setIsUpdatingPersistentKey(false)
+                                      }
+                                    }}
+                                  >
+                                    {t('Remove saved key')}
+                                  </SecondaryButton>
+                                ) : (
+                                  <PrimaryButton
+                                    isDisabled={
+                                      !providerPersistenceStatus.supported ||
+                                      !providerKeyStatus.hasKey
+                                    }
+                                    isLoading={isUpdatingPersistentKey}
+                                    onClick={async () => {
+                                      setIsUpdatingPersistentKey(true)
+                                      try {
+                                        const bridge = ensureBridge()
+                                        await bridge.persistProviderKey({
+                                          provider: activeProvider,
+                                        })
+                                        await refreshProviderPersistenceStatus()
+                                        await refreshProviderKeyStatus()
+                                        notify(
+                                          t('Key available after restart'),
+                                          t(
+                                            'The currently loaded key is now encrypted for this host and will be restored when IdenaAI starts.'
+                                          )
+                                        )
+                                      } catch (error) {
+                                        notify(
+                                          t('Unable to save key on host'),
+                                          formatErrorForToast(error),
+                                          'error'
+                                        )
+                                      } finally {
+                                        setIsUpdatingPersistentKey(false)
+                                      }
+                                    }}
+                                  >
+                                    {t('Keep after restart')}
+                                  </PrimaryButton>
+                                )}
+                              </Stack>
+                            </Flex>
+                          </Box>
+                        )}
                       </>
                     ) : (
                       <Box
