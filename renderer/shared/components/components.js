@@ -4,6 +4,7 @@ import React, {useMemo} from 'react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import ReactDOM from 'react-dom'
 import NextLink from 'next/link'
+import {useRouter} from 'next/router'
 import {
   Code,
   Drawer as ChakraDrawer,
@@ -58,6 +59,7 @@ import {
   FormHelperText,
 } from '@chakra-ui/react'
 import {rem} from '../theme'
+import {navigateRendererRouteFromLink} from '../utils/navigation'
 import {IconButton2} from './button'
 import {
   ChevronDownIcon,
@@ -579,6 +581,7 @@ export function SmallText(props) {
 // eslint-disable-next-line react/display-name
 export const IconLink = React.forwardRef(
   ({href, icon, children, isDisabled, ...props}, ref) => {
+    const router = useRouter()
     const disabledProps = isDisabled
       ? {
           'aria-disabled': true,
@@ -613,7 +616,14 @@ export const IconLink = React.forwardRef(
         {isDisabled ? (
           <Text as="span">{children}</Text>
         ) : (
-          <LinkOverlay as={NextLink} ref={ref} href={href}>
+          <LinkOverlay
+            as={NextLink}
+            ref={ref}
+            href={href}
+            onClick={(event) => {
+              navigateRendererRouteFromLink(event, router, href)
+            }}
+          >
             {children}
           </LinkOverlay>
         )}
