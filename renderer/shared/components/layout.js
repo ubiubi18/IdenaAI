@@ -98,6 +98,7 @@ import {OfflineBanner} from './layout/offline'
 import {TroubleshootingScreen} from '../../screens/troubleshooting'
 import {getAppBridge} from '../utils/app-bridge'
 import {syncSharedGlobal} from '../utils/shared-global'
+import {navigateRendererRoute} from '../utils/navigation'
 
 global.getZoomLevel = global.getZoomLevel || (() => 0)
 global.setZoomLevel = global.setZoomLevel || (() => {})
@@ -564,6 +565,10 @@ function BenchmarkResearchBanner() {
               as={NextLink}
               href="/settings/ai"
               color={aiEnabled ? 'orange.800' : 'blue.800'}
+              onClick={(event) => {
+                event.preventDefault()
+                navigateRendererRoute(router, '/settings/ai')
+              }}
             >
               {t('AI settings')}
             </Link>
@@ -602,7 +607,8 @@ function BenchmarkResearchBanner() {
               ? {model: AI_PROVIDER_DEFAULT_MODELS[provider]}
               : {}),
           })
-          router.push(
+          navigateRendererRoute(
+            router,
             provider === 'local-ai'
               ? '/settings/ai?setup=1&startLocalAi=1'
               : '/settings/ai?setup=1'

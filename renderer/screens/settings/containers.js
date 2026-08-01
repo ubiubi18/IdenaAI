@@ -38,6 +38,7 @@ import {callRpc, eitherState} from '../../shared/utils/utils'
 import {useNodeDispatch} from '../../shared/providers/node-context'
 import {importKey} from '../../shared/api/dna'
 import {useSettingsDispatch} from '../../shared/providers/settings-context'
+import {getNodeBridge} from '../../shared/utils/node-bridge'
 import {AVAILABLE_LANGS, isoLangs} from '../../i18n'
 import {EyeIcon, EyeOffIcon} from '../../shared/components/icons'
 
@@ -190,7 +191,11 @@ export function ExportPrivateKeyDialog({onClose, ...props}) {
   )
 }
 
-export function ImportPrivateKeyDialog(props) {
+export function ImportPrivateKeyDialog({
+  managedExternalNode = false,
+  onClose,
+  ...props
+}) {
   const {t} = useTranslation()
 
   const toast = useToast()
@@ -218,22 +223,55 @@ export function ImportPrivateKeyDialog(props) {
             />
           ),
         })
+        return false
+      }
+
+      let managedRestartFailed = false
+
+      if (managedExternalNode) {
+        try {
+          await getNodeBridge().restartManagedExternalNode()
+        } catch {
+          managedRestartFailed = true
+        }
       } else {
         importNodeKey(shouldResetNode)
-        toast({
-          // eslint-disable-next-line react/display-name
-          render: () => (
-            <Toast
-              title={t('Success')}
-              description={t(
-                'Key was imported, please, wait, while node is restarting'
-              )}
-            />
-          ),
-        })
-        setKey('')
-        setPassword('')
       }
+
+      let successDescription = t(
+        'Key was imported, please, wait, while node is restarting'
+      )
+
+      if (managedExternalNode) {
+        successDescription = t(
+          'Key was imported. The managed node is restarting automatically.'
+        )
+      }
+
+      if (managedRestartFailed) {
+        successDescription = t(
+          'The key was imported, but the managed node could not be restarted automatically. Restart it before validation.'
+        )
+      }
+
+      toast({
+        status: managedRestartFailed ? 'warning' : undefined,
+        // eslint-disable-next-line react/display-name
+        render: () => (
+          <Toast
+            title={t(
+              managedRestartFailed
+                ? 'Key imported, restart required'
+                : 'Success'
+            )}
+            description={successDescription}
+            status={managedRestartFailed ? 'warning' : undefined}
+          />
+        ),
+      })
+      setKey('')
+      setPassword('')
+      return true
     } catch (e) {
       toast({
         status: 'error',
@@ -241,26 +279,25 @@ export function ImportPrivateKeyDialog(props) {
         render: () => (
           <Toast
             title={t('Error while importing key')}
-            description={t(
-              'Internal node is not available, try again in a few seconds'
-            )}
+            description={t('Node is not available, try again in a few seconds')}
             status="error"
           />
         ),
       })
+      return false
     }
   }
 
   const [revealPassword, setRevealPassword] = React.useState()
 
   return (
-    <Dialog title={t('Import private key')} {...props}>
+    <Dialog title={t('Import private key')} onClose={onClose} {...props}>
       <form
         onSubmit={async (e) => {
           e.preventDefault()
-          await submit()
-          // eslint-disable-next-line react/destructuring-assignment
-          props.onClose()
+          if (await submit()) {
+            onClose()
+          }
         }}
       >
         <DialogBody>
@@ -298,31 +335,32 @@ export function ImportPrivateKeyDialog(props) {
                 </InputRightElement>
               </InputGroup>
             </FormControl>
-            <FormControl>
-              <Stack isInline>
-                <Checkbox
-                  isChecked={shouldResetNode}
-                  onChange={(e) => {
-                    setShouldResetNode(e.target.checked)
-                  }}
-                >
-                  {t('Re-sync node from scratch')}
-                </Checkbox>
-                <Tooltip
-                  label={t(
-                    'Please re-sync the node if you want to have an up-to-date transaction history for the new address. It will take some time to re-sync.'
-                  )}
-                  zIndex="tooltip"
-                >
-                  <InfoButton />
-                </Tooltip>
-              </Stack>
-            </FormControl>
+            {!managedExternalNode && (
+              <FormControl>
+                <Stack isInline>
+                  <Checkbox
+                    isChecked={shouldResetNode}
+                    onChange={(e) => {
+                      setShouldResetNode(e.target.checked)
+                    }}
+                  >
+                    {t('Re-sync node from scratch')}
+                  </Checkbox>
+                  <Tooltip
+                    label={t(
+                      'Please re-sync the node if you want to have an up-to-date transaction history for the new address. It will take some time to re-sync.'
+                    )}
+                    zIndex="tooltip"
+                  >
+                    <InfoButton />
+                  </Tooltip>
+                </Stack>
+              </FormControl>
+            )}
           </Stack>
         </DialogBody>
         <DialogFooter>
-          {/* eslint-disable-next-line react/destructuring-assignment */}
-          <SecondaryButton type="button" onClick={props.onClose}>
+          <SecondaryButton type="button" onClick={onClose}>
             {t('Close')}
           </SecondaryButton>
           <PrimaryButton type="submit" disabled={!password || !key}>

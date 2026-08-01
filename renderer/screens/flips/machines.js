@@ -20,6 +20,7 @@ import {persistState} from '../../shared/utils/persist'
 import {appendAiProviderBudgetLedgerEntry} from '../../shared/utils/ai-provider-budget'
 import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 import {getImageSearchBridge} from '../../shared/utils/image-search-bridge'
+import {resolveNodeKeywordRefresh} from './keyword-refresh'
 
 const OFFLINE_KEYWORD_WORD_RANGE_START = 3300
 const RANDOM_KEYWORD_PAIR_COUNT = 9
@@ -662,16 +663,11 @@ export const flipMasterMachine = Machine(
               },
               USE_NODE_KEYWORDS: {
                 target: '.loading',
-                actions: assign({
-                  availableKeywords: ({nodeAvailableKeywords}) =>
-                    Array.isArray(nodeAvailableKeywords)
-                      ? nodeAvailableKeywords
-                      : [],
-                  keywordPairId: () => 0,
-                  keywordSource: () => 'node',
+                actions: assign((context, event) => ({
+                  ...resolveNodeKeywordRefresh(context, event),
                   adversarialImage: '',
                   adversarialImages: Array.from({length: 8}),
-                }),
+                })),
               },
               USE_RANDOM_KEYWORDS: {
                 target: '.loading',
@@ -1100,16 +1096,11 @@ export const flipMasterMachine = Machine(
           },
           USE_NODE_KEYWORDS: {
             target: '.keywords.loading',
-            actions: assign({
-              availableKeywords: ({nodeAvailableKeywords}) =>
-                Array.isArray(nodeAvailableKeywords)
-                  ? nodeAvailableKeywords
-                  : [],
-              keywordPairId: () => 0,
-              keywordSource: () => 'node',
+            actions: assign((context, event) => ({
+              ...resolveNodeKeywordRefresh(context, event),
               adversarialImage: '',
               adversarialImages: Array.from({length: 8}),
-            }),
+            })),
           },
           USE_RANDOM_KEYWORDS: {
             target: '.keywords.loading',
