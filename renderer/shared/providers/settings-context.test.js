@@ -2,6 +2,7 @@ const {
   DEFAULT_RUN_INTERNAL_NODE,
   buildAiSolverSettings,
   buildEffectiveSettingsState,
+  isManagedExternalNodeKeyImportEnabled,
   isValidationRehearsalNodeSettings,
   normalizeNodeModeSettings,
 } = require('./settings-context')
@@ -173,5 +174,54 @@ describe('settings-context ai solver normalization', () => {
         externalNodeLabel: '',
       })
     ).toBe(true)
+  })
+
+  it('allows key import only for an explicitly managed persistent loopback node', () => {
+    expect(
+      isManagedExternalNodeKeyImportEnabled({
+        useExternalNode: true,
+        externalNodeMode: 'persistent',
+        managedExternalNodeKeyImportEnabled: true,
+        url: 'http://127.0.0.1:9129',
+      })
+    ).toBe(true)
+
+    expect(
+      isManagedExternalNodeKeyImportEnabled({
+        useExternalNode: true,
+        externalNodeMode: 'persistent',
+        managedExternalNodeKeyImportEnabled: true,
+        url: 'http://[::1]:9129',
+      })
+    ).toBe(true)
+  })
+
+  it.each([
+    ['missing operator opt-in', false, 'http://127.0.0.1:9129'],
+    ['remote host', true, 'https://node.example.org'],
+    ['loopback lookalike', true, 'http://127.0.0.1.example.org:9129'],
+    ['embedded credentials', true, 'http://user:pass@127.0.0.1:9129'],
+    ['unexpected path', true, 'http://127.0.0.1:9129/rpc'],
+    ['unexpected query', true, 'http://127.0.0.1:9129/?target=remote'],
+  ])('blocks managed key import for %s', (_label, enabled, url) => {
+    expect(
+      isManagedExternalNodeKeyImportEnabled({
+        useExternalNode: true,
+        externalNodeMode: 'persistent',
+        managedExternalNodeKeyImportEnabled: enabled,
+        url,
+      })
+    ).toBe(false)
+  })
+
+  it('blocks key import for ephemeral rehearsal nodes', () => {
+    expect(
+      isManagedExternalNodeKeyImportEnabled({
+        useExternalNode: true,
+        externalNodeMode: 'ephemeral',
+        managedExternalNodeKeyImportEnabled: true,
+        url: 'http://127.0.0.1:9129',
+      })
+    ).toBe(false)
   })
 })

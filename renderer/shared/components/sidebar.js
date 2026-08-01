@@ -48,6 +48,7 @@ import {
   onboardingPromotingStep,
   onboardingShowingStep,
 } from '../utils/onboarding'
+import {navigateRendererRoute} from '../utils/navigation'
 import {getIdentityPublishedFlipsCount} from '../utils/identity'
 import {
   OnboardingLinkButton,
@@ -418,7 +419,8 @@ function NavSectionTitle({children, ...props}) {
 }
 
 function NavItem({href, icon, children, badge, featured = false}) {
-  const {pathname} = useRouter()
+  const router = useRouter()
+  const {pathname} = router
   const isActive = pathname.startsWith(href)
   let backgroundColor = 'transparent'
   let hoverBackgroundColor = 'gray.10'
@@ -465,7 +467,16 @@ function NavItem({href, icon, children, badge, featured = false}) {
       _focus={{outline: 'none'}}
     >
       <Icon as={icon} boxSize="5" />
-      <LinkOverlay as={NextLink} href={href} display="block" w="full">
+      <LinkOverlay
+        as={NextLink}
+        href={href}
+        display="block"
+        w="full"
+        onClick={(event) => {
+          event.preventDefault()
+          navigateRendererRoute(router, href)
+        }}
+      >
         {badge ? (
           <Flex align="center" justify="space-between" w="full" gap={2}>
             <Text as="span" noOfLines={1}>
@@ -895,12 +906,18 @@ function CurrentTask({epoch, validationStart, period, identity}) {
 }
 
 function CurrentTaskLink({href, ...props}) {
+  const router = useRouter()
+
   return (
     <Link
       as={NextLink}
       href={href}
       color="white"
       _hover={{textDecoration: 'none'}}
+      onClick={(event) => {
+        event.preventDefault()
+        navigateRendererRoute(router, href)
+      }}
       {...props}
     />
   )

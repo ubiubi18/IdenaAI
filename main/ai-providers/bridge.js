@@ -53,6 +53,7 @@ const {withRetries, mapWithConcurrency} = require('./concurrency')
 const {
   callOpenAi,
   callOpenAiImage,
+  testOpenAiFastMode,
   testOpenAiProvider,
   listOpenAiModels,
 } = require('./providers/openai')
@@ -6144,6 +6145,11 @@ function createAiProviderBridge(logger, dependencies = {}) {
   const providerKeys = new Map(
     Object.values(PROVIDERS).map((provider) => [provider, null])
   )
+  const providerKeySources = new Map(
+    Object.values(PROVIDERS).map((provider) => [provider, null])
+  )
+  const persistentCredentialClient =
+    dependencies.persistentCredentialClient || null
 
   const now =
     typeof dependencies.now === 'function' ? dependencies.now : () => Date.now()
@@ -6608,6 +6614,7 @@ Flip hash: ${hash}
     }
 
     providerKeys.set(normalized, key)
+    providerKeySources.set(normalized, 'session')
     logger.info('AI provider key updated', {provider: normalized})
 
     return {ok: true, provider: normalized}
@@ -6621,6 +6628,7 @@ Flip hash: ${hash}
     }
 
     providerKeys.set(normalized, null)
+    providerKeySources.set(normalized, null)
     logger.info('AI provider key cleared', {provider: normalized})
     return {ok: true, provider: normalized}
   }
@@ -6642,6 +6650,141 @@ Flip hash: ${hash}
       ok: true,
       provider: normalized,
       hasKey: Boolean(key),
+      source: providerKeySources.get(normalized),
+    }
+  }
+
+  async function initializePersistentProviderKeys() {
+    if (
+      !persistentCredentialClient ||
+      typeof persistentCredentialClient.loadProviderKey !== 'function'
+    ) {
+      return {
+        ok: true,
+        supported: false,
+        loadedProviders: [],
+      }
+    }
+
+    const loadedProviders = []
+
+    try {
+      const result = await persistentCredentialClient.loadProviderKey({
+        provider: PROVIDERS.OpenAI,
+      })
+
+      if (result && result.hasKey && result.apiKey) {
+        providerKeys.set(PROVIDERS.OpenAI, String(result.apiKey).trim())
+        providerKeySources.set(PROVIDERS.OpenAI, 'host-credential')
+        loadedProviders.push(PROVIDERS.OpenAI)
+        logger.info('Persistent AI provider credential loaded', {
+          provider: PROVIDERS.OpenAI,
+        })
+      }
+
+      return {
+        ok: true,
+        supported: Boolean(result && result.supported),
+        loadedProviders,
+      }
+    } catch (error) {
+      logger.warn('Persistent AI provider credential unavailable', {
+        provider: PROVIDERS.OpenAI,
+        error: String(
+          error && error.message ? error.message : 'credential_load_failed'
+        ),
+      })
+      return {
+        ok: false,
+        supported: true,
+        loadedProviders,
+        error: 'credential_load_failed',
+      }
+    }
+  }
+
+  async function persistProviderKey({provider}) {
+    const normalized = normalizeProvider(provider)
+
+    if (
+      !persistentCredentialClient ||
+      typeof persistentCredentialClient.persistProviderKey !== 'function'
+    ) {
+      throw new Error('Persistent credential storage is not configured')
+    }
+
+    const apiKey = getApiKey(normalized)
+    const result = await persistentCredentialClient.persistProviderKey({
+      provider: normalized,
+      apiKey,
+    })
+
+    providerKeySources.set(normalized, 'host-credential')
+    logger.info('AI provider credential persisted on host', {
+      provider: normalized,
+    })
+
+    return {
+      ok: true,
+      provider: normalized,
+      supported: Boolean(result && result.supported),
+      hasKey: Boolean(result && result.hasKey),
+    }
+  }
+
+  async function hasPersistentProviderKey({provider}) {
+    const normalized = normalizeProvider(provider)
+
+    if (
+      !persistentCredentialClient ||
+      typeof persistentCredentialClient.hasPersistentProviderKey !== 'function'
+    ) {
+      return {
+        ok: true,
+        provider: normalized,
+        supported: false,
+        hasKey: false,
+      }
+    }
+
+    return persistentCredentialClient.hasPersistentProviderKey({
+      provider: normalized,
+    })
+  }
+
+  async function clearPersistentProviderKey({provider}) {
+    const normalized = normalizeProvider(provider)
+
+    if (
+      !persistentCredentialClient ||
+      typeof persistentCredentialClient.clearPersistentProviderKey !==
+        'function'
+    ) {
+      return {
+        ok: true,
+        provider: normalized,
+        supported: false,
+        hasKey: false,
+      }
+    }
+
+    const result = await persistentCredentialClient.clearPersistentProviderKey({
+      provider: normalized,
+    })
+
+    if (providerKeys.get(normalized)) {
+      providerKeySources.set(normalized, 'session')
+    }
+
+    logger.info('Persistent AI provider credential cleared', {
+      provider: normalized,
+    })
+
+    return {
+      ok: true,
+      provider: normalized,
+      supported: Boolean(result && result.supported),
+      hasKey: false,
     }
   }
 
@@ -6982,6 +7125,67 @@ Flip hash: ${hash}
       model: testedModel,
       modelFallback,
       latencyMs: now() - startedAt,
+    }
+  }
+
+  async function testProviderFastMode({provider, model, providerConfig}) {
+    const normalized = normalizeProvider(provider)
+    const finalModel = String(model || DEFAULT_MODELS[normalized]).trim()
+    const startedAt = now()
+
+    if (normalized !== PROVIDERS.OpenAI) {
+      throw new Error('Fast-mode probing is supported only for OpenAI')
+    }
+
+    const apiKey = getApiKey(normalized)
+    const profile = sanitizeBenchmarkProfile({
+      requestTimeoutMs: 45 * 1000,
+      maxOutputTokens: 16,
+      temperature: 0,
+    })
+    const resolvedProviderConfig = resolveProviderConfig(
+      normalized,
+      providerConfig
+    )
+
+    try {
+      const result = await testOpenAiFastMode({
+        httpClient,
+        apiKey,
+        model: finalModel,
+        profile,
+        providerConfig: resolvedProviderConfig,
+        serviceTier: 'priority',
+        reasoningEffort: 'low',
+      })
+      const accepted =
+        result.appliedServiceTier === 'priority' &&
+        result.priorityDowngraded !== true
+
+      return {
+        ok: true,
+        provider: normalized,
+        model: finalModel,
+        latencyMs: now() - startedAt,
+        accepted,
+        requestedServiceTier: result.requestedServiceTier,
+        requestedReasoningEffort: result.requestedReasoningEffort,
+        appliedServiceTier: result.appliedServiceTier,
+        priorityDowngraded: result.priorityDowngraded,
+      }
+    } catch (error) {
+      const message = createProviderErrorMessage({
+        provider: normalized,
+        model: finalModel,
+        operation: 'fast-mode test',
+        error,
+      })
+      logger.error('AI provider fast-mode test failed', {
+        provider: normalized,
+        model: finalModel,
+        error: message,
+      })
+      throw new Error(message)
     }
   }
 
@@ -11586,10 +11790,15 @@ Flip hash: ${hash}
   }
 
   return {
+    initializePersistentProviderKeys,
     setProviderKey,
     clearProviderKey,
     hasProviderKey,
+    persistProviderKey,
+    hasPersistentProviderKey,
+    clearPersistentProviderKey,
     testProvider,
+    testProviderFastMode,
     listModels,
     generateImageSearchResults,
     generateStoryOptions,

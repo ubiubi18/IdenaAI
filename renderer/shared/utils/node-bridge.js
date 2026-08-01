@@ -10,6 +10,10 @@ function createFallbackNodeBridge() {
     onEvent: () => () => {},
     getLastLogs: () => {},
     restartNode: () => {},
+    restartManagedExternalNode: () =>
+      Promise.reject(
+        new Error('Managed external node restart bridge is unavailable')
+      ),
     startLocalNode: () => {},
     initLocalNode: () => {},
     startValidationDevnet: () => {},
