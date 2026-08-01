@@ -1,10 +1,13 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import Modal from 'react-modal';
-import { type Post, type Poster, type Tip, type RpcPostCostEstimate, breakingChanges, estimateRpcPostCost, getNewPosterAndPost, getReplyPosts, deOrphanReplyPosts, getBlockHeightFromTxHash, submitPost, processTip, submitSendTip, supportedImageTypes, storeFileToIpfs, getPastTxsWithIdenaIndexerApi, getRpcClient, type RpcClient, copyPostTx, getPostIdFromChannelId, getNewPostLatestActivity, getblockTxsWithIdenaIndexerApi, getBlockAtWithIdenaIndexerApi, getLastBlockWithIdenaIndexerApi, getTransactionDetailsRpc, getTransactionDetailsIndexerApi } from './logic/asyncUtils';
-import { getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, str2bytes } from './logic/utils';
+import { hexToUint8Array } from 'idena-sdk-js-lite';
+import { keccak256, sha3_256 } from 'js-sha3';
+import { encrypt } from 'eciesjs';
+import { type Message, type Post, type Poster, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getBlockHeightFromTxHash, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPosterAndPost, getPastTxsWithIdenaIndexerApi, getPostIdFromChannelId, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getReplyPosts, getRpcClient, getTransactionDetailsIndexerApi, getTransactionDetailsRpc, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewMedia, resolveNewMessages, resolveNewPosters, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, type RpcClient } from './logic/asyncUtils';
+import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, str2bytes } from './logic/utils';
 import { createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
 import { Link, Outlet, useLocation } from 'react-router';
-import type { BrowserStateHistorySettings, MouseEventLocal, PostMediaAttachment } from './App.exports';
+import type { BrowserStateHistorySettings, EventTransaction, MouseEventLocal, PostMediaAttachment } from './App.exports';
 import ModalLikesTipsComponent from './components/ModalLikesTipsComponent';
 import ModalSendTipComponent from './components/ModalSendTipComponent';
 import ModalAddMediaComponent from './components/ModalAddMediaComponent';
@@ -13,6 +16,8 @@ import ModalExpandImageComponent from './components/ModalExpandImageComponent';
 import MenuComponent from './components/MenuComponent';
 import menuWhiteSvg from './assets/menu-8-white.svg';
 import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSocialPostIdForContract, SOCIAL_CONTRACTS, SOCIAL_CONTRACT_CURRENT, type SocialContractId } from './logic/socialContracts';
+import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageComponent';
+import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
 
@@ -21,6 +26,7 @@ const defaultNodeUrl = 'http://localhost:9119';
 const defaultNodeApiKey = '';
 const initIndexerApiUrl = officialIndexerApiUrl;
 const contractAddressCurrent = SOCIAL_CONTRACT_CURRENT.address;
+const contractAddress5 = getSocialContractById('v11').address;
 const contractAddress4 = getSocialContractById('v10').address;
 const contractAddress3 = getSocialContractById('v9').address;
 const contractAddress2 = getSocialContractById('v5').address;
@@ -28,7 +34,8 @@ const contractAddress1 = getSocialContractById('v1').address;
 const firstBlock = 10135627;
 const makePostMethod = 'makePost';
 const sendTipMethod = 'sendTip';
-const allMethods = [makePostMethod, sendTipMethod];
+const sendMessageMethod = 'sendMessage';
+const allMethods = [makePostMethod, sendTipMethod, sendMessageMethod];
 const thisChannelId = '';
 const discussPrefix = 'discuss:';
 const postChannelRegex = new RegExp(String.raw`${discussPrefix}[\d]+$`, 'i');
@@ -87,6 +94,8 @@ const initSettings = {
     postersAddress: readLocalStorage('postersAddress') || zeroAddress,
     findingPastPosts: initialDesktopBootstrap.findingPastPosts || readLocalStorage('findPostsWith') || readLocalStorage('findPastPostsWith') || 'rpc',
     indexerApiUrl: initialDesktopBootstrap.indexerApiUrl || readLocalStorage('indexerApiUrl') || initIndexerApiUrl,
+    encryptedPrivateKey: '',
+    password: '',
 };
 
 const DEBUG = false;
@@ -147,6 +156,11 @@ function App() {
     const [postersAddressInvalid, setPostersAddressInvalid] = useState<boolean>(false);
     const postersAddressInvalidRef = useRef<boolean>(postersAddressInvalid);
     const [inputSendingTxs, setInputSendingTxs] = useState<string>(initSettings.sendingTxs);
+    const [inputCredentialsApplied, setInputCredentialsApplied] = useState<boolean>(true);
+    const [credentialsInvalid, setCredentialsInvalid] = useState<string>('Invalid key or password');
+    const [messageSettingsInvalid, setMessageSettingsInvalid] = useState<boolean>(true);
+    const [encryptedPrivateKey, setEncryptedPrivateKey] = useState<string>(initSettings.encryptedPrivateKey);
+    const [password, setPassword] = useState<string>(initSettings.password);
     const [advancedContractControlsOpen, setAdvancedContractControlsOpen] = useState<boolean>(false);
     const [legacyContractRiskAccepted, setLegacyContractRiskAccepted] = useState<boolean>(false);
     const [inputSocialContractId, setInputSocialContractId] = useState<SocialContractId>(SOCIAL_CONTRACT_CURRENT.id);
@@ -184,6 +198,7 @@ function App() {
     const [submittingPost, setSubmittingPost] = useState<string>('');
     const [submittingLike, setSubmittingLike] = useState<string>('');
     const [submittingTip, setSubmittingTip] = useState<string>('');
+    const [submittingMessage, setSubmittingMessage] = useState<string>('');
     const [inputPostDisabled, setInputPostDisabled] = useState<boolean>(false);
     const browserStateHistoryRef = useRef<Record<string, BrowserStateHistorySettings>>({});
     const postMediaAttachmentsRef = useRef<Record<string, PostMediaAttachment | undefined>>({});
@@ -191,16 +206,22 @@ function App() {
     const tipsRef = useRef<Record<string, { totalAmount: number, tips: Tip[] }>>({});
     const [idenaWalletBalance, setIdenaWalletBalance] = useState<string>('0');
     const postLatestActivityRef = useRef({} as Record<string, number>);
-
+    const latestMessagesForwardQueueRef = useRef([] as EventTransaction[]);
+    const latestMessagesBackwardQueueRef = useRef([] as EventTransaction[]);
+    const [latestConversationActivity, setLatestConversationActivity] = useState<string[]>([]); // ['0x011', '0x022']
+    const conversationsRef = useRef<Record<string, string[]>>({}); // { '0x011': ['messageId1', 'messageId2', 'messageId3'], }
+    const messagesRef = useRef<Record<string, Message>>({});
 
     // modals
     const [modalOpen, setModalOpen] = useState<string>('');
     const modalLikePostsRef = useRef<Post[]>([]);
     const modalTipsRef = useRef<Tip[]>([]);
     const modalSendTipRef = useRef<Post>(undefined);
-    const [modalAddMediaLocation, setModalAddMediaLocation] = useState<string>('');
+    const modalAddMediaRef = useRef<string>('');
     const modalRpcMakePostRef = useRef<{ location: string, replyToPostId?: string, channelId?: string }>({ location: '' });
-    const modalExpandImageRef = useRef<{ dataUrl?: string, cid?: string}>({});
+    const modalRpcSendMessageRef = useRef<{ location: string, recipient: string, replyToMessageId?: string }>({ location: '', recipient: '' });
+    const modalExpandImageRef = useRef<{ dataUrl?: string, cid?: string }>({});
+    const modalSubmitPubKeyRef = useRef<{ address: string }>({ address: '' });
     const [mainComposerCostEstimate, setMainComposerCostEstimate] = useState<RpcPostCostEstimate | null>(null);
     const [mainComposerCostEstimateError, setMainComposerCostEstimateError] = useState<string>('');
     const [mainComposerCostEstimateLoading, setMainComposerCostEstimateLoading] = useState<boolean>(false);
@@ -239,7 +260,7 @@ function App() {
             return isSameAddress(post.contractAddress, activeContractAddress);
         }
         return isSameAddress(activeContractAddress, contractAddressCurrent) &&
-            post.timestamp > breakingChanges.v11.timestamp;
+            post.timestamp > breakingChanges.v12.timestamp;
     };
 
     const normalizePostIdForActiveContract = (postId?: string | null) =>
@@ -295,7 +316,6 @@ function App() {
         setInputIdenaIndexerApiUrlApplied(true);
         setInputNodeApplied(true);
     }, [desktopBootstrap, desktopBootstrapReady, isDesktopOnchainMode]);
-
 
     // miscellaneous
     const [, forceUpdate] = useReducer(x => x + 1, 0);
@@ -408,6 +428,18 @@ function App() {
     }, [inputIdenaIndexerApiUrlApplied]);
 
     useEffect(() => {
+        if (
+            !nodeAvailable ||
+            !!credentialsInvalid ||
+            inputSendingTxs === 'rpc' && viewOnlyNode
+        ) {
+            setMessageSettingsInvalid(true);
+        } else {
+            setMessageSettingsInvalid(false);
+        }
+    }, [nodeAvailable, inputSendingTxs, credentialsInvalid, viewOnlyNode]);
+
+    useEffect(() => {
         nodeAvailableRef.current = nodeAvailable;
     }, [nodeAvailable]);
 
@@ -445,13 +477,13 @@ function App() {
 
     type RecurseForward = () => Promise<void>;
     useEffect(() => {
+        let recurseForwardIntervalId: NodeJS.Timeout | undefined;
+
         if (initialBlock && nodeAvailable) {
             if (isDesktopOnchainMode) {
                 setCurrentBlockCaptured(initialBlock);
                 return undefined;
             }
-
-            let recurseForwardIntervalId: NodeJS.Timeout;
 
             (async function recurseForward() {
                 if (nodeAvailableRef.current) {
@@ -463,15 +495,17 @@ function App() {
                 }
             } as RecurseForward)();
 
-            return () => clearInterval(recurseForwardIntervalId);
+            return () => recurseForwardIntervalId && clearTimeout(recurseForwardIntervalId);
+        } else {
+            recurseForwardIntervalId && clearTimeout(recurseForwardIntervalId);
         }
     }, [initialBlock, nodeAvailable, activeContractAddress]);
 
     type RecurseBackward = (time: number) => Promise<void>;
     useEffect(() => {
-        if (scanningPastBlocks && initialBlock && nodeAvailable) {
-            let recurseBackwardIntervalId: NodeJS.Timeout;
+        let recurseBackwardIntervalId: NodeJS.Timeout | undefined;
 
+        if (scanningPastBlocks && initialBlock && nodeAvailable) {
             const timeNow = Math.floor(Date.now() / 1000);
             const ttl = timeNow + SCAN_PAST_POSTS_TTL;
 
@@ -488,6 +522,8 @@ function App() {
             } as RecurseBackward)(timeNow);
 
             return () => clearInterval(recurseBackwardIntervalId);
+        } else {
+            recurseBackwardIntervalId && clearInterval(recurseBackwardIntervalId);
         }
     }, [scanningPastBlocks, initialBlock, nodeAvailable]);
 
@@ -586,6 +622,8 @@ function App() {
                                 pastContractAddressRef!.current = contractAddress3;
                             } else if (getBlockByHeightResult.timestamp < breakingChanges.v11.timestamp) {
                                 pastContractAddressRef!.current = contractAddress4;
+                            } else if (getBlockByHeightResult.timestamp < breakingChanges.v12.timestamp) {
+                                pastContractAddressRef!.current = contractAddress5;
                             }
                         }
                         throw 'no transactions';
@@ -638,12 +676,15 @@ function App() {
                     }
 
                     const isCurrentContract = pastContractAddressRef!.current === contractAddressCurrent;
+                    const isContractAddress5 = pastContractAddressRef!.current === contractAddress5;
                     const isContractAddress4 = pastContractAddressRef!.current === contractAddress4;
                     const isContractAddress3 = pastContractAddressRef!.current === contractAddress3;
                     const isContractAddress2 = pastContractAddressRef!.current === contractAddress2;
                     const isContractAddress1 = pastContractAddressRef!.current === contractAddress1;
 
-                    if (isContractAddress4) {
+                    if (isContractAddress5) {
+                        transactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < breakingChanges.v12.timestamp);
+                    } else if (isContractAddress4) {
                         transactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < breakingChanges.v11.timestamp);
                     } else if (isContractAddress3) {
                         transactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < breakingChanges.v10.timestamp);
@@ -657,6 +698,9 @@ function App() {
                         continuationTokenRef!.current = continuationToken;
                     } else {
                         if (isCurrentContract) {
+                            pastContractAddressRef!.current = contractAddress5;
+                            continuationTokenRef!.current = undefined;
+                        } else if (isContractAddress5) {
                             pastContractAddressRef!.current = contractAddress4;
                             continuationTokenRef!.current = undefined;
                         } else if (isContractAddress4) {
@@ -677,7 +721,7 @@ function App() {
                     throw 'this should not happen';
                 }
 
-                const transactionsWithDetails = isContentSourceRpc ?
+                const transactionsWithDetails: EventTransaction[] = isContentSourceRpc ?
                     await getTransactionDetailsRpc(transactions, contractAddress, allMethods, rpcClientRef.current!)
                     :
                     await getTransactionDetailsIndexerApi(transactions, indexerApiUrl);
@@ -688,6 +732,7 @@ function App() {
 
                 let newReplyPostsCollection = {};
 
+                const postersPromised: string[] = [];
                 const posterPromises = [];
                 const messagePromises = [];
                 const mediaPromises = [];
@@ -696,7 +741,7 @@ function App() {
                     const transaction = transactionsWithDetails[index];
 
                     if ([sendTipMethod].includes(transaction.method)) {
-                        const { postId, newTip, updatedPostTips, posterPromise } = await processTip(transaction, rpcClientRef.current!, tipsRef, postersRef, isRecurseForward);
+                        const { postId, newTip, updatedPostTips, posterPromise } = await processTip(transaction, rpcClientRef.current!, tipsRef, postersRef, isRecurseForward, postersPromised);
                         tipsRef.current = { ...tipsRef.current, [postId]: updatedPostTips };
 
                         posterPromise && posterPromises.push(posterPromise);
@@ -725,6 +770,21 @@ function App() {
                         continue;
                     }
 
+                    if ([sendMessageMethod].includes(transaction.method)) {
+
+                        if (transaction.timestamp > breakingChanges.v12.timestamp) {
+                            if (isRecurseForward) {
+                                latestMessagesForwardQueueRef.current = [ ...latestMessagesForwardQueueRef.current, transaction ];
+                            } else {
+                                latestMessagesBackwardQueueRef.current = [ ...latestMessagesBackwardQueueRef.current, transaction ];
+                            }
+                        }
+
+                        lastValidTransaction = transaction;
+
+                        continue;
+                    }
+
                     const {
                         newPost,
                         posterPromise,
@@ -738,6 +798,7 @@ function App() {
                         rpcClientRef.current!,
                         postsRef,
                         postersRef,
+                        postersPromised,
                     );
 
                     if (continued) {
@@ -854,27 +915,9 @@ function App() {
                     backwardOrphanedReplyPostsTreeRef.current = { ...backwardOrphanedReplyPostsTreeRef.current, ...newBackwardOrphanedReplyPosts };
                 }
 
-                const postersResolved = await Promise.all(posterPromises);
-                let newPosters = {};
-                for (let index = 0; index < postersResolved.length; index++) {
-                    const posterResolved = postersResolved[index];
-                    newPosters = { ...newPosters, [posterResolved.address]: posterResolved };
-                }
-                postersRef.current = { ...postersRef.current, ...newPosters };
-
-                const messages = await Promise.all(messagePromises);
-                for (let index = 0; index < messages.length; index++) {
-                    const messagesProps = messages[index];
-                    const updatedPost = { ...postsRef.current[messagesProps!.postId], ...messagesProps };
-                    postsRef.current = { ...postsRef.current, [messagesProps!.postId]: updatedPost };
-                }
-
-                const media = await Promise.all(mediaPromises);
-                for (let index = 0; index < media.length; index++) {
-                    const { blob, ...mediaPropsWithoutBlob } = media[index];
-                    const updatedPost = { ...postsRef.current[mediaPropsWithoutBlob!.postId], ...mediaPropsWithoutBlob };
-                    postsRef.current = { ...postsRef.current, [mediaPropsWithoutBlob!.postId]: updatedPost };
-                }
+                await resolveNewPosters(posterPromises, postersRef);
+                await resolveNewMessages(messagePromises, postsRef);
+                await resolveNewMedia(mediaPromises, postsRef);
 
                 setLatestPosts((currentLatestPosts) => {
                     const latestPostsUpdated = isRecurseForward ? [...newLatestPosts!, ...currentLatestPosts] : [...currentLatestPosts, ...newLatestPosts!];
@@ -936,23 +979,162 @@ function App() {
         };
     };
 
+    type RecurseForwardMessages = () => Promise<void>;
+    useEffect(() => {
+        const canProcessMessages = !credentialsInvalid;
+
+        let recurseForwardIntervalId: NodeJS.Timeout | undefined;
+
+        if (initialBlock && nodeAvailable && canProcessMessages) {
+            (async function recurseForwardMessages() {
+                if (nodeAvailableRef.current) {
+                    const recurseDirection = 'forward';
+                    recurseForwardIntervalId = setTimeout(messagesProcessorFactory(recurseDirection, recurseForwardMessages, latestMessagesForwardQueueRef), POLLING_INTERVAL);
+                }
+            } as RecurseForwardMessages)();
+
+            return () => clearInterval(recurseForwardIntervalId);
+        } else {
+            recurseForwardIntervalId && clearInterval(recurseForwardIntervalId);
+        }
+    }, [initialBlock, nodeAvailable, credentialsInvalid]);
+
+    type RecurseBackwardMessages = () => Promise<void>;
+    useEffect(() => {
+        const canProcessMessages = !credentialsInvalid;
+
+        let recurseBackwardIntervalId: NodeJS.Timeout | undefined;
+
+        if (initialBlock && nodeAvailable && canProcessMessages) {
+            (async function recurseBackwardMessages() {
+                if (nodeAvailableRef.current && (scanningPastBlocks || latestMessagesBackwardQueueRef.current.length)) {
+                    const recurseDirection = 'backward';
+                    recurseBackwardIntervalId = setTimeout(messagesProcessorFactory(recurseDirection, recurseBackwardMessages, latestMessagesBackwardQueueRef), POLLING_INTERVAL);
+                }
+            } as RecurseBackwardMessages)();
+
+            return () => clearInterval(recurseBackwardIntervalId);
+        } else {
+            recurseBackwardIntervalId && clearInterval(recurseBackwardIntervalId);
+        }
+    }, [initialBlock, nodeAvailable, credentialsInvalid, scanningPastBlocks]);
+
+    const messagesProcessorFactory = (
+        recurseDirection: string,
+        recurse: RecurseForwardMessages | RecurseBackwardMessages,
+        latestMessagesQueueRef: React.RefObject<EventTransaction[]>,
+    ) => {
+        return async function messageProcessor() {
+            const isRecurseForward = recurseDirection === 'forward';
+
+            try {
+                const postersPromised: string[] = [];
+                const posterPromises = [];
+                const messagePromises = [];
+                const mediaPromises = [];
+                const newMessages = [];
+
+                while (latestMessagesQueueRef.current.length) {
+                    const firstMessage = latestMessagesQueueRef.current.shift();
+
+                    const { newMessage, posterPromise, mediaPromise, messagePromise, continued } = await processMessage(
+                        firstMessage!,
+                        encryptedPrivateKey,
+                        password,
+                        postersAddress,
+                        messagesRef,
+                        thisChannelId,
+                        postersRef,
+                        rpcClientRef,
+                        postersPromised,
+                    );
+
+                    if (continued) {
+                        continue;
+                    }
+
+                    posterPromise && posterPromises.push(posterPromise);
+                    messagePromise && messagePromises.push(messagePromise);
+                    mediaPromise && mediaPromises.push(mediaPromise);
+
+                    messagesRef.current = { ...messagesRef.current, [newMessage!.messageId]: newMessage! };
+                    newMessages.push(newMessage);
+                }
+
+                await resolveNewPosters(posterPromises, postersRef);
+                await resolveNewMessages(messagePromises, null, messagesRef);
+                await resolveNewMedia(mediaPromises, null, messagesRef);
+
+                const conversationKeys: string[] = [];
+
+                for (let index = 0; index < newMessages.length; index++) {
+                    const newMessage = newMessages[index] as Message;
+                    const conversationKey = newMessage.participants.map((item: string) => item.toLowerCase()).sort().join('-');
+                    const conversation = isRecurseForward ? [ newMessage.messageId, ...(conversationsRef.current[conversationKey] ?? []) ] : [ ...(conversationsRef.current[conversationKey] ?? []), newMessage!.messageId ];
+                    conversationsRef.current = { ...conversationsRef.current, [conversationKey]: conversation };
+                    conversationKeys.push(conversationKey);
+
+                    const allParticipants = [newMessage.sender, ...newMessage.participants];
+                    for (let index = 0; index < allParticipants.length; index++) {
+                        const participantAddress = allParticipants[index];
+                        const participant = postersRef.current[participantAddress];
+                        if (participant && !participant.pubkey) {
+                            if (inputFindingPastPostsRef.current === 'indexer-api') {
+                                const pubKey = await getPubKeyWithIdenaIndexerApi(indexerApiUrlRef.current, participantAddress);
+                                participant.pubkey = pubKey ?? '';
+                            } else {
+                                const pubKey = await getPubKeyWithRpc(rpcClientRef.current!, participantAddress);
+                                participant.pubkey = pubKey ?? '';
+                            }
+                        }
+                    }
+                }
+
+                setLatestConversationActivity((currentValue) => {
+                    let newLatestConversationActivity = currentValue;
+                    if (isRecurseForward) {
+                        for (let index = 0; index < conversationKeys.length; index++) {
+                            const conversationKey = conversationKeys[index];
+                            const currentValueExcluding = newLatestConversationActivity.filter(item => item !== conversationKey);
+                            newLatestConversationActivity = [ conversationKey, ...currentValueExcluding ];
+                        }
+                    } else {
+                        for (let index = 0; index < conversationKeys.length; index++) {
+                            const conversationKey = conversationKeys[index];
+                            const conversationKeyExists = newLatestConversationActivity.includes(conversationKey);
+                            newLatestConversationActivity = conversationKeyExists ? newLatestConversationActivity : [...newLatestConversationActivity, conversationKey];
+                        }
+                    }
+
+                    return newLatestConversationActivity;
+                });
+
+            } catch (error) {
+                // do nothing
+            } finally {
+                recurse();
+            }
+        };
+    };
+
     useEffect(() => {
         let intervalSubmittingPost: NodeJS.Timeout;
-        if (submittingPost || submittingLike || submittingTip) {
+        if (submittingPost || submittingLike || submittingTip || submittingMessage) {
             intervalSubmittingPost = setTimeout(() => {
                 setSubmittingPost('');
                 setSubmittingLike('');
                 setSubmittingTip('');
+                setSubmittingMessage('');
             }, SUBMITTING_POST_INTERVAL);
         }
         return () => clearInterval(intervalSubmittingPost);
-    }, [submittingPost, submittingLike, submittingTip]);
+    }, [submittingPost, submittingLike, submittingTip, submittingMessage]);
 
     useEffect(() => {
-        setInputPostDisabled(!!submittingPost || !!submittingLike || !!submittingTip || (inputSendingTxs === 'rpc' && viewOnlyNode) || postersAddressInvalid);
-    }, [submittingPost, submittingLike, submittingTip, inputSendingTxs, viewOnlyNode, postersAddressInvalid]);
+        setInputPostDisabled(!!submittingPost || !!submittingLike || !!submittingTip || !!submittingMessage || (inputSendingTxs === 'rpc' && viewOnlyNode) || postersAddressInvalid);
+    }, [submittingPost, submittingLike, submittingTip, submittingMessage, inputSendingTxs, viewOnlyNode, postersAddressInvalid]);
 
-    const setPostMediaAttachmentHandler = async (location: string, file: File, ipfsUrl?: string) => {
+    const setPostMediaAttachmentHandler = async (attachmentId: string, file: File, ipfsUrl?: string) => {
         if (!supportedImageTypes.includes(file.type)) {
             showFlashNotice('warning', 'Media format not supported.');
             return;
@@ -978,7 +1160,7 @@ function App() {
 
             const newMedia = { dataUrl: imageDataUrl, file, ipfsUrl };
 
-            postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [location]: newMedia };
+            postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [attachmentId]: newMedia };
         } catch {
             showFlashNotice('error', 'Failed to read media file.');
         }
@@ -1018,7 +1200,7 @@ function App() {
             copyTxTextElement!.innerText = 'Copying';
 
             const postTextareaElement = document.getElementById(`post-input-${location}`) as HTMLTextAreaElement;
-            const postMediaAttachment = postMediaAttachmentsRef.current[location];
+            const postMediaAttachment = postMediaAttachmentsRef.current[`post-${location}`];
 
             const postPayload = getTextAndMediaForPost(postTextareaElement, postMediaAttachment);
             const {inputText} = postPayload;
@@ -1069,7 +1251,7 @@ function App() {
         }
 
         const postTextareaElement = document.getElementById(`post-input-${location}`) as HTMLTextAreaElement;
-        const postMediaAttachment = postMediaAttachmentsRef.current[location];
+        const postMediaAttachment = postMediaAttachmentsRef.current[`post-${location}`];
 
         let { inputText, media, mediaType } = getTextAndMediaForPost(postTextareaElement, postMediaAttachment);
 
@@ -1122,7 +1304,7 @@ function App() {
         }
 
         postTextareaElement.value = '';
-        postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [location]: undefined };
+        postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`post-${location}`]: undefined };
 
         setSubmittingPost(location);
 
@@ -1149,6 +1331,202 @@ function App() {
         setSubmittingTip(location);
 
         await submitSendTip(postersAddress, activeContractAddress, sendTipMethod, normalizePostIdForActiveContract(tipToPostId) || '', tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+    };
+
+    const copyMessageTxHandler = async (location: string, recipient: string, replyToMessageId?: string) => {
+        if (!nodeAvailable) {
+            alert('Node unavailable, cannot message!');
+            return;
+        }
+
+        const copyTxTextElement = document.getElementById(`message-copytx-${location}`) as HTMLElement;
+        const savedInnerText = copyTxTextElement!.innerText;
+
+        if (copyTxHandlerEnabledRef.current) {
+            copyTxHandlerEnabledRef.current = false;
+            copyTxTextElement!.innerText = 'Copying';
+
+            const messageTextareaElement = document.getElementById(`message-input-${location}`) as HTMLTextAreaElement;
+            const postMediaAttachment = postMediaAttachmentsRef.current['message-' + location];
+
+            const messageContent = getTextAndMediaForPost(messageTextareaElement, postMediaAttachment);
+            const { inputText } = messageContent;
+            let { media, mediaType } = messageContent;
+
+            if (!inputText && !postMediaAttachment) {
+                alert('No text or media provided!');
+                copyTxTextElement!.innerText = savedInnerText;
+                copyTxHandlerEnabledRef.current = true;
+                return;
+            }
+
+            const textPassword = '';
+            const mediaPassword = '';
+
+            if (postMediaAttachment?.ipfsUrl) {
+                media = [postMediaAttachment.ipfsUrl];
+                mediaType = [postMediaAttachment.file.type];
+            }
+
+            const recipientDetails = postersRef.current[recipient.toLowerCase()];
+
+            // [participants, channelId, message, textPassword (AES-GCM encryption), replyToMessageId, media, mediaType, mediaPassword (AES-GCM encryption), tags]
+            const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), recipient.toLowerCase()], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
+            const rawMessageHash = keccak256(rawMessage);
+
+            const encodedMessage = new TextEncoder().encode(rawMessage);
+
+            const keyData = new Uint8Array(sha3_256.array(password));
+            const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
+            const { pubKey: myPubKey } = extractPubKeyAddressFromPrivateKey(myPrivateKey);
+            const myEncryptedMessage = await encrypt(hexToUint8Array(myPubKey), encodedMessage);
+            // @ts-ignore: Uint8Array.toBase64 not recognized yet
+            const mySerializedEncryptedMessage = myEncryptedMessage.toBase64();
+
+            const recipientEncryptedMessage = await encrypt(hexToUint8Array(recipientDetails.pubkey), encodedMessage);
+            // @ts-ignore: Uint8Array.toBase64 not recognized yet
+            const recipientSerializedEncryptedMessage = recipientEncryptedMessage.toBase64();
+
+            const message = [mySerializedEncryptedMessage, recipientSerializedEncryptedMessage];
+
+            messageTextareaElement.value = '';
+
+            copyMessageTx(
+                postersAddress,
+                contractAddressCurrent,
+                sendMessageMethod,
+                message,
+                rawMessageHash,
+                rpcClientRef.current!,
+            ).then((res) => {
+
+                if (res?.success) {
+                    copyTxTextElement!.innerText = 'Copied ✅';
+                } else {
+                    copyTxTextElement!.innerText = 'Copied ❌';
+                }
+
+                setTimeout(() => {
+                    copyTxTextElement!.innerText = savedInnerText;
+                    copyTxHandlerEnabledRef.current = true;
+                }, 1000);
+            });
+        }
+    };
+
+    const submitMessageHandler = async (location: string, recipient: string, replyToMessageId?: string, storeTextIpfs?: boolean, storeMediaIpfs?: boolean) => {
+        if (!nodeAvailable) {
+            alert('Node unavailable, cannot message!');
+            return;
+        }
+
+        if (messageSettingsInvalid) {
+            alert('Messaging requires a valid session-only encrypted key and password.');
+            return;
+        }
+
+        const messageTextareaElement = document.getElementById(`message-input-${location}`) as HTMLTextAreaElement;
+        const postMediaAttachment = postMediaAttachmentsRef.current[`message-${location}`];
+
+        let { inputText, media, mediaType } = getTextAndMediaForPost(messageTextareaElement, postMediaAttachment);
+
+        if (!inputText && !postMediaAttachment) {
+            alert('No text or media provided!');
+            return;
+        }
+
+        let textPassword = '';
+        let mediaPassword = '';
+
+        if (inputSendingTxs === 'rpc' && storeTextIpfs && inputText) {
+
+            const textBytes = str2bytes(inputText);
+
+            const rawSecretKey = crypto.getRandomValues(new Uint8Array(32));
+
+            // @ts-ignore: Uint8Array.toBase64 not recognized yet
+            textPassword = rawSecretKey.toBase64();
+
+            const combined = await encryptAESGCM(textBytes, rawSecretKey);
+
+            const cidAddress = await storeFileToIpfs(rpcClientRef.current!, combined, postersAddressRef.current);
+
+            if (!cidAddress) {
+                alert('Something went wrong. Probably you have insufficient iDNA.');
+            }
+
+            inputText = cidAddress!;
+        }
+
+        if (inputSendingTxs === 'rpc' && postMediaAttachment && !postMediaAttachment.ipfsUrl) {
+            if (storeMediaIpfs) {
+                if (postMediaAttachment.file.size > MAX_POST_MEDIA_BYTES) {
+                    alert('1MB is the maximum size. This image is too large.');
+                    return;
+                }
+
+                const fileBytes = new Uint8Array(await postMediaAttachment.file.arrayBuffer());
+
+                const rawSecretKey = crypto.getRandomValues(new Uint8Array(32));
+
+                // @ts-ignore: Uint8Array.toBase64 not recognized yet
+                mediaPassword = rawSecretKey.toBase64();
+
+                const combined = await encryptAESGCM(fileBytes, rawSecretKey);
+
+                const cidAddress = await storeFileToIpfs(rpcClientRef.current!, combined, postersAddressRef.current);
+
+                if (!cidAddress) {
+                    alert('Something went wrong. Probably you have insufficient iDNA.');
+                }
+
+                media = [cidAddress!];
+                mediaType = [postMediaAttachment.file.type];
+            } else {
+                if (postMediaAttachment.file.size > MAX_POST_MEDIA_BYTES_WEBAPP) {
+                    alert('5KB is the maximum size when storing on the blockchain. Store image on IPFS instead.');
+                    return;
+                }
+            }
+        }
+
+        if (postMediaAttachment?.ipfsUrl) {
+            media = [postMediaAttachment.ipfsUrl];
+            mediaType = [postMediaAttachment.file.type];
+        }
+
+        const recipientDetails = postersRef.current[recipient.toLowerCase()];
+
+        if (!recipientDetails?.pubkey) {
+            alert('Recipient public key unavailable. Ask the recipient to publish a transaction first.');
+            return;
+        }
+
+        // [participants, channelId, message, textPassword (AES-GCM encryption), replyToMessageId, media, mediaType, mediaPassword (AES-GCM encryption), tags]
+        const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), recipient.toLowerCase()], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
+        const rawMessageHash = keccak256(rawMessage);
+
+        const encodedMessage = new TextEncoder().encode(rawMessage);
+
+        const keyData = new Uint8Array(sha3_256.array(password));
+        const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
+        const { pubKey: myPubKey } = extractPubKeyAddressFromPrivateKey(myPrivateKey);
+        const myEncryptedMessage = await encrypt(hexToUint8Array(myPubKey), encodedMessage);
+        // @ts-ignore: Uint8Array.toBase64 not recognized yet
+        const mySerializedEncryptedMessage = myEncryptedMessage.toBase64();
+
+        const recipientEncryptedMessage = await encrypt(hexToUint8Array(recipientDetails.pubkey), encodedMessage);
+        // @ts-ignore: Uint8Array.toBase64 not recognized yet
+        const recipientSerializedEncryptedMessage = recipientEncryptedMessage.toBase64();
+
+        const message = [mySerializedEncryptedMessage, recipientSerializedEncryptedMessage];
+
+        messageTextareaElement.value = '';
+        postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`message-${location}`]: undefined };
+
+        setSubmittingMessage(location);
+
+        await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
     const handleOpenLikesModal = (e: MouseEventLocal, likePosts: Post[]) => {
@@ -1184,17 +1562,29 @@ function App() {
         setModalOpen('sendTip');
     };
 
-    const handleOpenAddMediaModal = (e: MouseEventLocal, location: string) => {
+    const handleOpenAddMediaModal = (e: MouseEventLocal, location: string, source: string) => {
         e.stopPropagation();
 
-        const replyToPost = location !== 'main' && postsRef.current[location];
-        const isBreakingChangeDisabled = replyToPost && !postTargetsActiveContract(replyToPost);
+        if (source === 'post') {
+            const replyToPost = location !== 'main' && postsRef.current[location];
+            const isBreakingChangeDisabled = replyToPost && !postTargetsActiveContract(replyToPost);
 
-        if (inputPostDisabled || isBreakingChangeDisabled) {
+            if (isBreakingChangeDisabled) {
+                return;
+            }
+        }
+
+        if (source === 'message') {
+            if (messageSettingsInvalid) {
+                return;
+            }
+        }
+
+        if (inputPostDisabled) {
             return;
         }
 
-        setModalAddMediaLocation(location);
+        modalAddMediaRef.current = `${source}-${location}`;
         setModalOpen('addMedia');
     };
 
@@ -1217,15 +1607,69 @@ function App() {
         setModalOpen('rpcMakePost');
     };
 
+    const handleOpenRpcSendMessageModal = (location: string, recipient: string, replyToMessageId?: string) => {
+        if (!nodeAvailable) {
+            alert('Node unavailable, cannot message!');
+            return;
+        }
+
+        if (messageSettingsInvalid) {
+            return;
+        }
+
+        modalRpcSendMessageRef.current = { location, recipient, replyToMessageId };
+        setModalOpen('rpcSendMessage');
+    };
+
     const handleExpandImageModal = (e: MouseEventLocal, dataUrl: string, cid?: string) => {
         e.stopPropagation();
         modalExpandImageRef.current = { dataUrl, cid };
         setModalOpen('expandImage');
     };
 
-    const addMediaHandler = async (location: string, file: File, ipfsUrl?: string) => {
-        await setPostMediaAttachmentHandler(location, file, ipfsUrl);
+    const handleSubmitPubKeyModal = (address: string) => {
+        modalSubmitPubKeyRef.current = { address };
+        setModalOpen('submitPubKey');
+    };
+
+    const addMediaHandler = async (attachmentId: string, file: File, ipfsUrl?: string) => {
+        await setPostMediaAttachmentHandler(attachmentId, file, ipfsUrl);
         forceUpdate();
+    };
+
+    const handleSetInputCredentialsApplied = async (newValue: boolean) => {
+        setInputCredentialsApplied(newValue);
+
+        if (!newValue) {
+            return;
+        }
+
+        if (encryptedPrivateKey.length !== 120) {
+            setCredentialsInvalid('Key must be 120 chars');
+            return;
+        }
+
+        if (!password.length) {
+            setCredentialsInvalid('Password missing');
+            return;
+        }
+
+        try {
+            const keyData = new Uint8Array(sha3_256.array(password));
+            const privateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
+            const { address: calculatedAddress } = extractPubKeyAddressFromPrivateKey(privateKey);
+
+            if (calculatedAddress !== postersAddress.toLowerCase()) {
+                setCredentialsInvalid('Key corresponds to wrong address');
+                return;
+            }
+
+            setCredentialsInvalid('');
+
+        } catch (error) {
+            setCredentialsInvalid('Invalid key or password');
+            return;
+        }
     };
 
     return (
@@ -1503,9 +1947,12 @@ function App() {
                             copyPostTxHandler,
                             submitPostHandler,
                             submitLikeHandler,
+                            copyMessageTxHandler,
+                            submitMessageHandler,
                             submittingPost,
                             submittingLike,
                             submittingTip,
+                            submittingMessage,
                             browserStateHistoryRef,
                             setBrowserStateHistorySettings,
                             handleOpenLikesModal,
@@ -1513,7 +1960,9 @@ function App() {
                             handleOpenSendTipModal,
                             handleOpenAddMediaModal,
                             handleOpenRpcMakePostModal,
+                            handleOpenRpcSendMessageModal,
                             handleExpandImageModal,
+                            handleSubmitPubKeyModal,
                             tipsRef,
                             setPostMediaAttachmentHandler,
                             postMediaAttachmentsRef,
@@ -1528,6 +1977,22 @@ function App() {
                             desktopBootstrap,
                             activeSocialContract,
                             activeContractAddress,
+                            rpcClientRef,
+                            encryptedPrivateKey,
+                            setEncryptedPrivateKey,
+                            password,
+                            setPassword,
+                            inputCredentialsApplied,
+                            credentialsInvalid,
+                            handleSetInputCredentialsApplied,
+                            zeroAddress,
+                            latestConversationActivity,
+                            postersAddress,
+                            conversationsRef,
+                            messagesRef,
+                            messageSettingsInvalid,
+                            findPostsWithRef: inputFindingPastPostsRef,
+                            indexerApiUrlRef,
                         }}
                     />
                 </div>
@@ -1541,9 +2006,11 @@ function App() {
                     {modalOpen === 'likes' && <ModalLikesTipsComponent heading={'Likes'} modalItemsRef={modalLikePostsRef} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'tips' && <ModalLikesTipsComponent heading={'Tips'} modalItemsRef={modalTipsRef} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'sendTip' && <ModalSendTipComponent modalSendTipRef={modalSendTipRef} idenaWalletBalance={idenaWalletBalance} submitSendTipHandler={submitSendTipHandler} closeModal={() => setModalOpen('')} />}
-                    {modalOpen === 'addMedia' && <ModalAddMediaComponent modalAddMediaLocation={modalAddMediaLocation} addMediaHandler={addMediaHandler} rpcClient={rpcClientRef.current!} postersAddress={postersAddress} makePostsWith={inputSendingTxs} closeModal={() => setModalOpen('')} />}
+                    {modalOpen === 'addMedia' && <ModalAddMediaComponent modalAddMediaRef={modalAddMediaRef} addMediaHandler={addMediaHandler} rpcClient={rpcClientRef.current!} postersAddress={postersAddress} makePostsWith={inputSendingTxs} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'rpcMakePost' && <ModalRpcMakePostComponent modalRpcMakePostRef={modalRpcMakePostRef} submitPostHandler={submitPostHandler} closeModal={() => setModalOpen('')} />}
+                    {modalOpen === 'rpcSendMessage' && <ModalRpcSendMessageComponent modalRpcSendMessageRef={modalRpcSendMessageRef} submitMessageHandler={submitMessageHandler} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'expandImage' && <ModalExpandImageComponent modalExpandImageRef={modalExpandImageRef} />}
+                    {modalOpen === 'submitPubKey' && <ModalSubmitPubKeyComponent modalSubmitPubKeyRef={modalSubmitPubKeyRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
                     <div className="text-center"><button className="h-7 w-15 my-1 px-2 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => setModalOpen('')}>Close</button></div>
                 </Modal>
             </div>
