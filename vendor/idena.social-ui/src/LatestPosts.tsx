@@ -33,7 +33,7 @@ type LatestPostsProps = {
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
     handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
     handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
-    handleOpenAddMediaModal: (e: MouseEventLocal, location: string) => void,
+    handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
@@ -87,10 +87,6 @@ function LatestPosts() {
         replyPostsTreeRef,
         deOrphanedReplyPostsTreeRef,
         discussPrefix,
-        scanningPastBlocks,
-        setScanningPastBlocks,
-        noMorePastBlocks,
-        pastBlockCaptured,
         SET_NEW_POSTS_ADDED_DELAY,
         inputPostDisabled,
         copyPostTxHandler,
@@ -146,7 +142,7 @@ function LatestPosts() {
 
     const sortPostsBy = browserStateHistoryRef.current[locationKey].sortPostsBy;
     const sortedPostIds = sortPostsBy === 'latest-posts' ? latestPosts : latestActivity;
-    const mainPostMediaAttachment = postMediaAttachmentsRef.current['main'];
+    const mainPostMediaAttachment = postMediaAttachmentsRef.current['post-main'];
     const mainFeeTooltipText = mainComposerCostEstimate
         ? `Current conservative max-fee cap from your own node RPC: about ${mainComposerCostEstimate.totalMaxFeeDna} iDNA. Breakdown: contract call ${mainComposerCostEstimate.contractCallMaxFeeDna} iDNA${mainComposerCostEstimate.imageStoredToIpfs ? `, image storage ${mainComposerCostEstimate.imageStoreMaxFeeDna} iDNA` : ''}${mainComposerCostEstimate.textStoredToIpfs ? `, long-text storage ${mainComposerCostEstimate.textStoreMaxFeeDna} iDNA` : ''}. The actual charged fee can be lower.`
         : 'Start typing or attach an image to request a conservative max-fee estimate from your own node RPC.';
@@ -251,17 +247,16 @@ function LatestPosts() {
         setMainComposerCostEstimateError,
         setMainComposerCostEstimateLoading,
     ]);
-
     const removeMediaHandler = (e: MouseEventLocal, location: string) => {
         e?.stopPropagation();
 
-        postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [location]: undefined };
+        postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`post-${location}`]: undefined };
         forceUpdate();
     };
 
     return (<>
         <div
-            className={embeddedDesktopOnchainMode ? 'mx-auto w-full max-w-[1360px]' : 'w-full'}
+            className={`mt-3 mb-6 ${embeddedDesktopOnchainMode ? 'mx-auto w-full max-w-[1360px]' : 'w-full'}`}
             style={embeddedDesktopOnchainMode ? { width: '100%', maxWidth: '1360px' } : undefined}
         >
             {proposalMode && (
@@ -318,7 +313,7 @@ function LatestPosts() {
                     {mainPostMediaAttachment ? <>
                         <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => !mainComposerDisabled && removeMediaHandler(e, 'main')}>Remove image</p>
                     </> : <>
-                        <p className={`inline-block -mt-1 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, 'main')}>Add image</p>
+                        <p className={`inline-block -mt-1 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, 'main', 'post')}>Add image</p>
                     </>}
                     {proposalMode && proposalPrefillText && (
                         <p
@@ -377,14 +372,6 @@ function LatestPosts() {
                 </li>
             ))}
         </ul>
-        <div className="flex flex-col gap-2 mb-15">
-            <button className={`h-9 mt-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 ${scanningPastBlocks || noMorePastBlocks ? '' : 'hover:bg-white/20 cursor-pointer'}`} disabled={scanningPastBlocks || noMorePastBlocks || !nodeAvailable} onClick={() => setScanningPastBlocks(true)}>
-                {scanningPastBlocks ? "Scanning blockchain...." : (noMorePastBlocks ? "No more past posts" : "Scan for more posts")}
-            </button>
-            <p className="pr-12 text-gray-400 text-[12px] text-center">
-                {!scanningPastBlocks ? <>Posts found down to Block # <span className="absolute">{pastBlockCaptured || 'unavailable'}</span></> : <>&nbsp;</>}
-            </p>
-        </div>
     </>);
 }
 
