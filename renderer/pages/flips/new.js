@@ -1772,6 +1772,25 @@ export default function NewFlipPage() {
   const {updateAiSolverSettings} = useSettingsDispatch()
 
   const {flipKeyWordPairs} = useIdentityState()
+  const flipKeyWordPairsRef = useRef(flipKeyWordPairs)
+
+  useEffect(() => {
+    flipKeyWordPairsRef.current = flipKeyWordPairs
+  }, [flipKeyWordPairs])
+
+  const getCurrentAvailableNodeKeywords = useCallback(() => {
+    const currentPairs = flipKeyWordPairsRef.current
+    if (!Array.isArray(currentPairs)) return []
+
+    const persistedFlips = getFlipsBridge().getFlips()
+    const safePersistedFlips = Array.isArray(persistedFlips)
+      ? persistedFlips
+      : []
+
+    return currentPairs.filter(
+      ({id, used}) => !used && !isPendingKeywordPair(safePersistedFlips, id)
+    )
+  }, [])
 
   const failToast = useFailToast()
 
@@ -2503,24 +2522,8 @@ export default function NewFlipPage() {
           didShowBadFlip = false
         }
 
-        if (
-          !Array.isArray(flipKeyWordPairs) ||
-          flipKeyWordPairs.every(({used}) => used)
-        )
-          return {
-            keywordSource: 'node',
-            keywordPairId: 0,
-            availableKeywords: [],
-            nodeAvailableKeywords: [],
-            didShowBadFlip,
-          }
-
-        const persistedFlips = getFlipsBridge().getFlips()
-
         // eslint-disable-next-line no-shadow
-        const availableKeywords = flipKeyWordPairs.filter(
-          ({id, used}) => !used && !isPendingKeywordPair(persistedFlips, id)
-        )
+        const availableKeywords = getCurrentAvailableNodeKeywords()
 
         if (!availableKeywords.length) {
           return {
@@ -2598,6 +2601,36 @@ export default function NewFlipPage() {
     .trim()
     .toLowerCase()
   const isRandomKeywordSource = keywordSource === 'random'
+  const retryNodeKeywords = useCallback(() => {
+    send({
+      type: 'USE_NODE_KEYWORDS',
+      availableKeywords: getCurrentAvailableNodeKeywords(),
+    })
+  }, [getCurrentAvailableNodeKeywords, send])
+
+  useEffect(() => {
+    if (
+      keywordSource !== 'node' ||
+      !current.matches({editing: 'keywords.failure'})
+    ) {
+      return
+    }
+
+    const refreshedKeywords = getCurrentAvailableNodeKeywords()
+    if (refreshedKeywords.length > 0) {
+      send({
+        type: 'USE_NODE_KEYWORDS',
+        availableKeywords: refreshedKeywords,
+      })
+    }
+  }, [
+    current,
+    flipKeyWordPairs,
+    getCurrentAvailableNodeKeywords,
+    keywordSource,
+    send,
+  ])
+
   const keywordPairPosition = useMemo(() => {
     if (!Array.isArray(availableKeywords) || availableKeywords.length === 0) {
       return 1
@@ -5434,9 +5467,7 @@ export default function NewFlipPage() {
                                 )}
                               </Text>
                               <Stack isInline spacing={2}>
-                                <SecondaryButton
-                                  onClick={() => send('USE_NODE_KEYWORDS')}
-                                >
+                                <SecondaryButton onClick={retryNodeKeywords}>
                                   {t('Retry node keywords')}
                                 </SecondaryButton>
                                 <SecondaryButton
@@ -5454,7 +5485,7 @@ export default function NewFlipPage() {
                         <IconButton2
                           icon={<RefreshIcon />}
                           isDisabled={is('keywords.loading')}
-                          onClick={() => send('USE_NODE_KEYWORDS')}
+                          onClick={retryNodeKeywords}
                         >
                           {t('Retry node keywords')}
                         </IconButton2>
@@ -5668,9 +5699,7 @@ export default function NewFlipPage() {
                           )}
                         </Text>
                         <Stack isInline justify="flex-end">
-                          <SecondaryButton
-                            onClick={() => send('USE_NODE_KEYWORDS')}
-                          >
+                          <SecondaryButton onClick={retryNodeKeywords}>
                             {t('Retry node keywords')}
                           </SecondaryButton>
                           <SecondaryButton

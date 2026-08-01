@@ -16,6 +16,20 @@ import {ExternalLink, Page, PageTitle, TextLink} from './components'
 import {useSettingsState} from '../providers/settings-context'
 import {useChainState} from '../providers/chain-context'
 import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
+import {
+  SOCIAL_CONTRACT_ADDRESS,
+  SOCIAL_IMAGE_FORMATS,
+  SOCIAL_MAX_IMAGE_BYTES,
+  SOCIAL_OFFICIAL_INDEXER_URL,
+  validateSocialRpcRequest,
+} from './social-desktop-rpc-policy'
+
+export {
+  SOCIAL_CONTRACT_ADDRESS,
+  SOCIAL_IMAGE_FORMATS,
+  SOCIAL_MAX_IMAGE_BYTES,
+  SOCIAL_OFFICIAL_INDEXER_URL,
+} from './social-desktop-rpc-policy'
 
 const SOCIAL_BOOTSTRAP_STORAGE_KEY = 'idenaSocialDesktopBootstrap'
 const SOCIAL_HISTORY_MODE_STORAGE_KEY = 'idenaSocialDesktopHistoryModeV3'
@@ -27,145 +41,6 @@ const SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE = 'IDENA_SOCIAL_READY'
 const SOCIAL_CHANNEL_INIT_MESSAGE_TYPE = 'IDENA_SOCIAL_CHANNEL_INIT'
 const SOCIAL_RPC_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_REQUEST'
 const SOCIAL_RPC_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_RESPONSE'
-const SOCIAL_RPC_MAX_REQUEST_ID_LENGTH = 128
-const SOCIAL_RPC_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
-export const SOCIAL_CONTRACT_ADDRESS =
-  '0xa1c5c1A8c6a1Af596078A5c9653F24c216fE1cb2'
-export const SOCIAL_OFFICIAL_INDEXER_URL = 'https://api.idena.io'
-export const SOCIAL_MAX_IMAGE_BYTES = 1024 * 1024
-export const SOCIAL_IMAGE_FORMATS = [
-  'PNG',
-  'JPEG',
-  'GIF',
-  'WebP',
-  'AVIF',
-  'APNG',
-  'SVG',
-]
-const SOCIAL_ALLOWED_RPC_METHODS = new Set([
-  'bcn_block',
-  'bcn_blockAt',
-  'bcn_getRawTx',
-  'bcn_lastBlock',
-  'bcn_syncing',
-  'bcn_transaction',
-  'bcn_txReceipt',
-  'contract_call',
-  'dna_epoch',
-  'dna_getBalance',
-  'dna_getCoinbaseAddr',
-  'dna_identity',
-  'dna_storeToIpfs',
-  'ipfs_add',
-  'ipfs_get',
-])
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isFiniteNonNegativeInteger(value) {
-  return Number.isInteger(value) && value >= 0
-}
-
-function isShortString(value, maxLength = 512) {
-  return (
-    typeof value === 'string' && value.length > 0 && value.length <= maxLength
-  )
-}
-
-function estimatePayloadBytes(value) {
-  try {
-    const serialized = JSON.stringify(value)
-
-    if (typeof TextEncoder !== 'undefined') {
-      return new TextEncoder().encode(serialized).length
-    }
-
-    return serialized.length
-  } catch {
-    return Number.POSITIVE_INFINITY
-  }
-}
-
-function validateSocialRpcRequest(requestId, method, params) {
-  if (
-    typeof requestId !== 'string' ||
-    requestId.length < 1 ||
-    requestId.length > SOCIAL_RPC_MAX_REQUEST_ID_LENGTH
-  ) {
-    return 'invalid_rpc_request_id'
-  }
-
-  if (!SOCIAL_ALLOWED_RPC_METHODS.has(method)) {
-    return 'unsupported_rpc_method'
-  }
-
-  if (!Array.isArray(params)) {
-    return 'invalid_rpc_params'
-  }
-
-  if (estimatePayloadBytes(params) > SOCIAL_RPC_MAX_PAYLOAD_BYTES) {
-    return 'rpc_payload_too_large'
-  }
-
-  switch (method) {
-    case 'bcn_syncing':
-    case 'bcn_lastBlock':
-    case 'dna_epoch':
-    case 'dna_getCoinbaseAddr':
-      return params.length === 0 ? null : 'invalid_rpc_params'
-
-    case 'bcn_blockAt':
-      return params.length === 1 && isFiniteNonNegativeInteger(params[0])
-        ? null
-        : 'invalid_rpc_params'
-
-    case 'bcn_block':
-    case 'bcn_transaction':
-    case 'bcn_txReceipt':
-    case 'dna_getBalance':
-    case 'dna_identity':
-    case 'ipfs_get':
-      return params.length === 1 && isShortString(params[0], 256)
-        ? null
-        : 'invalid_rpc_params'
-
-    case 'ipfs_add':
-      return params.length === 2 &&
-        isShortString(params[0], SOCIAL_RPC_MAX_PAYLOAD_BYTES) &&
-        typeof params[1] === 'boolean'
-        ? null
-        : 'invalid_rpc_params'
-
-    case 'dna_storeToIpfs':
-      return params.length === 1 &&
-        isPlainObject(params[0]) &&
-        isShortString(params[0].cid, 256) &&
-        isFiniteNonNegativeInteger(params[0].nonce) &&
-        isFiniteNonNegativeInteger(params[0].epoch)
-        ? null
-        : 'invalid_rpc_params'
-
-    case 'bcn_getRawTx':
-      return params.length === 1 && isPlainObject(params[0])
-        ? null
-        : 'invalid_rpc_params'
-
-    case 'contract_call':
-      return params.length === 1 &&
-        isPlainObject(params[0]) &&
-        isShortString(params[0].from, 128) &&
-        isShortString(params[0].contract, 128) &&
-        isShortString(params[0].method, 128) &&
-        Array.isArray(params[0].args)
-        ? null
-        : 'invalid_rpc_params'
-
-    default:
-      return 'unsupported_rpc_method'
-  }
-}
 
 function formatBytesAsMib(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`

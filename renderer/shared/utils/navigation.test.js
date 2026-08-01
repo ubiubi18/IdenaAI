@@ -28,6 +28,48 @@ describe('renderer navigation', () => {
     ).toBe('settings/node.html')
   })
 
+  it('resolves AI settings from the packaged home page without flattening it', () => {
+    expect(
+      resolvePackagedRouteHref(
+        '/settings/ai?setup=1',
+        'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/home.html'
+      )
+    ).toBe('settings/ai.html?setup=1')
+  })
+
+  it('resolves AI chat as a top-level packaged page', () => {
+    expect(
+      resolvePackagedRouteHref(
+        '/ai-chat',
+        'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/home.html'
+      )
+    ).toBe('ai-chat.html')
+  })
+
+  it('uses the managed static root for AI settings from the packaged home page', () => {
+    expect(
+      resolvePackagedRouteHref(
+        '/settings/ai?setup=1',
+        'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/home.html',
+        './'
+      )
+    ).toBe(
+      'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/settings/ai.html?setup=1'
+    )
+  })
+
+  it('does not escape renderer output when returning home after an import', () => {
+    expect(
+      resolvePackagedRouteHref(
+        '/home',
+        'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/settings/general.html',
+        '../'
+      )
+    ).toBe(
+      'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/home.html'
+    )
+  })
+
   it('resolves top-level packaged routes from nested pages', () => {
     expect(
       resolvePackagedRouteHref(

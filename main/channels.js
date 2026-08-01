@@ -2,6 +2,8 @@ module.exports.AUTO_UPDATE_EVENT = 'auto-update/event'
 module.exports.AUTO_UPDATE_COMMAND = 'auto-update/command'
 module.exports.NODE_EVENT = 'node/event'
 module.exports.NODE_COMMAND = 'node/command'
+module.exports.MANAGED_EXTERNAL_NODE_RESTART_COMMAND =
+  'managed-external-node/restart'
 module.exports.AI_SOLVER_COMMAND = 'ai-solver/command'
 module.exports.AI_SOLVER_EVENT = 'ai-solver/event'
 module.exports.AI_TEST_UNIT_COMMAND = 'ai-test-unit/command'

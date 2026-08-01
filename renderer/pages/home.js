@@ -96,6 +96,7 @@ import {
   TelegramIcon,
 } from '../shared/components/icons'
 import {StakeProtectionBadge} from '../screens/home/stake-protection'
+import {navigateRendererRoute} from '../shared/utils/navigation'
 
 export default function ProfilePage() {
   const {
@@ -809,10 +810,16 @@ function HomeFeaturedCard({
   stamp,
   stampColorScheme = 'purple',
 }) {
+  const router = useRouter()
+
   return (
     <Box
       as={NextLink}
       href={href}
+      onClick={(event) => {
+        event.preventDefault()
+        navigateRendererRoute(router, href)
+      }}
       display="block"
       borderWidth="1px"
       borderColor="gray.100"

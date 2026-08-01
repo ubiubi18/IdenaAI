@@ -162,6 +162,37 @@ export function isValidationRehearsalNodeSettings(settings = {}) {
   )
 }
 
+export function isManagedExternalNodeKeyImportEnabled(settings = {}) {
+  if (
+    !settings ||
+    settings.useExternalNode !== true ||
+    settings.externalNodeMode !== 'persistent' ||
+    settings.managedExternalNodeKeyImportEnabled !== true
+  ) {
+    return false
+  }
+
+  try {
+    const rpcUrl = new URL(String(settings.url || '').trim())
+    const hostname = rpcUrl.hostname
+      .replace(/^\[/u, '')
+      .replace(/\]$/u, '')
+      .toLowerCase()
+
+    return Boolean(
+      rpcUrl.protocol === 'http:' &&
+        ['127.0.0.1', '::1'].includes(hostname) &&
+        !rpcUrl.username &&
+        !rpcUrl.password &&
+        rpcUrl.pathname === '/' &&
+        !rpcUrl.search &&
+        !rpcUrl.hash
+    )
+  } catch {
+    return false
+  }
+}
+
 export function buildEffectiveSettingsState(
   state,
   ephemeralExternalNode = null
@@ -371,6 +402,7 @@ const initialState = {
   runInternalNode: DEFAULT_RUN_INTERNAL_NODE,
   internalApiKey: randomApiKey(),
   externalApiKey: '',
+  managedExternalNodeKeyImportEnabled: false,
   lng: AVAILABLE_LANGS[0],
   autoActivateMining: true,
   aiSolver: buildAiSolverSettings(),

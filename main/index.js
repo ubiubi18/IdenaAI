@@ -107,6 +107,7 @@ const {
   AUTO_UPDATE_COMMAND,
   NODE_COMMAND,
   NODE_EVENT,
+  MANAGED_EXTERNAL_NODE_RESTART_COMMAND,
   APP_INFO_COMMAND,
   APP_PATH_COMMAND,
   AI_SOLVER_COMMAND,
@@ -114,8 +115,12 @@ const {
   AI_TEST_UNIT_EVENT,
   WINDOW_COMMAND,
 } = require('./channels')
+const {requestManagedExternalNodeRestart} = require('./managed-external-node')
 const {registerRendererDataBridge} = require('./renderer-data-bridge')
 const {createAiProviderBridge} = require('./ai-providers')
+const {
+  createPersistentCredentialClient,
+} = require('./ai-providers/persistent-credentials')
 const {createAiTestUnitBridge} = require('./ai-test-unit')
 const {prepareDb} = require('./stores/setup')
 const {createLocalAiFederated} = require('./local-ai/federated')
@@ -163,10 +168,12 @@ const localAiManager = createLocalAiManager({
   isDev,
   getModelReference: getMainLocalAiSettings,
 })
+const persistentCredentialClient = createPersistentCredentialClient()
 const aiProviderBridge = createAiProviderBridge(logger, {
   localAiManager,
   getLocalAiPayload: buildLocalAiFlipJudgePayload,
   requireProviderBudget: true,
+  persistentCredentialClient,
 })
 const aiTestUnitBridge = createAiTestUnitBridge({
   logger,
@@ -2039,6 +2046,7 @@ const createTray = () => {
 }
 
 async function bootstrapApp() {
+  await aiProviderBridge.initializePersistentProviderKeys()
   const i18nConfig = getI18nConfig()
 
   i18next.init(i18nConfig, (err) => {
@@ -2784,6 +2792,15 @@ handleTrusted('validation-devnet.seed-flip', async (_event, hash) =>
 
 handleTrusted('rpc.call', async (_event, payload) => performNodeRpc(payload))
 
+handleTrusted(MANAGED_EXTERNAL_NODE_RESTART_COMMAND, () => {
+  const result = requestManagedExternalNodeRestart({
+    settings: loadMainSettings(),
+    userDataPath: appDataPath('userData'),
+  })
+  logger.info('Managed external node restart requested')
+  return result
+})
+
 handleTrusted(AI_SOLVER_COMMAND, async (_event, command, payload) => {
   logger.info(`new ai solver command`, command, {
     provider: payload && payload.provider,
@@ -2799,8 +2816,16 @@ handleTrusted(AI_SOLVER_COMMAND, async (_event, command, payload) => {
         return aiProviderBridge.clearProviderKey(payload)
       case 'hasProviderKey':
         return aiProviderBridge.hasProviderKey(payload)
+      case 'persistProviderKey':
+        return aiProviderBridge.persistProviderKey(payload)
+      case 'hasPersistentProviderKey':
+        return aiProviderBridge.hasPersistentProviderKey(payload)
+      case 'clearPersistentProviderKey':
+        return aiProviderBridge.clearPersistentProviderKey(payload)
       case 'testProvider':
         return aiProviderBridge.testProvider(payload)
+      case 'testProviderFastMode':
+        return aiProviderBridge.testProviderFastMode(payload)
       case 'listModels':
         return aiProviderBridge.listModels(payload)
       case 'generateImageSearchResults':

@@ -16,6 +16,7 @@ const AUTO_UPDATE_COMMAND = 'auto-update/command'
 const AUTO_UPDATE_EVENT = 'auto-update/event'
 const NODE_COMMAND = 'node/command'
 const NODE_EVENT = 'node/event'
+const MANAGED_EXTERNAL_NODE_RESTART_COMMAND = 'managed-external-node/restart'
 const WINDOW_COMMAND = 'window/command'
 const FLIPS_SYNC_COMMAND = 'flips-sync/command'
 const INVITES_SYNC_COMMAND = 'invites-sync/command'
@@ -302,6 +303,9 @@ function createNodeBridge() {
     },
     restartNode() {
       ipcRenderer.send(NODE_COMMAND, 'restart-node')
+    },
+    restartManagedExternalNode() {
+      return invokeCloneable(MANAGED_EXTERNAL_NODE_RESTART_COMMAND)
     },
     startLocalNode(payload) {
       ipcRenderer.send(
@@ -1477,10 +1481,34 @@ const aiSolverBridge = Object.freeze({
       'hasProviderKey',
       sanitizeAiSolverPayload(payload)
     ),
+  persistProviderKey: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'persistProviderKey',
+      sanitizeAiSolverPayload(payload)
+    ),
+  hasPersistentProviderKey: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'hasPersistentProviderKey',
+      sanitizeAiSolverPayload(payload)
+    ),
+  clearPersistentProviderKey: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'clearPersistentProviderKey',
+      sanitizeAiSolverPayload(payload)
+    ),
   testProvider: (payload) =>
     invokeCloneable(
       AI_SOLVER_COMMAND,
       'testProvider',
+      sanitizeAiSolverPayload(payload)
+    ),
+  testProviderFastMode: (payload) =>
+    invokeCloneable(
+      AI_SOLVER_COMMAND,
+      'testProviderFastMode',
       sanitizeAiSolverPayload(payload)
     ),
   listModels: (payload) =>

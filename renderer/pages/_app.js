@@ -77,7 +77,16 @@ function syncLegacyBridgeGlobals(bridge = {}) {
         provider: 'openai',
         hasKey: false,
       }),
+      persistProviderKey: empty,
+      hasPersistentProviderKey: async () => ({
+        ok: true,
+        provider: 'openai',
+        supported: false,
+        hasKey: false,
+      }),
+      clearPersistentProviderKey: empty,
       testProvider: empty,
+      testProviderFastMode: empty,
       listModels: async () => ({
         ok: true,
         provider: 'openai',

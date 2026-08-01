@@ -1,0 +1,12 @@
+[Unit]
+Description=Restart the managed IdenaAI node after an identity-key import
+After=idena-ai-node.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sleep 1
+ExecStart=/usr/bin/systemctl try-restart idena-ai-node.service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

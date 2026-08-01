@@ -237,7 +237,7 @@ function estimateExpectedPassRuntimeMs({
     sessionType === 'short' &&
     promptOptions &&
     promptOptions.openAiServiceTier === 'priority' &&
-    promptOptions.openAiReasoningEffort === 'none'
+    promptOptions.openAiReasoningEffort === 'low'
       ? EXPECTED_OPENAI_SHORT_FAST_PASS_MS
       : EXPECTED_PASS_RUNTIME_MS[normalizedProvider] ||
         EXPECTED_PASS_RUNTIME_MS.default
