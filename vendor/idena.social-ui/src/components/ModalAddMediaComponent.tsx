@@ -3,8 +3,8 @@ import type { MouseEventLocal } from '../App.exports';
 import { getMedia, getNonceAndEpoch, supportedImageTypes, type RpcClient } from '../logic/asyncUtils';
 
 type ModalAddMediaComponentProps = {
-    modalAddMediaLocation: string,
-    addMediaHandler: (location: string, file: File, ipfsUrl?: string | undefined) => Promise<void>,
+    modalAddMediaRef: React.RefObject<string>,
+    addMediaHandler: (attachmentId: string, file: File, ipfsUrl?: string | undefined) => Promise<void>,
     rpcClient: RpcClient,
     postersAddress: string,
     makePostsWith: string,
@@ -14,7 +14,7 @@ type ModalAddMediaComponentProps = {
 function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
 
     const {
-        modalAddMediaLocation,
+        modalAddMediaRef,
         addMediaHandler,
         rpcClient,
         postersAddress,
@@ -24,7 +24,7 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
 
     const [ipfsUrl, setIpfsUrl] = useState<string>('');
 
-    const selectIpfsUrlHandler = async (e: MouseEventLocal, location: string) => {
+    const selectIpfsUrlHandler = async (e: MouseEventLocal, attachmentId: string) => {
         e.stopPropagation();
 
         if (!ipfsUrl.startsWith('ipfs://')) {
@@ -41,8 +41,10 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
 
         const file = new File([blob!], 'preview', { type: mediaType });
 
-        await addMediaHandler(location, file, ipfsUrl);
-        closeModal();
+        if (file) {
+            await addMediaHandler(attachmentId, file, ipfsUrl);
+            closeModal();
+        }
     };
 
     const storeToIpfsHandler = async (e: MouseEventLocal) => {
@@ -63,13 +65,13 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
         }
     };
 
-    const localAddMediaHandler = async (e: React.ChangeEvent<HTMLInputElement>, location: string) => {
-        e.stopPropagation();
+    const localAddMediaHandler = async (e: React.ChangeEvent<HTMLInputElement>, attachmentId: string) => {
+        e?.stopPropagation();
 
         const file = e.currentTarget.files?.[0];
 
         if (file) {
-            await addMediaHandler(location, file);
+            await addMediaHandler(attachmentId, file);
             closeModal();
         }
     };
@@ -84,14 +86,14 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
                             <p>Select image from your device:</p>
                         </div>
                         <div>
-                            <label htmlFor={`post-input-media-${modalAddMediaLocation}`} className="h-7 py-1.5 px-3 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={(e) => e.stopPropagation()}>Select</label>
+                            <label htmlFor={`post-input-media-${modalAddMediaRef.current}`} className="h-7 py-1.5 px-3 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={(e) => e.stopPropagation()}>Select</label>
                             <input
-                                id={`post-input-media-${modalAddMediaLocation}`}
+                                id={`post-input-media-${modalAddMediaRef.current}`}
                                 type="file"
                                 accept={supportedImageTypes.join(',')}
                                 className="hidden"
                                 onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => localAddMediaHandler(e, modalAddMediaLocation)}
+                                onChange={(e) => localAddMediaHandler(e, modalAddMediaRef.current)}
                             />
                         </div>
                     </div>
@@ -109,7 +111,7 @@ function ModalAddMediaComponent(props: ModalAddMediaComponentProps) {
                             onClick={(e) => e.stopPropagation()}
                             onChange={e => setIpfsUrl(e.target.value)}
                         />
-                        <button className="mt-1 h-7 px-3 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={(e) => selectIpfsUrlHandler(e, modalAddMediaLocation)}>Select</button>
+                        <button className="mt-1 h-7 px-3 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={(e) => selectIpfsUrlHandler(e, modalAddMediaRef.current)}>Select</button>
                     </div>
                     <div className="mt-3 flex flex-row gap-2">
                         <div>

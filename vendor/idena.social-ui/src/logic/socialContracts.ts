@@ -1,4 +1,4 @@
-export type SocialContractId = 'v11' | 'v10' | 'v9' | 'v5' | 'v1';
+export type SocialContractId = 'v12' | 'v11' | 'v10' | 'v9' | 'v5' | 'v1';
 
 export type SocialContractOption = {
     id: SocialContractId,
@@ -11,12 +11,20 @@ export type SocialContractOption = {
 
 export const SOCIAL_CONTRACTS: SocialContractOption[] = [
     {
-        id: 'v11',
-        label: 'Current contract v11',
-        shortLabel: 'v11 current',
-        address: '0x18b0a55eb99AcA113f50eEBbdeAf6f96E789277f',
+        id: 'v12',
+        label: 'Current contract v12',
+        shortLabel: 'v12 current',
+        address: '0x840e092e31e9656fF15E541505039ed77585338E',
         postIdPrefix: '',
         legacy: false,
+    },
+    {
+        id: 'v11',
+        label: 'Legacy contract v11',
+        shortLabel: 'v11 legacy',
+        address: '0x18b0a55eb99AcA113f50eEBbdeAf6f96E789277f',
+        postIdPrefix: 'preV12:',
+        legacy: true,
     },
     {
         id: 'v10',
@@ -102,7 +110,7 @@ export const normalizeSocialChannelIdForContract = (
     }
 
     return channelId.replace(
-        /^(discuss:)(preV(?:5|9|10|11):)/,
+        /^(discuss:)(preV(?:5|9|10|11|12):)/,
         '$1',
     );
 };
