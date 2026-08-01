@@ -1,4 +1,7 @@
-import {resolvePackagedRouteHref} from './navigation'
+import {
+  navigateRendererRouteFromLink,
+  resolvePackagedRouteHref,
+} from './navigation'
 
 describe('renderer navigation', () => {
   it('keeps normal routes absolute for dev server navigation', () => {
@@ -77,5 +80,15 @@ describe('renderer navigation', () => {
         'file:///Applications/IdenaAI.app/Contents/Resources/app.asar/renderer/out/settings/ai.html'
       )
     ).toBe('../home.html')
+  })
+
+  it('prevents raw link navigation before using the renderer navigator', () => {
+    const event = {preventDefault: jest.fn()}
+    const router = {push: jest.fn()}
+
+    navigateRendererRouteFromLink(event, router, '/flips/new')
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+    expect(router.push).toHaveBeenCalledWith('/flips/new')
   })
 })
