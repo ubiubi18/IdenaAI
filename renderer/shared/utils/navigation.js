@@ -117,3 +117,8 @@ export function navigateRendererRoute(router, routePath) {
 
   router.push(routePath)
 }
+
+export function navigateRendererRouteFromLink(event, router, routePath) {
+  event.preventDefault()
+  navigateRendererRoute(router, routePath)
+}
