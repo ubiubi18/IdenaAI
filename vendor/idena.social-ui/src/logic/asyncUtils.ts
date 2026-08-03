@@ -827,6 +827,12 @@ export const processMessage = async (
     postersRef: React.RefObject<Record<string, Poster>>,
     rpcClientRef: React.RefObject<((method: string, params: any[], skipStateUpdate?: boolean) => Promise<any>) | undefined>,
     postersPromised: string[],
+    desktopDecryptMessage?: (payload: {
+        txHash: string;
+        messageHash: string;
+        senderCiphertext: string;
+        recipientCiphertext: string;
+    }) => Promise<{plaintext: string, role: 'sender' | 'recipient' | 'both'}>,
 ) => {
     const { txHash, eventArgs, eventArgs2nd, timestamp } = message;
 
@@ -855,50 +861,67 @@ export const processMessage = async (
     }
 
     const messageEvent = messageEventRaw.split(',');
-    // @ts-ignore: Uint8Array.fromBase64 not recognized yet
-    const sendersMessageEncrypted = Uint8Array.fromBase64(messageEvent[0]);
-    // @ts-ignore: Uint8Array.fromBase64 not recognized yet
-    const recipientsMessageEncrypted =  Uint8Array.fromBase64(messageEvent[1]);
+    const senderCiphertext = messageEvent[0];
+    const recipientCiphertext = messageEvent[1];
 
-    const keyData = new Uint8Array(sha3_256.array(password));
-    const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
-    const myPrivateKeyBytes = hexToUint8Array(myPrivateKey);
-
-    const iAmSender = sender === postersAddress;
+    let iAmSender = sender === postersAddress;
     let iAmRecipient = false;
-
     let messageDecoded: string | undefined;
 
-    if (iAmSender) {
+    if (desktopDecryptMessage) {
         try {
-            const myMessageDecrypted = await decrypt(myPrivateKeyBytes, sendersMessageEncrypted);
-            messageDecoded = new TextDecoder().decode(myMessageDecrypted);
+            const result = await desktopDecryptMessage({
+                txHash,
+                messageHash: messageEventHash,
+                senderCiphertext,
+                recipientCiphertext,
+            });
+            messageDecoded = result.plaintext;
+            iAmSender = result.role === 'sender' || result.role === 'both';
+            iAmRecipient = result.role === 'recipient' || result.role === 'both';
+        } catch {
+            return { continued: true };
+        }
+    } else {
+        // @ts-ignore: Uint8Array.fromBase64 not recognized yet
+        const sendersMessageEncrypted = Uint8Array.fromBase64(senderCiphertext);
+        // @ts-ignore: Uint8Array.fromBase64 not recognized yet
+        const recipientsMessageEncrypted = Uint8Array.fromBase64(recipientCiphertext);
+        const keyData = new Uint8Array(sha3_256.array(password));
+        const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
+        const myPrivateKeyBytes = hexToUint8Array(myPrivateKey);
 
-            const rawMessageHash = keccak256(messageDecoded);
+        if (iAmSender) {
+            try {
+                const myMessageDecrypted = await decrypt(myPrivateKeyBytes, sendersMessageEncrypted);
+                messageDecoded = new TextDecoder().decode(myMessageDecrypted);
 
-            if (rawMessageHash !== messageEventHash) {
+                const rawMessageHash = keccak256(messageDecoded);
+
+                if (rawMessageHash !== messageEventHash) {
+                    return { continued: true };
+                }
+            } catch (error) {
                 return { continued: true };
+            }
+        }
+
+        try {
+            const messageDecrypted = await decrypt(myPrivateKeyBytes, recipientsMessageEncrypted);
+            iAmRecipient = true;
+
+            if (!iAmSender) {
+                messageDecoded = new TextDecoder().decode(messageDecrypted);
+                const rawMessageHash = keccak256(messageDecoded);
+
+                if (rawMessageHash !== messageEventHash) {
+                    return { continued: true };
+                }
             }
         } catch (error) {
-            return { continued: true };
-        }
-    }
-
-    try {
-        const messageDecrypted = await decrypt(myPrivateKeyBytes, recipientsMessageEncrypted);
-        iAmRecipient = true;
-
-        if (!iAmSender) {
-            messageDecoded = new TextDecoder().decode(messageDecrypted);
-            const rawMessageHash = keccak256(messageDecoded);
-
-            if (rawMessageHash !== messageEventHash) {
+            if (!iAmSender) {
                 return { continued: true };
             }
-        }
-    } catch (error) {
-        if (!iAmSender) {
-            return { continued: true };
         }
     }
 

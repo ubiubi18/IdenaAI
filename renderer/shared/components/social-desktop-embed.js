@@ -21,7 +21,9 @@ import {
   SOCIAL_EMBED_DOCUMENT_PATH,
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
+  SOCIAL_MESSAGE_CRYPTO_VERSION,
   SOCIAL_OFFICIAL_INDEXER_URL,
+  validateSocialCryptoRequest,
   validateSocialRpcRequest,
 } from './social-desktop-rpc-policy'
 
@@ -30,6 +32,7 @@ export {
   SOCIAL_EMBED_DOCUMENT_PATH,
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
+  SOCIAL_MESSAGE_CRYPTO_VERSION,
   SOCIAL_OFFICIAL_INDEXER_URL,
 } from './social-desktop-rpc-policy'
 
@@ -43,6 +46,8 @@ const SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE = 'IDENA_SOCIAL_READY'
 const SOCIAL_CHANNEL_INIT_MESSAGE_TYPE = 'IDENA_SOCIAL_CHANNEL_INIT'
 const SOCIAL_RPC_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_REQUEST'
 const SOCIAL_RPC_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_RESPONSE'
+const SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_REQUEST'
+const SOCIAL_CRYPTO_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_RESPONSE'
 
 function formatBytesAsMib(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
@@ -97,6 +102,7 @@ export function buildSocialNodeBootstrap(
     indexerApiUrl: SOCIAL_OFFICIAL_INDEXER_URL,
     sendingTxs: 'rpc',
     findingPastPosts: historyMode,
+    messageCrypto: SOCIAL_MESSAGE_CRYPTO_VERSION,
     ...overrides,
   }
 }
@@ -209,7 +215,53 @@ export default function SocialDesktopEmbed({
       return
     }
 
-    if (nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE) {
+    if (
+      nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE &&
+      nextPayload?.type !== SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE
+    ) {
+      return
+    }
+
+    if (nextPayload.type === SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE) {
+      const {requestId: cryptoRequestId, ...cryptoPayload} =
+        nextPayload.payload && typeof nextPayload.payload === 'object'
+          ? nextPayload.payload
+          : {}
+      const cryptoValidationError = validateSocialCryptoRequest(
+        cryptoRequestId,
+        cryptoPayload
+      )
+
+      let cryptoResponsePayload
+      if (cryptoValidationError) {
+        cryptoResponsePayload = {error: {message: cryptoValidationError}}
+      } else {
+        try {
+          const cryptoBridge =
+            window.idena &&
+            window.idena.social &&
+            typeof window.idena.social.crypto === 'function'
+              ? window.idena.social.crypto
+              : null
+
+          if (!cryptoBridge) {
+            throw new Error('social_crypto_bridge_unavailable')
+          }
+          cryptoResponsePayload = await cryptoBridge(cryptoPayload)
+        } catch (error) {
+          cryptoResponsePayload = {
+            error: {message: error?.message || 'social_crypto_proxy_failed'},
+          }
+        }
+      }
+
+      port.postMessage({
+        type: SOCIAL_CRYPTO_RESPONSE_MESSAGE_TYPE,
+        payload: {
+          requestId: cryptoRequestId,
+          response: cryptoResponsePayload || {},
+        },
+      })
       return
     }
 
