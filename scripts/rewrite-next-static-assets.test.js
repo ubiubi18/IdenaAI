@@ -15,6 +15,9 @@ describe('rewrite-next-static-assets', () => {
     fs.mkdirSync(path.join(outputDir, '_next', 'static', 'chunks'), {
       recursive: true,
     })
+    fs.mkdirSync(path.join(outputDir, 'idena-social', 'assets'), {
+      recursive: true,
+    })
     fs.writeFileSync(
       path.join(outputDir, 'home.html'),
       '<html><head><link href="/static/app.css"></head>' +
@@ -28,6 +31,14 @@ describe('rewrite-next-static-assets', () => {
     fs.writeFileSync(
       path.join(outputDir, '_next', 'static', 'chunks', 'webpack-fixture.js'),
       '(()=>{var f={};f.p="/_next/";})();'
+    )
+    fs.writeFileSync(
+      path.join(outputDir, 'idena-social', 'index.html'),
+      '<html><head>' +
+        '<meta http-equiv="Content-Security-Policy" content="base-uri \'none\'">' +
+        '<script type="module" src="./assets/social.js"></script>' +
+        '<link rel="stylesheet" href="./assets/social.css">' +
+        '</head><body></body></html>'
     )
   })
 
@@ -47,6 +58,7 @@ describe('rewrite-next-static-assets', () => {
   it('rewrites exported assets and the webpack public path deterministically', () => {
     expect(rewriteNextStaticAssets(outputDir)).toEqual({
       htmlFiles: 2,
+      preservedHtmlFiles: 1,
       webpackRuntimeFiles: 1,
     })
 
@@ -59,6 +71,10 @@ describe('rewrite-next-static-assets', () => {
       path.join(outputDir, '_next', 'static', 'chunks', 'webpack-fixture.js'),
       'utf8'
     )
+    const social = fs.readFileSync(
+      path.join(outputDir, 'idena-social', 'index.html'),
+      'utf8'
+    )
 
     expect(home).toContain('<base data-idena-static-root href="./">')
     expect(home).toContain('href="static/app.css"')
@@ -66,6 +82,18 @@ describe('rewrite-next-static-assets', () => {
     expect(node).toContain('<base data-idena-static-root href="../">')
     expect(node).toContain('src="_next/node.js"')
     expect(runtime).toContain('f.p="_next/"')
+    expect(social).toContain('content="base-uri \'none\'"')
+    expect(social).toContain('src="./assets/social.js"')
+    expect(social).toContain('href="./assets/social.css"')
+    expect(social).not.toContain('data-idena-static-root')
+    expect(
+      new URL(
+        './assets/social.js',
+        'file:///opt/IdenaAI/resources/app.asar/renderer/out/idena-social/index.html#/'
+      ).href
+    ).toBe(
+      'file:///opt/IdenaAI/resources/app.asar/renderer/out/idena-social/assets/social.js'
+    )
 
     rewriteNextStaticAssets(outputDir)
     expect(fs.readFileSync(path.join(outputDir, 'home.html'), 'utf8')).toBe(

@@ -17,6 +17,7 @@ const syntaxCheckedFiles = [
   'scripts/check-node-build-evidence.js',
   'scripts/sync-idena-social-ui.js',
   'scripts/run-next-static-build.js',
+  'scripts/rewrite-next-static-assets.js',
   'scripts/release-check.js',
   'scripts/setup-sources.js',
   'scripts/setup-flips.js',

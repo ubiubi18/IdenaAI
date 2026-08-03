@@ -4,6 +4,9 @@ const fs = require('fs')
 const path = require('path')
 
 const BASE_MARKER = 'data-idena-static-root'
+// Next copies this independent application from public/; its own relative assets
+// and CSP must not inherit the renderer's navigation base.
+const PRESERVED_HTML_SUBTREES = new Set(['idena-social'])
 const ROOT_ASSET_PATTERN = /(\b(?:href|src)=["'])\/((?:_next|static)\/)/gu
 const ABSOLUTE_WEBPACK_PUBLIC_PATH_PATTERN = /(\.p=)(["'])\/_next\/\2/gu
 const RELATIVE_WEBPACK_PUBLIC_PATH_PATTERN = /\.p=(["'])_next\/\1/u
@@ -42,6 +45,13 @@ function baseHrefForHtml(outputDir, htmlPath) {
   }
 
   return '../'.repeat(relativeDirectory.split(path.sep).filter(Boolean).length)
+}
+
+function shouldPreserveHtml(outputDir, htmlPath) {
+  const relativePath = path.relative(outputDir, htmlPath)
+  const [topLevelDirectory] = relativePath.split(path.sep)
+
+  return PRESERVED_HTML_SUBTREES.has(topLevelDirectory)
 }
 
 function upsertStaticRootBase(html, baseHref) {
@@ -107,16 +117,20 @@ function rewriteNextStaticAssets(outputDir) {
     )
   }
 
-  const htmlFiles = listFiles(normalizedOutputDir, (filePath) =>
+  const allHtmlFiles = listFiles(normalizedOutputDir, (filePath) =>
     filePath.endsWith('.html')
   )
+  const htmlFiles = allHtmlFiles.filter(
+    (htmlPath) => !shouldPreserveHtml(normalizedOutputDir, htmlPath)
+  )
+  const preservedHtmlFiles = allHtmlFiles.length - htmlFiles.length
   const webpackRuntimeFiles = listFiles(
     path.join(normalizedOutputDir, '_next', 'static', 'chunks'),
     (filePath) =>
       path.basename(filePath).startsWith('webpack-') && filePath.endsWith('.js')
   )
 
-  if (htmlFiles.length === 0) {
+  if (allHtmlFiles.length === 0) {
     throw new Error('Renderer output contains no HTML files')
   }
 
@@ -129,6 +143,7 @@ function rewriteNextStaticAssets(outputDir) {
 
   return {
     htmlFiles: htmlFiles.length,
+    preservedHtmlFiles,
     webpackRuntimeFiles: webpackRuntimeFiles.length,
   }
 }
