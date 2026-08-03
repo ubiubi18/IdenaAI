@@ -18,6 +18,7 @@ import {useChainState} from '../providers/chain-context'
 import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
 import {
   SOCIAL_CONTRACT_ADDRESS,
+  SOCIAL_EMBED_DOCUMENT_PATH,
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
   SOCIAL_OFFICIAL_INDEXER_URL,
@@ -26,6 +27,7 @@ import {
 
 export {
   SOCIAL_CONTRACT_ADDRESS,
+  SOCIAL_EMBED_DOCUMENT_PATH,
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
   SOCIAL_OFFICIAL_INDEXER_URL,
@@ -506,7 +508,7 @@ export default function SocialDesktopEmbed({
               as="iframe"
               ref={iframeRef}
               key={`${historyMode}:${iframeNonce}`}
-              src="/idena-social/index.html#/"
+              src={SOCIAL_EMBED_DOCUMENT_PATH}
               title={iframeTitle}
               w="full"
               h="full"
