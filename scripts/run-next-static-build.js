@@ -65,5 +65,6 @@ const rewriteResult = rewriteNextStaticAssets(
 )
 console.log(
   `[renderer-static] rewrote ${rewriteResult.htmlFiles} HTML files and ` +
-    `${rewriteResult.webpackRuntimeFiles} webpack runtime files`
+    `${rewriteResult.webpackRuntimeFiles} webpack runtime files; preserved ` +
+    `${rewriteResult.preservedHtmlFiles} vendored HTML files`
 )
