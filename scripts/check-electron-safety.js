@@ -93,12 +93,72 @@ const findings = listTrackedFiles()
 const mainIndex = fs.existsSync('main/index.js')
   ? fs.readFileSync('main/index.js', 'utf8')
   : ''
+const socialProtocol = fs.existsSync('main/idena-social-protocol.js')
+  ? fs.readFileSync('main/idena-social-protocol.js', 'utf8')
+  : ''
+const socialEmbed = fs.existsSync(
+  'renderer/shared/components/social-desktop-embed.js'
+)
+  ? fs.readFileSync(
+      'renderer/shared/components/social-desktop-embed.js',
+      'utf8'
+    )
+  : ''
+const socialPolicy = fs.existsSync(
+  'renderer/shared/components/social-desktop-rpc-policy.js'
+)
+  ? fs.readFileSync(
+      'renderer/shared/components/social-desktop-rpc-policy.js',
+      'utf8'
+    )
+  : ''
 if (!/\bnodeIntegration\s*:\s*false\b/.test(mainIndex)) {
   findings.push({
     filePath: 'main/index.js',
     line: 1,
     name: 'main window nodeIntegration guard',
     value: 'nodeIntegration: false missing',
+  })
+}
+
+const socialProtocolGuards = [
+  ['standard custom scheme', /\bstandard\s*:\s*true\b/],
+  ['secure custom scheme', /\bsecure\s*:\s*true\b/],
+  ['CSP bypass disabled', /\bbypassCSP\s*:\s*false\b/],
+  ['service workers disabled', /\ballowServiceWorkers\s*:\s*false\b/],
+  ['extension access disabled', /\ballowExtensions\s*:\s*false\b/],
+  ['request method allowlist', /\['GET',\s*'HEAD'\]\.includes\(method\)/],
+  ['real path confinement', /isPathInside\(realRoot,\s*realCandidatePath\)/],
+]
+
+for (const [name, regex] of socialProtocolGuards) {
+  if (!regex.test(socialProtocol)) {
+    findings.push({
+      filePath: 'main/idena-social-protocol.js',
+      line: 1,
+      name,
+      value: 'required idena.social protocol guard missing',
+    })
+  }
+}
+
+if (!/idena-social:\/\/app\/index\.html#\//.test(socialPolicy)) {
+  findings.push({
+    filePath: 'renderer/shared/components/social-desktop-rpc-policy.js',
+    line: 1,
+    name: 'isolated idena.social origin',
+    value: 'dedicated protocol URL missing',
+  })
+}
+
+if (
+  !/sandbox="allow-scripts allow-same-origin allow-popups"/.test(socialEmbed)
+) {
+  findings.push({
+    filePath: 'renderer/shared/components/social-desktop-embed.js',
+    line: 1,
+    name: 'isolated idena.social sandbox',
+    value: 'required sandbox policy missing',
   })
 }
 

@@ -8,6 +8,7 @@ const {
   Tray,
   Menu,
   nativeTheme,
+  protocol,
   safeStorage,
   screen,
   shell,
@@ -21,8 +22,14 @@ const {zoomIn, zoomOut, resetZoom} = require('./utils')
 const loadRoute = require('./utils/routes')
 const httpClient = require('./utils/fetch-client')
 const {applyPrivateFileCreationMask} = require('./private-files')
+const {
+  registerIdenaSocialProtocol,
+  registerIdenaSocialScheme,
+  resolveIdenaSocialRoot,
+} = require('./idena-social-protocol')
 
 applyPrivateFileCreationMask()
+registerIdenaSocialScheme(protocol)
 
 const {DEV_SERVER_ORIGIN} = loadRoute
 
@@ -2046,6 +2053,10 @@ const createTray = () => {
 }
 
 async function bootstrapApp() {
+  registerIdenaSocialProtocol(
+    protocol,
+    resolveIdenaSocialRoot(app.getAppPath(), app.isPackaged)
+  )
   await aiProviderBridge.initializePersistentProviderKeys()
   const i18nConfig = getI18nConfig()
 
