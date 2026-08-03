@@ -4,8 +4,8 @@ import { hexToUint8Array } from 'idena-sdk-js-lite';
 import { keccak256, sha3_256 } from 'js-sha3';
 import { encrypt } from 'eciesjs';
 import { type Message, type Post, type Poster, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getBlockHeightFromTxHash, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPosterAndPost, getPastTxsWithIdenaIndexerApi, getPostIdFromChannelId, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getReplyPosts, getRpcClient, getTransactionDetailsIndexerApi, getTransactionDetailsRpc, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewMedia, resolveNewMessages, resolveNewPosters, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, type RpcClient } from './logic/asyncUtils';
-import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, str2bytes } from './logic/utils';
-import { createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
+import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
+import { createDesktopMessageCryptoClient, createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
 import { Link, Outlet, useLocation } from 'react-router';
 import type { BrowserStateHistorySettings, EventTransaction, MouseEventLocal, PostMediaAttachment } from './App.exports';
 import ModalLikesTipsComponent from './components/ModalLikesTipsComponent';
@@ -137,6 +137,7 @@ function App() {
         !isEmbeddedDesktopFrame() || Object.keys(initialDesktopBootstrap).length > 0,
     );
     const isDesktopOnchainMode = desktopBootstrap.embeddedMode === 'desktop-onchain';
+    const hostMessageCryptoEnabled = isDesktopOnchainMode && desktopBootstrap.messageCrypto === 'host-v1';
 
     const location = useLocation();
 
@@ -145,6 +146,28 @@ function App() {
     const [nodeAvailable, setNodeAvailable] = useState<boolean>(true);
     const nodeAvailableRef = useRef(nodeAvailable);
     const rpcClientRef = useRef(undefined as undefined | RpcClient);
+    const messageCryptoClientRef = useRef(undefined as undefined | ReturnType<typeof createDesktopMessageCryptoClient>);
+    const decryptMessageWithDesktopHost = async (payload: {
+        txHash: string;
+        messageHash: string;
+        senderCiphertext: string;
+        recipientCiphertext: string;
+    }) => {
+        const response = await messageCryptoClientRef.current?.({
+            operation: 'decrypt-message',
+            address: postersAddressRef.current,
+            ...payload,
+        });
+
+        if (!response?.result?.plaintext || !response.result.role) {
+            throw new Error(response?.error?.message || 'Desktop message decryption unavailable');
+        }
+
+        return {
+            plaintext: response.result.plaintext,
+            role: response.result.role,
+        };
+    };
     const [viewOnlyNode, setViewOnlyNode] = useState<boolean>(false);
     const [inputNodeApplied, setInputNodeApplied] = useState<boolean>(desktopBootstrapReady);
     const [inputPostersAddress, setInputPostersAddress] = useState<string>(initSettings.postersAddress);
@@ -316,6 +339,33 @@ function App() {
         setInputIdenaIndexerApiUrlApplied(true);
         setInputNodeApplied(true);
     }, [desktopBootstrap, desktopBootstrapReady, isDesktopOnchainMode]);
+
+    useEffect(() => {
+        messageCryptoClientRef.current = hostMessageCryptoEnabled
+            ? createDesktopMessageCryptoClient()
+            : undefined;
+    }, [hostMessageCryptoEnabled]);
+
+    useEffect(() => {
+        if (!hostMessageCryptoEnabled || !isValidLowerCaseAddress(postersAddress.toLowerCase())) {
+            return;
+        }
+
+        let cancelled = false;
+        (async () => {
+            const response = await messageCryptoClientRef.current?.({
+                operation: 'status',
+                address: postersAddress,
+            });
+            if (!cancelled) {
+                setCredentialsInvalid(response?.result?.available ? '' : response?.error?.message || 'Desktop messaging unavailable');
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [hostMessageCryptoEnabled, postersAddress]);
 
     // miscellaneous
     const [, forceUpdate] = useReducer(x => x + 1, 0);
@@ -1047,6 +1097,7 @@ function App() {
                         postersRef,
                         rpcClientRef,
                         postersPromised,
+                        hostMessageCryptoEnabled ? decryptMessageWithDesktopHost : undefined,
                     );
 
                     if (continued) {
@@ -1333,9 +1384,41 @@ function App() {
         await submitSendTip(postersAddress, activeContractAddress, sendTipMethod, normalizePostIdForActiveContract(tipToPostId) || '', tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
+    const encryptDirectMessage = async (rawMessage: string, recipientPublicKey: string) => {
+        if (hostMessageCryptoEnabled) {
+            const response = await messageCryptoClientRef.current?.({
+                operation: 'encrypt-message',
+                address: postersAddress,
+                recipientPublicKey,
+                plaintext: rawMessage,
+            });
+
+            if (!response?.result?.senderCiphertext || !response.result.recipientCiphertext) {
+                throw new Error(response?.error?.message || 'Desktop message encryption unavailable');
+            }
+
+            return [response.result.senderCiphertext, response.result.recipientCiphertext];
+        }
+
+        const encodedMessage = new TextEncoder().encode(rawMessage);
+        const keyData = new Uint8Array(sha3_256.array(password));
+        const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
+        const { pubKey: myPubKey } = extractPubKeyAddressFromPrivateKey(myPrivateKey);
+        const myEncryptedMessage = await encrypt(hexToUint8Array(myPubKey), encodedMessage);
+        const recipientEncryptedMessage = await encrypt(hexToUint8Array(recipientPublicKey), encodedMessage);
+
+        // @ts-ignore: Uint8Array.toBase64 not recognized yet
+        return [myEncryptedMessage.toBase64(), recipientEncryptedMessage.toBase64()];
+    };
+
     const copyMessageTxHandler = async (location: string, recipient: string, replyToMessageId?: string) => {
         if (!nodeAvailable) {
             alert('Node unavailable, cannot message!');
+            return;
+        }
+
+        if (messageSettingsInvalid) {
+            alert('Messaging encryption is unavailable. Open Settings for details.');
             return;
         }
 
@@ -1370,24 +1453,26 @@ function App() {
 
             const recipientDetails = postersRef.current[recipient.toLowerCase()];
 
+            if (!recipientDetails?.pubkey) {
+                alert('Recipient public key unavailable. Ask the recipient to publish a transaction first.');
+                copyTxTextElement!.innerText = savedInnerText;
+                copyTxHandlerEnabledRef.current = true;
+                return;
+            }
+
             // [participants, channelId, message, textPassword (AES-GCM encryption), replyToMessageId, media, mediaType, mediaPassword (AES-GCM encryption), tags]
             const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), recipient.toLowerCase()], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
             const rawMessageHash = keccak256(rawMessage);
 
-            const encodedMessage = new TextEncoder().encode(rawMessage);
-
-            const keyData = new Uint8Array(sha3_256.array(password));
-            const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
-            const { pubKey: myPubKey } = extractPubKeyAddressFromPrivateKey(myPrivateKey);
-            const myEncryptedMessage = await encrypt(hexToUint8Array(myPubKey), encodedMessage);
-            // @ts-ignore: Uint8Array.toBase64 not recognized yet
-            const mySerializedEncryptedMessage = myEncryptedMessage.toBase64();
-
-            const recipientEncryptedMessage = await encrypt(hexToUint8Array(recipientDetails.pubkey), encodedMessage);
-            // @ts-ignore: Uint8Array.toBase64 not recognized yet
-            const recipientSerializedEncryptedMessage = recipientEncryptedMessage.toBase64();
-
-            const message = [mySerializedEncryptedMessage, recipientSerializedEncryptedMessage];
+            let message: string[];
+            try {
+                message = await encryptDirectMessage(rawMessage, recipientDetails.pubkey);
+            } catch (error) {
+                alert(`Unable to encrypt message: ${error instanceof Error ? error.message : 'unknown error'}`);
+                copyTxTextElement!.innerText = savedInnerText;
+                copyTxHandlerEnabledRef.current = true;
+                return;
+            }
 
             messageTextareaElement.value = '';
 
@@ -1421,7 +1506,7 @@ function App() {
         }
 
         if (messageSettingsInvalid) {
-            alert('Messaging requires a valid session-only encrypted key and password.');
+            alert('Messaging encryption is unavailable. Open Settings for details.');
             return;
         }
 
@@ -1506,20 +1591,13 @@ function App() {
         const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), recipient.toLowerCase()], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
         const rawMessageHash = keccak256(rawMessage);
 
-        const encodedMessage = new TextEncoder().encode(rawMessage);
-
-        const keyData = new Uint8Array(sha3_256.array(password));
-        const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
-        const { pubKey: myPubKey } = extractPubKeyAddressFromPrivateKey(myPrivateKey);
-        const myEncryptedMessage = await encrypt(hexToUint8Array(myPubKey), encodedMessage);
-        // @ts-ignore: Uint8Array.toBase64 not recognized yet
-        const mySerializedEncryptedMessage = myEncryptedMessage.toBase64();
-
-        const recipientEncryptedMessage = await encrypt(hexToUint8Array(recipientDetails.pubkey), encodedMessage);
-        // @ts-ignore: Uint8Array.toBase64 not recognized yet
-        const recipientSerializedEncryptedMessage = recipientEncryptedMessage.toBase64();
-
-        const message = [mySerializedEncryptedMessage, recipientSerializedEncryptedMessage];
+        let message: string[];
+        try {
+            message = await encryptDirectMessage(rawMessage, recipientDetails.pubkey);
+        } catch (error) {
+            alert(`Unable to encrypt message: ${error instanceof Error ? error.message : 'unknown error'}`);
+            return;
+        }
 
         messageTextareaElement.value = '';
         postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`message-${location}`]: undefined };
@@ -1641,6 +1719,15 @@ function App() {
         setInputCredentialsApplied(newValue);
 
         if (!newValue) {
+            return;
+        }
+
+        if (hostMessageCryptoEnabled) {
+            const response = await messageCryptoClientRef.current?.({
+                operation: 'status',
+                address: postersAddress,
+            });
+            setCredentialsInvalid(response?.result?.available ? '' : response?.error?.message || 'Desktop messaging unavailable');
             return;
         }
 
@@ -1929,6 +2016,7 @@ function App() {
                             indexerApiUrlInvalid,
                             setInputIdenaIndexerApiUrlApplied,
                             embeddedDesktopOnchainMode: isDesktopOnchainMode,
+                            hostMessageCryptoEnabled,
                             officialIndexerApiUrl,
                             currentBlockCaptured,
                             latestPosts,

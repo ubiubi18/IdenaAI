@@ -1,9 +1,12 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
+    createDesktopMessageCryptoClient,
     createDesktopRpcClient,
     DESKTOP_BOOTSTRAP_MESSAGE,
     DESKTOP_BOOTSTRAP_READY_MESSAGE,
     DESKTOP_CHANNEL_INIT_MESSAGE,
+    DESKTOP_CRYPTO_REQUEST_MESSAGE,
+    DESKTOP_CRYPTO_RESPONSE_MESSAGE,
     DESKTOP_RPC_REQUEST_MESSAGE,
     DESKTOP_RPC_RESPONSE_MESSAGE,
     installDesktopBootstrapListener,
@@ -108,6 +111,39 @@ describe('desktop bootstrap channel', () => {
             result: {address: '0x01'},
         });
         expect(setNodeAvailable).toHaveBeenCalledWith(true);
+
+        const cryptoPromise = createDesktopMessageCryptoClient(100)({
+            operation: 'status',
+            address: '0x0000000000000000000000000000000000000001',
+        });
+        const cryptoRequest = port.postMessage.mock.calls.find(
+            ([message]) => message.type === DESKTOP_CRYPTO_REQUEST_MESSAGE,
+        )?.[0];
+        expect(cryptoRequest).toMatchObject({
+            type: DESKTOP_CRYPTO_REQUEST_MESSAGE,
+            payload: {
+                operation: 'status',
+                address: '0x0000000000000000000000000000000000000001',
+            },
+        });
+
+        for (const listener of [...portListeners]) {
+            listener({
+                data: {
+                    type: DESKTOP_CRYPTO_RESPONSE_MESSAGE,
+                    payload: {
+                        requestId: cryptoRequest.payload.requestId,
+                        response: {
+                            result: {available: true, version: 'host-v1'},
+                        },
+                    },
+                },
+            } as MessageEvent);
+        }
+
+        await expect(cryptoPromise).resolves.toEqual({
+            result: {available: true, version: 'host-v1'},
+        });
 
         dispose();
         expect(port.close).toHaveBeenCalledOnce();

@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useState } from "react";
 import { useLocation, useNavigate, useOutletContext } from "react-router";
 import { getPoster, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, type Message, type Poster } from "./logic/asyncUtils";
+import { isValidAddress } from "./logic/utils";
 import { getDisplayAddressShort, getDisplayDateTime, getIdentityStatus, getMessageLines } from "./logic/utils";
 import { initDomSettings, type BrowserStateHistorySettings, type MouseEventLocal, type PostDomSettings, type PostMediaAttachment } from "./App.exports";
 import commentGraySvg from './assets/comment-alt-lines-gray.svg';
@@ -31,6 +32,7 @@ type MessagesProps = {
     handleSubmitPubKeyModal: (address: string) => void,
     handleOpenRpcSendMessageModal: (location: string, recipient: string, replyToMessageId?: string | undefined) => void,
     messageSettingsInvalid: boolean,
+    hostMessageCryptoEnabled?: boolean,
     handleSetInputCredentialsApplied: (newValue: boolean) => Promise<void>,
     findPostsWithRef: React.RefObject<string>,
     indexerApiUrlRef: React.RefObject<string>,
@@ -61,6 +63,7 @@ function Messages() {
         handleSubmitPubKeyModal,
         handleOpenRpcSendMessageModal,
         messageSettingsInvalid,
+        hostMessageCryptoEnabled,
         handleSetInputCredentialsApplied,
         findPostsWithRef,
         indexerApiUrlRef,
@@ -83,19 +86,24 @@ function Messages() {
     };
 
     const setInputSendMessageToAddressAppliedLocal = async (applied: boolean) => {
-        setInputSendMessageToAddressApplied(applied);
-
         if (!applied) {
+            setInputSendMessageToAddressApplied(false);
             return;
         }
 
-        let recipient = postersRef.current[sendMessageToAddress];
+        const normalizedAddress = sendMessageToAddress.toLowerCase();
+        if (!isValidAddress(normalizedAddress)) {
+            setAddressInvalid('invalid format');
+            return;
+        }
+
+        let recipient = postersRef.current[normalizedAddress];
 
         if (!recipient) {
-            const poster = await getPoster(rpcClientRef.current, sendMessageToAddress, true);
+            const poster = await getPoster(rpcClientRef.current, normalizedAddress, true);
 
             if (poster) {
-                postersRef.current[sendMessageToAddress] = poster;
+                postersRef.current[normalizedAddress] = poster;
                 recipient = poster;
             }
         }
@@ -108,10 +116,10 @@ function Messages() {
         if (!recipient.pubkey) {
             if (findPostsWithRef.current === 'indexer-api') {
                 const pubKey = await getPubKeyWithIdenaIndexerApi(indexerApiUrlRef.current, recipient.address);
-                postersRef.current[sendMessageToAddress].pubkey = pubKey ?? '';
+                postersRef.current[normalizedAddress].pubkey = pubKey ?? '';
             } else {
                 const pubKey = await getPubKeyWithRpc(rpcClientRef.current, recipient.address);
-                postersRef.current[sendMessageToAddress].pubkey = pubKey ?? '';
+                postersRef.current[normalizedAddress].pubkey = pubKey ?? '';
             }
 
             if (!recipient.pubkey) {
@@ -120,7 +128,9 @@ function Messages() {
             }
         }
 
+        setSendMessageToAddress(normalizedAddress);
         setAddressInvalid('');
+        setInputSendMessageToAddressApplied(true);
     };
 
     const handleClickAddress = (e: MouseEventLocal, to: string) => {
@@ -198,10 +208,14 @@ function Messages() {
         <button className="mb-4 text-[13px] hover:cursor-pointer hover:underline" onClick={handleGoBack}>&lt; Back</button>
         <div className="mb-4">
             {messageSettingsInvalid && <p className="mt-1 text-red-400 text-[13px]">Messaging is disabled because there is a problem with your settings. Please adjust your settings and return to this page.</p>}
+            {!messageSettingsInvalid && hostMessageCryptoEnabled && <p className="mt-1 text-green-400 text-[13px]">Desktop encryption ready. Your identity key stays outside this embedded page.</p>}
         </div>
         <div className="mb-4">
             <p className="mb-1">Send message to address:</p>
-            <input className="w-full mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputSendMessageToAddressApplied} value={sendMessageToAddress} onChange={e => setSendMessageToAddress(e.target.value)} />
+            <input className="w-full mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputSendMessageToAddressApplied} value={sendMessageToAddress} onChange={e => {
+                setSendMessageToAddress(e.target.value);
+                setAddressInvalid('');
+            }} />
             {addressInvalid && <div className="flex gap-2">
                 <span className="text-[11px] text-red-400">Invalid address: {addressInvalid}</span>
                 {addressInvalid === 'pubKey missing' && sendMessageToAddress !== zeroAddress && <span className="inline text-[11px] text-blue-400 hover:underline hover:cursor-pointer" onClick={() => handleSubmitPubKeyModal(sendMessageToAddress)}>Manually Provide PubKey</span>}

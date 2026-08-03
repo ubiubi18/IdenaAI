@@ -27,6 +27,7 @@ const {
   registerIdenaSocialScheme,
   resolveIdenaSocialRoot,
 } = require('./idena-social-protocol')
+const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
 
 applyPrivateFileCreationMask()
 registerIdenaSocialScheme(protocol)
@@ -634,6 +635,10 @@ async function performNodeRpc(payload = {}) {
     }
   }
 
+  return sendNodeRpcRequest(payload)
+}
+
+async function sendNodeRpcRequest(payload = {}) {
   const {url, key} = getNodeRpcConnection()
   const requestBody = {
     method: String(payload.method || '').trim(),
@@ -665,6 +670,33 @@ async function performNodeRpc(payload = {}) {
     }
   }
 }
+
+async function performSocialCryptoNodeRpc(payload = {}) {
+  const method = String(payload.method || '').trim()
+  const params = Array.isArray(payload.params) ? payload.params : []
+  const isExportPassword =
+    method === 'dna_exportKey' &&
+    params.length === 1 &&
+    typeof params[0] === 'string' &&
+    /^[A-Za-z0-9_-]{43}$/.test(params[0])
+  const isReceiptLookup =
+    method === 'bcn_txReceipt' &&
+    params.length === 1 &&
+    typeof params[0] === 'string' &&
+    /^0x[0-9a-fA-F]{64}$/.test(params[0])
+  const isAddressLookup =
+    method === 'dna_getCoinbaseAddr' && params.length === 0
+
+  if (!isExportPassword && !isReceiptLookup && !isAddressLookup) {
+    return {error: {message: 'unsupported_social_crypto_rpc'}}
+  }
+
+  return sendNodeRpcRequest({method, params})
+}
+
+const idenaSocialCryptoService = createIdenaSocialCryptoService({
+  rpcCall: performSocialCryptoNodeRpc,
+})
 
 function normalizeLocalAiPayload(payload = {}) {
   const MAX_LOCAL_AI_PAYLOAD_DEPTH = 8
@@ -3360,6 +3392,10 @@ handleTrusted('social.rpc', async (_event, payload) => {
 
   return performNodeRpc(payload)
 })
+
+handleTrusted('social.crypto', async (_event, payload) =>
+  idenaSocialCryptoService(payload)
+)
 
 handleTrusted('shell.openExternal.safe', async (_event, payload) =>
   openExternalSafely(payload && payload.url)

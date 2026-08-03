@@ -201,6 +201,28 @@ npm start
 directory. That keeps first-run experiments separate from your normal Idena app
 profile.
 
+## Direct Messages In Embedded idena.social
+
+The embedded `idena.social` view can send and read encrypted direct messages
+through the identity connected to the desktop node. Open `idena.social`, choose
+`Messages`, click `Change`, enter the recipient's Idena address, and click
+`Apply`. Once the recipient and public key are resolved, enter the message and
+click `Send` to review and submit the on-chain transaction.
+
+The recipient must have a discoverable public key, normally from identity data
+or a previous signed transaction. The UI offers a manual public-key fallback
+when automatic discovery is not possible. Sending a message uses the current
+social contract and costs the normal Idena transaction fees.
+
+In desktop mode, message encryption and verified on-chain decryption run in a
+bounded main-process bridge. The private identity key is exported with a random
+one-use password, used only in main-process memory, and never sent into the
+embedded page. Decryption is limited to successful current-contract
+`sendMessage` receipts whose ciphertext, message hash, sender, and participants
+match. The displayed plaintext is necessarily available to the social renderer;
+the private key is not. Legacy messages outside this verified path can still
+require the social app's manual session credentials.
+
 ## Fresh Machine Notes
 
 macOS:
