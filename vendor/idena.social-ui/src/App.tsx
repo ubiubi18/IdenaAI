@@ -18,6 +18,7 @@ import menuWhiteSvg from './assets/menu-8-white.svg';
 import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSocialPostIdForContract, SOCIAL_CONTRACTS, SOCIAL_CONTRACT_CURRENT, type SocialContractId } from './logic/socialContracts';
 import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageComponent';
 import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
+import DesktopNavigation from './components/DesktopNavigation';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
 
@@ -1883,6 +1884,9 @@ function App() {
                     className={`mx-auto w-full ${isDesktopOnchainMode ? 'max-w-[1480px]' : 'max-w-[1080px]'}`}
                     style={isDesktopOnchainMode ? { width: '100%', maxWidth: '1480px' } : undefined}
                 >
+                    {isDesktopOnchainMode && (
+                        <DesktopNavigation messagesReady={hostMessageCryptoEnabled && !messageSettingsInvalid} />
+                    )}
                     {!isDesktopOnchainMode && (
                         <div className="lg:hidden mb-3">
                             <div className="text-[26px] mb-1">
