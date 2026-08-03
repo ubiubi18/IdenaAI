@@ -4,7 +4,7 @@ const SOCIAL_RPC_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
 export const SOCIAL_CONTRACT_ADDRESS =
   '0x840e092e31e9656fF15E541505039ed77585338E'
 export const SOCIAL_OFFICIAL_INDEXER_URL = 'https://api.idena.io'
-export const SOCIAL_EMBED_DOCUMENT_PATH = 'idena-social/index.html#/'
+export const SOCIAL_EMBED_DOCUMENT_PATH = 'idena-social://app/index.html#/'
 export const SOCIAL_MAX_IMAGE_BYTES = 1024 * 1024
 export const SOCIAL_IMAGE_FORMATS = [
   'PNG',

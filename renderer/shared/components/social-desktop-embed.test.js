@@ -3,6 +3,7 @@ const {
   SOCIAL_EMBED_DOCUMENT_PATH,
   validateSocialRpcRequest,
 } = require('./social-desktop-rpc-policy')
+const {IDENA_SOCIAL_ENTRY_URL} = require('../../../main/idena-social-protocol')
 
 describe('idena.social v12 desktop RPC boundary', () => {
   it('targets the exact v12.1.0 contract', () => {
@@ -11,21 +12,8 @@ describe('idena.social v12 desktop RPC boundary', () => {
     )
   })
 
-  it('resolves the embedded document inside the packaged renderer output', () => {
-    expect(
-      new URL(
-        SOCIAL_EMBED_DOCUMENT_PATH,
-        'file:///opt/IdenaAI/resources/app.asar/renderer/out/social.html'
-      ).href
-    ).toBe(
-      'file:///opt/IdenaAI/resources/app.asar/renderer/out/idena-social/index.html#/'
-    )
-  })
-
-  it('resolves the same embedded document from the development route', () => {
-    expect(
-      new URL(SOCIAL_EMBED_DOCUMENT_PATH, 'http://127.0.0.1:8000/social').href
-    ).toBe('http://127.0.0.1:8000/idena-social/index.html#/')
+  it('uses the isolated read-only Electron origin in every runtime', () => {
+    expect(SOCIAL_EMBED_DOCUMENT_PATH).toBe(IDENA_SOCIAL_ENTRY_URL)
   })
 
   it('allows the bounded transaction-history lookup required for messaging', () => {
