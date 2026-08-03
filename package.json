@@ -199,6 +199,7 @@
     "dayjs": "^1.9.6",
     "dequal": "^1.0.0",
     "dexie": "^3.2.2",
+    "eciesjs": "0.5.0",
     "electron-updater": "^6.8.9",
     "extract-colors": "^1.1.22",
     "framer-motion": "^4.0.0",

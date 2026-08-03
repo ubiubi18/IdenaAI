@@ -1,10 +1,14 @@
 const SOCIAL_RPC_MAX_REQUEST_ID_LENGTH = 128
 const SOCIAL_RPC_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+const SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES = 256 * 1024
+const SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES =
+  SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES + 256
 
 export const SOCIAL_CONTRACT_ADDRESS =
   '0x840e092e31e9656fF15E541505039ed77585338E'
 export const SOCIAL_OFFICIAL_INDEXER_URL = 'https://api.idena.io'
 export const SOCIAL_EMBED_DOCUMENT_PATH = 'idena-social://app/index.html#/'
+export const SOCIAL_MESSAGE_CRYPTO_VERSION = 'host-v1'
 export const SOCIAL_MAX_IMAGE_BYTES = 1024 * 1024
 export const SOCIAL_IMAGE_FORMATS = [
   'PNG',
@@ -51,6 +55,34 @@ function isShortString(value, maxLength = 512) {
 
 function isIdenaAddress(value) {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
+}
+
+function isTxHash(value) {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
+}
+
+function isMessageHash(value) {
+  return typeof value === 'string' && /^[0-9a-fA-F]{64}$/.test(value)
+}
+
+function isPublicKey(value) {
+  const hex = String(value || '').replace(/^0x/i, '')
+  return hex.length === 130 && /^04[0-9a-fA-F]{128}$/.test(hex)
+}
+
+function isBoundedBase64(value) {
+  if (
+    typeof value !== 'string' ||
+    value.length < 4 ||
+    value.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(value)
+  ) {
+    return false
+  }
+
+  return (
+    Math.floor((value.length * 3) / 4) <= SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES
+  )
 }
 
 function estimatePayloadBytes(value) {
@@ -159,4 +191,41 @@ export function validateSocialRpcRequest(requestId, method, params) {
     default:
       return 'unsupported_rpc_method'
   }
+}
+
+export function validateSocialCryptoRequest(requestId, payload) {
+  if (
+    typeof requestId !== 'string' ||
+    requestId.length < 1 ||
+    requestId.length > SOCIAL_RPC_MAX_REQUEST_ID_LENGTH ||
+    !isPlainObject(payload) ||
+    !isIdenaAddress(payload.address)
+  ) {
+    return 'invalid_crypto_request'
+  }
+
+  if (payload.operation === 'status') {
+    return null
+  }
+
+  if (payload.operation === 'encrypt-message') {
+    return isPublicKey(payload.recipientPublicKey) &&
+      typeof payload.plaintext === 'string' &&
+      payload.plaintext.length > 0 &&
+      estimatePayloadBytes(payload.plaintext) <=
+        SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES
+      ? null
+      : 'invalid_crypto_request'
+  }
+
+  if (payload.operation === 'decrypt-message') {
+    return isTxHash(payload.txHash) &&
+      isMessageHash(payload.messageHash) &&
+      isBoundedBase64(payload.senderCiphertext) &&
+      isBoundedBase64(payload.recipientCiphertext)
+      ? null
+      : 'invalid_crypto_request'
+  }
+
+  return 'unsupported_crypto_operation'
 }
