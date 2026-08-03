@@ -517,7 +517,7 @@ export default function SocialDesktopEmbed({
               borderRadius="lg"
               bg="white"
               referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-popups"
+              sandbox="allow-scripts allow-same-origin allow-popups"
               onLoad={() => {
                 if (!messagePortRef.current) initializeIframeChannel()
               }}
