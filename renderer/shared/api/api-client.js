@@ -59,7 +59,12 @@ export default function createApiClient() {
         }
 
         return {
-          data: await rpcBridge.call(body),
+          data:
+            body &&
+            body.method === 'dna_exportKey' &&
+            typeof rpcBridge.exportKey === 'function'
+              ? await rpcBridge.exportKey(body)
+              : await rpcBridge.call(body),
         }
       },
     }

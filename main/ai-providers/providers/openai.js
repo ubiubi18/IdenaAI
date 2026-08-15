@@ -1,3 +1,5 @@
+const {parseRemoteUrl} = require('../url-policy')
+
 function trimTrailingSlash(value) {
   return String(value || '').replace(/\/+$/, '')
 }
@@ -839,9 +841,14 @@ async function callOpenAiImage({
   }
 
   if (first.url) {
-    const imageResponse = await httpClient.get(String(first.url), {
+    const imageUrl = parseRemoteUrl(String(first.url), {
+      allowLoopbackHttp: false,
+    }).toString()
+    const imageResponse = await httpClient.get(imageUrl, {
       responseType: 'arraybuffer',
       timeout: profile.requestTimeoutMs,
+      redirect: 'error',
+      maxResponseBytes: 20 * 1024 * 1024,
     })
 
     const mimeType = String(
@@ -854,6 +861,10 @@ async function callOpenAiImage({
       .trim()
       .toLowerCase()
       .split(';')[0]
+
+    if (!mimeType.startsWith('image/')) {
+      throw new Error('Image generation URL returned a non-image payload')
+    }
 
     return {
       imageDataUrl: toDataUrlFromBuffer(

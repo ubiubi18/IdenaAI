@@ -97,6 +97,17 @@ describe('local-ai codebase context', () => {
     ).rejects.toThrow(/outside the allowed workspace/u)
   })
 
+  it('rejects a symlink selected as a codebase root', async () => {
+    const linkedRoot = `${tempDir}-link`
+    await fs.symlink(tempDir, linkedRoot, 'dir')
+
+    await expect(
+      buildCodebaseContext({root: linkedRoot, allowedRoots: [linkedRoot]})
+    ).rejects.toThrow(/real directory/u)
+
+    await fs.remove(linkedRoot)
+  })
+
   it('identifies sensitive files that should not enter model context', () => {
     expect(shouldIgnoreFile('.env.local')).toBe(true)
     expect(shouldIgnoreFile('private-key.pem')).toBe(true)

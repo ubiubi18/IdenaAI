@@ -3,6 +3,7 @@ const fs = require('fs-extra')
 const path = require('path')
 const {promisify} = require('util')
 const httpClientDefault = require('../utils/fetch-client')
+const {createProviderHttpClient, parseRemoteUrl} = require('./url-policy')
 
 const {
   PROVIDERS,
@@ -76,6 +77,10 @@ const {
 } = require('./providers/legacy-heuristic')
 
 const SUPPORTED_PROVIDERS = Object.values(PROVIDERS)
+const PROVIDER_CREDENTIAL_BASE_URLS = {
+  [PROVIDERS.Gemini]: 'https://generativelanguage.googleapis.com',
+  [PROVIDERS.Anthropic]: 'https://api.anthropic.com/v1',
+}
 const MAX_CONSULTANTS = 4
 const UNCERTAINTY_RECHECK_CONFIDENCE_THRESHOLDS = [0.95, 0.8, 0.51]
 const MAX_PROBABILITY_ENSEMBLE_RUNS = 3
@@ -405,8 +410,14 @@ function resolveProviderConfig(provider, providerConfig = null) {
       ? PROVIDER_CONFIG_DEFAULTS[provider]
       : null
 
+  // Official providers have fixed credential destinations. Only the explicitly
+  // custom OpenAI-compatible adapter accepts a renderer-supplied endpoint.
   const overrides =
-    providerConfig && typeof providerConfig === 'object' ? providerConfig : null
+    provider === PROVIDERS.OpenAICompatible &&
+    providerConfig &&
+    typeof providerConfig === 'object'
+      ? providerConfig
+      : null
 
   if (!defaults && !overrides) {
     return null
@@ -416,6 +427,20 @@ function resolveProviderConfig(provider, providerConfig = null) {
     ...(defaults || {}),
     ...(overrides || {}),
   }
+}
+
+function resolveProviderCredentialOrigin(provider, providerConfig = null) {
+  const resolved = resolveProviderConfig(provider, providerConfig)
+  const baseUrl =
+    (resolved && resolved.baseUrl) || PROVIDER_CREDENTIAL_BASE_URLS[provider]
+
+  if (!baseUrl) {
+    throw new Error(`Provider credential destination is undefined: ${provider}`)
+  }
+
+  return parseRemoteUrl(baseUrl, {
+    allowLoopbackHttp: provider === PROVIDERS.OpenAICompatible,
+  }).origin
 }
 
 function normalizeConsultantWeight(value, fallback = 1) {
@@ -6148,12 +6173,23 @@ function createAiProviderBridge(logger, dependencies = {}) {
   const providerKeySources = new Map(
     Object.values(PROVIDERS).map((provider) => [provider, null])
   )
+  const providerKeyOrigins = new Map(
+    Object.values(PROVIDERS).map((provider) => [provider, null])
+  )
   const persistentCredentialClient =
     dependencies.persistentCredentialClient || null
 
   const now =
     typeof dependencies.now === 'function' ? dependencies.now : () => Date.now()
-  const httpClient = dependencies.httpClient || httpClientDefault
+  const rawHttpClient = dependencies.httpClient || httpClientDefault
+  const httpClient = createProviderHttpClient(rawHttpClient, {
+    lookup: dependencies.httpClient
+      ? dependencies.providerDnsLookup || null
+      : dependencies.providerDnsLookup,
+    connectionLookup: dependencies.httpClient
+      ? dependencies.providerConnectionLookup || null
+      : dependencies.providerConnectionLookup,
+  })
 
   const getUserDataPath =
     typeof dependencies.getUserDataPath === 'function'
@@ -6214,10 +6250,21 @@ function createAiProviderBridge(logger, dependencies = {}) {
     })
   }
 
-  function getApiKey(provider) {
+  function getApiKey(provider, providerConfig = null) {
     const key = providerKeys.get(provider)
     if (!key) {
       throw new Error(`API key is not set for provider: ${provider}`)
+    }
+
+    const expectedOrigin = resolveProviderCredentialOrigin(
+      provider,
+      providerConfig
+    )
+    const boundOrigin = providerKeyOrigins.get(provider)
+    if (!boundOrigin || boundOrigin !== expectedOrigin) {
+      throw new Error(
+        `API key for ${provider} is not bound to the requested provider origin`
+      )
     }
     return key
   }
@@ -6600,7 +6647,7 @@ Flip hash: ${hash}
     }
   }
 
-  function setProviderKey({provider, apiKey}) {
+  function setProviderKey({provider, apiKey, providerConfig = null}) {
     const normalized = normalizeProvider(provider)
 
     if (isLocalAiProvider(normalized)) {
@@ -6615,6 +6662,10 @@ Flip hash: ${hash}
 
     providerKeys.set(normalized, key)
     providerKeySources.set(normalized, 'session')
+    providerKeyOrigins.set(
+      normalized,
+      resolveProviderCredentialOrigin(normalized, providerConfig)
+    )
     logger.info('AI provider key updated', {provider: normalized})
 
     return {ok: true, provider: normalized}
@@ -6629,6 +6680,7 @@ Flip hash: ${hash}
 
     providerKeys.set(normalized, null)
     providerKeySources.set(normalized, null)
+    providerKeyOrigins.set(normalized, null)
     logger.info('AI provider key cleared', {provider: normalized})
     return {ok: true, provider: normalized}
   }
@@ -6676,6 +6728,10 @@ Flip hash: ${hash}
       if (result && result.hasKey && result.apiKey) {
         providerKeys.set(PROVIDERS.OpenAI, String(result.apiKey).trim())
         providerKeySources.set(PROVIDERS.OpenAI, 'host-credential')
+        providerKeyOrigins.set(
+          PROVIDERS.OpenAI,
+          resolveProviderCredentialOrigin(PROVIDERS.OpenAI)
+        )
         loadedProviders.push(PROVIDERS.OpenAI)
         logger.info('Persistent AI provider credential loaded', {
           provider: PROVIDERS.OpenAI,
@@ -6806,11 +6862,11 @@ Flip hash: ${hash}
       })
     }
 
-    const resolvedApiKey = apiKey || getApiKey(provider)
     const resolvedProviderConfig = resolveProviderConfig(
       provider,
       providerConfig
     )
+    const resolvedApiKey = apiKey || getApiKey(provider, providerConfig)
     const prompt =
       String(promptText || '').trim() ||
       promptTemplate({
@@ -6919,11 +6975,11 @@ Flip hash: ${hash}
     quality = '',
     style = '',
   }) {
-    const resolvedApiKey = apiKey || getApiKey(provider)
     const resolvedProviderConfig = resolveProviderConfig(
       provider,
       providerConfig
     )
+    const resolvedApiKey = apiKey || getApiKey(provider, providerConfig)
 
     if (
       isOpenAiCompatibleProvider(provider) &&
@@ -6992,11 +7048,11 @@ Flip hash: ${hash}
       }
     }
 
-    const apiKey = getApiKey(normalized)
     const resolvedProviderConfig = resolveProviderConfig(
       normalized,
       providerConfig
     )
+    const apiKey = getApiKey(normalized, providerConfig)
     let testedModel = finalModel
     let modelFallback = null
 
@@ -7137,7 +7193,6 @@ Flip hash: ${hash}
       throw new Error('Fast-mode probing is supported only for OpenAI')
     }
 
-    const apiKey = getApiKey(normalized)
     const profile = sanitizeBenchmarkProfile({
       requestTimeoutMs: 45 * 1000,
       maxOutputTokens: 16,
@@ -7147,6 +7202,7 @@ Flip hash: ${hash}
       normalized,
       providerConfig
     )
+    const apiKey = getApiKey(normalized, providerConfig)
 
     try {
       const result = await testOpenAiFastMode({
@@ -7222,11 +7278,11 @@ Flip hash: ${hash}
     }
 
     const profile = sanitizeBenchmarkProfile()
-    const apiKey = getApiKey(normalized)
     const resolvedProviderConfig = resolveProviderConfig(
       normalized,
       providerConfig
     )
+    const apiKey = getApiKey(normalized, providerConfig)
 
     try {
       let models = []
@@ -7801,7 +7857,7 @@ Flip hash: ${hash}
           exemplarsEnabled: storyExemplarsEnabled,
           requestedStoryCount,
         })
-    const apiKey = getApiKey(provider)
+    const apiKey = getApiKey(provider, providerConfig)
     let combinedUsage = createEmptyTokenUsage()
     const attemptHistory = []
 
@@ -9047,7 +9103,7 @@ Flip hash: ${hash}
     const imageQuality = String(payload.imageQuality || '').trim()
     const imageStyle = String(payload.imageStyle || '').trim()
     const providerConfig = payload.providerConfig || null
-    const apiKey = getApiKey(provider)
+    const apiKey = getApiKey(provider, providerConfig)
     const [keywordA, keywordB] = normalizeKeywords(payload)
     const senseSelection = getLockedSenseSelection(
       payload.senseSelection,
@@ -10102,7 +10158,7 @@ Flip hash: ${hash}
       .trim()
       .slice(0, 2400)
     const providerConfig = payload.providerConfig || null
-    const apiKey = getApiKey(provider)
+    const apiKey = getApiKey(provider, providerConfig)
 
     if (!prompt) {
       throw new Error('Prompt is required for AI image search')
@@ -10297,7 +10353,11 @@ Flip hash: ${hash}
         consultant.internalStrategy === LEGACY_HEURISTIC_STRATEGY ||
         isLocalAiProvider(consultant.provider)
           ? null
-          : getApiKey(consultant.provider),
+          : getApiKey(
+              consultant.provider,
+              consultant.providerConfig ||
+                (consultant.provider === provider ? providerConfig : null)
+            ),
     }))
     if (!flips.length) {
       throw new Error('No flips provided')
@@ -11489,7 +11549,11 @@ Flip hash: ${hash}
         consultant.internalStrategy === LEGACY_HEURISTIC_STRATEGY ||
         isLocalAiProvider(consultant.provider)
           ? null
-          : getApiKey(consultant.provider),
+          : getApiKey(
+              consultant.provider,
+              consultant.providerConfig ||
+                (consultant.provider === provider ? providerConfig : null)
+            ),
     }))
 
     if (!flips.length) {

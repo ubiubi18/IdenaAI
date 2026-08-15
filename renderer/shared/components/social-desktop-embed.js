@@ -19,17 +19,20 @@ import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
 import {
   SOCIAL_CONTRACT_ADDRESS,
   SOCIAL_EMBED_DOCUMENT_PATH,
+  SOCIAL_EMBED_ORIGIN,
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
   SOCIAL_OFFICIAL_INDEXER_URL,
   validateSocialCryptoRequest,
   validateSocialRpcRequest,
+  isTrustedSocialFrameMessage,
 } from './social-desktop-rpc-policy'
 
 export {
   SOCIAL_CONTRACT_ADDRESS,
   SOCIAL_EMBED_DOCUMENT_PATH,
+  SOCIAL_EMBED_ORIGIN,
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
@@ -342,11 +345,11 @@ export default function SocialDesktopEmbed({
     }
     channel.port1.start()
 
-    // The wildcard is limited to a capability-port transfer with no payload.
-    // All bootstrap and RPC data then stays on the private MessageChannel.
-    frameWindow.postMessage({type: SOCIAL_CHANNEL_INIT_MESSAGE_TYPE}, '*', [
-      channel.port2,
-    ])
+    frameWindow.postMessage(
+      {type: SOCIAL_CHANNEL_INIT_MESSAGE_TYPE},
+      SOCIAL_EMBED_ORIGIN,
+      [channel.port2]
+    )
     channel.port1.postMessage({
       type: SOCIAL_BOOTSTRAP_MESSAGE_TYPE,
       payload: bootstrap,
@@ -360,7 +363,7 @@ export default function SocialDesktopEmbed({
 
     const handleReadyMessage = (event) => {
       if (
-        event.source !== iframeRef.current?.contentWindow ||
+        !isTrustedSocialFrameMessage(event, iframeRef.current?.contentWindow) ||
         event.data?.type !== SOCIAL_BOOTSTRAP_READY_MESSAGE_TYPE ||
         bootstrapReady
       ) {
@@ -569,9 +572,10 @@ export default function SocialDesktopEmbed({
               borderRadius="lg"
               bg="white"
               referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-popups"
+              sandbox="allow-scripts allow-same-origin"
               onLoad={() => {
-                if (!messagePortRef.current) initializeIframeChannel()
+                closeMessagePort()
+                initializeIframeChannel()
               }}
             />
             {!bootstrapReady && (

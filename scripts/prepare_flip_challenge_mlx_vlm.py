@@ -27,6 +27,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from path_safety import safe_path_component
+
 try:
     from deepfunding_scoring import find_optimal_weights
 except ModuleNotFoundError:
@@ -1406,7 +1408,7 @@ def build_training_record(
     if not expected_answer:
         raise ValueError(f"Task {task_id} has no agreed answer")
 
-    task_dir = images_dir / task_id
+    task_dir = images_dir / safe_path_component(task_id, "task")
     task_dir.mkdir(parents=True, exist_ok=True)
 
     saved_images: List[str] = []
