@@ -1224,15 +1224,20 @@ describe('createAiProviderBridge', () => {
         .mockResolvedValue({data: {choices: [{message: {content: '{}'}}]}}),
     }
     const bridge = createAiProviderBridge(mockLogger(), {httpClient})
-    bridge.setProviderKey({provider: 'openai-compatible', apiKey: 'sk-custom'})
+    const providerConfig = {
+      baseUrl: 'https://example-provider.test/v1',
+      chatPath: '/chat/completions',
+    }
+    bridge.setProviderKey({
+      provider: 'openai-compatible',
+      apiKey: 'sk-custom',
+      providerConfig,
+    })
 
     const result = await bridge.testProvider({
       provider: 'openai-compatible',
       model: 'custom-model',
-      providerConfig: {
-        baseUrl: 'https://example-provider.local/v1',
-        chatPath: '/chat/completions',
-      },
+      providerConfig,
     })
 
     expect(result).toMatchObject({
@@ -1241,7 +1246,7 @@ describe('createAiProviderBridge', () => {
       model: 'custom-model',
     })
     expect(httpClient.post).toHaveBeenCalledWith(
-      'https://example-provider.local/v1/chat/completions',
+      'https://example-provider.test/v1/chat/completions',
       expect.any(Object),
       expect.objectContaining({
         headers: expect.objectContaining({
@@ -1249,6 +1254,25 @@ describe('createAiProviderBridge', () => {
         }),
       })
     )
+  })
+
+  it('does not send a custom-provider key to a different origin', async () => {
+    const httpClient = {post: jest.fn()}
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({
+      provider: 'openai-compatible',
+      apiKey: 'sk-custom',
+      providerConfig: {baseUrl: 'https://provider-a.test/v1'},
+    })
+
+    await expect(
+      bridge.testProvider({
+        provider: 'openai-compatible',
+        model: 'custom-model',
+        providerConfig: {baseUrl: 'https://provider-b.test/v1'},
+      })
+    ).rejects.toThrow(/not bound to the requested provider origin/u)
+    expect(httpClient.post).not.toHaveBeenCalled()
   })
 
   it('reports whether the exact OpenAI short-session fast path is accepted', async () => {
@@ -2438,6 +2462,10 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({
       provider: 'openai-compatible',
       apiKey: 'sk-test-compatible',
+      providerConfig: {
+        baseUrl: 'https://example-provider.test/v1',
+        chatPath: '/chat/completions',
+      },
     })
 
     const result = await solveFlipBatch(bridge, {
@@ -2453,7 +2481,7 @@ describe('createAiProviderBridge', () => {
           provider: 'openai-compatible',
           model: 'gpt-4.1-mini',
           providerConfig: {
-            baseUrl: 'https://example-provider.local/v1',
+            baseUrl: 'https://example-provider.test/v1',
             chatPath: '/chat/completions',
           },
         },
@@ -2500,6 +2528,10 @@ describe('createAiProviderBridge', () => {
     bridge.setProviderKey({
       provider: 'openai-compatible',
       apiKey: 'sk-test-compatible',
+      providerConfig: {
+        baseUrl: 'https://example-provider.test/v1',
+        chatPath: '/chat/completions',
+      },
     })
 
     const basePayload = {
@@ -2519,7 +2551,7 @@ describe('createAiProviderBridge', () => {
           provider: 'openai-compatible',
           model: 'gpt-4.1-mini',
           providerConfig: {
-            baseUrl: 'https://example-provider.local/v1',
+            baseUrl: 'https://example-provider.test/v1',
             chatPath: '/chat/completions',
           },
         },

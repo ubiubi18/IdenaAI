@@ -169,6 +169,46 @@ function resolveAllowedRoot(root, allowedRoots = []) {
   return requestedRoot
 }
 
+async function resolveCanonicalAllowedRoot(root, allowedRoots = []) {
+  const requestedRoot = resolveAllowedRoot(root, allowedRoots)
+  const defaultRoot = path.resolve(
+    process.env.IDENA_CODEBASE_CONTEXT_ROOT || process.cwd()
+  )
+  const normalizedAllowedRoots = [defaultRoot]
+    .concat(Array.isArray(allowedRoots) ? allowedRoots : [])
+    .map((item) => path.resolve(String(item || '')))
+    .filter(Boolean)
+
+  const requestedStats = await fs.lstat(requestedRoot)
+  if (requestedStats.isSymbolicLink() || !requestedStats.isDirectory()) {
+    throw new Error('Codebase context root must be a real directory')
+  }
+
+  const canonicalRoot = await fs.realpath(requestedRoot)
+  const canonicalAllowedRoots = []
+
+  for (const allowedRoot of normalizedAllowedRoots) {
+    // eslint-disable-next-line no-await-in-loop
+    const stats = await fs.lstat(allowedRoot)
+    if (!stats.isSymbolicLink() && stats.isDirectory()) {
+      // eslint-disable-next-line no-await-in-loop
+      canonicalAllowedRoots.push(await fs.realpath(allowedRoot))
+    }
+  }
+
+  if (
+    !canonicalAllowedRoots.some(
+      (allowedRoot) =>
+        canonicalRoot === allowedRoot ||
+        isInsidePath(allowedRoot, canonicalRoot)
+    )
+  ) {
+    throw new Error('Codebase context root is outside the allowed workspace')
+  }
+
+  return canonicalRoot
+}
+
 function shouldIgnoreRelativePath(relativePath) {
   const normalized = normalizeRelativePath(relativePath)
   const parts = normalized.split('/').filter(Boolean)
@@ -428,7 +468,20 @@ async function readTextFile(root, relativePath) {
     throw new Error('Refusing to read outside the codebase root')
   }
 
-  const stats = await fs.stat(absolutePath)
+  const linkStats = await fs.lstat(absolutePath)
+
+  if (linkStats.isSymbolicLink()) {
+    throw new Error('Refusing to read a symlink from the codebase root')
+  }
+
+  const canonicalRoot = await fs.realpath(rootPath)
+  const canonicalFile = await fs.realpath(absolutePath)
+
+  if (!isInsidePath(canonicalRoot, canonicalFile)) {
+    throw new Error('Refusing to read outside the canonical codebase root')
+  }
+
+  const stats = await fs.stat(canonicalFile)
 
   if (!stats.isFile()) {
     return null
@@ -443,7 +496,7 @@ async function readTextFile(root, relativePath) {
     }
   }
 
-  const raw = await fs.readFile(absolutePath, 'utf8')
+  const raw = await fs.readFile(canonicalFile, 'utf8')
 
   if (raw.includes('\u0000')) {
     return {
@@ -463,7 +516,10 @@ async function readTextFile(root, relativePath) {
 }
 
 async function buildCodebaseContext(options = {}) {
-  const root = resolveAllowedRoot(options.root, options.allowedRoots)
+  const root = await resolveCanonicalAllowedRoot(
+    options.root,
+    options.allowedRoots
+  )
   const rootStats = await fs.stat(root)
 
   if (!rootStats.isDirectory()) {
@@ -593,6 +649,7 @@ module.exports = {
   buildCodebaseContext,
   collectCodebaseFiles,
   resolveAllowedRoot,
+  resolveCanonicalAllowedRoot,
   shouldIgnoreFile,
   tokenizeQuery,
   buildRepositoryTreeSummary,

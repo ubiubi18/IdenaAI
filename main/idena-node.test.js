@@ -5,6 +5,7 @@ const {
     buildNodeParameters,
     getBundledNodeFileCandidates,
     getConfiguredBootstrapNodes,
+    getNodeAcquisitionPolicy,
     isPeerHintRetryable,
     isRpcMethodUnavailableError,
     getNodeReleaseRepos,
@@ -56,13 +57,39 @@ describe('idena node release selection', () => {
   it('looks for the PowerShell-built source node before legacy source bundle paths', () => {
     const suffix = process.platform === 'win32' ? '.exe' : ''
     expect(
-      getBundledNodeFileCandidates().some(
+      getBundledNodeFileCandidates({isPackaged: false}).some(
         (candidate) =>
           candidate.endsWith(
             path.join('build', 'node', 'current', `idena-go${suffix}`)
           ) || candidate.includes(`build${path.sep}node${path.sep}current`)
       )
     ).toBe(true)
+  })
+
+  it('allows packaged applications to use only their resource bundle', () => {
+    const resourcesPath = path.join('/opt', 'IdenaAI', 'resources')
+    expect(
+      getBundledNodeFileCandidates({isPackaged: true, resourcesPath})
+    ).toEqual([
+      path.join(
+        resourcesPath,
+        'node',
+        `idena-go${process.platform === 'win32' ? '.exe' : ''}`
+      ),
+    ])
+    expect(getNodeAcquisitionPolicy(true)).toEqual({
+      allowBundledNode: true,
+      allowLocalSourceBuild: false,
+      allowRemoteDownload: false,
+    })
+  })
+
+  it('keeps exact-source builds and downloads development-only', () => {
+    expect(getNodeAcquisitionPolicy(false)).toEqual({
+      allowBundledNode: true,
+      allowLocalSourceBuild: true,
+      allowRemoteDownload: true,
+    })
   })
 })
 

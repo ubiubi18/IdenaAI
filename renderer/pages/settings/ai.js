@@ -5157,6 +5157,10 @@ export default function AiSettingsPage() {
                                 await bridge.setProviderKey({
                                   provider: activeProvider,
                                   apiKey: trimmedApiKey,
+                                  providerConfig: buildProviderConfigForBridge(
+                                    aiSolver,
+                                    activeProvider
+                                  ),
                                 })
                                 setApiKey('')
                                 setIsApiKeyVisible(false)
