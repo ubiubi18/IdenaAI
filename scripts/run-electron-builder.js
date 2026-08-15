@@ -8,6 +8,14 @@ const {execFileSync, spawnSync} = require('child_process')
 const ROOT = path.join(__dirname, '..')
 const ELECTRON_BUILDER_CLI = require.resolve('electron-builder/out/cli/cli')
 const PREPARE_BUNDLED_NODE = path.join(__dirname, 'prepare-bundled-node.js')
+const CHECK_APPLICATION_RELEASE = path.join(
+  __dirname,
+  'check-application-release-lock.js'
+)
+const CHECK_BUNDLED_NODE = path.join(
+  __dirname,
+  'check-bundled-node-artifact.js'
+)
 const MIN_NODE_BINARY_SIZE = 1024 * 1024
 const WINDOWS_BUNDLED_NODE = path.join(
   ROOT,
@@ -156,6 +164,10 @@ function hasExplicitOutputDirectory(argv) {
   )
 }
 
+function requiresApprovedRelease(argv) {
+  return !argv.includes('--dir')
+}
+
 function shouldStageBuilderOutput(
   argv,
   root = ROOT,
@@ -188,6 +200,21 @@ function copyStagedOutput(stagedOutput, destination) {
 function runElectronBuilder(argv = process.argv.slice(2)) {
   const args = argv.slice()
 
+  if (requiresApprovedRelease(args)) {
+    const approvalResult = spawnSync(
+      process.execPath,
+      [CHECK_APPLICATION_RELEASE, '--require-approved'],
+      {cwd: ROOT, env: process.env, stdio: 'inherit'}
+    )
+    if (approvalResult.error) {
+      console.error(
+        `checking application release approval failed: ${approvalResult.error.message}`
+      )
+      return 1
+    }
+    if (approvalResult.status !== 0) return approvalResult.status || 1
+  }
+
   if (shouldAppendMacArch(args)) {
     const targetArch = detectMacMachineArch()
     args.push(targetArch === 'arm64' ? '--arm64' : '--x64')
@@ -212,6 +239,21 @@ function runElectronBuilder(argv = process.argv.slice(2)) {
 
     if (prepareResult.status !== 0) {
       return prepareResult.status || 1
+    }
+
+    if (requiresApprovedRelease(args)) {
+      const artifactResult = spawnSync(process.execPath, [CHECK_BUNDLED_NODE], {
+        cwd: ROOT,
+        env: process.env,
+        stdio: 'inherit',
+      })
+      if (artifactResult.error) {
+        console.error(
+          `checking bundled node approval failed: ${artifactResult.error.message}`
+        )
+        return 1
+      }
+      if (artifactResult.status !== 0) return artifactResult.status || 1
     }
   }
 
@@ -270,6 +312,7 @@ if (require.main === module) process.exit(runElectronBuilder())
 module.exports = {
   copyStagedOutput,
   hasExplicitOutputDirectory,
+  requiresApprovedRelease,
   runElectronBuilder,
   shouldStageBuilderOutput,
 }

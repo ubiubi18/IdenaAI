@@ -20,9 +20,12 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
-from datasets import load_from_disk
-
 from run_local_flip_ollama_smoke import CANDIDATE_ANALYSIS_SCHEMA, build_candidate_analysis_prompt
+from path_safety import (
+    resolve_existing_file_beneath,
+    resolve_output_path_beneath,
+    safe_path_component,
+)
 
 
 def sort_key(row: Dict[str, Any], sort_by: str) -> tuple:
@@ -34,14 +37,19 @@ def sort_key(row: Dict[str, Any], sort_by: str) -> tuple:
 
 
 def copy_images(
-    image_paths: List[str], output_dir: Path, request_id: str, candidate_key: str
+    image_paths: List[str],
+    image_root: Path,
+    output_dir: Path,
+    request_id: str,
+    candidate_key: str,
 ) -> List[str]:
     rel_paths: List[str] = []
+    request_dir = safe_path_component(request_id, "request")
     for index, source in enumerate(image_paths, start=1):
-        src_path = Path(source).resolve()
+        src_path = resolve_existing_file_beneath(image_root, source)
         ext = src_path.suffix or ".png"
-        rel_path = Path("images") / request_id / f"{candidate_key}-{index}{ext}"
-        dest_path = output_dir / rel_path
+        rel_path = Path("images") / request_dir / f"{candidate_key}-{index}{ext}"
+        dest_path = resolve_output_path_beneath(output_dir, *rel_path.parts)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_path, dest_path)
         rel_paths.append(str(rel_path))
@@ -59,9 +67,15 @@ def validate_candidate_images(row: Dict[str, Any], candidate_key: str) -> List[s
 
 
 def main() -> int:
+    from datasets import load_from_disk
+
     parser = argparse.ArgumentParser(description="Export a prepared FLIP dataset into a teacher request pack")
     parser.add_argument("--dataset-path", required=True, help="Prepared HF dataset path")
     parser.add_argument("--output-dir", required=True, help="Output directory for the teacher request pack")
+    parser.add_argument(
+        "--image-root",
+        help="Trusted root containing every image referenced by the dataset (default: dataset parent/images)",
+    )
     parser.add_argument("--take", type=int, default=0, help="Optional max examples after filtering/sorting")
     parser.add_argument(
         "--expected-strength",
@@ -79,6 +93,11 @@ def main() -> int:
 
     dataset_path = Path(args.dataset_path).resolve()
     output_dir = Path(args.output_dir).resolve()
+    image_root = (
+        Path(args.image_root).resolve()
+        if args.image_root
+        else (dataset_path.parent / "images").resolve()
+    )
     dataset = load_from_disk(str(dataset_path))
     rows: List[Dict[str, Any]] = [dict(item) for item in dataset]
 
@@ -114,7 +133,13 @@ def main() -> int:
                 seen_request_ids.add(request_id)
                 candidate_label = candidate_key.upper()
                 image_paths = validate_candidate_images(row, candidate_key)
-                relative_images = copy_images(image_paths, output_dir, request_id, candidate_key)
+                relative_images = copy_images(
+                    image_paths,
+                    image_root,
+                    output_dir,
+                    request_id,
+                    candidate_key,
+                )
                 item = {
                     "request_id": request_id,
                     "sample_id": sample_id,
@@ -137,6 +162,7 @@ def main() -> int:
     summary = {
         "dataset_path": str(dataset_path),
         "output_dir": str(output_dir),
+        "image_root": str(image_root),
         "examples": len(rows),
         "requests": len(rows) * 2,
         "expected_strength": args.expected_strength,

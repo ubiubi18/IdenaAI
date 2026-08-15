@@ -183,6 +183,11 @@ function trimString(value) {
   return String(value || '').trim()
 }
 
+function rendererExecutableOverride(value, isDev, validation) {
+  const normalized = normalizeExecutableOverride(value, validation)
+  return isDev ? normalized : ''
+}
+
 function resolveManagedRuntimeConfig(runtimeFamily = '') {
   const key = trimString(runtimeFamily).toLowerCase()
   return key ? MANAGED_LOCAL_RUNTIMES[key] || null : null
@@ -2289,7 +2294,6 @@ function createDefaultRuntimeController({
     }
 
     const {endpoint, flavor, model, runtimeConfig, runtimeRoot} = context
-    const pythonPath = trimString(payload.managedRuntimePythonPath)
     emitRuntimeProgress(onProgress, {
       status: 'installing',
       stage: 'prepare_runtime_files',
@@ -2405,6 +2409,16 @@ function createDefaultRuntimeController({
         runtimeConfig
       )
       assertManagedRuntimeSetupCurrent(startGeneration)
+
+      const pythonPath = rendererExecutableOverride(
+        payload.managedRuntimePythonPath,
+        isDev,
+        {
+          executablePattern: PYTHON_EXECUTABLE_PATTERN,
+          errorCode: 'invalid_python_command_path',
+          label: 'Python',
+        }
+      )
 
       const install = await ensureManagedMolmo2RuntimeInstalled(
         runtimeRoot,
@@ -2564,7 +2578,13 @@ function createDefaultRuntimeController({
           }
         }
 
-        const command = resolveOllamaCommand(payload.ollamaCommandPath)
+        const command = resolveOllamaCommand(
+          rendererExecutableOverride(payload.ollamaCommandPath, isDev, {
+            executablePattern: OLLAMA_EXECUTABLE_PATTERN,
+            errorCode: 'invalid_ollama_command_path',
+            label: 'Ollama',
+          })
+        )
         const env = {...process.env}
         const baseUrlValidation = validateLocalAiBaseUrl(payload.baseUrl)
 
@@ -2724,5 +2744,6 @@ module.exports = {
   parseManagedSnapshotDownloadProcesses,
   resolveManagedLocalRuntimeFlavor,
   resolveManagedMolmo2RuntimeFlavor,
+  rendererExecutableOverride,
   sha256File,
 }

@@ -4,6 +4,7 @@ const https = require('https')
 const {
   BrowserWindow,
   app,
+  dialog,
   ipcMain,
   Tray,
   Menu,
@@ -28,6 +29,17 @@ const {
   resolveIdenaSocialRoot,
 } = require('./idena-social-protocol')
 const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
+const {
+  validateExportKeyPayload,
+  validateGenericRpcMethod,
+} = require('./node-rpc-policy')
+const {
+  confirmDestructiveNodeAction,
+} = require('./destructive-node-confirmation')
+const {
+  socialContractCallRequiresConfirmation,
+  validateSocialContractCall,
+} = require('./social-contract-call-policy')
 
 applyPrivateFileCreationMask()
 registerIdenaSocialScheme(protocol)
@@ -163,6 +175,7 @@ const {
   getNodeFile,
   getNodeIpfsDir,
   tryStopNode,
+  configureIdenaNodeRuntime,
 } = require('./idena-node')
 const {
   createDefaultValidationDevnetController,
@@ -170,6 +183,8 @@ const {
 } = require('./idena-devnet')
 
 const NodeUpdater = require('./node-updater')
+
+configureIdenaNodeRuntime({isPackaged: app.isPackaged})
 
 const localAiManager = createLocalAiManager({
   logger,
@@ -274,7 +289,7 @@ function isTrustedRendererUrl(url) {
   }
 
   if (app.isPackaged) {
-    return url.startsWith('file://')
+    return loadRoute.isPackagedRendererUrl(url)
   }
 
   try {
@@ -293,6 +308,17 @@ function resolvePackagedRendererRouteName(url) {
 }
 
 function assertTrustedSender(event) {
+  const isMainWindowSender = Boolean(
+    mainWindow &&
+      event &&
+      event.sender === mainWindow.webContents &&
+      event.senderFrame === mainWindow.webContents.mainFrame
+  )
+
+  if (!isMainWindowSender) {
+    throw new Error('Blocked IPC sender: non-main renderer frame')
+  }
+
   const senderUrl = String(
     (event && event.senderFrame && event.senderFrame.url) ||
       (event && event.sender && typeof event.sender.getURL === 'function'
@@ -301,11 +327,7 @@ function assertTrustedSender(event) {
       ''
   ).trim()
 
-  const isBootFrame =
-    (senderUrl === '' || senderUrl === 'about:blank') &&
-    mainWindow &&
-    event &&
-    event.sender === mainWindow.webContents
+  const isBootFrame = senderUrl === '' || senderUrl === 'about:blank'
 
   if (isBootFrame || isTrustedRendererUrl(senderUrl)) {
     return
@@ -482,13 +504,8 @@ function validateSocialRpcRequest(payload = {}) {
         : 'invalid_rpc_params'
 
     case 'contract_call':
-      return params.length === 1 &&
-        isPlainObject(params[0]) &&
-        isShortString(params[0].from, 128) &&
-        isShortString(params[0].contract, 128) &&
-        isShortString(params[0].method, 128) &&
-        Array.isArray(params[0].args)
-        ? null
+      return params.length === 1
+        ? validateSocialContractCall(params[0])
         : 'invalid_rpc_params'
 
     default:
@@ -514,6 +531,12 @@ function validateNodeRpcPayload(payload = {}) {
 
   if (estimatePayloadBytes(payload) > SOCIAL_RPC_MAX_PAYLOAD_BYTES) {
     return 'rpc_payload_too_large'
+  }
+
+  const policyError = validateGenericRpcMethod(method)
+
+  if (policyError) {
+    return policyError
   }
 
   return null
@@ -633,6 +656,81 @@ async function performNodeRpc(payload = {}) {
         message: validationError,
       },
     }
+  }
+
+  return sendNodeRpcRequest(payload)
+}
+
+async function performSocialRpc(payload = {}) {
+  const validationError = validateSocialRpcRequest(payload)
+
+  if (validationError) {
+    return {error: {message: validationError}}
+  }
+
+  if (payload.method !== 'contract_call') {
+    return performNodeRpc(payload)
+  }
+
+  const call = payload.params[0]
+  const coinbaseResponse = await sendNodeRpcRequest({
+    method: 'dna_getCoinbaseAddr',
+    params: [],
+  })
+  const coinbase = String(
+    coinbaseResponse && coinbaseResponse.result
+  ).toLowerCase()
+
+  if (
+    coinbaseResponse.error ||
+    !coinbase ||
+    coinbase !== String(call.from || '').toLowerCase()
+  ) {
+    return {error: {message: 'social_contract_caller_mismatch'}}
+  }
+
+  if (socialContractCallRequiresConfirmation(call)) {
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: 'Confirm idena.social tip',
+      message: `Send an idena.social tip of ${call.amount} IDNA?`,
+      detail:
+        'This transfers real mainnet IDNA through the pinned idena.social contract.',
+      buttons: ['Cancel', 'Send tip'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+
+    if (!confirmation || confirmation.response !== 1) {
+      return {error: {message: 'social_tip_cancelled'}}
+    }
+  }
+
+  return performNodeRpc(payload)
+}
+
+async function performExportKeyRpc(payload = {}) {
+  const validationError = validateExportKeyPayload(payload)
+
+  if (validationError) {
+    return {error: {message: validationError}}
+  }
+
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Export private key?',
+    message: 'Export the private key from this Idena node?',
+    detail:
+      'Only continue when you initiated this backup. Never share the exported key or its password.',
+    buttons: ['Cancel', 'Export'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  })
+
+  if (!confirmation || confirmation.response !== 1) {
+    return {error: {message: 'private_key_export_cancelled'}}
   }
 
   return sendNodeRpcRequest(payload)
@@ -1801,10 +1899,6 @@ const createMainWindow = () => {
   )
 
   mainWindow.webContents.setWindowOpenHandler(({url}) => {
-    if (isTrustedRendererUrl(url)) {
-      return {action: 'allow'}
-    }
-
     Promise.resolve(openExternalSafely(url)).catch((error) => {
       logger.warn('Blocked external window open', {
         url,
@@ -2345,6 +2439,16 @@ onTrusted(NODE_COMMAND, async (_event, command, data) => {
       break
     }
     case 'clean-state': {
+      if (
+        !(await confirmDestructiveNodeAction({
+          dialog,
+          parent: mainWindow,
+          action: 'clean-state',
+        }))
+      ) {
+        break
+      }
+
       runtimeExternalNodeOverride = null
       validationDevnetConnectRequested = false
       validationDevnetConnectCountdownSeconds = null
@@ -2640,6 +2744,16 @@ onTrusted(NODE_COMMAND, async (_event, command, data) => {
     }
 
     case 'troubleshooting-reset-node': {
+      if (
+        !(await confirmDestructiveNodeAction({
+          dialog,
+          parent: mainWindow,
+          action: 'troubleshooting-reset-node',
+        }))
+      ) {
+        break
+      }
+
       await tryStopNode(node, {
         onSuccess() {
           node = null
@@ -2676,6 +2790,9 @@ nodeUpdater.on('update-downloaded', (info) => {
 })
 
 if (autoUpdater) {
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+
   autoUpdater.on('download-progress', (info) => {
     sendMainWindowMsg(AUTO_UPDATE_EVENT, 'ui-download-progress', info)
   })
@@ -2697,15 +2814,9 @@ onTrusted(AUTO_UPDATE_COMMAND, async (event, command, data) => {
       break
     }
     case 'update-ui': {
-      if (isWin && app.isPackaged) {
-        didConfirmQuit = true
-        quitAfterCleanup = () => autoUpdater.quitAndInstall()
-        app.quit()
-      } else {
-        shell.openExternal(
-          `https://github.com/${RELEASE_REPOSITORY.owner}/${RELEASE_REPOSITORY.repo}/releases`
-        )
-      }
+      shell.openExternal(
+        `https://github.com/${RELEASE_REPOSITORY.owner}/${RELEASE_REPOSITORY.repo}/releases`
+      )
       break
     }
     case 'update-node': {
@@ -2736,19 +2847,15 @@ function checkForUpdates() {
 
   async function runCheck() {
     try {
-      if (isMac) {
-        const {data} = await httpClient.get(RELEASE_URL)
-        const {tag_name: tag, prerelease} = data
+      const {data} = await httpClient.get(RELEASE_URL)
+      const {tag_name: tag, prerelease} = data
 
-        if (!prerelease && semver.gt(semver.clean(tag), appVersion)) {
-          setTimeout(() => {
-            sendMainWindowMsg(AUTO_UPDATE_EVENT, 'ui-update-ready', {
-              version: tag,
-            })
-          }, 30000)
-        }
-      } else if (autoUpdater) {
-        await autoUpdater.checkForUpdates()
+      if (!prerelease && semver.gt(semver.clean(tag), appVersion)) {
+        setTimeout(() => {
+          sendMainWindowMsg(AUTO_UPDATE_EVENT, 'ui-update-ready', {
+            version: tag,
+          })
+        }, 30000)
       }
     } catch (e) {
       logger.error('error while checking UI update', e.toString())
@@ -2834,6 +2941,9 @@ handleTrusted('validation-devnet.seed-flip', async (_event, hash) =>
 )
 
 handleTrusted('rpc.call', async (_event, payload) => performNodeRpc(payload))
+handleTrusted('rpc.export-key', async (_event, payload) =>
+  performExportKeyRpc(payload)
+)
 
 handleTrusted(MANAGED_EXTERNAL_NODE_RESTART_COMMAND, () => {
   const result = requestManagedExternalNodeRestart({
@@ -3379,19 +3489,9 @@ onTrusted('localAi.captureFlip', (_event, payload) => {
   })
 })
 
-handleTrusted('social.rpc', async (_event, payload) => {
-  const validationError = validateSocialRpcRequest(payload)
-
-  if (validationError) {
-    return {
-      error: {
-        message: validationError,
-      },
-    }
-  }
-
-  return performNodeRpc(payload)
-})
+handleTrusted('social.rpc', async (_event, payload) =>
+  performSocialRpc(payload)
+)
 
 handleTrusted('social.crypto', async (_event, payload) =>
   idenaSocialCryptoService(payload)
