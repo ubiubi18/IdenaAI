@@ -19,6 +19,7 @@ const DEV_PORT = Number.parseInt(
 const DEV_HOST = process.env.IDENA_DESKTOP_RENDERER_HOST || '127.0.0.1'
 const DEV_SERVER_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const STARTUP_TIMEOUT_MS = 120000
+const RENDERER_PROBE_TIMEOUT_MS = 90000
 const POLL_INTERVAL_MS = 1000
 const DEFAULT_DEV_USER_DATA_NAME = 'IdenaAIDev'
 const APP_USER_DATA_NAME =
@@ -249,10 +250,25 @@ function wait(ms) {
   })
 }
 
-function isRendererReady() {
+function isRendererReady({
+  httpGet = http.get,
+  timeoutMs = RENDERER_PROBE_TIMEOUT_MS,
+  url = `${DEV_SERVER_URL}/home`,
+} = {}) {
   return new Promise((resolve) => {
-    const request = http.get(
-      `${DEV_SERVER_URL}/home`,
+    let settled = false
+
+    const finish = (ready) => {
+      if (settled) return
+      settled = true
+      resolve(ready)
+    }
+
+    // A listening socket only means that Next.js has started accepting work.
+    // Wait for the initial route compilation so Electron's HMR client cannot
+    // receive build messages before its router has been initialized.
+    const request = httpGet(
+      url,
       {
         headers: {
           Connection: 'close',
@@ -260,16 +276,16 @@ function isRendererReady() {
       },
       (response) => {
         response.resume()
-        resolve(response.statusCode >= 200 && response.statusCode < 500)
+        finish(response.statusCode >= 200 && response.statusCode < 400)
       }
     )
 
     request.on('error', () => {
-      resolve(false)
+      finish(false)
     })
-    request.setTimeout(1000, () => {
+    request.setTimeout(timeoutMs, () => {
       request.destroy()
-      resolve(false)
+      finish(false)
     })
   })
 }
@@ -284,7 +300,12 @@ async function waitForRenderer() {
       )
     }
 
-    if (await isRendererReady()) {
+    const remainingMs = deadline - Date.now()
+    if (
+      await isRendererReady({
+        timeoutMs: Math.min(RENDERER_PROBE_TIMEOUT_MS, remainingMs),
+      })
+    ) {
       return
     }
 
@@ -412,16 +433,22 @@ async function main() {
   })
 }
 
-process.on('SIGINT', () => shutdown(130))
-process.on('SIGTERM', () => shutdown(143))
-process.on('exit', () => {
-  terminateChild(electronProcess, 'SIGKILL')
-  terminateChild(rendererProcess, 'SIGKILL')
-})
+if (require.main === module) {
+  process.on('SIGINT', () => shutdown(130))
+  process.on('SIGTERM', () => shutdown(143))
+  process.on('exit', () => {
+    terminateChild(electronProcess, 'SIGKILL')
+    terminateChild(rendererProcess, 'SIGKILL')
+  })
 
-main().catch((error) => {
-  console.error(
-    `Unable to start the desktop development runtime: ${error.message}`
-  )
-  shutdown(1)
-})
+  main().catch((error) => {
+    console.error(
+      `Unable to start the desktop development runtime: ${error.message}`
+    )
+    shutdown(1)
+  })
+}
+
+module.exports = {
+  isRendererReady,
+}
