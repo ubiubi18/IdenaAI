@@ -5,7 +5,7 @@
   "compatibilityReleaseId": "idena-mainnet-legacy-compat-2026.07.17-rc7",
   "consensusChangesAllowed": false,
   "protectedFiles": {
-    ".github/workflows/release.yml": "582532853db15a9bbb58118dfe541b70aba2477023faedfac3b514006dd85512",
+    ".github/workflows/release.yml": "6fd317929a6538a8f1a308b4a6f2a35212900b9bbb0e29f690ff0f4195f2c3b1",
     ".node-version": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
     ".nvmrc": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
     "compatibility/stack-lock.json": "525e6f8376f1aab44f526b7d0f0fa1b4b4631720a2cd9e2341b9a74baff03450",
@@ -17,7 +17,7 @@
     "main/node-artifact-policy.js": "fdb3fe87f484a917e8fb14c17afa60dfb9cf678cf05dba7d45db6c009d0e1cf8",
     "main/utils/fetch-client.js": "09db5ae64b17b9e882078c873deb708ab10313aecf965d2cacfb33d379764071",
     "package-lock.json": "289c7cf2e0c921b1bd011ad52a770aaf3b233be8a9271cebed7ac1329c853ca4",
-    "package.json": "245476638f8480bd74b35e8383ba27201e3581ac585596de96740b1250aa60f8",
+    "package.json": "e832210b2feba361d0a8dfbdf2de4aac04192b4ba0359e695b4ec8ed843990ec",
     "scripts/build-node-from-sources.js": "54d882e09942006146a9d4b0b6f677857a0c8940d2a3efc30399eb7e234af66f",
     "scripts/check-application-release-lock.js": "5f9d8f10dcf6776385d71f5cbc0ec0342f4c405867a3d1a9d45ba5a570a18686",
     "scripts/check-bundled-node-artifact.js": "4ab7c0ac3467a22f03d07320c8866eab44de6b52b11e795a2ca451cfd502f30d",

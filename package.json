@@ -55,6 +55,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "jest",
+    "test:novnc-clipboard": "node --test deploy/novnc/idena-vnc-clipboard.test.mjs",
     "test:local-rag": "jest main/local-rag --runInBand",
     "test:source-rag": "jest main/source-rag --runInBand",
     "test:qwen-deepinfra": "node scripts/run_deepinfra_qwen_test_unit.js",
