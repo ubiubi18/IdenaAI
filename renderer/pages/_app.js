@@ -24,6 +24,7 @@ import {
   syncSharedGlobal,
 } from '../shared/utils/shared-global'
 import {getBrowserDevLocalAiBridge} from '../shared/utils/local-ai-browser-dev-bridge'
+import ClientRuntimeBoundary from '../shared/components/client-runtime-boundary'
 
 function hasRealBridge(bridge = {}) {
   return Boolean(
@@ -281,11 +282,13 @@ export default function App({Component, err, ...pageProps}) {
         <link href="/static/scrollbars.css" rel="stylesheet" />
       </Head>
 
-      <ChakraProvider theme={extendTheme(theme)}>
-        <AppProviders>
-          <Component err={err} {...pageProps} />
-        </AppProviders>
-      </ChakraProvider>
+      <ClientRuntimeBoundary>
+        <ChakraProvider theme={extendTheme(theme)}>
+          <AppProviders>
+            <Component err={err} {...pageProps} />
+          </AppProviders>
+        </ChakraProvider>
+      </ClientRuntimeBoundary>
     </>
   )
 }
