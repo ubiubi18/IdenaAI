@@ -1,0 +1,15 @@
+{
+  "rpcUrl": "http://127.0.0.1:9009",
+  "apiKeyFile": "/mnt/ssd/idena/idena-data/api.key",
+  "expectedAddress": "0x0123456789abcdef0123456789abcdef01234567",
+  "peerLossSeconds": 900,
+  "peerZeroSamples": 15,
+  "startupGraceSeconds": 1800,
+  "restartCooldownSeconds": 3600,
+  "onlineFalseSeconds": 900,
+  "onlineFalseBlocks": 30,
+  "headStaleSeconds": 300,
+  "maxBlockLag": 2,
+  "recheckSeconds": 5,
+  "eligibleIdentityStates": ["Human"]
+}
