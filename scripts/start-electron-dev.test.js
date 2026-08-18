@@ -87,7 +87,7 @@ describe('Electron renderer readiness', () => {
       isReady,
       log,
       now: () => 0,
-      routes: ['/home', '/ai-chat', '/social'],
+      routes: ['/home', '/validation', '/ai-chat', '/social'],
     })
 
     expect(isReady).toHaveBeenCalledTimes(1)
@@ -96,12 +96,19 @@ describe('Electron renderer readiness', () => {
     readinessResolvers.shift()(true)
     await Promise.resolve()
     expect(isReady).toHaveBeenCalledTimes(2)
-    expect(isReady.mock.calls[1][0].url).toBe('http://127.0.0.1:8000/ai-chat')
+    expect(isReady.mock.calls[1][0].url).toBe(
+      'http://127.0.0.1:8000/validation'
+    )
 
     readinessResolvers.shift()(true)
     await Promise.resolve()
     expect(isReady).toHaveBeenCalledTimes(3)
-    expect(isReady.mock.calls[2][0].url).toBe('http://127.0.0.1:8000/social')
+    expect(isReady.mock.calls[2][0].url).toBe('http://127.0.0.1:8000/ai-chat')
+
+    readinessResolvers.shift()(true)
+    await Promise.resolve()
+    expect(isReady).toHaveBeenCalledTimes(4)
+    expect(isReady.mock.calls[3][0].url).toBe('http://127.0.0.1:8000/social')
 
     readinessResolvers.shift()(true)
     await warming
