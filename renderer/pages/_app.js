@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import React, {useCallback, useEffect, useState} from 'react'
+import React, {useEffect} from 'react'
 import Head from 'next/head'
 import {useRouter} from 'next/router'
 import {ChakraProvider, extendTheme} from '@chakra-ui/react'
@@ -32,11 +32,12 @@ function hasRealBridge(bridge = {}) {
   )
 }
 
-function syncLegacyBridgeGlobals(bridge = {}) {
+function syncLegacyBridgeGlobals() {
   if (typeof window === 'undefined') {
     return false
   }
 
+  const bridge = window.idena || {}
   const bridgeGlobals =
     bridge && bridge.globals && typeof bridge.globals === 'object'
       ? bridge.globals
@@ -282,7 +283,7 @@ export default function App({Component, err, ...pageProps}) {
         <link href="/static/scrollbars.css" rel="stylesheet" />
       </Head>
 
-      <ClientRuntimeBoundary>
+      <ClientRuntimeBoundary prepareRuntime={syncLegacyBridgeGlobals}>
         <ChakraProvider theme={extendTheme(theme)}>
           <AppProviders>
             <Component err={err} {...pageProps} />
@@ -294,40 +295,8 @@ export default function App({Component, err, ...pageProps}) {
 }
 
 function AppProviders(props) {
-  const [bridgeEpoch, setBridgeEpoch] = useState(0)
-
-  if (typeof window !== 'undefined') {
-    syncLegacyBridgeGlobals(window.idena || {})
-  }
-
-  const handleBridgeReady = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const hadFallbackBridge = global.__idenaBridgeReady === false
-    const isBridgeReady = syncLegacyBridgeGlobals(window.idena || {})
-
-    if (hadFallbackBridge && isBridgeReady) {
-      setBridgeEpoch((value) => value + 1)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined
-    }
-
-    handleBridgeReady()
-    window.addEventListener('idena-preload-ready', handleBridgeReady)
-
-    return () => {
-      window.removeEventListener('idena-preload-ready', handleBridgeReady)
-    }
-  }, [handleBridgeReady])
-
   return (
-    <QueryClientProvider client={queryClient} key={bridgeEpoch}>
+    <QueryClientProvider client={queryClient}>
       <SettingsProvider>
         <AutoUpdateProvider>
           <NodeProvider>
