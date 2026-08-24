@@ -4,6 +4,7 @@ import React, {useMemo} from 'react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import ReactDOM from 'react-dom'
 import NextLink from 'next/link'
+import {keyframes} from '@emotion/react'
 import {
   Code,
   Drawer as ChakraDrawer,
@@ -45,7 +46,6 @@ import {
   LinkBox,
   LinkOverlay,
   HStack,
-  keyframes,
   Skeleton as ChakraSkeleton,
   Center,
   MenuButton,
@@ -521,7 +521,7 @@ export function ExternalLink({
       }}
       {...props}
     >
-      <Text as="span" width={width} isTruncated={isTruncated}>
+      <Text as="span" width={width} noOfLines={isTruncated ? 1 : undefined}>
         {children || href}
       </Text>
       <ChevronRightIcon boxSize="4" />

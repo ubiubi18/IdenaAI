@@ -136,7 +136,7 @@ function AdBannerContent({ad}) {
         <Text lineHeight="4" noOfLines={1}>
           {ad?.title}
         </Text>
-        <Text fontSize="sm" color="muted" lineHeight={4} isTruncated>
+        <Text fontSize="sm" color="muted" lineHeight={4} noOfLines={1}>
           {ad?.desc}
         </Text>
       </Stack>
@@ -161,7 +161,13 @@ function AdBannerAuthor({ad, ...props}) {
             rounded="sm"
           />
           <Skeleton isLoaded={Boolean(ad?.author)}>
-            <Text color="muted" fontSize="sm" w="24" lineHeight="4" isTruncated>
+            <Text
+              color="muted"
+              fontSize="sm"
+              w="24"
+              lineHeight="4"
+              noOfLines={1}
+            >
               {ad?.author}
             </Text>
           </Skeleton>
@@ -457,7 +463,7 @@ function AdPromotion({cid, title, desc, url, media, author}) {
             <AdStatNumber color="muted" fontSize="sm" mt="1.5" h="4">
               <HStack spacing="1" align="center">
                 <Avatar address={author} boxSize={4} />
-                <Text as="span" maxW="36" isTruncated>
+                <Text as="span" maxW="36" noOfLines={1}>
                   {author}
                 </Text>
               </HStack>

@@ -207,7 +207,7 @@ export function VotingCard({votingRef, ...props}) {
         </Stack>
         <Link href={viewHref}>
           <Text
-            isTruncated
+            noOfLines={1}
             fontSize="base"
             fontWeight={500}
             cursor="pointer"
@@ -216,7 +216,7 @@ export function VotingCard({votingRef, ...props}) {
             {title}
           </Text>
         </Link>
-        <Text isTruncated color="muted" mb={4}>
+        <Text noOfLines={1} color="muted" mb={4}>
           {desc}
         </Text>
         {eitherIdleState(
@@ -1115,7 +1115,7 @@ function VotingResultBar({
             {isMine && <OkIcon boxSize="3" />}
           </Flex>
         )}
-        <Text isTruncated maxW="sm" title={label.length > 50 ? label : ''}>
+        <Text noOfLines={1} maxW="sm" title={label.length > 50 ? label : ''}>
           {label}
         </Text>
       </Stack>

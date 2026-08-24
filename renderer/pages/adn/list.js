@@ -235,7 +235,7 @@ export default function AdListPage() {
         <HStack spacing={20} pb="2" pt="1">
           <BlockAdStat label="My balance" w="2xs">
             <Skeleton isLoaded={Boolean(balance)}>
-              <AdStatNumber fontSize="lg" lineHeight="5" isTruncated>
+              <AdStatNumber fontSize="lg" lineHeight="5" noOfLines={1}>
                 {formatDna(balance)}
               </AdStatNumber>
             </Skeleton>

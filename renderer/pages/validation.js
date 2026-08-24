@@ -4825,7 +4825,7 @@ function ValidationSession({
                       fontSize="xs"
                       color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
                       maxW="3xs"
-                      isTruncated
+                      noOfLines={1}
                     >
                       {aiProgress}
                     </Text>
@@ -4848,7 +4848,7 @@ function ValidationSession({
                       color={isShortSession(state) ? 'whiteAlpha.800' : 'muted'}
                       fontWeight={600}
                       maxW="3xs"
-                      isTruncated
+                      noOfLines={1}
                     >
                       {autoRunStatusText}
                     </Text>

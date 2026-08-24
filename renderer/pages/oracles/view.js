@@ -459,7 +459,7 @@ export default function ViewVotingPage() {
                                   </Flex>
 
                                   <Text
-                                    isTruncated
+                                    noOfLines={1}
                                     maxW="sm"
                                     title={value.length > 50 ? value : ''}
                                   >
@@ -765,7 +765,7 @@ export default function ViewVotingPage() {
                                           <ArrowDownIcon boxSize="5" />
                                         )}
                                       </Flex>
-                                      <Box isTruncated>
+                                      <Box noOfLines={1}>
                                         {contractCallMethod ? (
                                           <Text>
                                             {
@@ -779,7 +779,7 @@ export default function ViewVotingPage() {
                                             {ContractTransactionType[type]}
                                           </Text>
                                         )}
-                                        <SmallText isTruncated title={from}>
+                                        <SmallText noOfLines={1} title={from}>
                                           {hash}
                                         </SmallText>
                                       </Box>

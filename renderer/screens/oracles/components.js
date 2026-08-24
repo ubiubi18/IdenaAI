@@ -372,7 +372,7 @@ export const VotingOption = React.forwardRef(
         <Text
           title={children.length > 50 ? children : ''}
           maxW="xs"
-          isTruncated
+          noOfLines={1}
         >
           {children}
         </Text>

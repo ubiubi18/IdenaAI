@@ -120,7 +120,7 @@ export function ValidationAdPromotion() {
                           boxSize="4"
                           borderRadius="sm"
                         />
-                        <Text as="span" isTruncated>
+                        <Text as="span" noOfLines={1}>
                           {currentAd?.author}
                         </Text>
                       </AdStatValue>

@@ -120,7 +120,7 @@ export function WalletCard({
             </WalletCardMenu>
           )}
         </Flex>
-        <Box color="muted" isTruncated>
+        <Box color="muted" noOfLines={1}>
           {address}
         </Box>
       </Stack>
@@ -369,7 +369,7 @@ export function WalletTransactionList({txs = []}) {
                         ? t('smart contract')
                         : t('address')}
                     </Text>
-                    <SmallText fontWeight={500} isTruncated>
+                    <SmallText fontWeight={500} noOfLines={1}>
                       {tx.counterParty}
                     </SmallText>
                   </Box>
