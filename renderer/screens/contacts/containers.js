@@ -256,7 +256,7 @@ function ContactListItem({
     >
       <ContactAvatar address={receiver} w="8" h="8" borderRadius="lg" />
       <Box fontWeight={500}>
-        <Text maxW={180} isTruncated>
+        <Text maxW={180} noOfLines={1}>
           {fullName || receiver || t('...')}
         </Text>
         <SmallText color="blue.500">{hint}</SmallText>

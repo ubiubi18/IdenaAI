@@ -11,6 +11,7 @@
     "dayjs",
     "dequal",
     "dexie",
+    "eciesjs",
     "electron-updater",
     "extract-colors",
     "framer-motion",
@@ -40,5 +41,5 @@
     "xstate"
   ],
   "maxProductionNodeModules": 400,
-  "maxRootRuntimeDependencies": 38
+  "maxRootRuntimeDependencies": 39
 }

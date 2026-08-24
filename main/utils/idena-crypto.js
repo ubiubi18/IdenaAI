@@ -24,6 +24,9 @@ function stripHexPrefix(value) {
 }
 
 function hexToBuffer(value) {
+  if (Buffer.isBuffer(value)) return Buffer.from(value)
+  if (value instanceof Uint8Array) return Buffer.from(value)
+
   const hex = stripHexPrefix(value)
   if (!hex || typeof hex !== 'string') return Buffer.alloc(0)
   return Buffer.from(hex, 'hex')
@@ -156,6 +159,7 @@ function privateKeyToAddress(key, withPrefix = true) {
 }
 
 module.exports = {
+  privateKeyToPublicKey,
   privateKeyToAddress,
   toHexString,
 }

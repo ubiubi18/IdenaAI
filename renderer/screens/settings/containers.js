@@ -41,50 +41,50 @@ import {useSettingsDispatch} from '../../shared/providers/settings-context'
 import {AVAILABLE_LANGS, isoLangs} from '../../i18n'
 import {EyeIcon, EyeOffIcon} from '../../shared/components/icons'
 
+const exportPrivateKeyMachine = createMachine({
+  predictableActionArguments: true,
+  initial: 'password',
+  states: {
+    password: {
+      entry: [assign({password: ''})],
+      on: {
+        CHANGE_PASSWORD: {
+          actions: [
+            assign({
+              password: (_, {value}) => value,
+            }),
+          ],
+        },
+        ENCODE: 'encoding',
+        RESET: 'password',
+      },
+    },
+    encoding: {
+      invoke: {
+        // eslint-disable-next-line no-shadow
+        src: ({password}) => callRpc('dna_exportKey', password),
+        onDone: 'encoded',
+        onError: 'fail',
+      },
+    },
+    encoded: {
+      entry: [
+        assign({
+          encodedPrivateKey: (_, {data}) => data,
+        }),
+      ],
+      on: {
+        RESET: 'password',
+      },
+    },
+    fail: {},
+  },
+})
+
 export function ExportPrivateKeyDialog({onClose, ...props}) {
   const {t} = useTranslation()
 
-  const [current, send] = useMachine(
-    createMachine({
-      predictableActionArguments: true,
-      initial: 'password',
-      states: {
-        password: {
-          entry: [assign({password: ''})],
-          on: {
-            CHANGE_PASSWORD: {
-              actions: [
-                assign({
-                  password: (_, {value}) => value,
-                }),
-              ],
-            },
-            ENCODE: 'encoding',
-            RESET: 'password',
-          },
-        },
-        encoding: {
-          invoke: {
-            // eslint-disable-next-line no-shadow
-            src: ({password}) => callRpc('dna_exportKey', password),
-            onDone: 'encoded',
-            onError: 'fail',
-          },
-        },
-        encoded: {
-          entry: [
-            assign({
-              encodedPrivateKey: (_, {data}) => data,
-            }),
-          ],
-          on: {
-            RESET: 'password',
-          },
-        },
-        fail: {},
-      },
-    })
-  )
+  const [current, send] = useMachine(exportPrivateKeyMachine)
 
   const {password, encodedPrivateKey} = current.context
 

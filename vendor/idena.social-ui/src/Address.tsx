@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
-import { getPoster, type Post, type Poster, type RpcClient, type Tip } from "./logic/asyncUtils";
+import { getPoster, getPosterWithIndexerApi, type Post, type Poster, type RpcClient, type Tip } from "./logic/asyncUtils";
 import { getDisplayAddress, getIdentityStatus } from "./logic/utils";
 import PostComponent from "./components/PostComponent";
 import { type BrowserStateHistorySettings, type PostMediaAttachment } from "./App.exports";
@@ -30,7 +30,7 @@ type AddressProps = {
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
     handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
     handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
-    handleOpenAddMediaModal: (e: MouseEventLocal, location: string) => void,
+    handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
     tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
@@ -38,6 +38,8 @@ type AddressProps = {
     makePostsWith: string,
     activeContractAddress: string,
     rpcClientRef: React.RefObject<RpcClient | undefined>,
+    findPostsWithRef: React.RefObject<string>,
+    indexerApiUrlRef: React.RefObject<string>,
 };
 
 function Address() {
@@ -77,6 +79,8 @@ function Address() {
         makePostsWith,
         activeContractAddress,
         rpcClientRef,
+        findPostsWithRef,
+        indexerApiUrlRef,
     } = useOutletContext() as AddressProps;
 
     if (!browserStateHistoryRef.current[locationKey]?.sortPostsBy) {
@@ -86,23 +90,36 @@ function Address() {
     const sortPostsBy = browserStateHistoryRef.current[locationKey].sortPostsBy;
 
     useEffect(() => {
-        if (!address || postersRef.current[address]?.address || !rpcClientRef.current) {
+        const findPostsWith = findPostsWithRef.current;
+        const indexerApiUrl = indexerApiUrlRef.current;
+
+        if (
+            !address ||
+            postersRef.current[address]?.address ||
+            (findPostsWith === 'rpc' && !rpcClientRef.current)
+        ) {
             return undefined;
         }
 
         let cancelled = false;
-        getPoster(rpcClientRef.current, address).then((result) => {
+        const posterPromise = findPostsWith === 'rpc'
+            ? getPoster(rpcClientRef.current!, address, true)
+            : getPosterWithIndexerApi(indexerApiUrl, address);
+
+        posterPromise.then((result) => {
             if (cancelled) {
                 return;
             }
-            postersRef.current[address] = result;
-            setPosterLoadNonce((value) => value + 1);
+            if (result) {
+                postersRef.current[address] = result;
+                setPosterLoadNonce((value) => value + 1);
+            }
         });
 
         return () => {
             cancelled = true;
         };
-    }, [address, postersRef, rpcClientRef]);
+    }, [address, postersRef, rpcClientRef, findPostsWithRef, indexerApiUrlRef]);
 
     const poster = postersRef.current[address!] ?? {};
 

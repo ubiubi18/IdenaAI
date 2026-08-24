@@ -10,6 +10,19 @@ export type DesktopBootstrap = {
     composerPlaceholder?: string;
     composerPrefillText?: string;
     composerHint?: string;
+    messageCrypto?: string;
+};
+
+export type DesktopMessageCryptoResponse = {
+    result?: {
+        available?: boolean;
+        senderCiphertext?: string;
+        recipientCiphertext?: string;
+        plaintext?: string;
+        role?: 'sender' | 'recipient' | 'both';
+        version?: string;
+    };
+    error?: {message?: string};
 };
 
 declare global {
@@ -23,6 +36,8 @@ export const DESKTOP_BOOTSTRAP_READY_MESSAGE = 'IDENA_SOCIAL_READY';
 export const DESKTOP_CHANNEL_INIT_MESSAGE = 'IDENA_SOCIAL_CHANNEL_INIT';
 export const DESKTOP_RPC_REQUEST_MESSAGE = 'IDENA_SOCIAL_RPC_REQUEST';
 export const DESKTOP_RPC_RESPONSE_MESSAGE = 'IDENA_SOCIAL_RPC_RESPONSE';
+export const DESKTOP_CRYPTO_REQUEST_MESSAGE = 'IDENA_SOCIAL_CRYPTO_REQUEST';
+export const DESKTOP_CRYPTO_RESPONSE_MESSAGE = 'IDENA_SOCIAL_CRYPTO_RESPONSE';
 
 let desktopMessagePort: MessagePort | null = null;
 
@@ -123,6 +138,7 @@ export const installDesktopBootstrapListener = (
 };
 
 let desktopRpcRequestId = 0;
+let desktopCryptoRequestId = 0;
 
 export const createDesktopRpcClient = (
     setNodeAvailable: (next: boolean) => void,
@@ -195,6 +211,64 @@ export const createDesktopRpcClient = (
                     method,
                     params: Array.isArray(params) ? params : [],
                 },
+            });
+        });
+    };
+
+export const createDesktopMessageCryptoClient = (timeout = 20000) =>
+    async (payload: Record<string, unknown>): Promise<DesktopMessageCryptoResponse> => {
+        const port = desktopMessagePort;
+
+        if (
+            typeof window === 'undefined' ||
+            !window.parent ||
+            window.parent === window ||
+            !port
+        ) {
+            return {error: {message: 'desktop_crypto_parent_unavailable'}};
+        }
+
+        const requestId = `desktop-crypto-${Date.now()}-${desktopCryptoRequestId++}`;
+
+        return new Promise<DesktopMessageCryptoResponse>((resolve) => {
+            let finished = false;
+
+            const cleanup = () => {
+                port.removeEventListener('message', handleMessage);
+                window.clearTimeout(timer);
+            };
+
+            const finish = (response: DesktopMessageCryptoResponse) => {
+                if (finished) return;
+                finished = true;
+                cleanup();
+                resolve(response);
+            };
+
+            const handleMessage = (event: MessageEvent) => {
+                const responsePayload =
+                    event?.data && typeof event.data === 'object'
+                        ? event.data
+                        : null;
+
+                if (
+                    responsePayload?.type !== DESKTOP_CRYPTO_RESPONSE_MESSAGE ||
+                    responsePayload.payload?.requestId !== requestId
+                ) {
+                    return;
+                }
+
+                finish(responsePayload.payload.response || {});
+            };
+
+            const timer = window.setTimeout(() => {
+                finish({error: {message: 'desktop_crypto_timeout'}});
+            }, timeout);
+
+            port.addEventListener('message', handleMessage);
+            port.postMessage({
+                type: DESKTOP_CRYPTO_REQUEST_MESSAGE,
+                payload: {requestId, ...payload},
             });
         });
     };

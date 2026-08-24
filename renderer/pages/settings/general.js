@@ -100,7 +100,7 @@ function Settings() {
                     placement="top"
                     shouldWrapChildren
                   >
-                    <SettingsLinkButton as={Box} d="flex" isDisabled>
+                    <SettingsLinkButton as={Box} display="flex" isDisabled>
                       {t('Import')}
                     </SettingsLinkButton>
                   </Tooltip>
