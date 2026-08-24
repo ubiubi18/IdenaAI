@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 
 type SettingsProps = {
@@ -24,7 +25,16 @@ type SettingsProps = {
     indexerApiUrlInvalid: boolean,
     setInputIdenaIndexerApiUrlApplied: React.Dispatch<React.SetStateAction<boolean>>,
     embeddedDesktopOnchainMode?: boolean,
+    hostMessageCryptoEnabled?: boolean,
     officialIndexerApiUrl?: string,
+    encryptedPrivateKey: string,
+    setEncryptedPrivateKey: React.Dispatch<React.SetStateAction<string>>,
+    password: string,
+    setPassword: React.Dispatch<React.SetStateAction<string>>,
+    inputCredentialsApplied: boolean,
+    credentialsInvalid: string,
+    handleSetInputCredentialsApplied: (newValue: boolean) => Promise<void>,
+    restoreDefaultSettings: () => void,
 };
 
 function Settings() {
@@ -54,11 +64,30 @@ function Settings() {
         indexerApiUrlInvalid,
         setInputIdenaIndexerApiUrlApplied,
         embeddedDesktopOnchainMode,
+        hostMessageCryptoEnabled,
         officialIndexerApiUrl,
+        encryptedPrivateKey,
+        setEncryptedPrivateKey,
+        password,
+        setPassword,
+        inputCredentialsApplied,
+        credentialsInvalid,
+        handleSetInputCredentialsApplied,
+        restoreDefaultSettings,
     } = useOutletContext() as SettingsProps;
 
     const handleGoBack = () => {
         navigate(-1);
+    };
+
+    useEffect(() => {
+        handleSetInputCredentialsApplied(true);
+    }, []);
+
+    const handleRestoreDefaults = () => {
+        if (window.confirm('Restore the default idena.social settings?')) {
+            restoreDefaultSettings();
+        }
     };
 
     return (<>
@@ -95,7 +124,7 @@ function Settings() {
                 </div>
             )}
             {!embeddedDesktopOnchainMode && inputSendingTxs === 'idena-app' && (
-                <div className="flex flex-col ml-5 text-[14px]">
+                <div className="mb-4 flex flex-col ml-5 text-[14px]">
                     <p className="mb-1">Your Idena Address:</p>
                     <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
                     {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled)</p>}
@@ -103,6 +132,30 @@ function Settings() {
                         <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputPostersAddressApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
                         {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
                     </div>
+                </div>
+            )}
+            {hostMessageCryptoEnabled ? (
+                <div className="mt-4 flex flex-col ml-5 text-[14px]">
+                    <p className="mb-1">Direct-message encryption:</p>
+                    <p className="text-[11px] text-stone-400">The desktop host uses your connected node for bounded message encryption and verified on-chain message decryption. Your identity key never enters this embedded page.</p>
+                    {credentialsInvalid
+                        ? <p className="mt-1 text-[11px] text-red-400">Unavailable: {credentialsInvalid}. Messaging is disabled.</p>
+                        : <p className="mt-1 text-[11px] text-green-400">Ready. Encrypted direct messages are enabled.</p>}
+                </div>
+            ) : (
+                <div className="mt-4 flex flex-col ml-5 text-[14px]">
+                    <p className="mb-1">Messaging credentials:</p>
+                    <p className="mb-2 text-[11px] text-stone-400">Enter these manually only if you want encrypted direct messages. The desktop never exports your node key into this page.</p>
+                    <p className="mb-1">Encrypted private key:</p>
+                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputCredentialsApplied} value={encryptedPrivateKey} onChange={e => setEncryptedPrivateKey(e.target.value)} />
+                    <p className="mb-1">Password:</p>
+                    <input type="password" className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputCredentialsApplied} value={password} onChange={e => setPassword(e.target.value)} />
+                    <div className="flex flex-row">
+                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputCredentialsApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => handleSetInputCredentialsApplied(!inputCredentialsApplied)}>{inputCredentialsApplied ? 'Change' : 'Apply'}</button>
+                        {!inputCredentialsApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                    </div>
+                    {credentialsInvalid && inputCredentialsApplied && <p className="mt-1 text-[11px] text-red-400">Invalid credentials: {credentialsInvalid}. (Messaging is disabled)</p>}
+                    <p className="mt-2 text-[12px] text-stone-400">Credentials stay in memory for this browser session and are never written to browser storage.</p>
                 </div>
             )}
         </div>
@@ -137,6 +190,18 @@ function Settings() {
                     </div>
                 </div>
             )}
+        </div>
+        <hr className="mb-3 text-gray-500" />
+        <div className="mb-6">
+            <button
+                className="h-9 w-36 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10"
+                onClick={handleRestoreDefaults}
+            >
+                Restore Defaults
+            </button>
+            <p className="mt-1 text-[11px] text-stone-400">
+                Removes idena.social overrides only. Desktop connection values are restored from the host.
+            </p>
         </div>
     </>);
 }

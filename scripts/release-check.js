@@ -23,6 +23,7 @@ const syntaxCheckedFiles = [
   'scripts/prepare-bundled-node.js',
   'main/channels.js',
   'main/index.js',
+  'main/idena-social-protocol.js',
   'main/preload.js',
   'main/app-data-path.js',
   'main/stores/setup.js',

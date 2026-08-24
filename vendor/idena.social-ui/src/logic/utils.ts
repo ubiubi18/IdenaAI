@@ -1,5 +1,7 @@
 import Decimal from "decimal.js";
-import { CallContractAttachment, contractArgumentFormat, hexToUint8Array, toHexString, Transaction, transactionType } from "idena-sdk-js-lite";
+import * as secp256k1 from "@noble/secp256k1";
+import { keccak_256 } from "js-sha3";
+import { CallContractAttachment, contractArgumentFormat, hexToUint8Array, privateKeyToPublicKey, publicKeyToAddress, toHexString, Transaction, transactionType } from "idena-sdk-js-lite";
 import type { PostMediaAttachment } from "../App.exports";
 
 export const dnaBase = 1e18;
@@ -223,6 +225,27 @@ export function getMakePostTransactionPayload(makePostMethod: string, inputPost:
     return { txAmount, args, payload };
 }
 
+export function getSendMessageTransactionPayload(sendMessageMethod: string, inputMessage: string[], inputMessageHash: string) {
+    const txAmount = new Decimal(0.00001);
+    const args = [
+        {
+            format: contractArgumentFormat.String,
+            index: 0,
+            value: JSON.stringify({
+                message: inputMessage,
+                messageHash: inputMessageHash,
+                encrypted: true,
+            }),
+        }
+    ];
+
+    const payload = new CallContractAttachment();
+    payload.setArgs(args);
+    payload.method = sendMessageMethod;
+
+    return { txAmount, args, payload };
+}
+
 export function getCallTransaction(to: string, txAmount: Decimal, nonce: number, epoch: number, maxFeeDna: string, payload: CallContractAttachment) {
     const tx = new Transaction();
     tx.type = transactionType.CallContractTx;
@@ -240,4 +263,139 @@ export function getTimestampFromIndexerApi(indexerApiTimestamp: number) {
     if (!indexerApiTimestamp) return undefined;
 
     return Math.floor((new Date(indexerApiTimestamp)).getTime() / 1000 );
+}
+
+export function extractPubKeyAddressFromPrivateKey(privateKey: string) {
+    const pubKey = privateKeyToPublicKey(privateKey);
+    const address = publicKeyToAddress(pubKey);
+
+    return { pubKey, address };
+}
+
+export async function encryptAESGCM(data: Uint8Array<ArrayBuffer>, rawSecretKey: Uint8Array<ArrayBuffer>) {
+    const secretKey = await crypto.subtle.importKey('raw', rawSecretKey, 'AES-GCM', false, ['encrypt']);
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, secretKey, data);
+    const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+    combined.set(iv);
+    combined.set(new Uint8Array(ciphertext), iv.length);
+    return combined;
+}
+
+export async function decryptAESGCM(data: string, keyData: Uint8Array<ArrayBuffer>) {
+    const bytes = hexToUint8Array(data);
+    const iv = bytes.slice(0, 12);
+    const ciphertext = bytes.slice(12);
+    const key = await window.crypto.subtle.importKey('raw', keyData, 'AES-GCM', false, ['decrypt']);
+    const decryptedBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+    return toHexString(new Uint8Array(decryptedBuffer));
+}
+
+export function isValidAddress(address: string) {
+    return /^0x[0-9a-fA-F]{40}$/.test(address);
+};
+
+export function isValidLowerCaseAddress(address: string) {
+    return /^0x[0-9a-f]{40}$/.test(address);
+};
+
+type ProtoField = {
+    fieldNumber: number;
+    wireType: number;
+    bytes?: Uint8Array;
+};
+
+const readProtoVarint = (bytes: Uint8Array, offset: number) => {
+    let value = 0;
+    let multiplier = 1;
+
+    for (let index = 0; index < 10; index++) {
+        if (offset >= bytes.length) throw new Error('Truncated protobuf varint');
+
+        const byte = bytes[offset++];
+        value += (byte & 0x7f) * multiplier;
+
+        if (!Number.isSafeInteger(value)) throw new Error('Protobuf varint exceeds the safe integer range');
+        if ((byte & 0x80) === 0) return { value, offset };
+
+        multiplier *= 128;
+    }
+
+    throw new Error('Protobuf varint is too long');
+};
+
+const readProtoFields = (bytes: Uint8Array): ProtoField[] => {
+    const fields: ProtoField[] = [];
+    let offset = 0;
+
+    while (offset < bytes.length) {
+        const keyResult = readProtoVarint(bytes, offset);
+        const fieldNumber = Math.floor(keyResult.value / 8);
+        const wireType = keyResult.value % 8;
+        offset = keyResult.offset;
+
+        if (fieldNumber === 0) throw new Error('Invalid protobuf field number');
+
+        if (wireType === 0) {
+            offset = readProtoVarint(bytes, offset).offset;
+        } else if (wireType === 1) {
+            offset += 8;
+        } else if (wireType === 2) {
+            const lengthResult = readProtoVarint(bytes, offset);
+            offset = lengthResult.offset;
+            const end = offset + lengthResult.value;
+
+            if (!Number.isSafeInteger(end) || end > bytes.length) throw new Error('Truncated protobuf field');
+
+            fields.push({ fieldNumber, wireType, bytes: bytes.slice(offset, end) });
+            offset = end;
+            continue;
+        } else if (wireType === 5) {
+            offset += 4;
+        } else {
+            throw new Error(`Unsupported protobuf wire type: ${wireType}`);
+        }
+
+        if (offset > bytes.length) throw new Error('Truncated protobuf field');
+        fields.push({ fieldNumber, wireType });
+    }
+
+    return fields;
+};
+
+export function decodeBlockBodyTransactions(blockBodyHex: string) {
+    const fields = readProtoFields(hexToUint8Array(blockBodyHex));
+
+    return fields
+        .filter((field) => field.fieldNumber === 1 && field.wireType === 2 && field.bytes)
+        .map((field) => Transaction.fromBytes(field.bytes!));
+}
+
+export function extractSenderInfoFromRawTx(rawTx: string): { address?: string; pubkey?: string; pubKey?: string; error?: unknown } {
+    try {
+        const fields = readProtoFields(hexToUint8Array(rawTx));
+        const dataFields = fields.filter((field) => field.fieldNumber === 1 && field.wireType === 2 && field.bytes);
+        const signatureFields = fields.filter((field) => field.fieldNumber === 2 && field.wireType === 2 && field.bytes);
+
+        if (dataFields.length !== 1 || signatureFields.length !== 1) {
+            throw new Error('Transaction must contain exactly one data field and one signature field');
+        }
+
+        const data = dataFields[0].bytes!;
+        const signature = signatureFields[0].bytes!;
+
+        if (signature.length !== 65 || signature[64] > 3) throw new Error('Invalid recoverable transaction signature');
+
+        const recovered = secp256k1.recoverPublicKey(
+            new Uint8Array([signature[64], ...signature.slice(0, 64)]),
+            new Uint8Array(keccak_256.array(data)),
+            { prehash: false },
+        );
+        const publicKey = secp256k1.Point.fromBytes(recovered).toBytes(false);
+
+        const pubkey = toHexString(publicKey, false);
+        return { address: publicKeyToAddress(publicKey), pubkey, pubKey: pubkey };
+    } catch (error) {
+        return { error };
+    }
 }
