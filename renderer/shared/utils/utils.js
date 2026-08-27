@@ -41,11 +41,15 @@ export function createRpcCaller({url, key} = {}) {
     let response
 
     if (rpcBridge) {
-      response = await rpcBridge.call({
+      const payload = {
         method,
         params,
         id: 1,
-      })
+      }
+      response =
+        method === 'dna_exportKey' && typeof rpcBridge.exportKey === 'function'
+          ? await rpcBridge.exportKey(payload)
+          : await rpcBridge.call(payload)
     } else {
       const fallbackUrl = String(url || '').trim()
 

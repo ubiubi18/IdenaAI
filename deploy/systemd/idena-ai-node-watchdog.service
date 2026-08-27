@@ -1,0 +1,38 @@
+[Unit]
+Description=IdenaAI external-node peer and mining recovery watchdog
+After=network-online.target idena.service
+RequiresMountsFor=/mnt/ssd/idena/idena-data
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/idena-ai/node-watchdog.py
+TimeoutStartSec=6min
+StateDirectory=idena-ai-node-watchdog
+StateDirectoryMode=0700
+UMask=0077
+LoadCredential=idena-rpc-key:/mnt/ssd/idena/idena-data/api.key
+Environment=IDENA_AI_WATCHDOG_API_KEY_FILE=%d/idena-rpc-key
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+LockPersonality=yes
+KeyringMode=private
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadOnlyPaths=/etc/idena-ai/idena-node-watchdog.json
+ReadWritePaths=/var/lib/idena-ai-node-watchdog

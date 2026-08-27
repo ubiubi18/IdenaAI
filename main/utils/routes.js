@@ -1,6 +1,7 @@
 /* eslint-disable import/no-extraneous-dependencies */
 const fs = require('fs')
 const path = require('path')
+const {fileURLToPath} = require('url')
 const {app} = require('electron')
 
 const ROUTE_NAME_PATTERN = /^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i
@@ -51,6 +52,44 @@ function resolvePackagedRouteFile(routeName) {
     'out',
     `${normalizedRouteName}.html`
   )
+}
+
+function isPathInside(parent, child) {
+  const relative = path.relative(parent, child)
+  return Boolean(
+    relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+  )
+}
+
+function isPackagedRendererUrl(
+  url,
+  appPath = app.getAppPath(),
+  canonicalize = fs.realpathSync
+) {
+  try {
+    const nextUrl = new URL(String(url || ''))
+
+    if (nextUrl.protocol !== 'file:') {
+      return false
+    }
+
+    const rendererRoot = path.resolve(appPath, 'renderer', 'out')
+    const requestedFile = path.resolve(fileURLToPath(nextUrl))
+
+    if (!isPathInside(rendererRoot, requestedFile)) {
+      return false
+    }
+
+    const canonicalRoot = canonicalize(rendererRoot)
+    const canonicalFile = canonicalize(requestedFile)
+
+    return (
+      path.extname(canonicalFile).toLowerCase() === '.html' &&
+      isPathInside(canonicalRoot, canonicalFile)
+    )
+  } catch {
+    return false
+  }
 }
 
 function resolvePackagedRouteNameFromUrl(
@@ -110,5 +149,6 @@ loadRoute.DEV_SERVER_ORIGIN = DEV_SERVER_ORIGIN
 loadRoute.normalizeRouteName = normalizeRouteName
 loadRoute.resolvePackagedRouteFile = resolvePackagedRouteFile
 loadRoute.resolvePackagedRouteNameFromUrl = resolvePackagedRouteNameFromUrl
+loadRoute.isPackagedRendererUrl = isPackagedRendererUrl
 
 module.exports = loadRoute

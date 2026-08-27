@@ -1,4 +1,9 @@
-const {callOpenAi, testOpenAiFastMode, testOpenAiProvider} = require('./openai')
+const {
+  callOpenAi,
+  callOpenAiImage,
+  testOpenAiFastMode,
+  testOpenAiProvider,
+} = require('./openai')
 const {STORY_OPTIONS_OPENAI_RESPONSE_FORMAT} = require('../storySchema')
 
 function makeUnsupportedParameterError(param, message = '') {
@@ -722,5 +727,34 @@ describe('openai provider adapter', () => {
       safetyBlock: false,
       truncated: false,
     })
+  })
+
+  test('bounds generated-image URL downloads and requires image content', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {data: [{url: 'https://images.example.test/result'}]},
+      }),
+      get: jest.fn().mockResolvedValue({
+        data: Buffer.from('not an image'),
+        headers: {'content-type': 'text/html'},
+      }),
+    }
+
+    await expect(
+      callOpenAiImage({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gpt-image-1-mini',
+        prompt: 'test image',
+        profile: {requestTimeoutMs: 5000},
+      })
+    ).rejects.toThrow(/non-image payload/u)
+    expect(httpClient.get).toHaveBeenCalledWith(
+      'https://images.example.test/result',
+      expect.objectContaining({
+        redirect: 'error',
+        maxResponseBytes: 20 * 1024 * 1024,
+      })
+    )
   })
 })

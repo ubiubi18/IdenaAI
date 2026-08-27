@@ -151,9 +151,7 @@ if (!/idena-social:\/\/app\/index\.html#\//.test(socialPolicy)) {
   })
 }
 
-if (
-  !/sandbox="allow-scripts allow-same-origin allow-popups"/.test(socialEmbed)
-) {
+if (!/sandbox="allow-scripts allow-same-origin"/.test(socialEmbed)) {
   findings.push({
     filePath: 'renderer/shared/components/social-desktop-embed.js',
     line: 1,

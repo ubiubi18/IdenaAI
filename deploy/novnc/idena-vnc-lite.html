@@ -1,0 +1,264 @@
+<!doctype html>
+<!--
+  Adapted from noVNC's lightweight example page.
+
+  Copyright (C) 2019 The noVNC Authors
+  noVNC is licensed under MPL-2.0. The upstream lightweight example page is
+  licensed under BSD-2-Clause. See THIRD_PARTY_NOTICES.md and
+  LICENSES/BSD-2-Clause-noVNC.txt in the IdenaAI source tree.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IdenaAI Pi console</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+        background: #4b5563;
+        color: #fff;
+        font: 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      #toolbar {
+        display: flex;
+        min-height: 34px;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        border-bottom: 1px solid #41516a;
+        background: #6e84a3;
+      }
+
+      #status {
+        min-width: 175px;
+        flex: 1;
+        font-weight: 600;
+      }
+
+      #clipboard-form {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      #clipboard-input {
+        width: min(290px, 34vw);
+        box-sizing: border-box;
+        border: 1px solid #b8c5d6;
+        border-radius: 4px;
+        padding: 6px 8px;
+        background: #fff;
+        color: #111827;
+      }
+
+      button {
+        min-height: 29px;
+        border: 1px solid #d9e1eb;
+        border-radius: 4px;
+        padding: 4px 9px;
+        background: #f7f9fc;
+        color: #1f2937;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      #screen {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      @media (max-width: 760px) {
+        #toolbar {
+          flex-wrap: wrap;
+        }
+
+        #status {
+          flex-basis: 100%;
+        }
+
+        #clipboard-form {
+          flex: 1;
+        }
+
+        #clipboard-input {
+          min-width: 120px;
+          flex: 1;
+        }
+      }
+    </style>
+    <script type="module">
+      import RFB from './core/rfb.js'
+      import {
+        clearRemoteClipboard,
+        pasteRemoteClipboard,
+        sendClipboardFromInput,
+      } from './idena-vnc-clipboard.mjs'
+
+      let rfb = null
+      let desktopName = 'Pi'
+      let isConnected = false
+
+      const statusElement = document.querySelector('#status')
+      const clipboardForm = document.querySelector('#clipboard-form')
+      const clipboardInput = document.querySelector('#clipboard-input')
+      const sendClipboardButton = document.querySelector(
+        '#send-clipboard-button'
+      )
+      const clearClipboardButton = document.querySelector(
+        '#clear-clipboard-button'
+      )
+      const pasteClipboardButton = document.querySelector(
+        '#paste-clipboard-button'
+      )
+      const sendCtrlAltDelButton = document.querySelector(
+        '#send-ctrl-alt-del-button'
+      )
+
+      function setStatus(message) {
+        statusElement.textContent = message
+      }
+
+      function setClipboardControlsEnabled(enabled) {
+        clipboardInput.disabled = !enabled
+        sendClipboardButton.disabled = !enabled
+        clearClipboardButton.disabled = !enabled
+        pasteClipboardButton.disabled = !enabled
+      }
+
+      function readQueryVariable(name, defaultValue) {
+        const match = `${document.location.href}${window.location.hash}`.match(
+          new RegExp(`.*[?&]${name}=([^&#]*)`)
+        )
+        return match ? decodeURIComponent(match[1]) : defaultValue
+      }
+
+      function connectedToServer() {
+        isConnected = true
+        setClipboardControlsEnabled(true)
+        setStatus(`Connected to ${desktopName}`)
+      }
+
+      function disconnectedFromServer(event) {
+        isConnected = false
+        clipboardInput.value = ''
+        setClipboardControlsEnabled(false)
+        setStatus(event.detail.clean ? 'Disconnected' : 'Connection closed')
+      }
+
+      function credentialsAreRequired() {
+        const password = window.prompt('VNC password:')
+        if (password !== null) rfb.sendCredentials({password})
+      }
+
+      function updateDesktopName(event) {
+        desktopName = event.detail.name || 'Pi'
+      }
+
+      clipboardForm.addEventListener('submit', (event) => {
+        event.preventDefault()
+
+        try {
+          if (!isConnected) throw new Error('VNC is disconnected')
+          if (!sendClipboardFromInput(rfb, clipboardInput)) {
+            setStatus('Paste text into the masked box first')
+            clipboardInput.focus()
+            return
+          }
+          setStatus(
+            'Pi clipboard send requested — focus the remote field, then select Paste into focused field'
+          )
+        } catch {
+          setStatus('Clipboard transfer failed; reconnect and try again')
+        }
+      })
+
+      clearClipboardButton.addEventListener('click', () => {
+        try {
+          if (!isConnected) throw new Error('VNC is disconnected')
+          clearRemoteClipboard(rfb)
+          clipboardInput.value = ''
+          setStatus('Pi clipboard overwrite requested')
+        } catch {
+          setStatus('Could not clear the Pi clipboard')
+        }
+      })
+
+      pasteClipboardButton.addEventListener('click', () => {
+        try {
+          if (!isConnected) throw new Error('VNC is disconnected')
+          pasteRemoteClipboard(rfb)
+          setStatus('Paste command sent to the focused Pi field')
+        } catch {
+          setStatus('Could not send the Pi paste command')
+        }
+      })
+
+      sendCtrlAltDelButton.addEventListener('click', () => {
+        if (rfb) rfb.sendCtrlAltDel()
+      })
+
+      // The clipboard may contain a credential. Keep the RFB endpoint pinned
+      // to this page's origin and the fixed local websockify path so query
+      // parameters cannot redirect clipboard data to another server.
+      const url = new URL('/websockify', window.location.href)
+      url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+
+      setClipboardControlsEnabled(false)
+      setStatus('Connecting')
+
+      rfb = new RFB(document.querySelector('#screen'), url.href)
+      rfb.addEventListener('connect', connectedToServer)
+      rfb.addEventListener('disconnect', disconnectedFromServer)
+      rfb.addEventListener('credentialsrequired', credentialsAreRequired)
+      rfb.addEventListener('desktopname', updateDesktopName)
+      rfb.scaleViewport =
+        readQueryVariable('scale', false) === 'true' ||
+        readQueryVariable('resize', '') === 'scale'
+    </script>
+  </head>
+  <body>
+    <div id="toolbar">
+      <div id="status" role="status">Loading</div>
+      <form id="clipboard-form" autocomplete="off">
+        <input
+          id="clipboard-input"
+          type="password"
+          aria-label="Text to send to the Pi clipboard"
+          placeholder="Paste key here"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          disabled
+        />
+        <button id="send-clipboard-button" type="submit" disabled>
+          Send clipboard
+        </button>
+      </form>
+      <button id="clear-clipboard-button" type="button" disabled>
+        Clear Pi clipboard
+      </button>
+      <button id="paste-clipboard-button" type="button" disabled>
+        Paste into focused field
+      </button>
+      <button id="send-ctrl-alt-del-button" type="button">
+        Send CtrlAltDel
+      </button>
+    </div>
+    <div id="screen"></div>
+  </body>
+</html>

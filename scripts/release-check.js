@@ -13,6 +13,8 @@ const syntaxCheckedFiles = [
   'scripts/check-dependency-footprint.js',
   'scripts/check-electron-safety.js',
   'scripts/check-compatibility-lock.js',
+  'scripts/check-application-release-lock.js',
+  'scripts/check-bundled-node-artifact.js',
   'scripts/check-promotion-evidence.js',
   'scripts/check-node-build-evidence.js',
   'scripts/sync-idena-social-ui.js',
@@ -35,6 +37,8 @@ const syntaxCheckedFiles = [
   'main/logger.js',
   'main/utils/fetch-client.js',
   'main/idena-node.js',
+  'main/application-release-policy.js',
+  'main/node-artifact-policy.js',
   'main/idena-devnet.js',
   'main/ai-providers/bridge.js',
   'main/local-ai/sidecar.js',
@@ -64,6 +68,9 @@ for (const filePath of syntaxCheckedFiles) {
 
 runStep('Compatibility lock audit', process.execPath, [
   'scripts/check-compatibility-lock.js',
+])
+runStep('Application release lock audit', process.execPath, [
+  'scripts/check-application-release-lock.js',
 ])
 runStep('ESLint', npmCommand, ['run', 'lint', '--', '--format', 'unix'])
 runStep('Release metadata audit', npmCommand, ['run', 'audit:metadata'])

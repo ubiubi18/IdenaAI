@@ -11,6 +11,7 @@ const {
   parseManagedSnapshotDownloadProcesses,
   resolveManagedLocalRuntimeFlavor,
   resolveManagedMolmo2RuntimeFlavor,
+  rendererExecutableOverride,
   sha256File,
 } = require('./runtime-controller')
 
@@ -41,6 +42,38 @@ describe('managed local runtime server args', () => {
       '123abc',
     ])
     expect(args).not.toContain('--trust-remote-code')
+  })
+})
+
+describe('managed local runtime executable overrides', () => {
+  it('ignores renderer-supplied executable paths in packaged mode', () => {
+    expect(
+      rendererExecutableOverride('/usr/bin/python3', false, {
+        executablePattern: /^(?:python3)$/u,
+        errorCode: 'invalid_python_command_path',
+        label: 'Python',
+      })
+    ).toBe('')
+  })
+
+  it('retains explicit overrides only for development tooling', () => {
+    expect(
+      rendererExecutableOverride(' /usr/bin/python3 ', true, {
+        executablePattern: /^(?:python3)$/u,
+        errorCode: 'invalid_python_command_path',
+        label: 'Python',
+      })
+    ).toBe('/usr/bin/python3')
+  })
+
+  it('still rejects a malformed packaged executable override', () => {
+    expect(() =>
+      rendererExecutableOverride('/bin/sh', false, {
+        executablePattern: /^(?:python3)$/u,
+        errorCode: 'invalid_python_command_path',
+        label: 'Python',
+      })
+    ).toThrow('allowed Python binary')
   })
 })
 

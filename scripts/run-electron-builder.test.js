@@ -4,10 +4,16 @@ const path = require('path')
 const {
   copyStagedOutput,
   hasExplicitOutputDirectory,
+  requiresApprovedRelease,
   shouldStageBuilderOutput,
 } = require('./run-electron-builder')
 
 describe('electron builder output staging', () => {
+  it('blocks distributable installers until application release approval', () => {
+    expect(requiresApprovedRelease(['--mac', '--publish', 'never'])).toBe(true)
+    expect(requiresApprovedRelease(['--dir', '--mac'])).toBe(false)
+  })
+
   it('stages macOS output when the checkout path is shell-unsafe', () => {
     const unsafeRoot = path.join('/tmp', 'idena-go & desktop')
 

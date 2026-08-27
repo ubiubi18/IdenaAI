@@ -129,6 +129,23 @@ function runAuditSummary() {
   }
 }
 
+function auditPolicyFailures(auditSummary = {}) {
+  if (!auditSummary.vulnerabilities) {
+    return [
+      `npm audit --omit=dev unavailable: ${
+        auditSummary.error || 'missing vulnerability summary'
+      }`,
+    ]
+  }
+
+  const {high = 0, critical = 0} = auditSummary.vulnerabilities
+  return high > 0 || critical > 0
+    ? [
+        `npm audit --omit=dev reports ${high} high and ${critical} critical production vulnerabilities`,
+      ]
+    : []
+}
+
 function checkPackagedFileRisk(packageJsonInput) {
   const files = (((packageJsonInput || {}).build || {}).files || []).map(String)
   const packageFailures = []
@@ -201,53 +218,60 @@ function compareBaseline({
   return baselineFailures
 }
 
-const packageJson = readJson(packagePath)
-const packageLock = readJson(lockPath)
-const runtimeDependencies = Object.keys(packageJson.dependencies || {}).sort()
-const productionNodeModules = countProductionLockPackages(packageLock)
-const topNodeModules = listTopNodeModules()
-const auditSummary = runAuditSummary()
-const failures = [
-  ...compareBaseline({
-    currentRuntimeDependencies: runtimeDependencies,
-    currentProductionNodeModules: productionNodeModules,
-  }),
-  ...checkPackagedFileRisk(packageJson),
-]
+function main() {
+  const packageJson = readJson(packagePath)
+  const packageLock = readJson(lockPath)
+  const runtimeDependencies = Object.keys(packageJson.dependencies || {}).sort()
+  const productionNodeModules = countProductionLockPackages(packageLock)
+  const topNodeModules = listTopNodeModules()
+  const auditSummary = runAuditSummary()
+  const failures = [
+    ...compareBaseline({
+      currentRuntimeDependencies: runtimeDependencies,
+      currentProductionNodeModules: productionNodeModules,
+    }),
+    ...checkPackagedFileRisk(packageJson),
+    ...auditPolicyFailures(auditSummary),
+  ]
 
-console.log('Dependency footprint audit')
-console.log(`- Root runtime dependencies: ${runtimeDependencies.length}`)
-console.log(
-  `- Root dev dependencies: ${
-    Object.keys(packageJson.devDependencies || {}).length
-  }`
-)
-console.log(`- Production transitive packages: ${productionNodeModules}`)
-
-if (auditSummary.vulnerabilities) {
-  const summary = auditSummary.vulnerabilities
+  console.log('Dependency footprint audit')
+  console.log(`- Root runtime dependencies: ${runtimeDependencies.length}`)
   console.log(
-    `- npm audit --omit=dev: ${summary.total || 0} total (${
-      summary.low || 0
-    } low, ${summary.moderate || 0} moderate, ${summary.high || 0} high, ${
-      summary.critical || 0
-    } critical)`
+    `- Root dev dependencies: ${
+      Object.keys(packageJson.devDependencies || {}).length
+    }`
   )
-} else if (auditSummary.error) {
-  console.warn(`- npm audit --omit=dev unavailable: ${auditSummary.error}`)
+  console.log(`- Production transitive packages: ${productionNodeModules}`)
+
+  if (auditSummary.vulnerabilities) {
+    const summary = auditSummary.vulnerabilities
+    console.log(
+      `- npm audit --omit=dev: ${summary.total || 0} total (${
+        summary.low || 0
+      } low, ${summary.moderate || 0} moderate, ${summary.high || 0} high, ${
+        summary.critical || 0
+      } critical)`
+    )
+  } else if (auditSummary.error) {
+    console.warn(`- npm audit --omit=dev unavailable: ${auditSummary.error}`)
+  }
+
+  if (topNodeModules.length > 0) {
+    console.log('- Largest installed packages:')
+    topNodeModules.forEach((item) => {
+      console.log(`  ${item.name}: ${formatSize(item.bytes)}`)
+    })
+  }
+
+  if (failures.length > 0) {
+    console.error('Dependency footprint audit failed:')
+    failures.forEach((failure) => console.error(`- ${failure}`))
+    process.exit(1)
+  }
+
+  console.log('Dependency footprint audit passed.')
 }
 
-if (topNodeModules.length > 0) {
-  console.log('- Largest installed packages:')
-  topNodeModules.forEach((item) => {
-    console.log(`  ${item.name}: ${formatSize(item.bytes)}`)
-  })
-}
+if (require.main === module) main()
 
-if (failures.length > 0) {
-  console.error('Dependency footprint audit failed:')
-  failures.forEach((failure) => console.error(`- ${failure}`))
-  process.exit(1)
-}
-
-console.log('Dependency footprint audit passed.')
+module.exports = {auditPolicyFailures}

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the IdenaAI external-node watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+AccuracySec=5s
+RandomizedDelaySec=5s
+Persistent=true
+Unit=idena-ai-node-watchdog.service
+
+[Install]
+WantedBy=timers.target
