@@ -1,13 +1,21 @@
+/* global BigInt */
+
 const SOCIAL_RPC_MAX_REQUEST_ID_LENGTH = 128
 const SOCIAL_RPC_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
 const SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES = 256 * 1024
 const SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES =
   SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES + 256
+const SOCIAL_CONTRACT_METHODS = new Set(['makePost', 'sendMessage', 'sendTip'])
+const SOCIAL_IDNA_SCALE = 10n ** 18n
+const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
+const SOCIAL_MAX_TIP_AMOUNT = 1000n * SOCIAL_IDNA_SCALE
+const SOCIAL_MAX_FEE = 10n * SOCIAL_IDNA_SCALE
 
 export const SOCIAL_CONTRACT_ADDRESS =
   '0x840e092e31e9656fF15E541505039ed77585338E'
 export const SOCIAL_OFFICIAL_INDEXER_URL = 'https://api.idena.io'
 export const SOCIAL_EMBED_DOCUMENT_PATH = 'idena-social://app/index.html#/'
+export const SOCIAL_EMBED_ORIGIN = 'idena-social://app'
 export const SOCIAL_MESSAGE_CRYPTO_VERSION = 'host-v1'
 export const SOCIAL_MAX_IMAGE_BYTES = 1024 * 1024
 export const SOCIAL_IMAGE_FORMATS = [
@@ -99,6 +107,60 @@ function estimatePayloadBytes(value) {
   }
 }
 
+function decimalToAtoms(value) {
+  const match = /^(0|[1-9]\d*)(?:\.(\d{1,18}))?$/u.exec(
+    String(value ?? '').trim()
+  )
+  if (!match) return null
+  return (
+    BigInt(match[1]) * SOCIAL_IDNA_SCALE +
+    BigInt((match[2] || '').padEnd(18, '0') || '0')
+  )
+}
+
+function validateSocialContractCall(call) {
+  if (
+    !isPlainObject(call) ||
+    !isIdenaAddress(call.from) ||
+    String(call.contract || '').toLowerCase() !==
+      SOCIAL_CONTRACT_ADDRESS.toLowerCase() ||
+    !SOCIAL_CONTRACT_METHODS.has(call.method) ||
+    !Array.isArray(call.args) ||
+    call.args.length !== 1 ||
+    !isPlainObject(call.args[0]) ||
+    call.args[0].format !== 'string' ||
+    call.args[0].index !== 0 ||
+    !isShortString(call.args[0].value, 1024 * 1024)
+  ) {
+    return 'invalid_social_contract_call'
+  }
+
+  const amount = decimalToAtoms(call.amount)
+  const maxFee = decimalToAtoms(call.maxFee)
+  if (amount === null || maxFee === null || maxFee > SOCIAL_MAX_FEE) {
+    return 'invalid_social_contract_call'
+  }
+
+  if (call.method === 'sendTip') {
+    return amount > 0n && amount <= SOCIAL_MAX_TIP_AMOUNT
+      ? null
+      : 'invalid_social_contract_call'
+  }
+
+  return amount === SOCIAL_BASE_CALL_AMOUNT
+    ? null
+    : 'invalid_social_contract_call'
+}
+
+export function isTrustedSocialFrameMessage(event, frameWindow) {
+  return Boolean(
+    event &&
+      frameWindow &&
+      event.source === frameWindow &&
+      event.origin === SOCIAL_EMBED_ORIGIN
+  )
+}
+
 export function validateSocialRpcRequest(requestId, method, params) {
   if (
     typeof requestId !== 'string' ||
@@ -179,13 +241,8 @@ export function validateSocialRpcRequest(requestId, method, params) {
         : 'invalid_rpc_params'
 
     case 'contract_call':
-      return params.length === 1 &&
-        isPlainObject(params[0]) &&
-        isShortString(params[0].from, 128) &&
-        isShortString(params[0].contract, 128) &&
-        isShortString(params[0].method, 128) &&
-        Array.isArray(params[0].args)
-        ? null
+      return params.length === 1
+        ? validateSocialContractCall(params[0])
         : 'invalid_rpc_params'
 
     default:

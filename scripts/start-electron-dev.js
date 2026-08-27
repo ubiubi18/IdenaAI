@@ -18,15 +18,20 @@ const DEV_PORT = Number.parseInt(
 )
 const DEV_HOST = process.env.IDENA_DESKTOP_RENDERER_HOST || '127.0.0.1'
 const DEV_SERVER_URL = `http://${DEV_HOST}:${DEV_PORT}`
-const STARTUP_TIMEOUT_MS = 120000
+const RENDERER_ROUTE_TIMEOUT_MS = 300000
+const RENDERER_PROBE_TIMEOUT_MS = 300000
 const POLL_INTERVAL_MS = 1000
 const DEFAULT_DEV_USER_DATA_NAME = 'IdenaAIDev'
+const DEFAULT_RENDERER_WARMUP_ROUTES = ['/home']
+const RENDERER_ROUTE_PATTERN = /^\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i
 const APP_USER_DATA_NAME =
   process.env.IDENA_DESKTOP_APP_USER_DATA_NAME || DEFAULT_DEV_USER_DATA_NAME
 const WORKSPACE_RUNTIME_DIR =
   process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
   path.join(path.dirname(ROOT), 'IdenaAI-runtime')
 const ALLOW_DEV_SESSION_AUTO_ENV = 'IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO'
+const PRESERVE_RENDERER_CACHE_ENV = 'IDENA_DESKTOP_PRESERVE_RENDERER_DEV_CACHE'
+const RENDERER_WARMUP_ROUTES_ENV = 'IDENA_DESKTOP_RENDERER_WARMUP_ROUTES'
 
 let rendererProcess = null
 let electronProcess = null
@@ -38,8 +43,17 @@ function ensureDir(dirPath) {
   return dirPath
 }
 
-function cleanRendererDevOutput() {
-  ;['renderer/.next', 'renderer/out'].forEach((relativePath) => {
+function resolveRendererDevOutputPaths(env = process.env) {
+  return [
+    ...(isTruthyEnv(env[PRESERVE_RENDERER_CACHE_ENV])
+      ? []
+      : ['renderer/.next']),
+    'renderer/out',
+  ]
+}
+
+function cleanRendererDevOutput(env = process.env) {
+  resolveRendererDevOutputPaths(env).forEach((relativePath) => {
     fs.rmSync(path.join(ROOT, relativePath), {
       recursive: true,
       force: true,
@@ -65,6 +79,29 @@ function isTruthyEnv(value) {
       .trim()
       .toLowerCase()
   )
+}
+
+function resolveRendererWarmupRoutes(env = process.env) {
+  const configuredRoutes = String(env[RENDERER_WARMUP_ROUTES_ENV] || '')
+    .split(/[\s,]+/)
+    .map((routePath) => routePath.trim())
+    .filter(Boolean)
+  const routes = configuredRoutes.length
+    ? configuredRoutes
+    : DEFAULT_RENDERER_WARMUP_ROUTES
+  const uniqueRoutes = ['/home', ...routes].filter(
+    (routePath, index, values) => values.indexOf(routePath) === index
+  )
+
+  uniqueRoutes.forEach((routePath) => {
+    if (!RENDERER_ROUTE_PATTERN.test(routePath)) {
+      throw new Error(
+        `Invalid renderer warmup route in ${RENDERER_WARMUP_ROUTES_ENV}: ${routePath}`
+      )
+    }
+  })
+
+  return uniqueRoutes
 }
 
 function readJsonIfExists(filePath) {
@@ -249,10 +286,25 @@ function wait(ms) {
   })
 }
 
-function isRendererReady() {
+function isRendererReady({
+  httpGet = http.get,
+  timeoutMs = RENDERER_PROBE_TIMEOUT_MS,
+  url = `${DEV_SERVER_URL}/home`,
+} = {}) {
   return new Promise((resolve) => {
-    const request = http.get(
-      `${DEV_SERVER_URL}/home`,
+    let settled = false
+
+    const finish = (ready) => {
+      if (settled) return
+      settled = true
+      resolve(ready)
+    }
+
+    // A listening socket only means that Next.js has started accepting work.
+    // Wait for the initial route compilation so Electron's HMR client cannot
+    // receive build messages before its router has been initialized.
+    const request = httpGet(
+      url,
       {
         headers: {
           Connection: 'close',
@@ -260,42 +312,66 @@ function isRendererReady() {
       },
       (response) => {
         response.resume()
-        resolve(response.statusCode >= 200 && response.statusCode < 500)
+        finish(response.statusCode >= 200 && response.statusCode < 400)
       }
     )
 
     request.on('error', () => {
-      resolve(false)
+      finish(false)
     })
-    request.setTimeout(1000, () => {
+    request.setTimeout(timeoutMs, () => {
       request.destroy()
-      resolve(false)
+      finish(false)
     })
   })
 }
 
-async function waitForRenderer() {
-  const deadline = Date.now() + STARTUP_TIMEOUT_MS
+async function waitForRenderer({
+  isReady = isRendererReady,
+  log = console.log,
+  now = Date.now,
+  routes = resolveRendererWarmupRoutes(),
+  routeTimeoutMs = RENDERER_ROUTE_TIMEOUT_MS,
+  waitFn = wait,
+} = {}) {
+  for (const routePath of routes) {
+    const deadline = now() + routeTimeoutMs
+    const url = `${DEV_SERVER_URL}${routePath}`
+    let ready = false
 
-  while (Date.now() < deadline) {
-    if (rendererProcess && rendererProcess.exitCode !== null) {
+    log(`[IdenaAI] Warming renderer route ${routePath}`)
+
+    while (now() < deadline) {
+      if (rendererProcess && rendererProcess.exitCode !== null) {
+        throw new Error(
+          `Renderer dev server exited early with code ${rendererProcess.exitCode}`
+        )
+      }
+
+      const remainingMs = deadline - now()
+      if (
+        await isReady({
+          timeoutMs: Math.min(RENDERER_PROBE_TIMEOUT_MS, remainingMs),
+          url,
+        })
+      ) {
+        ready = true
+        break
+      }
+
+      await waitFn(POLL_INTERVAL_MS)
+    }
+
+    if (!ready) {
       throw new Error(
-        `Renderer dev server exited early with code ${rendererProcess.exitCode}`
+        `Renderer route ${routePath} did not become ready within ${
+          routeTimeoutMs / 1000
+        }s at ${url}`
       )
     }
 
-    if (await isRendererReady()) {
-      return
-    }
-
-    await wait(POLL_INTERVAL_MS)
+    log(`[IdenaAI] Renderer route ready ${routePath}`)
   }
-
-  throw new Error(
-    `Renderer dev server did not become ready within ${
-      STARTUP_TIMEOUT_MS / 1000
-    }s at ${DEV_SERVER_URL}`
-  )
 }
 
 function terminateChild(child, signal = 'SIGTERM') {
@@ -412,16 +488,25 @@ async function main() {
   })
 }
 
-process.on('SIGINT', () => shutdown(130))
-process.on('SIGTERM', () => shutdown(143))
-process.on('exit', () => {
-  terminateChild(electronProcess, 'SIGKILL')
-  terminateChild(rendererProcess, 'SIGKILL')
-})
+if (require.main === module) {
+  process.on('SIGINT', () => shutdown(130))
+  process.on('SIGTERM', () => shutdown(143))
+  process.on('exit', () => {
+    terminateChild(electronProcess, 'SIGKILL')
+    terminateChild(rendererProcess, 'SIGKILL')
+  })
 
-main().catch((error) => {
-  console.error(
-    `Unable to start the desktop development runtime: ${error.message}`
-  )
-  shutdown(1)
-})
+  main().catch((error) => {
+    console.error(
+      `Unable to start the desktop development runtime: ${error.message}`
+    )
+    shutdown(1)
+  })
+}
+
+module.exports = {
+  isRendererReady,
+  resolveRendererDevOutputPaths,
+  resolveRendererWarmupRoutes,
+  waitForRenderer,
+}
