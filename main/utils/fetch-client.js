@@ -1,5 +1,7 @@
 const {Readable} = require('stream')
 
+const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+
 function appendParams(url, params) {
   const nextUrl = new URL(url)
   if (params && typeof params === 'object') {
@@ -35,15 +37,84 @@ function applyTransforms(value, transforms = []) {
   }, value)
 }
 
-async function parseResponseBody(response, responseType, transforms = []) {
+function responseTooLargeError(limit) {
+  const error = new Error(`response exceeds ${limit} byte limit`)
+  error.code = 'ERR_RESPONSE_TOO_LARGE'
+  return error
+}
+
+function normalizeResponseByteLimit(value) {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_MAX_RESPONSE_BYTES
+}
+
+async function readBufferedResponse(response, maxResponseBytes) {
+  const limit = normalizeResponseByteLimit(maxResponseBytes)
+  const declaredLength = Number.parseInt(
+    response.headers.get('content-length') || '',
+    10
+  )
+
+  if (Number.isFinite(declaredLength) && declaredLength > limit) {
+    throw responseTooLargeError(limit)
+  }
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const fallback = Buffer.from(await response.arrayBuffer())
+    if (fallback.length > limit) {
+      throw responseTooLargeError(limit)
+    }
+    return fallback
+  }
+
+  const reader = response.body.getReader()
+  const chunks = []
+  let total = 0
+  let finished = false
+
+  try {
+    while (!finished) {
+      // eslint-disable-next-line no-await-in-loop
+      const {done, value} = await reader.read()
+      finished = done
+      if (finished) break
+
+      const chunk = Buffer.from(value)
+      total += chunk.length
+      if (total > limit) {
+        if (typeof reader.cancel === 'function') {
+          await reader.cancel('response limit exceeded')
+        }
+        throw responseTooLargeError(limit)
+      }
+      chunks.push(chunk)
+    }
+  } finally {
+    if (typeof reader.releaseLock === 'function') {
+      reader.releaseLock()
+    }
+  }
+
+  return Buffer.concat(chunks, total)
+}
+
+async function parseResponseBody(
+  response,
+  responseType,
+  maxResponseBytes,
+  transforms = []
+) {
   if (responseType === 'stream') {
     return Readable.fromWeb(response.body)
   }
+  const buffer = await readBufferedResponse(response, maxResponseBytes)
   if (responseType === 'arraybuffer') {
-    return Buffer.from(await response.arrayBuffer())
+    return buffer
   }
 
-  const text = await response.text()
+  const text = buffer.toString('utf8')
   if (!text) return applyTransforms(null, transforms)
 
   if (transforms.length > 0) {
@@ -90,6 +161,9 @@ async function request(defaults = {}, config = {}) {
     validateStatus = (status) => status >= 200 && status < 300,
     transformRequest = [],
     transformResponse = [],
+    maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+    redirect = 'follow',
+    dispatcher,
   } = {...defaults, ...config}
 
   const requestUrl = appendParams(new URL(url, baseURL).toString(), params)
@@ -123,10 +197,13 @@ async function request(defaults = {}, config = {}) {
       headers: nextHeaders,
       body,
       signal: timeoutController.signal,
+      redirect,
+      dispatcher,
     })
     const responseData = await parseResponseBody(
       response,
       responseType,
+      maxResponseBytes,
       transformResponse
     )
     const result = {
@@ -174,3 +251,5 @@ function createFetchClient(defaults = {}) {
 
 module.exports = createFetchClient()
 module.exports.createFetchClient = createFetchClient
+module.exports.DEFAULT_MAX_RESPONSE_BYTES = DEFAULT_MAX_RESPONSE_BYTES
+module.exports.readBufferedResponse = readBufferedResponse

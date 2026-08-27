@@ -37,9 +37,10 @@
     "stackblur-canvas",
     "subleveldown",
     "tree-kill",
+    "undici",
     "url-regex-safe",
     "xstate"
   ],
   "maxProductionNodeModules": 400,
-  "maxRootRuntimeDependencies": 39
+  "maxRootRuntimeDependencies": 40
 }

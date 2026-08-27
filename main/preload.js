@@ -1858,6 +1858,7 @@ const bridge = {
   },
   rpc: {
     call: (payload) => invokeCloneable('rpc.call', payload),
+    exportKey: (payload) => invokeCloneable('rpc.export-key', payload),
   },
   flips: flipsBridge,
   invites: invitesBridge,

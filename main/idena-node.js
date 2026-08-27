@@ -10,6 +10,7 @@ const kill = require('tree-kill')
 // eslint-disable-next-line import/no-extraneous-dependencies
 const appDataPath = require('./app-data-path')
 const logger = require('./logger')
+const {verifyBundledNodeArtifact} = require('./node-artifact-policy')
 const httpClient = require('./utils/fetch-client')
 
 const idenaBin = 'idena-go'
@@ -40,6 +41,23 @@ const localNodeBuildFreshnessFiles = [
   path.join('core', 'ceremony', 'ceremony.go'),
   path.join('core', 'flip', 'flipper.go'),
 ]
+
+let runtimePolicy = Object.freeze({isPackaged: true})
+
+function configureIdenaNodeRuntime({isPackaged}) {
+  if (typeof isPackaged !== 'boolean') {
+    throw new Error('Idena node runtime profile requires isPackaged')
+  }
+  runtimePolicy = Object.freeze({isPackaged})
+}
+
+function getNodeAcquisitionPolicy(isPackaged = runtimePolicy.isPackaged) {
+  return Object.freeze({
+    allowBundledNode: true,
+    allowLocalSourceBuild: !isPackaged,
+    allowRemoteDownload: !isPackaged,
+  })
+}
 
 const execFileAsync = promisify(execFile)
 
@@ -74,12 +92,19 @@ const getNodeRuntimeFile = () => path.join(getNodeDir(), 'runtime.json')
 const getTempNodeFile = () =>
   path.join(getNodeDir(), `new-${idenaBin}${getBinarySuffix()}`)
 
-function getBundledNodeFileCandidates() {
+function getBundledNodeFileCandidates({
+  isPackaged = runtimePolicy.isPackaged,
+  resourcesPath = process.resourcesPath,
+} = {}) {
   const suffix = getBinarySuffix()
   const candidates = []
 
-  if (process.resourcesPath) {
-    candidates.push(path.join(process.resourcesPath, 'node', idenaBin + suffix))
+  if (resourcesPath) {
+    candidates.push(path.join(resourcesPath, 'node', idenaBin + suffix))
+  }
+
+  if (isPackaged) {
+    return candidates
   }
 
   candidates.push(
@@ -119,6 +144,10 @@ async function copyBundledNode(tempNodeFile, onProgress) {
 
   if (!bundledNodeFile) {
     return null
+  }
+
+  if (runtimePolicy.isPackaged) {
+    await verifyBundledNodeArtifact(bundledNodeFile)
   }
 
   const version = await getBinaryVersion(bundledNodeFile)
@@ -1125,6 +1154,10 @@ async function getLocalNodeSourceMtimeMs() {
 }
 
 async function isNodeBinaryOlderThanLocalSource(nodePath = getNodeFile()) {
+  if (!getNodeAcquisitionPolicy().allowLocalSourceBuild) {
+    return false
+  }
+
   if (!localNodeSourceBuildAvailable()) {
     return false
   }
@@ -1189,6 +1222,12 @@ function runCommand(command, args, options = {}) {
 }
 
 async function buildLocalPinnedNode(tempNodeFile, onProgress) {
+  if (!getNodeAcquisitionPolicy().allowLocalSourceBuild) {
+    throw new Error(
+      'packaged applications cannot build an Idena node at runtime'
+    )
+  }
+
   const cargoBinDir = path.join(os.homedir(), '.cargo', 'bin')
   const env = {
     ...process.env,
@@ -1359,6 +1398,16 @@ async function getCompatibleRemoteReleaseInfo() {
 }
 
 async function getCompatibleReleaseInfo() {
+  const acquisitionPolicy = getNodeAcquisitionPolicy()
+  if (
+    !acquisitionPolicy.allowLocalSourceBuild &&
+    !acquisitionPolicy.allowRemoteDownload
+  ) {
+    throw new Error(
+      'packaged applications require the pinned bundled Idena node'
+    )
+  }
+
   const preferRemote = shouldPreferRemoteNodeRelease()
   const localBuildAllowed = !isFalseyEnv(process.env.IDENAAI_NODE_SOURCE_BUILD)
 
@@ -1459,6 +1508,12 @@ function writeDownloadStream(
 }
 
 async function downloadRemoteNode(release, tempNodeFile, onProgress) {
+  if (!getNodeAcquisitionPolicy().allowRemoteDownload) {
+    throw new Error(
+      'packaged applications cannot download executable Idena node updates'
+    )
+  }
+
   if (!release.url) {
     throw new Error(
       `cannot resolve node download URL for release ${
@@ -1493,9 +1548,6 @@ async function downloadNode(onProgress) {
   const tempNodeFile = getTempNodeFile()
 
   try {
-    const release = await getCompatibleReleaseInfo()
-    const {version, localBuild} = release
-
     await fs.ensureDir(getNodeDir())
     await fs.remove(tempNodeFile)
 
@@ -1504,6 +1556,19 @@ async function downloadNode(onProgress) {
     if (bundledVersion) {
       return bundledVersion
     }
+
+    const acquisitionPolicy = getNodeAcquisitionPolicy()
+    if (
+      !acquisitionPolicy.allowLocalSourceBuild &&
+      !acquisitionPolicy.allowRemoteDownload
+    ) {
+      throw new Error(
+        'packaged Idena node bundle is missing or incompatible; reinstall a verified application build'
+      )
+    }
+
+    const release = await getCompatibleReleaseInfo()
+    const {version, localBuild} = release
 
     if (localBuild) {
       try {
@@ -1823,6 +1888,7 @@ async function tryStopNode(node, {onSuccess, onFail}) {
 }
 
 module.exports = {
+  configureIdenaNodeRuntime,
   downloadNode,
   getCurrentVersion,
   getRemoteVersion,
@@ -1841,6 +1907,7 @@ module.exports = {
     buildNodeParameters,
     getBundledNodeFileCandidates,
     getConfiguredBootstrapNodes,
+    getNodeAcquisitionPolicy,
     getNodeReleaseRepos,
     getPeerHintFailureBackoffMs,
     isRpcMethodUnavailableError,

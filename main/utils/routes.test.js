@@ -60,4 +60,48 @@ describe('renderer routes', () => {
     expect(resolveRoute('file:///static/identity-mark.png')).toBeNull()
     expect(resolveRoute('file:///settings/missing')).toBeNull()
   })
+
+  it('trusts only canonical HTML files inside the packaged renderer root', () => {
+    const rendererRoot = path.join(appPath, 'renderer', 'out')
+    const canonicalize = (value) => path.resolve(value)
+
+    expect(
+      loadRoute.isPackagedRendererUrl(
+        `file://${path.join(rendererRoot, 'home.html')}`,
+        appPath,
+        canonicalize
+      )
+    ).toBe(true)
+    expect(
+      loadRoute.isPackagedRendererUrl(
+        'file:///private/tmp/attacker.html',
+        appPath,
+        canonicalize
+      )
+    ).toBe(false)
+    expect(
+      loadRoute.isPackagedRendererUrl(
+        `file://${path.join(rendererRoot, 'runtime.js')}`,
+        appPath,
+        canonicalize
+      )
+    ).toBe(false)
+  })
+
+  it('rejects renderer files whose canonical path escapes through a symlink', () => {
+    const rendererRoot = path.join(appPath, 'renderer', 'out')
+    const requestedFile = path.join(rendererRoot, 'linked.html')
+    const canonicalize = (value) =>
+      path.resolve(value) === path.resolve(requestedFile)
+        ? '/private/tmp/attacker.html'
+        : path.resolve(value)
+
+    expect(
+      loadRoute.isPackagedRendererUrl(
+        `file://${requestedFile}`,
+        appPath,
+        canonicalize
+      )
+    ).toBe(false)
+  })
 })
