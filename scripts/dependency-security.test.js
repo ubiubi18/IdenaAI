@@ -12,7 +12,7 @@ describe('dependency security locks', () => {
     )
 
     expect(sharpPackages.length).toBeGreaterThan(0)
-    expect(packageJson.overrides.sharp).toBe('0.35.0')
+    expect(packageJson.overrides.sharp).toBe('0.35.3')
 
     for (const [packagePath, metadata] of sharpPackages) {
       expect({packagePath, version: metadata.version}).toEqual(
@@ -20,9 +20,9 @@ describe('dependency security locks', () => {
           version: expect.stringMatching(/^0\.35\./),
         })
       )
-      expect(semver.gte(metadata.version, '0.35.0')).toBe(true)
+      expect(semver.gte(metadata.version, '0.35.3')).toBe(true)
     }
 
-    expect(packageJson.allowScripts['sharp@0.35.0']).toBe(true)
+    expect(packageJson.allowScripts['sharp@0.35.3']).toBe(true)
   })
 })
