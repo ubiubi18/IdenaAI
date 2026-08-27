@@ -97,7 +97,15 @@ function createResponse(status, body = null, headers = {}) {
 
 function createIdenaSocialProtocolHandler(rootPath) {
   const resolvedRoot = path.resolve(rootPath)
-  const realRootPromise = fs.promises.realpath(resolvedRoot)
+  let realRootPromise
+
+  const resolveRealRoot = () => {
+    if (!realRootPromise) {
+      realRootPromise = fs.promises.realpath(resolvedRoot)
+    }
+
+    return realRootPromise
+  }
 
   return async function handleIdenaSocialRequest(request) {
     const method = String(request?.method || 'GET').toUpperCase()
@@ -117,7 +125,7 @@ function createIdenaSocialProtocolHandler(rootPath) {
 
     try {
       const [realRoot, stats, realCandidatePath] = await Promise.all([
-        realRootPromise,
+        resolveRealRoot(),
         fs.promises.stat(candidatePath),
         fs.promises.realpath(candidatePath),
       ])

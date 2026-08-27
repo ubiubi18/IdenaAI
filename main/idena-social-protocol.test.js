@@ -74,6 +74,17 @@ describe('idena.social isolated protocol', () => {
     )
   })
 
+  it('defers filesystem resolution until the first request', () => {
+    const realpathSpy = jest.spyOn(fs.promises, 'realpath')
+
+    try {
+      createIdenaSocialProtocolHandler(socialRoot)
+      expect(realpathSpy).not.toHaveBeenCalled()
+    } finally {
+      realpathSpy.mockRestore()
+    }
+  })
+
   it('resolves only paths on the dedicated app host inside the root', () => {
     expect(
       resolveIdenaSocialAssetPath(
