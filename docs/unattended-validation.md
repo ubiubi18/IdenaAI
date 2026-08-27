@@ -32,8 +32,17 @@ experiment.
 From the exact reviewed source checkout on the managed host:
 
 ```sh
+sudo /srv/sharechain/idena-ai/source/deploy/install-electron-userns-apparmor.sh
 sudo /srv/sharechain/idena-ai/source/deploy/install-provider-credential-broker.sh
 ```
+
+Ubuntu hosts that restrict unprivileged user namespaces need the path-specific
+AppArmor profile before Electron starts. The installer refuses a symlinked,
+service-writable, or non-root-owned Electron binary, validates the profile
+before loading it, and rolls the persistent policy back if activation fails.
+It grants `userns` only to the fixed managed Electron path. It does not disable
+Chromium's sandbox, weaken AppArmor globally, install a setuid sandbox helper,
+or restart IdenaAI.
 
 The installer deliberately does not restart IdenaAI. Once the updated app is
 running, open **AI settings**, load the key, and select **Keep after restart**.

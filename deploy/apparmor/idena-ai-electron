@@ -1,0 +1,12 @@
+# Permit Chromium's sandbox namespace for the exact managed IdenaAI Electron
+# binary. The process remains bounded by idena-ai-console.service hardening.
+
+abi <abi/5.0>,
+include <tunables/global>
+
+profile idena-ai-electron /opt/idena-ai/source/node_modules/electron/dist/electron flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+
+  include if exists <local/idena-ai-electron>
+}

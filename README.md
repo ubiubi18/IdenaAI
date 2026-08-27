@@ -247,6 +247,10 @@ Linux desktop or VPS:
   Electron runtime libraries for your distro.
 - A VPS needs a real GUI session through VNC, RDP, or another remote desktop.
   Pure SSH/headless mode is only suitable for dependency checks.
+- On Ubuntu hosts that restrict unprivileged user namespaces, install the
+  reviewed `deploy/apparmor/idena-ai-electron` profile with
+  `deploy/install-electron-userns-apparmor.sh`. Do not work around the policy
+  with `--no-sandbox` or a setuid Electron helper.
 
 Then use the Quick Start commands above.
 
