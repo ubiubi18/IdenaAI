@@ -50,6 +50,7 @@ describe('desktop direct-message processing', () => {
         const decryptWithHost = vi.fn().mockResolvedValue({
             plaintext,
             role: 'recipient',
+            ciphertextIndexes: [1],
         });
         const rpcClient = vi.fn();
         const messagesRef = {current: {}};
@@ -82,6 +83,8 @@ describe('desktop direct-message processing', () => {
             postersRef,
             {current: rpcClient},
             [],
+            {current: 'rpc'},
+            {current: 'https://api.idena.io'},
             decryptWithHost,
         );
 
@@ -90,11 +93,13 @@ describe('desktop direct-message processing', () => {
             messageHash,
             senderCiphertext,
             recipientCiphertext,
+            ciphertexts: [senderCiphertext, recipientCiphertext],
         });
         expect(result.continued).toBeUndefined();
         expect(result.newMessage).toMatchObject({
             sender,
             participants: [sender, recipient],
+            conversationKey: keccak256([sender, recipient].sort().join('-')),
             txHash: `0x${'11'.repeat(32)}`,
         });
         await expect(result.messagePromise).resolves.toEqual({
@@ -102,6 +107,70 @@ describe('desktop direct-message processing', () => {
             message: 'hello from the verified host bridge',
         });
         expect(rpcClient).not.toHaveBeenCalled();
+    });
+
+    it('maps a verified group ciphertext to the matching participant', async () => {
+        const thirdParticipant = '0x0000000000000000000000000000000000000003';
+        const participants = [sender, recipient, thirdParticipant];
+        const plaintext = JSON.stringify([
+            participants,
+            '',
+            'hello group',
+            '',
+            '',
+            [],
+            [],
+            '',
+            [],
+        ]);
+        const messageHash = keccak256(plaintext);
+        const ciphertexts = ['YQ==', 'Yg==', 'Yw=='];
+        const decryptWithHost = vi.fn().mockResolvedValue({
+            plaintext,
+            role: 'recipient',
+            ciphertextIndexes: [2],
+        });
+
+        const result = await processMessage(
+            {
+                txHash: `0x${'44'.repeat(32)}`,
+                eventArgs: [
+                    sender,
+                    '0x01000000',
+                    toHex(ciphertexts.join(',')),
+                    toHex(messageHash),
+                    toHex('true'),
+                ],
+                eventArgs2nd: [sender, '0x', '0x01000000', '0x01000000'],
+                method: 'sendMessage',
+                timestamp: 1,
+            },
+            '',
+            '',
+            thirdParticipant,
+            {current: {}},
+            '',
+            {current: Object.fromEntries(participants.map(address => [address, poster(address)]))},
+            {current: vi.fn()},
+            [],
+            {current: 'rpc'},
+            {current: 'https://api.idena.io'},
+            decryptWithHost,
+        );
+
+        expect(decryptWithHost).toHaveBeenCalledWith({
+            txHash: `0x${'44'.repeat(32)}`,
+            messageHash,
+            senderCiphertext: ciphertexts[0],
+            recipientCiphertext: ciphertexts[1],
+            ciphertexts,
+        });
+        expect(result.continued).toBeUndefined();
+        expect(result.newMessage).toMatchObject({
+            sender,
+            participants: [...participants].sort(),
+            conversationKey: keccak256([...participants].sort().join('-')),
+        });
     });
 
     it('drops a message when host verification rejects it', async () => {
@@ -131,6 +200,45 @@ describe('desktop direct-message processing', () => {
             {current: {[sender]: poster(sender), [recipient]: poster(recipient)}},
             {current: vi.fn()},
             [],
+            {current: 'rpc'},
+            {current: 'https://api.idena.io'},
+            decryptWithHost,
+        );
+
+        expect(result).toEqual({continued: true});
+    });
+
+    it('fails closed when a verified host payload has an invalid message schema', async () => {
+        const plaintext = JSON.stringify({participants: [sender, recipient]});
+        const decryptWithHost = vi.fn().mockResolvedValue({
+            plaintext,
+            role: 'recipient',
+        });
+
+        const result = await processMessage(
+            {
+                txHash: `0x${'33'.repeat(32)}`,
+                eventArgs: [
+                    sender,
+                    '0x01000000',
+                    toHex('YQ==,Yg=='),
+                    toHex(keccak256(plaintext)),
+                    toHex('true'),
+                ],
+                eventArgs2nd: [sender, '0x', '0x01000000', '0x01000000'],
+                method: 'sendMessage',
+                timestamp: 1,
+            },
+            '',
+            '',
+            recipient,
+            {current: {}},
+            '',
+            {current: {[sender]: poster(sender), [recipient]: poster(recipient)}},
+            {current: vi.fn()},
+            [],
+            {current: 'rpc'},
+            {current: 'https://api.idena.io'},
             decryptWithHost,
         );
 

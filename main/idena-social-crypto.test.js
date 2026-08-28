@@ -201,11 +201,107 @@ describe('idena.social host message crypto', () => {
     })
 
     expect(response).toEqual({
-      result: {plaintext, role: 'sender', version: 'host-v1'},
+      result: {
+        plaintext,
+        role: 'sender',
+        ciphertextIndexes: [0],
+        version: 'host-v1',
+      },
     })
     expect(harness.calls.some(({method}) => method === 'bcn_txReceipt')).toBe(
       true
     )
+  })
+
+  it('decrypts a receipt-bound group message only at the matching participant index', async () => {
+    const thirdPrivateKey = randomPrivateKey()
+
+    try {
+      const senderHarness = createRpcHarness(privateKey)
+      const senderService = createIdenaSocialCryptoService({
+        rpcCall: senderHarness.rpcCall,
+      })
+      const firstRecipient =
+        privateKeyToAddress(recipientPrivateKey).toLowerCase()
+      const secondRecipient = privateKeyToAddress(thirdPrivateKey).toLowerCase()
+      const plaintext = JSON.stringify([
+        [senderHarness.address, firstRecipient, secondRecipient],
+        '',
+        'receipt-bound group message',
+        '',
+        '',
+        [],
+        [],
+        '',
+        [],
+      ])
+      const firstEncryption = await senderService({
+        operation: 'encrypt-message',
+        address: senderHarness.address,
+        recipientPublicKey:
+          privateKeyToPublicKey(recipientPrivateKey).toString('hex'),
+        plaintext,
+      })
+      const secondEncryption = await senderService({
+        operation: 'encrypt-message',
+        address: senderHarness.address,
+        recipientPublicKey:
+          privateKeyToPublicKey(thirdPrivateKey).toString('hex'),
+        plaintext,
+      })
+      const ciphertexts = [
+        firstEncryption.result.senderCiphertext,
+        firstEncryption.result.recipientCiphertext,
+        secondEncryption.result.recipientCiphertext,
+      ]
+      const txHash = `0x${crypto.randomBytes(32).toString('hex')}`
+      const messageHash = keccak256(plaintext)
+      const receipt = {
+        success: true,
+        contract: SOCIAL_CONTRACT_ADDRESS,
+        method: 'sendMessage',
+        txHash,
+        events: [
+          {
+            contract: SOCIAL_CONTRACT_ADDRESS,
+            event: 'sendMessage',
+            args: [
+              senderHarness.address,
+              '0x01',
+              utf8EventArg(ciphertexts.join(',')),
+              utf8EventArg(messageHash),
+              utf8EventArg('true'),
+            ],
+          },
+        ],
+      }
+      const recipientHarness = createRpcHarness(thirdPrivateKey)
+      recipientHarness.setReceipt(receipt)
+      const recipientService = createIdenaSocialCryptoService({
+        rpcCall: recipientHarness.rpcCall,
+      })
+
+      const response = await recipientService({
+        operation: 'decrypt-message',
+        address: recipientHarness.address,
+        txHash,
+        messageHash,
+        senderCiphertext: ciphertexts[0],
+        recipientCiphertext: ciphertexts[1],
+        ciphertexts,
+      })
+
+      expect(response).toEqual({
+        result: {
+          plaintext,
+          role: 'recipient',
+          ciphertextIndexes: [2],
+          version: 'host-v1',
+        },
+      })
+    } finally {
+      thirdPrivateKey.fill(0)
+    }
   })
 
   it('rejects ciphertext that is not present in the confirmed event', async () => {
