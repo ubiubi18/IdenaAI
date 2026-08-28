@@ -28,4 +28,17 @@ describe('DesktopNavigation', () => {
         expect(markup.match(/aria-current="page"/g)).toHaveLength(1);
         expect(markup).not.toContain('Ready');
     });
+
+    it('keeps direct messages active on a routable conversation page', () => {
+        const markup = renderToStaticMarkup(
+            <MemoryRouter initialEntries={['/conversation/abc123']}>
+                <DesktopNavigation messagesReady={true} />
+            </MemoryRouter>,
+        );
+
+        expect(markup).toContain('href="/messages"');
+        expect(markup).toContain('Direct messages');
+        expect(markup.match(/aria-current="page"/g)).toHaveLength(1);
+        expect(markup).toContain('Ready');
+    });
 });

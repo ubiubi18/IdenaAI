@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "repository": "https://github.com/N3CR0M4NC3R-dev/idena.social-ui.git",
-  "release": "v12.1.0",
-  "commit": "55d0d2c090a5c5fc3693889c7bb1e974dd6fb32c",
-  "mergeBaseRelease": "v11.3.0",
-  "mergeBaseCommit": "da4943e12d80d7fa7ecc6088e90193b3df8a5c2a",
+  "release": "v12.5.0",
+  "commit": "09a8cadfb318fce1510a1e8320bc7155f4447c8f",
+  "mergeBaseRelease": "v12.1.0",
+  "mergeBaseCommit": "55d0d2c090a5c5fc3693889c7bb1e974dd6fb32c",
   "localPolicy": {
     "desktopRpcBridge": true,
     "automaticPrivateKeyExport": false,

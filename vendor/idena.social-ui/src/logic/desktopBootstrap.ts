@@ -18,6 +18,7 @@ export type DesktopMessageCryptoResponse = {
         available?: boolean;
         senderCiphertext?: string;
         recipientCiphertext?: string;
+        ciphertextIndexes?: number[];
         plaintext?: string;
         role?: 'sender' | 'recipient' | 'both';
         version?: string;
