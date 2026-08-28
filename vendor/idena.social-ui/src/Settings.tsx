@@ -34,6 +34,7 @@ type SettingsProps = {
     inputCredentialsApplied: boolean,
     credentialsInvalid: string,
     handleSetInputCredentialsApplied: (newValue: boolean) => Promise<void>,
+    restoreDefaultSettings: () => void,
 };
 
 function Settings() {
@@ -72,6 +73,7 @@ function Settings() {
         inputCredentialsApplied,
         credentialsInvalid,
         handleSetInputCredentialsApplied,
+        restoreDefaultSettings,
     } = useOutletContext() as SettingsProps;
 
     const handleGoBack = () => {
@@ -81,6 +83,12 @@ function Settings() {
     useEffect(() => {
         handleSetInputCredentialsApplied(true);
     }, []);
+
+    const handleRestoreDefaults = () => {
+        if (window.confirm('Restore the default idena.social settings?')) {
+            restoreDefaultSettings();
+        }
+    };
 
     return (<>
         <button className="mb-4 text-[13px] hover:cursor-pointer hover:underline" onClick={handleGoBack}>&lt; Back</button>
@@ -182,6 +190,18 @@ function Settings() {
                     </div>
                 </div>
             )}
+        </div>
+        <hr className="mb-3 text-gray-500" />
+        <div className="mb-6">
+            <button
+                className="h-9 w-36 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10"
+                onClick={handleRestoreDefaults}
+            >
+                Restore Defaults
+            </button>
+            <p className="mt-1 text-[11px] text-stone-400">
+                Removes idena.social overrides only. Desktop connection values are restored from the host.
+            </p>
         </div>
     </>);
 }

@@ -9,8 +9,8 @@ const {
 } = require('./social-desktop-rpc-policy')
 const {IDENA_SOCIAL_ENTRY_URL} = require('../../../main/idena-social-protocol')
 
-describe('idena.social v12 desktop RPC boundary', () => {
-  it('targets the exact v12.1.0 contract', () => {
+describe('idena.social v12.5 desktop RPC boundary', () => {
+  it('targets the exact v12 contract', () => {
     expect(SOCIAL_CONTRACT_ADDRESS).toBe(
       '0x840e092e31e9656fF15E541505039ed77585338E'
     )
@@ -74,6 +74,41 @@ describe('idena.social v12 desktop RPC boundary', () => {
         messageHash: '33'.repeat(32),
         senderCiphertext: 'not-base64',
         recipientCiphertext: 'not-base64',
+      })
+    ).toBe('invalid_crypto_request')
+
+    const groupCiphertexts = ['sender', 'recipient-1', 'recipient-2'].map(
+      (value) => Buffer.from(value).toString('base64')
+    )
+    expect(
+      validateSocialCryptoRequest('crypto-group', {
+        operation: 'decrypt-message',
+        address,
+        txHash: `0x${'44'.repeat(32)}`,
+        messageHash: '55'.repeat(32),
+        senderCiphertext: groupCiphertexts[0],
+        recipientCiphertext: groupCiphertexts[1],
+        ciphertexts: groupCiphertexts,
+      })
+    ).toBeNull()
+    expect(
+      validateSocialCryptoRequest('crypto-group-mismatch', {
+        operation: 'decrypt-message',
+        address,
+        txHash: `0x${'44'.repeat(32)}`,
+        messageHash: '55'.repeat(32),
+        senderCiphertext: groupCiphertexts[1],
+        recipientCiphertext: groupCiphertexts[0],
+        ciphertexts: groupCiphertexts,
+      })
+    ).toBe('invalid_crypto_request')
+    expect(
+      validateSocialCryptoRequest('crypto-group-too-large', {
+        operation: 'decrypt-message',
+        address,
+        txHash: `0x${'44'.repeat(32)}`,
+        messageHash: '55'.repeat(32),
+        ciphertexts: Array(17).fill(groupCiphertexts[0]),
       })
     ).toBe('invalid_crypto_request')
   })

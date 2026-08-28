@@ -79,6 +79,16 @@ const sensitiveBrowserStorageKeys = [
     'password',
 ];
 
+const resettableBrowserStorageKeys = [
+    'nodeUrl',
+    'makePostsWith',
+    'postersAddress',
+    'findPostsWith',
+    'findPastPostsWith',
+    'indexerApiUrl',
+    ...sensitiveBrowserStorageKeys,
+];
+
 sensitiveBrowserStorageKeys.forEach(key => {
     try {
         window.localStorage.removeItem(key);
@@ -153,6 +163,7 @@ function App() {
         messageHash: string;
         senderCiphertext: string;
         recipientCiphertext: string;
+        ciphertexts: string[];
     }) => {
         const response = await messageCryptoClientRef.current?.({
             operation: 'decrypt-message',
@@ -167,6 +178,7 @@ function App() {
         return {
             plaintext: response.result.plaintext,
             role: response.result.role,
+            ciphertextIndexes: response.result.ciphertextIndexes,
         };
     };
     const [viewOnlyNode, setViewOnlyNode] = useState<boolean>(false);
@@ -243,7 +255,7 @@ function App() {
     const modalSendTipRef = useRef<Post>(undefined);
     const modalAddMediaRef = useRef<string>('');
     const modalRpcMakePostRef = useRef<{ location: string, replyToPostId?: string, channelId?: string }>({ location: '' });
-    const modalRpcSendMessageRef = useRef<{ location: string, recipient: string, replyToMessageId?: string }>({ location: '', recipient: '' });
+    const modalRpcSendMessageRef = useRef<{ location: string, recipients: string[], replyToMessageId?: string }>({ location: '', recipients: [] });
     const modalExpandImageRef = useRef<{ dataUrl?: string, cid?: string }>({});
     const modalSubmitPubKeyRef = useRef<{ address: string }>({ address: '' });
     const [mainComposerCostEstimate, setMainComposerCostEstimate] = useState<RpcPostCostEstimate | null>(null);
@@ -792,7 +804,16 @@ function App() {
                     const transaction = transactionsWithDetails[index];
 
                     if ([sendTipMethod].includes(transaction.method)) {
-                        const { postId, newTip, updatedPostTips, posterPromise } = await processTip(transaction, rpcClientRef.current!, tipsRef, postersRef, isRecurseForward, postersPromised);
+                        const { postId, newTip, updatedPostTips, posterPromise } = await processTip(
+                            transaction,
+                            rpcClientRef.current!,
+                            tipsRef,
+                            postersRef,
+                            isRecurseForward,
+                            postersPromised,
+                            inputFindingPastPostsRef,
+                            indexerApiUrlRef,
+                        );
                         tipsRef.current = { ...tipsRef.current, [postId]: updatedPostTips };
 
                         posterPromise && posterPromises.push(posterPromise);
@@ -850,6 +871,8 @@ function App() {
                         postsRef,
                         postersRef,
                         postersPromised,
+                        inputFindingPastPostsRef,
+                        indexerApiUrlRef,
                     );
 
                     if (continued) {
@@ -1098,6 +1121,8 @@ function App() {
                         postersRef,
                         rpcClientRef,
                         postersPromised,
+                        inputFindingPastPostsRef,
+                        indexerApiUrlRef,
                         hostMessageCryptoEnabled ? decryptMessageWithDesktopHost : undefined,
                     );
 
@@ -1121,7 +1146,7 @@ function App() {
 
                 for (let index = 0; index < newMessages.length; index++) {
                     const newMessage = newMessages[index] as Message;
-                    const conversationKey = newMessage.participants.map((item: string) => item.toLowerCase()).sort().join('-');
+                    const conversationKey = newMessage.conversationKey;
                     const conversation = isRecurseForward ? [ newMessage.messageId, ...(conversationsRef.current[conversationKey] ?? []) ] : [ ...(conversationsRef.current[conversationKey] ?? []), newMessage!.messageId ];
                     conversationsRef.current = { ...conversationsRef.current, [conversationKey]: conversation };
                     conversationKeys.push(conversationKey);
@@ -1412,7 +1437,35 @@ function App() {
         return [myEncryptedMessage.toBase64(), recipientEncryptedMessage.toBase64()];
     };
 
-    const copyMessageTxHandler = async (location: string, recipient: string, replyToMessageId?: string) => {
+    const encryptMessageForRecipients = async (rawMessage: string, recipients: string[]) => {
+        if (!recipients.length || recipients.length > 15) {
+            throw new Error('Messages require between 1 and 15 recipients');
+        }
+
+        const message: string[] = [];
+
+        for (const recipient of recipients) {
+            const recipientDetails = postersRef.current[recipient.toLowerCase()];
+
+            if (!recipientDetails?.pubkey) {
+                throw new Error(`Recipient public key unavailable for ${recipient}`);
+            }
+
+            const [senderCiphertext, recipientCiphertext] = await encryptDirectMessage(
+                rawMessage,
+                recipientDetails.pubkey,
+            );
+
+            if (!message.length) {
+                message.push(senderCiphertext);
+            }
+            message.push(recipientCiphertext);
+        }
+
+        return message;
+    };
+
+    const copyMessageTxHandler = async (location: string, recipients: string[], replyToMessageId?: string) => {
         if (!nodeAvailable) {
             alert('Node unavailable, cannot message!');
             return;
@@ -1452,22 +1505,13 @@ function App() {
                 mediaType = [postMediaAttachment.file.type];
             }
 
-            const recipientDetails = postersRef.current[recipient.toLowerCase()];
-
-            if (!recipientDetails?.pubkey) {
-                alert('Recipient public key unavailable. Ask the recipient to publish a transaction first.');
-                copyTxTextElement!.innerText = savedInnerText;
-                copyTxHandlerEnabledRef.current = true;
-                return;
-            }
-
             // [participants, channelId, message, textPassword (AES-GCM encryption), replyToMessageId, media, mediaType, mediaPassword (AES-GCM encryption), tags]
-            const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), recipient.toLowerCase()], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
+            const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), ...recipients], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
             const rawMessageHash = keccak256(rawMessage);
 
             let message: string[];
             try {
-                message = await encryptDirectMessage(rawMessage, recipientDetails.pubkey);
+                message = await encryptMessageForRecipients(rawMessage, recipients);
             } catch (error) {
                 alert(`Unable to encrypt message: ${error instanceof Error ? error.message : 'unknown error'}`);
                 copyTxTextElement!.innerText = savedInnerText;
@@ -1500,7 +1544,7 @@ function App() {
         }
     };
 
-    const submitMessageHandler = async (location: string, recipient: string, replyToMessageId?: string, storeTextIpfs?: boolean, storeMediaIpfs?: boolean) => {
+    const submitMessageHandler = async (location: string, recipients: string[], replyToMessageId?: string, storeTextIpfs?: boolean, storeMediaIpfs?: boolean) => {
         if (!nodeAvailable) {
             alert('Node unavailable, cannot message!');
             return;
@@ -1581,20 +1625,13 @@ function App() {
             mediaType = [postMediaAttachment.file.type];
         }
 
-        const recipientDetails = postersRef.current[recipient.toLowerCase()];
-
-        if (!recipientDetails?.pubkey) {
-            alert('Recipient public key unavailable. Ask the recipient to publish a transaction first.');
-            return;
-        }
-
         // [participants, channelId, message, textPassword (AES-GCM encryption), replyToMessageId, media, mediaType, mediaPassword (AES-GCM encryption), tags]
-        const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), recipient.toLowerCase()], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
+        const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), ...recipients], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
         const rawMessageHash = keccak256(rawMessage);
 
         let message: string[];
         try {
-            message = await encryptDirectMessage(rawMessage, recipientDetails.pubkey);
+            message = await encryptMessageForRecipients(rawMessage, recipients);
         } catch (error) {
             alert(`Unable to encrypt message: ${error instanceof Error ? error.message : 'unknown error'}`);
             return;
@@ -1686,7 +1723,7 @@ function App() {
         setModalOpen('rpcMakePost');
     };
 
-    const handleOpenRpcSendMessageModal = (location: string, recipient: string, replyToMessageId?: string) => {
+    const handleOpenRpcSendMessageModal = (location: string, recipients: string[], replyToMessageId?: string) => {
         if (!nodeAvailable) {
             alert('Node unavailable, cannot message!');
             return;
@@ -1696,7 +1733,7 @@ function App() {
             return;
         }
 
-        modalRpcSendMessageRef.current = { location, recipient, replyToMessageId };
+        modalRpcSendMessageRef.current = { location, recipients, replyToMessageId };
         setModalOpen('rpcSendMessage');
     };
 
@@ -1706,7 +1743,8 @@ function App() {
         setModalOpen('expandImage');
     };
 
-    const handleSubmitPubKeyModal = (address: string) => {
+    const handleSubmitPubkeyModal = (e: MouseEventLocal, address: string) => {
+        e.stopPropagation();
         modalSubmitPubKeyRef.current = { address };
         setModalOpen('submitPubKey');
     };
@@ -1758,6 +1796,22 @@ function App() {
             setCredentialsInvalid('Invalid key or password');
             return;
         }
+    };
+
+    const restoreDefaultSettings = () => {
+        try {
+            resettableBrowserStorageKeys.forEach((key) => {
+                window.localStorage.removeItem(key);
+                window.sessionStorage.removeItem(key);
+            });
+        } catch {
+            // The sandboxed desktop frame may not expose browser storage.
+        }
+
+        // Reloading re-applies either the clean web defaults or the authoritative
+        // desktop bootstrap, without ever moving node or identity secrets into
+        // this renderer.
+        window.location.reload();
     };
 
     return (
@@ -2054,7 +2108,7 @@ function App() {
                             handleOpenRpcMakePostModal,
                             handleOpenRpcSendMessageModal,
                             handleExpandImageModal,
-                            handleSubmitPubKeyModal,
+                            handleSubmitPubkeyModal,
                             tipsRef,
                             setPostMediaAttachmentHandler,
                             postMediaAttachmentsRef,
@@ -2077,6 +2131,7 @@ function App() {
                             inputCredentialsApplied,
                             credentialsInvalid,
                             handleSetInputCredentialsApplied,
+                            restoreDefaultSettings,
                             zeroAddress,
                             latestConversationActivity,
                             postersAddress,
@@ -2102,7 +2157,7 @@ function App() {
                     {modalOpen === 'rpcMakePost' && <ModalRpcMakePostComponent modalRpcMakePostRef={modalRpcMakePostRef} submitPostHandler={submitPostHandler} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'rpcSendMessage' && <ModalRpcSendMessageComponent modalRpcSendMessageRef={modalRpcSendMessageRef} submitMessageHandler={submitMessageHandler} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'expandImage' && <ModalExpandImageComponent modalExpandImageRef={modalExpandImageRef} />}
-                    {modalOpen === 'submitPubKey' && <ModalSubmitPubKeyComponent modalSubmitPubKeyRef={modalSubmitPubKeyRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
+                    {modalOpen === 'submitPubKey' && <ModalSubmitPubKeyComponent modalSubmitPubkeyRef={modalSubmitPubKeyRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
                     <div className="text-center"><button className="h-7 w-15 my-1 px-2 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => setModalOpen('')}>Close</button></div>
                 </Modal>
             </div>

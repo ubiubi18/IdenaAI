@@ -5,6 +5,7 @@ const SOCIAL_RPC_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
 const SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES = 256 * 1024
 const SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES =
   SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES + 256
+const SOCIAL_CRYPTO_MAX_CIPHERTEXTS = 16
 const SOCIAL_CONTRACT_METHODS = new Set(['makePost', 'sendMessage', 'sendTip'])
 const SOCIAL_IDNA_SCALE = 10n ** 18n
 const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
@@ -91,6 +92,28 @@ function isBoundedBase64(value) {
   return (
     Math.floor((value.length * 3) / 4) <= SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES
   )
+}
+
+function getValidatedCiphertexts(payload) {
+  const ciphertexts = Array.isArray(payload.ciphertexts)
+    ? payload.ciphertexts
+    : [payload.senderCiphertext, payload.recipientCiphertext]
+
+  if (
+    ciphertexts.length < 2 ||
+    ciphertexts.length > SOCIAL_CRYPTO_MAX_CIPHERTEXTS ||
+    !ciphertexts.every(isBoundedBase64) ||
+    (Array.isArray(payload.ciphertexts) &&
+      ((payload.senderCiphertext !== undefined &&
+        payload.senderCiphertext !== ciphertexts[0]) ||
+        (payload.recipientCiphertext !== undefined &&
+          payload.recipientCiphertext !== ciphertexts[1]))) ||
+    estimatePayloadBytes(ciphertexts) > SOCIAL_RPC_MAX_PAYLOAD_BYTES
+  ) {
+    return null
+  }
+
+  return ciphertexts
 }
 
 function estimatePayloadBytes(value) {
@@ -278,8 +301,7 @@ export function validateSocialCryptoRequest(requestId, payload) {
   if (payload.operation === 'decrypt-message') {
     return isTxHash(payload.txHash) &&
       isMessageHash(payload.messageHash) &&
-      isBoundedBase64(payload.senderCiphertext) &&
-      isBoundedBase64(payload.recipientCiphertext)
+      getValidatedCiphertexts(payload)
       ? null
       : 'invalid_crypto_request'
   }

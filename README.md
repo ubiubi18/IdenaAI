@@ -201,13 +201,13 @@ npm start
 directory. That keeps first-run experiments separate from your normal Idena app
 profile.
 
-## Direct Messages In Embedded idena.social
+## Encrypted Messages In Embedded idena.social
 
-The embedded `idena.social` view can send and read encrypted direct messages
+The embedded `idena.social` view can send and read encrypted direct and group messages
 through the identity connected to the desktop node. Open `idena.social`, choose
-`Messages`, click `Change`, enter the recipient's Idena address, and click
-`Apply`. Once the recipient and public key are resolved, enter the message and
-click `Send` to review and submit the on-chain transaction.
+`Messages`, enter an Idena address, and click `Add Recipient`. Add more recipients
+for a group conversation. Once every recipient and public key is resolved, enter
+the message and click `Send` to review and submit the on-chain transaction.
 
 The recipient must have a discoverable public key, normally from identity data
 or a previous signed transaction. The UI offers a manual public-key fallback

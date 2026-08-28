@@ -11,7 +11,11 @@ const navigationItems = [
 ];
 
 const routeIsActive = (pathname: string, path: string) => (
-    path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(`${path}/`)
+    path === '/'
+        ? pathname === '/'
+        : path === '/messages'
+            ? pathname === path || pathname.startsWith('/conversation/')
+            : pathname === path || pathname.startsWith(`${path}/`)
 );
 
 function DesktopNavigation({ messagesReady }: DesktopNavigationProps) {

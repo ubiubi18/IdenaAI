@@ -103,6 +103,7 @@ export type Message = {
     messageId: string,
     sender: string,
     participants: string[], // includes sender
+    conversationKey: string,
     channelId: string,
     message?: string,
     replyToMessageId: string,
@@ -461,6 +462,51 @@ export const getRawTxWithIdenaIndexerApi = async (indexerApiUrl: string, txHash:
     }
 };
 
+export const getAddressWithIndexerApi = async (indexerApiUrl: string, posterAddress: string) => {
+    try {
+        const response = await fetch(`${indexerApiUrl}/api/Address/${posterAddress}`);
+
+        if (!response.ok) {
+            throw new Error(`Response status: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: unknown) {
+        console.error(error);
+        return { error };
+    }
+};
+
+export const getIdentityWithIndexerApi = async (indexerApiUrl: string, posterAddress: string) => {
+    try {
+        const response = await fetch(`${indexerApiUrl}/api/Identity/${posterAddress}`);
+
+        if (!response.ok) {
+            throw new Error(`Response status: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: unknown) {
+        console.error(error);
+        return { error };
+    }
+};
+
+export const getIdentityAgeWithIndexerApi = async (indexerApiUrl: string, posterAddress: string) => {
+    try {
+        const response = await fetch(`${indexerApiUrl}/api/Identity/${posterAddress}/Age`);
+
+        if (!response.ok) {
+            throw new Error(`Response status: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: unknown) {
+        console.error(error);
+        return { error };
+    }
+};
+
 export const getChildPostIds = (parentId: string, postsTreeRef: Record<string, string>) => {
     const childPostIds = [];
     let childPostId;
@@ -524,6 +570,8 @@ export const getNewPosterAndPost = async (
     postsRef: React.RefObject<Record<string, Post>>,
     postersRef: React.RefObject<Record<string, Poster>>,
     postersPromised: string[],
+    findPostsWithRef: React.RefObject<string>,
+    indexerApiUrlRef: React.RefObject<string>,
 ) => {
     const { txHash, eventArgs, eventArgs2nd, timestamp, contractAddress } = transaction;
     const { preV3, preV9, postIdPrefix } = getContractEra(timestamp, contractAddress);
@@ -601,7 +649,11 @@ export const getNewPosterAndPost = async (
 
     if (!postersRef.current[poster] && !postersPromised.includes(poster)) {
         postersPromised.push(poster);
-        posterPromise = getPoster(rpcClient, poster) as Promise<Poster>;
+        posterPromise = (
+            findPostsWithRef.current === 'rpc'
+                ? getPoster(rpcClient, poster)
+                : getPosterWithIndexerApi(indexerApiUrlRef.current, poster)
+        ) as Promise<Poster>;
     }
 
     return { newPost, posterPromise, mediaPromise, messagePromise };
@@ -749,6 +801,8 @@ export const processTip = async (
     postersRef: React.RefObject<Record<string, Poster>>,
     isRecurseForward: boolean,
     postersPromised: string[],
+    findPostsWithRef: React.RefObject<string>,
+    indexerApiUrlRef: React.RefObject<string>,
 ) => {
     const { txHash, eventArgs, eventArgs2nd, timestamp, contractAddress } = transaction;
     const { preV9, preV11, postIdPrefix } = getContractEra(timestamp, contractAddress);
@@ -795,7 +849,11 @@ export const processTip = async (
 
     if (!postersRef.current[tipper] && !postersPromised.includes(tipper)) {
         postersPromised.push(tipper);
-        posterPromise = getPoster(rpcClient, tipper) as Promise<Poster>;
+        posterPromise = (
+            findPostsWithRef.current === 'rpc'
+                ? getPoster(rpcClient, tipper)
+                : getPosterWithIndexerApi(indexerApiUrlRef.current, tipper)
+        ) as Promise<Poster>;
     }
 
     return { postId, newTip, updatedPostTips, posterPromise };
@@ -817,6 +875,25 @@ export const getPoster = async (rpcClient: RpcClient, posterAddress: string, ski
     return { address, stake, age, pubkey, state };
 };
 
+export const getPosterWithIndexerApi = async (indexerApiUrl: string, posterAddress: string) => {
+    const [addressResult, identityResult, ageResult] = await Promise.all([
+        getAddressWithIndexerApi(indexerApiUrl, posterAddress),
+        getIdentityWithIndexerApi(indexerApiUrl, posterAddress),
+        getIdentityAgeWithIndexerApi(indexerApiUrl, posterAddress),
+    ]);
+
+    if (addressResult.error) {
+        return;
+    }
+
+    const { address, stake } = addressResult.result;
+    const { state } = identityResult.error ? { state: 'Not validated' } : identityResult.result;
+    const age = ageResult.error ? 0 : ageResult.result;
+    const pubkey = await getPubKeyWithIdenaIndexerApi(indexerApiUrl, posterAddress) ?? '';
+
+    return { address: address.toLowerCase(), stake, age, pubkey, state };
+};
+
 export const processMessage = async (
     message: EventTransaction,
     encryptedPrivateKey: string,
@@ -827,12 +904,19 @@ export const processMessage = async (
     postersRef: React.RefObject<Record<string, Poster>>,
     rpcClientRef: React.RefObject<((method: string, params: any[], skipStateUpdate?: boolean) => Promise<any>) | undefined>,
     postersPromised: string[],
+    findPostsWithRef: React.RefObject<string>,
+    indexerApiUrlRef: React.RefObject<string>,
     desktopDecryptMessage?: (payload: {
         txHash: string;
         messageHash: string;
         senderCiphertext: string;
         recipientCiphertext: string;
-    }) => Promise<{plaintext: string, role: 'sender' | 'recipient' | 'both'}>,
+        ciphertexts: string[];
+    }) => Promise<{
+        plaintext: string;
+        role: 'sender' | 'recipient' | 'both';
+        ciphertextIndexes?: number[];
+    }>,
 ) => {
     const { txHash, eventArgs, eventArgs2nd, timestamp } = message;
 
@@ -861,71 +945,110 @@ export const processMessage = async (
     }
 
     const messageEvent = messageEventRaw.split(',');
-    const senderCiphertext = messageEvent[0];
-    const recipientCiphertext = messageEvent[1];
 
-    let iAmSender = sender === postersAddress;
-    let iAmRecipient = false;
+    if (
+        messageEvent.length < 2 ||
+        messageEvent.length > 16 ||
+        messageEvent.some(ciphertext => !ciphertext)
+    ) {
+        return { continued: true };
+    }
+
+    const iAmSender = sender === postersAddress;
     let messageDecoded: string | undefined;
+    let decryptSuccesses: number[] = [];
 
     if (desktopDecryptMessage) {
         try {
             const result = await desktopDecryptMessage({
                 txHash,
                 messageHash: messageEventHash,
-                senderCiphertext,
-                recipientCiphertext,
+                senderCiphertext: messageEvent[0],
+                recipientCiphertext: messageEvent[1],
+                ciphertexts: messageEvent,
             });
+
             messageDecoded = result.plaintext;
-            iAmSender = result.role === 'sender' || result.role === 'both';
-            iAmRecipient = result.role === 'recipient' || result.role === 'both';
+
+            if (
+                Array.isArray(result.ciphertextIndexes) &&
+                result.ciphertextIndexes.length > 0 &&
+                result.ciphertextIndexes.every(index =>
+                    Number.isInteger(index) && index >= 0 && index < messageEvent.length
+                ) &&
+                new Set(result.ciphertextIndexes).size === result.ciphertextIndexes.length
+            ) {
+                decryptSuccesses = [...result.ciphertextIndexes].sort((a, b) => a - b);
+            } else if (messageEvent.length === 2) {
+                decryptSuccesses = result.role === 'both'
+                    ? [0, 1]
+                    : [result.role === 'sender' ? 0 : 1];
+            } else {
+                return { continued: true };
+            }
         } catch {
             return { continued: true };
         }
     } else {
-        // @ts-ignore: Uint8Array.fromBase64 not recognized yet
-        const sendersMessageEncrypted = Uint8Array.fromBase64(senderCiphertext);
-        // @ts-ignore: Uint8Array.fromBase64 not recognized yet
-        const recipientsMessageEncrypted = Uint8Array.fromBase64(recipientCiphertext);
         const keyData = new Uint8Array(sha3_256.array(password));
         const myPrivateKey = await decryptAESGCM(encryptedPrivateKey, keyData);
         const myPrivateKeyBytes = hexToUint8Array(myPrivateKey);
 
-        if (iAmSender) {
+        for (let index = 0; index < messageEvent.length; index++) {
             try {
-                const myMessageDecrypted = await decrypt(myPrivateKeyBytes, sendersMessageEncrypted);
-                messageDecoded = new TextDecoder().decode(myMessageDecrypted);
+                // @ts-ignore: Uint8Array.fromBase64 not recognized yet
+                const encryptedMessage = Uint8Array.fromBase64(messageEvent[index]);
+                const decryptedMessage = await decrypt(myPrivateKeyBytes, encryptedMessage);
+                const decodedMessage = new TextDecoder().decode(decryptedMessage);
 
-                const rawMessageHash = keccak256(messageDecoded);
-
-                if (rawMessageHash !== messageEventHash) {
+                if (keccak256(decodedMessage) !== messageEventHash) {
                     return { continued: true };
                 }
-            } catch (error) {
-                return { continued: true };
-            }
-        }
 
-        try {
-            const messageDecrypted = await decrypt(myPrivateKeyBytes, recipientsMessageEncrypted);
-            iAmRecipient = true;
-
-            if (!iAmSender) {
-                messageDecoded = new TextDecoder().decode(messageDecrypted);
-                const rawMessageHash = keccak256(messageDecoded);
-
-                if (rawMessageHash !== messageEventHash) {
+                decryptSuccesses.push(index);
+                if (decryptSuccesses.length > 1 && messageEvent.length > 2) {
                     return { continued: true };
                 }
-            }
-        } catch (error) {
-            if (!iAmSender) {
-                return { continued: true };
+                messageDecoded = decodedMessage;
+            } catch {
+                if (index === 0 && iAmSender) {
+                    return { continued: true };
+                }
             }
         }
     }
 
-    const [ participants, channelId, inputText, textPassword, replyToMessageId, mediaArray, mediaTypeArray, mediaPassword, tags ] = JSON.parse(messageDecoded!);
+    if (!decryptSuccesses.length || !messageDecoded) {
+        return { continued: true };
+    }
+
+    let decodedPayload: unknown;
+    try {
+        decodedPayload = JSON.parse(messageDecoded);
+    } catch {
+        return { continued: true };
+    }
+
+    if (!Array.isArray(decodedPayload)) {
+        return { continued: true };
+    }
+
+    const [ participantsRaw, channelId, inputText, textPassword, replyToMessageId, mediaArray, mediaTypeArray, mediaPassword, tags ] = decodedPayload;
+
+    if (
+        !Array.isArray(participantsRaw) ||
+        !participantsRaw.every((item) => typeof item === 'string') ||
+        typeof channelId !== 'string' ||
+        typeof inputText !== 'string' ||
+        typeof textPassword !== 'string' ||
+        typeof replyToMessageId !== 'string' ||
+        !Array.isArray(mediaArray) ||
+        !Array.isArray(mediaTypeArray) ||
+        typeof mediaPassword !== 'string' ||
+        !Array.isArray(tags)
+    ) {
+        return { continued: true };
+    }
 
     const media = mediaArray[0];
     const mediaType = mediaTypeArray[0];
@@ -944,39 +1067,66 @@ export const processMessage = async (
         return { continued: true };
     }
 
-    if (replyToMessageId && replyToMessageId >= newMessageId) {
+    if (
+        replyToMessageId &&
+        (!/^\d+$/.test(replyToMessageId) || parseInt(replyToMessageId) >= parseInt(newMessageId))
+    ) {
         return { continued: true };
     }
 
-    if (participants.length !== 2) {
+    if (participantsRaw.length !== messageEvent.length) {
         return { continued: true };
     }
 
-    if (participants[0] !== sender) {
+    if (participantsRaw[0] !== sender) {
         return { continued: true };
     }
 
-    if (iAmRecipient && participants[1] !== postersAddress.toLowerCase()) {
+    if (participantsRaw.length > 2 && new Set(participantsRaw).size !== participantsRaw.length) {
         return { continued: true };
     }
 
-    if (!isValidLowerCaseAddress(participants[1])) {
+    for (let index = 0; index < participantsRaw.length; index++) {
+        const participant = participantsRaw[index];
+
+        if (!isValidLowerCaseAddress(participant)) {
+            return { continued: true };
+        }
+    }
+
+    const selfParticipants = participantsRaw.filter((participant: string) => participant === postersAddress.toLowerCase());
+    if (selfParticipants.length !== decryptSuccesses.length) {
         return { continued: true };
     }
 
-    for (let index = 0; index < participants.length; index++) {
-        const participant = participants[index];
+    for (let index = 0; index < decryptSuccesses.length; index++) {
+        const jindex = decryptSuccesses[index];
+
+        if (participantsRaw[jindex] !== postersAddress.toLowerCase()) {
+            return { continued: true };
+        }
+    }
+
+    for (let index = 0; index < participantsRaw.length; index++) {
+        const participant = participantsRaw[index];
 
         const existingPoster = postersRef.current[participant];
 
         if (!existingPoster) {
-            const poster = await getPoster(rpcClientRef.current!, participant, true);
+            const poster = await (
+                findPostsWithRef.current === 'rpc'
+                    ? getPoster(rpcClientRef.current!, participant, true)
+                    : getPosterWithIndexerApi(indexerApiUrlRef.current, participant)
+            );
 
             if (poster) {
                 postersRef.current[participant] = poster;
             }
         }
     }
+
+    const participants = participantsRaw.map((item: string) => item.toLowerCase()).sort();
+    const conversationKey = keccak256(participants.join('-'));
 
     const sendersDetails_atTimeOfMessage = {
         stake: eventArgs2nd[1] === '0x' ? 0 : Number(dna2num(parseInt(eventArgs2nd[1], 16)).toFixed(0)),
@@ -993,6 +1143,7 @@ export const processMessage = async (
         messageId: newMessageId,
         sender,
         participants,
+        conversationKey,
         channelId,
         replyToMessageId,
         tags,
@@ -1005,7 +1156,11 @@ export const processMessage = async (
 
     if (!postersRef.current[sender] && !postersPromised.includes(sender)) {
         postersPromised.push(sender);
-        posterPromise = getPoster(rpcClientRef.current!, sender) as Promise<Poster>;
+        posterPromise = (
+            findPostsWithRef.current === 'rpc'
+                ? getPoster(rpcClientRef.current!, sender)
+                : getPosterWithIndexerApi(indexerApiUrlRef.current, sender)
+        ) as Promise<Poster>;
     }
 
     return { newMessage, posterPromise, mediaPromise, messagePromise };
@@ -1367,6 +1522,9 @@ export const resolveNewPosters = async (posterPromises: any[], postersRef: any) 
     let newPosters = {};
     for (let index = 0; index < postersResolved.length; index++) {
         const posterResolved = postersResolved[index];
+        if (!posterResolved?.address) {
+            continue;
+        }
         newPosters = { ...newPosters, [posterResolved.address]: posterResolved };
     }
 
@@ -1485,3 +1643,8 @@ export const getPubKeyWithRpc = async (rpcClient: RpcClient, address: string) =>
 
     return pubKey;
 };
+
+// Keep the v12.4 public API spelling while preserving compatibility with the
+// existing IdenaAI callers that use the historical PubKey form.
+export const getPubkeyWithIdenaIndexerApi = getPubKeyWithIdenaIndexerApi;
+export const getPubkeyWithRpc = getPubKeyWithRpc;

@@ -14,6 +14,10 @@ export function getDisplayAddressShort(address: string) {
     return `${address.slice(0, 5)}...${address.slice(-3)}`;
 }
 
+export function getDisplayAddressVeryShort(address: string) {
+    return `${address.slice(0, 4)}...${address.slice(-2)}`;
+}
+
 export function getDisplayDateTime(timestamp: number) {
     const datePost = new Date(timestamp * 1000);
     const dateToday = new Date();
@@ -371,7 +375,7 @@ export function decodeBlockBodyTransactions(blockBodyHex: string) {
         .map((field) => Transaction.fromBytes(field.bytes!));
 }
 
-export function extractSenderInfoFromRawTx(rawTx: string): { address?: string; pubKey?: string; error?: unknown } {
+export function extractSenderInfoFromRawTx(rawTx: string): { address?: string; pubkey?: string; pubKey?: string; error?: unknown } {
     try {
         const fields = readProtoFields(hexToUint8Array(rawTx));
         const dataFields = fields.filter((field) => field.fieldNumber === 1 && field.wireType === 2 && field.bytes);
@@ -393,7 +397,8 @@ export function extractSenderInfoFromRawTx(rawTx: string): { address?: string; p
         );
         const publicKey = secp256k1.Point.fromBytes(recovered).toBytes(false);
 
-        return { address: publicKeyToAddress(publicKey), pubKey: toHexString(publicKey, false) };
+        const pubkey = toHexString(publicKey, false);
+        return { address: publicKeyToAddress(publicKey), pubkey, pubKey: pubkey };
     } catch (error) {
         return { error };
     }

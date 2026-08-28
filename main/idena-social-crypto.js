@@ -11,6 +11,7 @@ const SOCIAL_CONTRACT_ADDRESS = '0x840e092e31e9656ff15e541505039ed77585338e'
 const SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES = 256 * 1024
 const SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES =
   SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES + 256
+const SOCIAL_CRYPTO_MAX_CIPHERTEXTS = 16
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -37,6 +38,11 @@ function normalizeHex(value) {
 function isPublicKey(value) {
   const hex = normalizeHex(value)
   return hex.length === 130 && hex.startsWith('04') && /^[0-9a-f]+$/.test(hex)
+}
+
+function getMessageCiphertexts(payload) {
+  if (Array.isArray(payload.ciphertexts)) return payload.ciphertexts
+  return [payload.senderCiphertext, payload.recipientCiphertext]
 }
 
 function decodeBase64(value, maxBytes) {
@@ -112,28 +118,32 @@ function validateSocialCryptoRequest(payload = {}) {
     return null
   }
 
+  const ciphertexts = getMessageCiphertexts(payload)
   if (
     !isTxHash(payload.txHash) ||
     !isMessageHash(payload.messageHash) ||
-    typeof payload.senderCiphertext !== 'string' ||
-    typeof payload.recipientCiphertext !== 'string'
+    ciphertexts.length < 2 ||
+    ciphertexts.length > SOCIAL_CRYPTO_MAX_CIPHERTEXTS ||
+    (Array.isArray(payload.ciphertexts) &&
+      ((payload.senderCiphertext !== undefined &&
+        payload.senderCiphertext !== ciphertexts[0]) ||
+        (payload.recipientCiphertext !== undefined &&
+          payload.recipientCiphertext !== ciphertexts[1])))
   ) {
     return 'invalid_decrypt_request'
   }
 
+  const decodedCiphertexts = []
   try {
-    const sender = decodeBase64(
-      payload.senderCiphertext,
-      SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES
-    )
-    const recipient = decodeBase64(
-      payload.recipientCiphertext,
-      SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES
-    )
-    sender.fill(0)
-    recipient.fill(0)
+    for (const ciphertext of ciphertexts) {
+      decodedCiphertexts.push(
+        decodeBase64(ciphertext, SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES)
+      )
+    }
   } catch {
     return 'invalid_decrypt_request'
+  } finally {
+    decodedCiphertexts.forEach((ciphertext) => ciphertext.fill(0))
   }
 
   return null
@@ -222,7 +232,7 @@ async function withNodePrivateKey(rpcCall, expectedAddress, operation) {
   }
 }
 
-function findVerifiedMessageEvent(receipt, payload) {
+function findVerifiedMessageEvent(receipt, payload, ciphertexts) {
   if (
     !receipt ||
     receipt.success !== true ||
@@ -233,7 +243,7 @@ function findVerifiedMessageEvent(receipt, payload) {
     throw new Error('unverified_message_transaction')
   }
 
-  const pair = `${payload.senderCiphertext},${payload.recipientCiphertext}`
+  const serializedCiphertexts = ciphertexts.join(',')
   const messageHash = payload.messageHash.toLowerCase()
   const event = Array.isArray(receipt.events)
     ? receipt.events.find(
@@ -243,7 +253,9 @@ function findVerifiedMessageEvent(receipt, payload) {
           String(candidate.contract || '').toLowerCase() ===
             SOCIAL_CONTRACT_ADDRESS &&
           Array.isArray(candidate.args) &&
-          candidate.args.some((arg) => eventArgText(arg) === pair) &&
+          candidate.args.some(
+            (arg) => eventArgText(arg) === serializedCiphertexts
+          ) &&
           candidate.args.some(
             (arg) => eventArgText(arg).toLowerCase() === messageHash
           ) &&
@@ -255,7 +267,14 @@ function findVerifiedMessageEvent(receipt, payload) {
   return event
 }
 
-function parseVerifiedPlaintext(plaintext, event, address, messageHash) {
+function parseVerifiedPlaintext(
+  plaintext,
+  event,
+  address,
+  messageHash,
+  ciphertextCount,
+  ciphertextIndexes
+) {
   if (keccak256(plaintext).toLowerCase() !== messageHash.toLowerCase()) {
     throw new Error('message_hash_mismatch')
   }
@@ -270,7 +289,12 @@ function parseVerifiedPlaintext(plaintext, event, address, messageHash) {
   const participants = Array.isArray(parsed) ? parsed[0] : null
   if (
     !Array.isArray(participants) ||
-    participants.length !== 2 ||
+    participants.length !== ciphertextCount ||
+    participants.length < 2 ||
+    participants.length > SOCIAL_CRYPTO_MAX_CIPHERTEXTS ||
+    (participants.length > 2 &&
+      new Set(participants.map((item) => String(item).toLowerCase())).size !==
+        participants.length) ||
     !participants.every(isIdenaAddress)
   ) {
     throw new Error('invalid_message_participants')
@@ -288,10 +312,31 @@ function parseVerifiedPlaintext(plaintext, event, address, messageHash) {
     throw new Error('message_participant_mismatch')
   }
 
-  let role = 'recipient'
-  if (normalizedParticipants[0] === normalizedAddress) {
-    role = normalizedParticipants[1] === normalizedAddress ? 'both' : 'sender'
+  const participantIndexes = normalizedParticipants.reduce(
+    (indexes, participant, index) => {
+      if (participant === normalizedAddress) indexes.push(index)
+      return indexes
+    },
+    []
+  )
+  const normalizedCiphertextIndexes = [...ciphertextIndexes].sort(
+    (left, right) => left - right
+  )
+
+  if (
+    participantIndexes.length !== normalizedCiphertextIndexes.length ||
+    participantIndexes.some(
+      (participantIndex, index) =>
+        participantIndex !== normalizedCiphertextIndexes[index]
+    )
+  ) {
+    throw new Error('message_ciphertext_participant_mismatch')
   }
+
+  const isSender = participantIndexes.includes(0)
+  const isRecipient = participantIndexes.some((index) => index > 0)
+  let role = 'recipient'
+  if (isSender) role = isRecipient ? 'both' : 'sender'
 
   return {role}
 }
@@ -350,53 +395,77 @@ function createIdenaSocialCryptoService({rpcCall}) {
         await rpcCall({method: 'bcn_txReceipt', params: [payload.txHash]}),
         'message_receipt_unavailable'
       )
-      const event = findVerifiedMessageEvent(receipt, payload)
+      const ciphertexts = getMessageCiphertexts(payload)
+      const event = findVerifiedMessageEvent(receipt, payload, ciphertexts)
 
       return await withNodePrivateKey(
         rpcCall,
         payload.address,
         async (privateKey) => {
-          const encryptedMessages = [
-            decodeBase64(
-              payload.senderCiphertext,
-              SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES
-            ),
-            decodeBase64(
-              payload.recipientCiphertext,
-              SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES
-            ),
-          ]
+          const encryptedMessages = ciphertexts.map((ciphertext) =>
+            decodeBase64(ciphertext, SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES)
+          )
           let plaintextBytes
+          const ciphertextIndexes = []
 
           try {
-            for (const encryptedMessage of encryptedMessages) {
+            for (let index = 0; index < encryptedMessages.length; index += 1) {
+              let candidatePlaintext
               try {
-                plaintextBytes = Buffer.from(
+                candidatePlaintext = Buffer.from(
                   decrypt(
                     Uint8Array.from(privateKey),
-                    Uint8Array.from(encryptedMessage)
+                    Uint8Array.from(encryptedMessages[index])
                   )
                 )
-                break
               } catch {
-                // Exactly one side normally decrypts for this identity.
+                candidatePlaintext = null
+              }
+
+              if (candidatePlaintext) {
+                try {
+                  if (
+                    candidatePlaintext.length >
+                    SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES
+                  ) {
+                    throw new Error('message_plaintext_too_large')
+                  }
+                  if (
+                    plaintextBytes &&
+                    !plaintextBytes.equals(candidatePlaintext)
+                  ) {
+                    throw new Error('message_ciphertext_plaintext_mismatch')
+                  }
+
+                  if (!plaintextBytes) {
+                    plaintextBytes = candidatePlaintext
+                    candidatePlaintext = null
+                  }
+                  ciphertextIndexes.push(index)
+                } finally {
+                  if (candidatePlaintext) candidatePlaintext.fill(0)
+                }
               }
             }
 
             if (!plaintextBytes) throw new Error('message_not_for_identity')
-            if (plaintextBytes.length > SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES) {
-              throw new Error('message_plaintext_too_large')
-            }
 
             const plaintext = plaintextBytes.toString('utf8')
             const {role} = parseVerifiedPlaintext(
               plaintext,
               event,
               payload.address,
-              payload.messageHash
+              payload.messageHash,
+              ciphertexts.length,
+              ciphertextIndexes
             )
             return {
-              result: {plaintext, role, version: SOCIAL_CRYPTO_VERSION},
+              result: {
+                plaintext,
+                role,
+                ciphertextIndexes,
+                version: SOCIAL_CRYPTO_VERSION,
+              },
             }
           } finally {
             encryptedMessages.forEach((item) => item.fill(0))
@@ -418,6 +487,7 @@ function createIdenaSocialCryptoService({rpcCall}) {
 module.exports = {
   SOCIAL_CONTRACT_ADDRESS,
   SOCIAL_CRYPTO_MAX_CIPHERTEXT_BYTES,
+  SOCIAL_CRYPTO_MAX_CIPHERTEXTS,
   SOCIAL_CRYPTO_MAX_PLAINTEXT_BYTES,
   SOCIAL_CRYPTO_VERSION,
   createIdenaSocialCryptoService,
