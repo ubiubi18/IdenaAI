@@ -201,6 +201,34 @@ npm start
 directory. That keeps first-run experiments separate from your normal Idena app
 profile.
 
+### Nix / NixOS
+
+The repository includes a locked Linux flake for `x86_64-linux` and
+`aarch64-linux`. It builds the pinned Idena node, idena.social UI, Node 24
+dependencies, Electron 43 runtime, and IdenaAI renderer without downloading
+tools during the build:
+
+```bash
+nix run .#idenaai
+nix build .#idena-go
+nix build .#idena-social-ui
+nix develop
+```
+
+The default package is a guarded source runtime, not an approved signed
+installer. It serves the prebuilt renderer on a random loopback-only port and
+keeps the repository's source-runtime safety check: if real validation
+session-auto is already armed, startup is refused unless the operator makes the
+same explicit override required by the source development runtime.
+
+The flake source contains tracked repository files only, and all tracked dotenv
+files are removed before the package is built. Runtime profiles, node data,
+identity keys, provider credentials, and logs stay outside the Nix store under
+the normal Linux IdenaAI profile (`$XDG_CONFIG_HOME/IdenaAI`, usually
+`~/.config/IdenaAI`). Do not put credentials in `flake.nix`, Nix configuration,
+the Git tree, or command-line arguments. Override `IDENA_DESKTOP_USER_DATA_DIR`
+when a separate test profile is required.
+
 ## Encrypted Messages In Embedded idena.social
 
 The embedded `idena.social` view can send and read encrypted direct and group messages
