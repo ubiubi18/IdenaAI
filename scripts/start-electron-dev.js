@@ -6,6 +6,8 @@ const fs = require('fs')
 const net = require('net')
 const path = require('path')
 const {spawn} = require('child_process')
+// eslint-disable-next-line import/no-extraneous-dependencies
+const ELECTRON_BIN = require('electron')
 const {
   DEFAULT_DEV_USER_DATA_NAME,
   assertDevRuntimeCanStart,
@@ -13,8 +15,6 @@ const {
 
 const ROOT = path.join(__dirname, '..')
 const NEXT_BIN = path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next')
-// eslint-disable-next-line import/no-extraneous-dependencies
-const ELECTRON_BIN = require('electron')
 
 const DEV_PORT = Number.parseInt(
   process.env.IDENA_DESKTOP_RENDERER_PORT || '8000',
