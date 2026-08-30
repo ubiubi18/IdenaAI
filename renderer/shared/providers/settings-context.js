@@ -98,6 +98,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
 }
 
 const OPENAI_SHORT_SESSION_FAST_MODELS = [
+  'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',
   'gpt-5.4',
