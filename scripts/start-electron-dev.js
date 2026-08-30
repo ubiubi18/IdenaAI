@@ -6,6 +6,10 @@ const fs = require('fs')
 const net = require('net')
 const path = require('path')
 const {spawn} = require('child_process')
+const {
+  DEFAULT_DEV_USER_DATA_NAME,
+  assertDevRuntimeCanStart,
+} = require('./runtime-safety')
 
 const ROOT = path.join(__dirname, '..')
 const NEXT_BIN = path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next')
@@ -21,7 +25,6 @@ const DEV_SERVER_URL = `http://${DEV_HOST}:${DEV_PORT}`
 const RENDERER_ROUTE_TIMEOUT_MS = 300000
 const RENDERER_PROBE_TIMEOUT_MS = 300000
 const POLL_INTERVAL_MS = 1000
-const DEFAULT_DEV_USER_DATA_NAME = 'IdenaAIDev'
 const DEFAULT_RENDERER_WARMUP_ROUTES = ['/home']
 const RENDERER_ROUTE_PATTERN = /^\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i
 const APP_USER_DATA_NAME =
@@ -29,7 +32,6 @@ const APP_USER_DATA_NAME =
 const WORKSPACE_RUNTIME_DIR =
   process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
   path.join(path.dirname(ROOT), 'IdenaAI-runtime')
-const ALLOW_DEV_SESSION_AUTO_ENV = 'IDENA_DESKTOP_ALLOW_DEV_SESSION_AUTO'
 const PRESERVE_RENDERER_CACHE_ENV = 'IDENA_DESKTOP_PRESERVE_RENDERER_DEV_CACHE'
 const RENDERER_WARMUP_ROUTES_ENV = 'IDENA_DESKTOP_RENDERER_WARMUP_ROUTES'
 
@@ -102,61 +104,6 @@ function resolveRendererWarmupRoutes(env = process.env) {
   })
 
   return uniqueRoutes
-}
-
-function readJsonIfExists(filePath) {
-  try {
-    if (!fs.existsSync(filePath)) {
-      return null
-    }
-
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'))
-  } catch (error) {
-    throw new Error(`Unable to read ${filePath}: ${error.message}`)
-  }
-}
-
-function isRehearsalNodeSettings(settings = {}) {
-  return Boolean(
-    settings &&
-      settings.useExternalNode &&
-      (settings.ephemeralExternalNodeConnected === true ||
-        settings.externalNodeLabel === 'Validation rehearsal node')
-  )
-}
-
-function isRealSessionAutoArmed(settings = {}) {
-  const aiSolver = settings && settings.aiSolver
-  return Boolean(
-    aiSolver &&
-      aiSolver.enabled === true &&
-      String(aiSolver.mode || '').trim() === 'session-auto' &&
-      !isRehearsalNodeSettings(settings)
-  )
-}
-
-function assertDevRuntimeCanStart(env) {
-  if (isTruthyEnv(env[ALLOW_DEV_SESSION_AUTO_ENV])) {
-    return
-  }
-
-  const settingsPath = path.join(
-    env.IDENA_DESKTOP_USER_DATA_DIR,
-    'settings.json'
-  )
-  const settings = readJsonIfExists(settingsPath)
-
-  if (!isRealSessionAutoArmed(settings)) {
-    return
-  }
-
-  throw new Error(
-    [
-      `Refusing to start the source dev runtime because real validation session-auto is armed in ${settingsPath}.`,
-      `Use the packaged IdenaAI app for real validation, switch to a clean dev profile with IDENA_DESKTOP_APP_USER_DATA_NAME=${DEFAULT_DEV_USER_DATA_NAME}, or disable session-auto in that profile before running npm start.`,
-      `For deliberate local testing only, set ${ALLOW_DEV_SESSION_AUTO_ENV}=1.`,
-    ].join(' ')
-  )
 }
 
 function assertRendererPortFree() {
@@ -505,6 +452,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertDevRuntimeCanStart,
   isRendererReady,
   resolveRendererDevOutputPaths,
   resolveRendererWarmupRoutes,
