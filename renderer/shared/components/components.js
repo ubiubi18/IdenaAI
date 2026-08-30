@@ -1,6 +1,7 @@
 /* eslint-disable react/display-name */
 /* eslint-disable react/prop-types */
 import React, {useMemo} from 'react'
+import {keyframes} from '@emotion/react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import ReactDOM from 'react-dom'
 import NextLink from 'next/link'
@@ -46,7 +47,6 @@ import {
   LinkBox,
   LinkOverlay,
   HStack,
-  keyframes,
   Skeleton as ChakraSkeleton,
   Center,
   MenuButton,

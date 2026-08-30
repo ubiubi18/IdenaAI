@@ -91,7 +91,8 @@ const PROBABILITY_ENSEMBLE_FALLBACK_RESERVE_MS = 4500
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
 const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
-  // OpenAI public API pricing checked on 2026-05-14.
+  // GPT-5.6 Sol checked on 2026-08-30; earlier OpenAI entries on 2026-05-14.
+  'gpt-5.6-sol': {input: 4, output: 20},
   'gpt-5.5': {input: 5, output: 30},
   // gpt-5.5-mini is currently resolved through the configured 5.4-mini fallback.
   'gpt-5.5-mini': {input: 0.75, output: 4.5},
