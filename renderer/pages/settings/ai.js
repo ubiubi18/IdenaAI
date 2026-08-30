@@ -157,6 +157,7 @@ const HOSTED_QWEN_INFERENCE_LINKS = [
 const MODEL_PRESETS = {
   'local-ai': [],
   openai: [
+    'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
     'gpt-5.4',
@@ -171,6 +172,7 @@ const MODEL_PRESETS = {
     'o4-mini',
   ],
   'openai-compatible': [
+    'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
     'gpt-5.4',
@@ -209,6 +211,7 @@ const MODEL_PRESETS = {
 }
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
+  'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',
   'gpt-5.4',

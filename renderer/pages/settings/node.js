@@ -116,6 +116,7 @@ const REHEARSAL_AI_DEFAULT_MODELS = {
 
 const REHEARSAL_AI_MODEL_PRESETS = {
   openai: [
+    'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
     'gpt-5.4',
@@ -152,6 +153,7 @@ const REHEARSAL_AI_MODEL_PRESETS = {
   ],
   moonshot: ['kimi-k2.6'],
   'openai-compatible': [
+    'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
     'gpt-5.4',

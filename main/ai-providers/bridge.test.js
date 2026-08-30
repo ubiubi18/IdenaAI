@@ -637,7 +637,7 @@ describe('createAiProviderBridge', () => {
 
     const result = await bridge.reviewValidationReports({
       provider: 'openai',
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.6-sol',
       benchmarkProfile: 'custom',
       requestTimeoutMs: 1000,
       maxRetries: 0,
@@ -677,10 +677,10 @@ describe('createAiProviderBridge', () => {
       approved: 1,
       reported: 1,
     })
-    expect(result.results[0].costs.estimatedUsd).toBeCloseTo(0.0000324, 10)
-    expect(result.results[0].costs.actualUsd).toBeCloseTo(0.0000324, 10)
-    expect(result.summary.costs.estimatedUsd).toBeCloseTo(0.0000648, 10)
-    expect(result.summary.costs.actualUsd).toBeCloseTo(0.0000648, 10)
+    expect(result.results[0].costs.estimatedUsd).toBeCloseTo(0.00096, 10)
+    expect(result.results[0].costs.actualUsd).toBeCloseTo(0.00096, 10)
+    expect(result.summary.costs.estimatedUsd).toBeCloseTo(0.00192, 10)
+    expect(result.summary.costs.actualUsd).toBeCloseTo(0.00192, 10)
     expect(result.results[0]).toMatchObject({
       hash: 'flip-report-1',
       decision: 'report',

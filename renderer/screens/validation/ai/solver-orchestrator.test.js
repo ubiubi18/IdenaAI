@@ -158,7 +158,7 @@ describe('solver-orchestrator planning', () => {
     expect(longPlan.promptOptions).toBeNull()
   })
 
-  it('keeps the full model when short fast mode requests it', () => {
+  it('keeps GPT-5.6 Sol when short fast mode requests it', () => {
     const plan = planValidationAiSolve({
       sessionType: 'short',
       shortFlips: [createDecodedFlip('short-full-fast-model')],
@@ -166,11 +166,15 @@ describe('solver-orchestrator planning', () => {
         provider: 'openai',
         model: 'gpt-5.5',
         shortSessionOpenAiFastEnabled: true,
-        shortSessionOpenAiFastModel: 'gpt-5.5',
+        shortSessionOpenAiFastModel: 'gpt-5.6-sol',
       },
     })
 
-    expect(plan.model).toBe('gpt-5.5')
+    expect(plan.model).toBe('gpt-5.6-sol')
+    expect(plan.promptOptions).toEqual({
+      openAiServiceTier: 'priority',
+      openAiReasoningEffort: 'low',
+    })
   })
 
   it('uses bounded short-session OpenAI settings on the fast lane', () => {

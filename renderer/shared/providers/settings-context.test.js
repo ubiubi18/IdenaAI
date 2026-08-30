@@ -84,11 +84,11 @@ describe('settings-context ai solver normalization', () => {
     expect(
       buildAiSolverSettings({
         shortSessionOpenAiFastEnabled: true,
-        shortSessionOpenAiFastModel: 'gpt-5.5',
+        shortSessionOpenAiFastModel: 'gpt-5.6-sol',
       })
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
-      shortSessionOpenAiFastModel: 'gpt-5.5',
+      shortSessionOpenAiFastModel: 'gpt-5.6-sol',
     })
   })
 
