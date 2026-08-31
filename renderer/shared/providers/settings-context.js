@@ -35,6 +35,13 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
   model: 'gpt-5.5',
+  flipBuilderStoryProvider: 'openai',
+  flipBuilderStoryModel: 'gpt-5.6-sol',
+  flipBuilderImageProvider: 'openai',
+  flipBuilderImageModel: 'gpt-image-2',
+  flipBuilderImageQuality: 'low',
+  flipBuilderImageSize: '1024x1024',
+  flipBuilderGenerationMode: 'fast',
   shortSessionOpenAiFastEnabled: false,
   shortSessionOpenAiFastModel: 'gpt-5.5',
   memoryBudgetGiB: 32,
@@ -226,6 +233,42 @@ function buildAiSolverSettings(settings = {}) {
     ...DEFAULT_AI_SOLVER_SETTINGS,
     ...(settings || {}),
   }
+
+  nextSettings.flipBuilderStoryProvider =
+    String(nextSettings.flipBuilderStoryProvider || '').trim() ||
+    DEFAULT_AI_SOLVER_SETTINGS.flipBuilderStoryProvider
+  nextSettings.flipBuilderStoryModel =
+    String(nextSettings.flipBuilderStoryModel || '').trim() ||
+    DEFAULT_AI_SOLVER_SETTINGS.flipBuilderStoryModel
+  nextSettings.flipBuilderImageProvider =
+    String(nextSettings.flipBuilderImageProvider || '').trim() ||
+    DEFAULT_AI_SOLVER_SETTINGS.flipBuilderImageProvider
+  nextSettings.flipBuilderImageModel =
+    String(nextSettings.flipBuilderImageModel || '').trim() ||
+    DEFAULT_AI_SOLVER_SETTINGS.flipBuilderImageModel
+  const normalizedFlipBuilderImageQuality = String(
+    nextSettings.flipBuilderImageQuality || ''
+  )
+    .trim()
+    .toLowerCase()
+  nextSettings.flipBuilderImageQuality = ['low', 'medium', 'high'].includes(
+    normalizedFlipBuilderImageQuality
+  )
+    ? normalizedFlipBuilderImageQuality
+    : DEFAULT_AI_SOLVER_SETTINGS.flipBuilderImageQuality
+  nextSettings.flipBuilderImageSize =
+    String(nextSettings.flipBuilderImageSize || '').trim() ||
+    DEFAULT_AI_SOLVER_SETTINGS.flipBuilderImageSize
+  const normalizedFlipBuilderGenerationMode = String(
+    nextSettings.flipBuilderGenerationMode || ''
+  )
+    .trim()
+    .toLowerCase()
+  nextSettings.flipBuilderGenerationMode = ['fast', 'strict'].includes(
+    normalizedFlipBuilderGenerationMode
+  )
+    ? normalizedFlipBuilderGenerationMode
+    : DEFAULT_AI_SOLVER_SETTINGS.flipBuilderGenerationMode
 
   nextSettings.shortSessionOpenAiFastEnabled = Boolean(
     nextSettings.shortSessionOpenAiFastEnabled

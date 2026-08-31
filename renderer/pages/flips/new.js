@@ -98,6 +98,13 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
   model: 'gpt-5.5',
+  flipBuilderStoryProvider: 'openai',
+  flipBuilderStoryModel: 'gpt-5.6-sol',
+  flipBuilderImageProvider: 'openai',
+  flipBuilderImageModel: 'gpt-image-2',
+  flipBuilderImageQuality: 'low',
+  flipBuilderImageSize: '1024x1024',
+  flipBuilderGenerationMode: 'fast',
   benchmarkProfile: 'strict',
   deadlineMs: 60 * 1000,
   requestTimeoutMs: 9 * 1000,
@@ -198,8 +205,13 @@ const REASONING_MODEL_PRESETS = {
 }
 
 const IMAGE_MODEL_PRESETS = {
-  openai: ['gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-1'],
-  'openai-compatible': ['gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-1'],
+  openai: ['gpt-image-2', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-1'],
+  'openai-compatible': [
+    'gpt-image-2',
+    'gpt-image-1-mini',
+    'gpt-image-1.5',
+    'gpt-image-1',
+  ],
   gemini: ['gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'],
   xai: ['grok-2-image'],
   mistral: ['pixtral-large-latest'],
@@ -245,9 +257,26 @@ const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'qwen/qwen3.6-35b-a3b': {input: 0.15, output: 0.95},
 }
 
-// OpenAI image-generation pricing snapshot (USD per image),
-// from OpenAI model docs/pricing pages, checked on 2026-03-30.
+// OpenAI image-generation pricing snapshot (USD per image), checked on
+// 2026-08-31. Legacy model prices are retained for existing configurations.
 const OPENAI_IMAGE_PRICING_USD_PER_IMAGE = {
+  'gpt-image-2': {
+    low: {
+      '1024x1024': 0.006,
+      '1024x1536': 0.005,
+      '1536x1024': 0.005,
+    },
+    medium: {
+      '1024x1024': 0.053,
+      '1024x1536': 0.041,
+      '1536x1024': 0.041,
+    },
+    high: {
+      '1024x1024': 0.211,
+      '1024x1536': 0.165,
+      '1536x1024': 0.165,
+    },
+  },
   'gpt-image-1': {
     '1024x1024': 0.042,
     '1024x1536': 0.063,
@@ -382,11 +411,24 @@ function normalizeImageModelForPricing(model) {
   const normalized = String(model || '')
     .trim()
     .toLowerCase()
-  if (!normalized) return 'gpt-image-1'
+  if (!normalized) return 'gpt-image-2'
+  if (normalized.includes('gpt-image-2')) return 'gpt-image-2'
   if (normalized.includes('gpt-image-1-mini')) return 'gpt-image-1-mini'
   if (normalized.includes('gpt-image-1.5')) return 'gpt-image-1.5'
   if (normalized.includes('gpt-image-1')) return 'gpt-image-1'
   return null
+}
+
+function resolveImagePricingByQuality(pricing, quality) {
+  if (!pricing || typeof pricing !== 'object') return null
+  const normalizedQuality = String(quality || 'low')
+    .trim()
+    .toLowerCase()
+  const qualityPricing = pricing[normalizedQuality]
+  if (qualityPricing && typeof qualityPricing === 'object') {
+    return qualityPricing
+  }
+  return pricing
 }
 
 function normalizeAiProviderIdForFlipBuilder(value, fallback = 'openai') {
@@ -413,7 +455,7 @@ function resolveDefaultImageModelForProvider(provider) {
   const presets = Array.isArray(IMAGE_MODEL_PRESETS[normalized])
     ? IMAGE_MODEL_PRESETS[normalized]
     : IMAGE_MODEL_PRESETS.openai
-  return presets.find((item) => String(item || '').trim()) || 'gpt-image-1-mini'
+  return presets.find((item) => String(item || '').trim()) || 'gpt-image-2'
 }
 
 function resolveDefaultReasoningModelForProvider(provider) {
@@ -1112,7 +1154,7 @@ function formatAiRunError(error) {
     /timeout of \d+ms exceeded/i.test(message) ||
     /timed out after retries/i.test(message)
   ) {
-    return 'Image generation timed out. Retry once, or switch to a faster/cheaper image model (for example gpt-image-1-mini). You can also increase request timeout in AI settings.'
+    return 'Image generation timed out. Retry once, or use GPT-Image-2 at low quality. You can also increase request timeout in AI settings.'
   }
 
   return message
@@ -1773,6 +1815,89 @@ export default function NewFlipPage() {
   const {syncing, offline} = useChainState()
   const settings = useSettingsState()
   const {updateAiSolverSettings} = useSettingsDispatch()
+  const aiSolverSettings = useMemo(
+    () => ({...DEFAULT_AI_SOLVER_SETTINGS, ...(settings.aiSolver || {})}),
+    [settings.aiSolver]
+  )
+  const aiReasoningProvider = String(
+    aiSolverSettings.flipBuilderStoryProvider || 'openai'
+  )
+    .trim()
+    .toLowerCase()
+  const aiReasoningModel = String(
+    aiSolverSettings.flipBuilderStoryModel || 'gpt-5.6-sol'
+  ).trim()
+  const aiImageProvider = String(
+    aiSolverSettings.flipBuilderImageProvider || 'openai'
+  )
+    .trim()
+    .toLowerCase()
+  const aiImageModel = String(
+    aiSolverSettings.flipBuilderImageModel || 'gpt-image-2'
+  ).trim()
+  const aiImageQuality = String(
+    aiSolverSettings.flipBuilderImageQuality || 'low'
+  )
+    .trim()
+    .toLowerCase()
+  const aiImageSize = String(
+    aiSolverSettings.flipBuilderImageSize || DEFAULT_AI_IMAGE_SIZE
+  ).trim()
+  const aiGenerationMode = String(
+    aiSolverSettings.flipBuilderGenerationMode || 'fast'
+  )
+    .trim()
+    .toLowerCase()
+  const setAiReasoningProvider = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderStoryProvider: String(value || '').trim() || 'openai',
+      }),
+    [updateAiSolverSettings]
+  )
+  const setAiReasoningModel = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderStoryModel: String(value || '').trim(),
+      }),
+    [updateAiSolverSettings]
+  )
+  const setAiImageProvider = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderImageProvider: String(value || '').trim() || 'openai',
+      }),
+    [updateAiSolverSettings]
+  )
+  const setAiImageModel = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderImageModel: String(value || '').trim(),
+      }),
+    [updateAiSolverSettings]
+  )
+  const setAiImageQuality = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderImageQuality: String(value || '').trim() || 'low',
+      }),
+    [updateAiSolverSettings]
+  )
+  const setAiImageSize = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderImageSize:
+          String(value || '').trim() || DEFAULT_AI_IMAGE_SIZE,
+      }),
+    [updateAiSolverSettings]
+  )
+  const setAiGenerationMode = useCallback(
+    (value) =>
+      updateAiSolverSettings({
+        flipBuilderGenerationMode: String(value || '').trim() || 'fast',
+      }),
+    [updateAiSolverSettings]
+  )
 
   const {flipKeyWordPairs} = useIdentityState()
   const flipKeyWordPairsRef = useRef(flipKeyWordPairs)
@@ -1856,6 +1981,9 @@ export default function NewFlipPage() {
     allReady: false,
     error: '',
   })
+  const [aiStoryProviderKeyStatus, setAiStoryProviderKeyStatus] = useState(
+    createProviderKeyStatus('openai')
+  )
   const [aiImageProviderKeyStatus, setAiImageProviderKeyStatus] = useState(
     createProviderKeyStatus('openai')
   )
@@ -1876,12 +2004,6 @@ export default function NewFlipPage() {
     kind: 'idle',
     message: '',
   })
-  const [aiReasoningModel, setAiReasoningModel] = useState('')
-  const [aiImageProvider, setAiImageProvider] = useState('openai')
-  const autoImageProviderRef = useRef('openai')
-  const [aiImageModel, setAiImageModel] = useState('gpt-image-1-mini')
-  const [aiImageSize, setAiImageSize] = useState(DEFAULT_AI_IMAGE_SIZE)
-  const [aiGenerationMode, setAiGenerationMode] = useState('fast')
   const [aiImageStyle, setAiImageStyle] = useState(
     'Single-panel cartoon illustration, flat bright colors, clean line art, consistent environment.'
   )
@@ -1889,10 +2011,6 @@ export default function NewFlipPage() {
   const benchmarkSessionDisclosure = useDisclosure()
   const aiGuideDisclosure = useDisclosure()
 
-  const aiSolverSettings = useMemo(
-    () => ({...DEFAULT_AI_SOLVER_SETTINGS, ...(settings.aiSolver || {})}),
-    [settings.aiSolver]
-  )
   const providerDailyBudgetStatus = useMemo(
     () => getAiProviderDailyBudgetStatus(aiSolverSettings),
     [aiSolverSettings]
@@ -1903,26 +2021,6 @@ export default function NewFlipPage() {
   const isLegacyOnlyMode =
     aiSolverSettings.legacyHeuristicEnabled &&
     aiSolverSettings.legacyHeuristicOnly
-
-  useEffect(() => {
-    const nextDefault = resolveDefaultImageProviderForReasoningProvider(
-      aiSolverSettings.provider
-    )
-
-    setAiImageProvider((previousProvider) => {
-      const normalizedPrevious = normalizeAiProviderIdForFlipBuilder(
-        previousProvider,
-        ''
-      )
-      const shouldUseDefault =
-        !normalizedPrevious ||
-        normalizedPrevious === autoImageProviderRef.current ||
-        !supportsAiFlipImageProvider(normalizedPrevious)
-
-      autoImageProviderRef.current = nextDefault
-      return shouldUseDefault ? nextDefault : normalizedPrevious
-    })
-  }, [aiSolverSettings.provider])
 
   const refreshAiProviderKeyStatus = useCallback(async () => {
     if (isLegacyOnlyMode) {
@@ -2001,6 +2099,65 @@ export default function NewFlipPage() {
     }
   }, [aiSolverSettings, isLegacyOnlyMode, settings.localAi])
 
+  const refreshAiStoryProviderKeyStatus = useCallback(async () => {
+    const activeProvider = String(aiReasoningProvider || 'openai')
+      .trim()
+      .toLowerCase()
+
+    if (
+      !global.aiSolver ||
+      typeof global.aiSolver.hasProviderKey !== 'function'
+    ) {
+      const fallbackState = createProviderKeyStatus(activeProvider, {
+        checked: true,
+        checking: false,
+        missingProviders: [activeProvider],
+        error: 'ai_bridge_unavailable',
+      })
+      setAiStoryProviderKeyStatus(fallbackState)
+      return fallbackState
+    }
+
+    setAiStoryProviderKeyStatus((prev) => ({
+      ...prev,
+      activeProvider,
+      checking: true,
+      error: '',
+    }))
+
+    try {
+      const nextState = await checkAiProviderReadiness({
+        bridge: global.aiSolver,
+        localBridge: global.localAi,
+        localAi: settings.localAi,
+        aiSolver: {
+          ...aiSolverSettings,
+          provider: activeProvider,
+          model: aiReasoningModel,
+          legacyHeuristicEnabled: false,
+          legacyHeuristicOnly: false,
+          ensembleEnabled: false,
+        },
+      })
+      setAiStoryProviderKeyStatus(nextState)
+      return nextState
+    } catch (error) {
+      const fallbackState = createProviderKeyStatus(activeProvider, {
+        checked: true,
+        checking: false,
+        missingProviders: [activeProvider],
+        error: String((error && error.message) || error || '').trim(),
+      })
+      setAiStoryProviderKeyStatus(fallbackState)
+      return fallbackState
+    }
+  }, [
+    aiReasoningModel,
+    aiReasoningProvider,
+    aiSolverSettings,
+    settings.localAi,
+  ])
+
   const refreshAiImageProviderKeyStatus = useCallback(async () => {
     const activeProvider = normalizeAiProviderIdForFlipBuilder(
       aiImageProvider,
@@ -2069,6 +2226,34 @@ export default function NewFlipPage() {
   useEffect(() => {
     let cancelled = false
 
+    async function loadStoryProviderKeyStatus() {
+      try {
+        await refreshAiStoryProviderKeyStatus()
+      } catch (error) {
+        if (!cancelled) {
+          setAiStoryProviderKeyStatus((prev) => ({
+            ...prev,
+            checked: true,
+            checking: false,
+            hasKey: false,
+            primaryReady: false,
+            allReady: false,
+            error: String((error && error.message) || error || '').trim(),
+          }))
+        }
+      }
+    }
+
+    loadStoryProviderKeyStatus()
+
+    return () => {
+      cancelled = true
+    }
+  }, [refreshAiStoryProviderKeyStatus])
+
+  useEffect(() => {
+    let cancelled = false
+
     async function loadProviderKeyStatus() {
       try {
         await refreshAiProviderKeyStatus()
@@ -2129,6 +2314,8 @@ export default function NewFlipPage() {
 
     const refreshOnFocus = () => {
       refreshAiProviderKeyStatus()
+      refreshAiStoryProviderKeyStatus()
+      refreshAiImageProviderKeyStatus()
     }
 
     window.addEventListener('focus', refreshOnFocus)
@@ -2138,7 +2325,11 @@ export default function NewFlipPage() {
       window.removeEventListener('focus', refreshOnFocus)
       document.removeEventListener('visibilitychange', refreshOnFocus)
     }
-  }, [refreshAiProviderKeyStatus])
+  }, [
+    refreshAiImageProviderKeyStatus,
+    refreshAiProviderKeyStatus,
+    refreshAiStoryProviderKeyStatus,
+  ])
 
   useEffect(() => {
     if (didAutoOpenAiGuideRef.current) return
@@ -2166,28 +2357,31 @@ export default function NewFlipPage() {
     router.query,
   ])
 
-  useEffect(() => {
-    if (!String(aiReasoningModel || '').trim()) {
-      setAiReasoningModel(String(aiSolverSettings.model || 'gpt-4.1-mini'))
-    }
-  }, [aiReasoningModel, aiSolverSettings.model])
-
   const reasoningModelOptions = useMemo(() => {
-    const provider = String(aiSolverSettings.provider || 'openai')
+    const provider = String(aiReasoningProvider || 'openai')
       .trim()
       .toLowerCase()
     const base = Array.isArray(REASONING_MODEL_PRESETS[provider])
       ? REASONING_MODEL_PRESETS[provider]
       : []
-    const merged = [
-      ...base,
-      String(aiSolverSettings.model || '').trim(),
-      String(aiReasoningModel || '').trim(),
-    ]
+    const merged = [...base, String(aiReasoningModel || '').trim()]
       .map((item) => String(item || '').trim())
       .filter(Boolean)
     return Array.from(new Set(merged))
-  }, [aiReasoningModel, aiSolverSettings.model, aiSolverSettings.provider])
+  }, [aiReasoningModel, aiReasoningProvider])
+
+  const reasoningProviderOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          String(aiReasoningProvider || 'openai')
+            .trim()
+            .toLowerCase(),
+          ...Object.keys(REASONING_MODEL_PRESETS),
+        ])
+      ).filter(Boolean),
+    [aiReasoningProvider]
+  )
 
   const imageModelOptions = useMemo(() => {
     const provider = normalizeAiProviderIdForFlipBuilder(
@@ -2223,12 +2417,11 @@ export default function NewFlipPage() {
     if (!presets.includes(String(aiImageModel || '').trim())) {
       setAiImageModel(resolveDefaultImageModelForProvider(normalizedProvider))
     }
-  }, [aiImageModel, aiImageProvider])
+  }, [aiImageModel, aiImageProvider, setAiImageModel])
 
   const imageProviderOptions = useMemo(() => {
-    const preferred = resolveDefaultImageProviderForReasoningProvider(
-      aiSolverSettings.provider
-    )
+    const preferred =
+      resolveDefaultImageProviderForReasoningProvider(aiReasoningProvider)
     const selected = normalizeAiProviderIdForFlipBuilder(
       aiImageProvider,
       preferred
@@ -2236,11 +2429,12 @@ export default function NewFlipPage() {
     return Array.from(
       new Set([preferred, selected, ...AI_FLIP_IMAGE_PROVIDER_OPTIONS])
     ).filter((provider) => supportsAiFlipImageProvider(provider))
-  }, [aiImageProvider, aiSolverSettings.provider])
+  }, [aiImageProvider, aiReasoningProvider])
 
-  const currentReasoningModel = String(
-    aiReasoningModel || aiSolverSettings.model || ''
+  const currentReasoningProvider = String(
+    aiReasoningProvider || 'openai'
   ).trim()
+  const currentReasoningModel = String(aiReasoningModel || '').trim()
   const currentImageProvider = normalizeAiProviderIdForFlipBuilder(
     aiImageProvider,
     'openai'
@@ -2313,20 +2507,28 @@ export default function NewFlipPage() {
     if (!pricingModel) {
       return null
     }
-    const pricingBySize = OPENAI_IMAGE_PRICING_USD_PER_IMAGE[pricingModel]
+    const pricingBySize = resolveImagePricingByQuality(
+      OPENAI_IMAGE_PRICING_USD_PER_IMAGE[pricingModel],
+      aiImageQuality
+    )
     const unitUsd = pricingBySize && pricingBySize[normalizedSize]
     if (!Number.isFinite(unitUsd)) {
       return null
     }
     const cheapestEntry = getCheapestImagePricingEntry(pricingBySize)
+    const requestCount = aiGenerationMode === 'strict' ? 4 : 1
     return {
       model: pricingModel,
+      quality: aiImageQuality,
       unitUsd,
-      fourPanelsUsd: unitUsd * 4,
+      requestCount,
+      totalUsd: unitUsd * requestCount,
       cheapestSize: cheapestEntry ? cheapestEntry[0] : normalizedSize,
       cheapestUnitUsd: cheapestEntry ? Number(cheapestEntry[1]) : unitUsd,
+      cheapestTotalUsd:
+        (cheapestEntry ? Number(cheapestEntry[1]) : unitUsd) * requestCount,
     }
-  }, [aiImageModel, aiImageSize])
+  }, [aiGenerationMode, aiImageModel, aiImageQuality, aiImageSize])
 
   const baseRunPayload = useMemo(
     () => ({
@@ -2371,24 +2573,31 @@ export default function NewFlipPage() {
     [aiSolverSettings]
   )
 
-  const getProviderBudgetRunPayload = useCallback(() => {
-    const status = getAiProviderDailyBudgetStatus(aiSolverSettings)
-    if (status.blocked) {
-      throw new Error(buildAiProviderDailyBudgetErrorMessage(status))
-    }
-
-    if (status.remoteProvider && status.enabled) {
-      return {
-        providerDailyBudgetEnabled: true,
-        providerDailyBudgetRemainingUsd: status.remainingUsd,
+  const getProviderBudgetRunPayload = useCallback(
+    (providerOverride = '') => {
+      const status = getAiProviderDailyBudgetStatus({
+        ...aiSolverSettings,
+        provider:
+          String(providerOverride || '').trim() || aiSolverSettings.provider,
+      })
+      if (status.blocked) {
+        throw new Error(buildAiProviderDailyBudgetErrorMessage(status))
       }
-    }
 
-    return {
-      providerDailyBudgetEnabled:
-        aiSolverSettings.providerDailyBudgetEnabled !== false,
-    }
-  }, [aiSolverSettings])
+      if (status.remoteProvider && status.enabled) {
+        return {
+          providerDailyBudgetEnabled: true,
+          providerDailyBudgetRemainingUsd: status.remainingUsd,
+        }
+      }
+
+      return {
+        providerDailyBudgetEnabled:
+          aiSolverSettings.providerDailyBudgetEnabled !== false,
+      }
+    },
+    [aiSolverSettings]
+  )
 
   const fullAutoNodePublishRunPayload = useMemo(
     () => ({
@@ -2924,6 +3133,25 @@ export default function NewFlipPage() {
     ]
   )
 
+  const ensureAiStoryRunReady = useCallback(async () => {
+    ensureAiSolverBridge()
+    const readiness = await refreshAiStoryProviderKeyStatus()
+    if (!readiness || !readiness.allReady) {
+      const missingProviders = formatMissingAiProviders(
+        readiness && readiness.missingProviders
+      )
+      throw new Error(
+        `Session API key missing for story provider: ${
+          missingProviders || aiReasoningProvider
+        }`
+      )
+    }
+  }, [
+    aiReasoningProvider,
+    ensureAiSolverBridge,
+    refreshAiStoryProviderKeyStatus,
+  ])
+
   const ensureAiImageRunReady = useCallback(async () => {
     const readiness = await refreshAiImageProviderKeyStatus()
     if (!readiness || !readiness.allReady) {
@@ -2944,7 +3172,9 @@ export default function NewFlipPage() {
         id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
         time: new Date().toISOString(),
         action: String(action || 'unknown'),
-        provider: String(provider || aiSolverSettings.provider),
+        provider: String(
+          provider || aiReasoningProvider || aiSolverSettings.provider
+        ),
         model: String(model || aiReasoningModel || aiSolverSettings.model),
         tokenUsage: tokenUsage || null,
         estimatedUsd:
@@ -2966,7 +3196,12 @@ export default function NewFlipPage() {
 
       setGenerationCostLedger((prev) => [entry].concat(prev).slice(0, 30))
     },
-    [aiReasoningModel, aiSolverSettings.model, aiSolverSettings.provider]
+    [
+      aiReasoningModel,
+      aiReasoningProvider,
+      aiSolverSettings.model,
+      aiSolverSettings.provider,
+    ]
   )
 
   const generateStoryAlternatives = useCallback(
@@ -2983,12 +3218,10 @@ export default function NewFlipPage() {
       setStoryOptions([])
       setSelectedStoryId('')
       try {
-        await ensureAiRunReady()
+        await ensureAiStoryRunReady()
         ensureAiSolverBridge()
 
-        const reasoningModel = String(
-          aiReasoningModel || aiSolverSettings.model
-        ).trim()
+        const reasoningModel = String(aiReasoningModel).trim()
         const isFastMode = aiGenerationMode !== 'strict'
         let storyTemperature = 0.72
         if (isFastMode && optimize) {
@@ -3013,14 +3246,19 @@ export default function NewFlipPage() {
             storyOptionCount,
             optimize,
           })
-        const providerBudgetRunPayload = getProviderBudgetRunPayload()
+        const providerBudgetRunPayload =
+          getProviderBudgetRunPayload(aiReasoningProvider)
 
         const response = await global.aiSolver.generateStoryOptions({
           ...baseRunPayload,
           ...(runPayloadOverride || {}),
           ...providerBudgetRunPayload,
           fastStoryMode: isFastMode,
-          provider: aiSolverSettings.provider,
+          provider: aiReasoningProvider,
+          providerConfig: buildProviderConfig(
+            aiReasoningProvider,
+            aiSolverSettings
+          ),
           model: reasoningModel,
           storyOptionCount,
           disableLocalFallback: true,
@@ -3156,13 +3394,12 @@ export default function NewFlipPage() {
     [
       aiGenerationMode,
       aiReasoningModel,
-      aiSolverSettings.maxOutputTokens,
-      aiSolverSettings.model,
-      aiSolverSettings.provider,
+      aiReasoningProvider,
+      aiSolverSettings,
       appendGenerationLedger,
       applyStoryOptionToDraft,
       baseRunPayload,
-      ensureAiRunReady,
+      ensureAiStoryRunReady,
       ensureAiSolverBridge,
       ensureKeywordsReady,
       getProviderBudgetRunPayload,
@@ -3235,12 +3472,13 @@ export default function NewFlipPage() {
       })
       const startedAt = Date.now()
       try {
-        await ensureAiRunReady()
+        const isFastMode = aiGenerationMode !== 'strict'
+        if (!isFastMode) {
+          await ensureAiStoryRunReady()
+        }
         await ensureAiImageRunReady()
         ensureAiSolverBridge()
-        const reasoningModel = String(
-          aiReasoningModel || aiSolverSettings.model
-        ).trim()
+        const reasoningModel = String(aiReasoningModel).trim()
         const panelProvider = currentImageProvider
         const panelProviderConfig = buildProviderConfig(
           panelProvider,
@@ -3248,13 +3486,9 @@ export default function NewFlipPage() {
         )
         const panelTextAuditModel =
           panelProvider ===
-          normalizeAiProviderIdForFlipBuilder(
-            aiSolverSettings.provider,
-            'openai'
-          )
+          normalizeAiProviderIdForFlipBuilder(aiReasoningProvider, 'openai')
             ? reasoningModel
             : resolveDefaultReasoningModelForProvider(panelProvider)
-        const isFastMode = aiGenerationMode !== 'strict'
         const effectiveStoryOptions = Array.isArray(storyOptionsOverride)
           ? storyOptionsOverride
           : storyOptions
@@ -3275,7 +3509,8 @@ export default function NewFlipPage() {
         const selectedStoryOption = effectiveStoryOptions.find(
           (item) => String(item.id) === effectiveSelectedStoryId
         )
-        const providerBudgetRunPayload = getProviderBudgetRunPayload()
+        const providerBudgetRunPayload =
+          getProviderBudgetRunPayload(currentImageProvider)
 
         const response = await global.aiSolver.generateFlipPanels({
           ...baseRunPayload,
@@ -3291,6 +3526,7 @@ export default function NewFlipPage() {
           textAuditMaxRetries: isFastMode ? 0 : 1,
           imageModel: aiImageModel,
           imageSize: aiImageSize,
+          imageQuality: aiImageQuality,
           imageStyle: '',
           visualStyle: aiImageStyle,
           keywords: [keywordA, keywordB],
@@ -3547,16 +3783,18 @@ export default function NewFlipPage() {
     [
       aiGenerationMode,
       aiImageModel,
+      aiImageQuality,
       aiImageSize,
       aiImageStyle,
       aiReasoningModel,
+      aiReasoningProvider,
       aiSolverSettings,
       appendGenerationLedger,
       applyGeneratedPanelsToBuilder,
       baseRunPayload,
       currentImageProvider,
       ensureAiImageRunReady,
-      ensureAiRunReady,
+      ensureAiStoryRunReady,
       ensureAiSolverBridge,
       ensureKeywordsReady,
       getProviderBudgetRunPayload,
@@ -3726,7 +3964,8 @@ export default function NewFlipPage() {
 
     setIsRunningFullyAutomatedNodePublish(true)
     try {
-      await ensureAiRunReady()
+      await ensureAiStoryRunReady()
+      await ensureAiImageRunReady()
       const draftResult = await resolveAutoFlipDraftResult({
         forceFreshDraft: true,
         runPayloadOverride: fullAutoNodePublishRunPayload,
@@ -3814,7 +4053,8 @@ export default function NewFlipPage() {
   }, [
     allowFullyAutomatedNodePublish,
     buildFlipWithAi,
-    ensureAiRunReady,
+    ensureAiImageRunReady,
+    ensureAiStoryRunReady,
     failToast,
     fullAutoNodePublishRunPayload,
     keywordPairId,
@@ -4542,6 +4782,39 @@ export default function NewFlipPage() {
     isLegacyOnlyMode,
     t,
   ])
+  const aiStoryProviderKeyStatusUi = useMemo(() => {
+    if (
+      !aiStoryProviderKeyStatus.checked ||
+      aiStoryProviderKeyStatus.checking
+    ) {
+      return {label: t('Checking...'), color: 'muted', detail: ''}
+    }
+
+    if (aiStoryProviderKeyStatus.allReady) {
+      return {
+        label: t('Ready'),
+        color: 'green.500',
+        detail: t('Story provider key is loaded.'),
+      }
+    }
+
+    const missingProviders = formatMissingAiProviders(
+      aiStoryProviderKeyStatus.missingProviders
+    )
+    return {
+      label: t('Missing'),
+      color: 'orange.500',
+      detail: missingProviders
+        ? t('Missing for: {{providers}}', {providers: missingProviders})
+        : t('Open AI settings and load the story provider key.'),
+    }
+  }, [
+    aiStoryProviderKeyStatus.allReady,
+    aiStoryProviderKeyStatus.checked,
+    aiStoryProviderKeyStatus.checking,
+    aiStoryProviderKeyStatus.missingProviders,
+    t,
+  ])
   const aiImageProviderKeyStatusUi = useMemo(() => {
     if (
       !aiImageProviderKeyStatus.checked ||
@@ -4580,11 +4853,17 @@ export default function NewFlipPage() {
     (!aiProviderKeyStatus.checked ||
       aiProviderKeyStatus.checking ||
       !aiProviderKeyStatus.allReady)
-  const isFlipImageBuildBlockedByProviderKeys =
-    isAiRunBlockedByProviderKeys ||
+  const isStoryGenerationBlockedByProviderKeys =
+    !aiStoryProviderKeyStatus.checked ||
+    aiStoryProviderKeyStatus.checking ||
+    !aiStoryProviderKeyStatus.allReady
+  const isImageGenerationBlockedByProviderKeys =
     !aiImageProviderKeyStatus.checked ||
     aiImageProviderKeyStatus.checking ||
     !aiImageProviderKeyStatus.allReady
+  const isFlipImageBuildBlockedByProviderKeys =
+    isImageGenerationBlockedByProviderKeys ||
+    (aiGenerationMode === 'strict' && isStoryGenerationBlockedByProviderKeys)
   const flipBuildStatusBorderColorByKind = {
     idle: 'gray.100',
     running: 'gray.100',
@@ -5544,7 +5823,9 @@ export default function NewFlipPage() {
                       <Stack isInline spacing={2} flexWrap="wrap">
                         <SecondaryButton
                           isDisabled={
-                            !hasUsableKeywords || is('keywords.loading')
+                            !hasUsableKeywords ||
+                            is('keywords.loading') ||
+                            isStoryGenerationBlockedByProviderKeys
                           }
                           isLoading={isGeneratingStoryOptions}
                           onClick={() =>
@@ -5562,6 +5843,7 @@ export default function NewFlipPage() {
                         activeStoryDraftReview &&
                         activeStoryDraftReview.kind !== 'strong' ? (
                           <SecondaryButton
+                            isDisabled={isStoryGenerationBlockedByProviderKeys}
                             isLoading={isGeneratingStoryOptions}
                             onClick={() =>
                               generateStoryAlternatives({
@@ -5607,7 +5889,10 @@ export default function NewFlipPage() {
                       {imageStepStoryPreview}
                       <Stack isInline spacing={2} flexWrap="wrap">
                         <SecondaryButton
-                          isDisabled={!hasUsableKeywords}
+                          isDisabled={
+                            !hasUsableKeywords ||
+                            isStoryGenerationBlockedByProviderKeys
+                          }
                           isLoading={isGeneratingStoryOptions}
                           onClick={() =>
                             generateStoryAlternatives({optimize: false})
@@ -5621,6 +5906,7 @@ export default function NewFlipPage() {
                         activeStoryDraftReview &&
                         activeStoryDraftReview.kind !== 'strong' ? (
                           <SecondaryButton
+                            isDisabled={isStoryGenerationBlockedByProviderKeys}
                             isLoading={isGeneratingStoryOptions}
                             onClick={() =>
                               generateStoryAlternatives({
@@ -5633,7 +5919,10 @@ export default function NewFlipPage() {
                           </SecondaryButton>
                         ) : null}
                         <PrimaryButton
-                          isDisabled={!activeStoryDraft}
+                          isDisabled={
+                            !activeStoryDraft ||
+                            isFlipImageBuildBlockedByProviderKeys
+                          }
                           isLoading={isGeneratingFlipPanels}
                           onClick={() =>
                             buildFlipWithAi({
@@ -5819,12 +6108,12 @@ export default function NewFlipPage() {
                                   bg="white"
                                 >
                                   <Text fontSize="xs" color="muted">
-                                    {t('Provider')}
+                                    {t('Story provider')}
                                   </Text>
                                   <Text fontSize="sm" fontWeight={500}>
-                                    {String(
-                                      aiSolverSettings.provider || 'openai'
-                                    )}
+                                    {`${formatAiProviderLabel(
+                                      currentReasoningProvider
+                                    )} / ${currentReasoningModel}`}
                                   </Text>
                                 </Box>
                                 <Box
@@ -5835,18 +6124,18 @@ export default function NewFlipPage() {
                                   bg="white"
                                 >
                                   <Text fontSize="xs" color="muted">
-                                    {t('Session API key')}
+                                    {t('Story provider key')}
                                   </Text>
                                   <Text
                                     fontSize="sm"
                                     fontWeight={500}
-                                    color={aiProviderKeyStatusUi.color}
+                                    color={aiStoryProviderKeyStatusUi.color}
                                   >
-                                    {aiProviderKeyStatusUi.label}
+                                    {aiStoryProviderKeyStatusUi.label}
                                   </Text>
-                                  {aiProviderKeyStatusUi.detail ? (
+                                  {aiStoryProviderKeyStatusUi.detail ? (
                                     <Text fontSize="xs" color="muted" mt={1}>
-                                      {aiProviderKeyStatusUi.detail}
+                                      {aiStoryProviderKeyStatusUi.detail}
                                     </Text>
                                   ) : null}
                                 </Box>
@@ -5861,9 +6150,9 @@ export default function NewFlipPage() {
                                     {t('Panel image provider')}
                                   </Text>
                                   <Text fontSize="sm" fontWeight={500}>
-                                    {formatAiProviderLabel(
+                                    {`${formatAiProviderLabel(
                                       currentImageProvider
-                                    )}
+                                    )} / ${currentImageModel}`}
                                   </Text>
                                   <Text
                                     fontSize="xs"
@@ -5871,7 +6160,7 @@ export default function NewFlipPage() {
                                     color={aiImageProviderKeyStatusUi.color}
                                     mt={1}
                                   >
-                                    {aiImageProviderKeyStatusUi.label}
+                                    {`${aiImageProviderKeyStatusUi.label} / ${aiImageQuality}`}
                                   </Text>
                                 </Box>
                                 <Box
@@ -5882,10 +6171,20 @@ export default function NewFlipPage() {
                                   bg="white"
                                 >
                                   <Text fontSize="xs" color="muted">
-                                    {t('Advanced options')}
+                                    {t('Validation autosolver')}
                                   </Text>
                                   <Text fontSize="sm" fontWeight={500}>
-                                    {t('Hidden unless you need them')}
+                                    {formatAiProviderLabel(
+                                      aiSolverSettings.provider || 'openai'
+                                    )}
+                                  </Text>
+                                  <Text
+                                    fontSize="xs"
+                                    fontWeight={500}
+                                    color={aiProviderKeyStatusUi.color}
+                                    mt={1}
+                                  >
+                                    {aiProviderKeyStatusUi.label}
                                   </Text>
                                 </Box>
                               </SimpleGrid>
@@ -5894,7 +6193,7 @@ export default function NewFlipPage() {
                                   'Beginner flow: first decide whether you want to create a flip or solve queued flips. You can still open advanced options later.'
                                 )}
                               </Text>
-                              {isAiRunBlockedByProviderKeys ? (
+                              {isStoryGenerationBlockedByProviderKeys ? (
                                 <Box
                                   borderWidth="1px"
                                   borderColor="orange.200"
@@ -5908,12 +6207,12 @@ export default function NewFlipPage() {
                                       fontWeight={500}
                                       color="orange.700"
                                     >
-                                      {t('AI provider setup needed')}
+                                      {t('Story provider setup needed')}
                                     </Text>
                                     <Text fontSize="xs" color="muted">
-                                      {aiProviderKeyStatusUi.detail ||
+                                      {aiStoryProviderKeyStatusUi.detail ||
                                         t(
-                                          'Finish the required AI provider setup before starting AI generation or solver runs.'
+                                          'Load the selected story provider key before generating or refining a story draft.'
                                         )}
                                     </Text>
                                     <Stack
@@ -5922,10 +6221,14 @@ export default function NewFlipPage() {
                                       spacing={2}
                                     >
                                       <SecondaryButton
-                                        isLoading={aiProviderKeyStatus.checking}
-                                        onClick={refreshAiProviderKeyStatus}
+                                        isLoading={
+                                          aiStoryProviderKeyStatus.checking
+                                        }
+                                        onClick={
+                                          refreshAiStoryProviderKeyStatus
+                                        }
                                       >
-                                        {t('Refresh key status')}
+                                        {t('Refresh story key status')}
                                       </SecondaryButton>
                                       <PrimaryButton
                                         onClick={() =>
@@ -5938,8 +6241,8 @@ export default function NewFlipPage() {
                                   </Stack>
                                 </Box>
                               ) : null}
-                              {!isAiRunBlockedByProviderKeys &&
-                              isFlipImageBuildBlockedByProviderKeys ? (
+                              {!isStoryGenerationBlockedByProviderKeys &&
+                              isImageGenerationBlockedByProviderKeys ? (
                                 <Box
                                   borderWidth="1px"
                                   borderColor="orange.200"
@@ -6143,6 +6446,45 @@ export default function NewFlipPage() {
                                     </Box>
                                     <Box>
                                       <Text fontSize="xs" color="muted" mb={1}>
+                                        {t('Story provider')}
+                                      </Text>
+                                      <Select
+                                        value={currentReasoningProvider}
+                                        onChange={(e) => {
+                                          const next = String(
+                                            e && e.target ? e.target.value : ''
+                                          )
+                                            .trim()
+                                            .toLowerCase()
+                                          if (next) {
+                                            setAiReasoningProvider(next)
+                                            setAiReasoningModel(
+                                              resolveDefaultReasoningModelForProvider(
+                                                next
+                                              )
+                                            )
+                                          }
+                                        }}
+                                      >
+                                        {reasoningProviderOptions.map(
+                                          (provider) => (
+                                            <option
+                                              key={provider}
+                                              value={provider}
+                                            >
+                                              {formatAiProviderLabel(provider)}
+                                            </option>
+                                          )
+                                        )}
+                                      </Select>
+                                      <Text fontSize="xs" color="muted" mt={1}>
+                                        {t(
+                                          'The story provider is independent from the validation autosolver provider.'
+                                        )}
+                                      </Text>
+                                    </Box>
+                                    <Box>
+                                      <Text fontSize="xs" color="muted" mb={1}>
                                         {t('Reasoning model (story + audit)')}
                                       </Text>
                                       <Select
@@ -6265,12 +6607,36 @@ export default function NewFlipPage() {
                                           onChange={(e) =>
                                             setAiImageModel(e.target.value)
                                           }
-                                          placeholder="gpt-image-1-mini"
+                                          placeholder="gpt-image-2"
                                         />
                                       ) : null}
                                       <Text fontSize="xs" color="muted" mt={1}>
                                         {t(
                                           'Custom model IDs are allowed (for example: nano-banana or provider-specific variants).'
+                                        )}
+                                      </Text>
+                                    </Box>
+                                    <Box>
+                                      <Text fontSize="xs" color="muted" mb={1}>
+                                        {t('Image quality')}
+                                      </Text>
+                                      <Select
+                                        value={aiImageQuality}
+                                        onChange={(e) =>
+                                          setAiImageQuality(e.target.value)
+                                        }
+                                      >
+                                        <option value="low">{t('Low')}</option>
+                                        <option value="medium">
+                                          {t('Medium')}
+                                        </option>
+                                        <option value="high">
+                                          {t('High')}
+                                        </option>
+                                      </Select>
+                                      <Text fontSize="xs" color="muted" mt={1}>
+                                        {t(
+                                          'Low is the economical default. Increase quality only when a draft needs a stronger render.'
                                         )}
                                       </Text>
                                     </Box>
@@ -6303,11 +6669,20 @@ export default function NewFlipPage() {
                                         >
                                           {`Estimated image cost (${
                                             aiImageGenerationCostHint.model
+                                          }, ${
+                                            aiImageGenerationCostHint.quality
                                           }): ~$${aiImageGenerationCostHint.unitUsd.toFixed(
                                             3
-                                          )} per image, ~$${aiImageGenerationCostHint.fourPanelsUsd.toFixed(
+                                          )} per request, ~$${aiImageGenerationCostHint.totalUsd.toFixed(
                                             3
-                                          )} for 4 panels.`}
+                                          )} for ${
+                                            aiImageGenerationCostHint.requestCount
+                                          } ${
+                                            aiImageGenerationCostHint.requestCount ===
+                                            1
+                                              ? 'storyboard sheet'
+                                              : 'separate panel requests'
+                                          }.`}
                                         </Text>
                                       ) : null}
                                       <Text fontSize="xs" color="muted" mt={1}>
@@ -6318,12 +6693,11 @@ export default function NewFlipPage() {
                                               aiImageGenerationCostHint.cheapestSize
                                             } (~$${aiImageGenerationCostHint.cheapestUnitUsd.toFixed(
                                               3
-                                            )}/image, ~$${(
-                                              aiImageGenerationCostHint.cheapestUnitUsd *
-                                              4
-                                            ).toFixed(3)} per 4-panel flip).`
+                                            )}/request, ~$${aiImageGenerationCostHint.cheapestTotalUsd.toFixed(
+                                              3
+                                            )} for the selected generation mode).`
                                           : t(
-                                              'Known price hints are available for gpt-image-1, gpt-image-1.5, and gpt-image-1-mini.'
+                                              'Known price hints are available for GPT-Image-2 and retained legacy GPT Image models.'
                                             )}
                                       </Text>
                                     </Box>
@@ -6451,6 +6825,7 @@ export default function NewFlipPage() {
                                             !allowFullyAutomatedNodePublish ||
                                             keywordSource !== 'node' ||
                                             !keywordPairId ||
+                                            isStoryGenerationBlockedByProviderKeys ||
                                             isFlipImageBuildBlockedByProviderKeys ||
                                             syncing ||
                                             offline ||
@@ -6500,7 +6875,9 @@ export default function NewFlipPage() {
                               ) : null}
                               <Stack isInline justify="flex-end" spacing={2}>
                                 <SecondaryButton
-                                  isDisabled={isAiRunBlockedByProviderKeys}
+                                  isDisabled={
+                                    isStoryGenerationBlockedByProviderKeys
+                                  }
                                   isLoading={isGeneratingStoryOptions}
                                   onClick={() =>
                                     generateStoryAlternatives({optimize: false})
@@ -6511,7 +6888,9 @@ export default function NewFlipPage() {
                                     : t('Generate 2 story options')}
                                 </SecondaryButton>
                                 <SecondaryButton
-                                  isDisabled={isAiRunBlockedByProviderKeys}
+                                  isDisabled={
+                                    isStoryGenerationBlockedByProviderKeys
+                                  }
                                   isLoading={isGeneratingStoryOptions}
                                   onClick={() =>
                                     generateStoryAlternatives({optimize: true})

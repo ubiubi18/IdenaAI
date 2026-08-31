@@ -6,6 +6,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import type { DesktopBootstrap } from './logic/desktopBootstrap';
 import SortPostsByComponent from './components/SortPostsByComponent';
 import type { SocialContractOption } from './logic/socialContracts';
+import { isRenderableTopLevelPost } from './logic/feedVisibility';
 
 type LatestPostsProps = {
     currentBlockCaptured: number,
@@ -146,12 +147,15 @@ function LatestPosts() {
     const mainFeeTooltipText = mainComposerCostEstimate
         ? `Current conservative max-fee cap from your own node RPC: about ${mainComposerCostEstimate.totalMaxFeeDna} iDNA. Breakdown: contract call ${mainComposerCostEstimate.contractCallMaxFeeDna} iDNA${mainComposerCostEstimate.imageStoredToIpfs ? `, image storage ${mainComposerCostEstimate.imageStoreMaxFeeDna} iDNA` : ''}${mainComposerCostEstimate.textStoredToIpfs ? `, long-text storage ${mainComposerCostEstimate.textStoreMaxFeeDna} iDNA` : ''}. The actual charged fee can be lower.`
         : 'Start typing or attach an image to request a conservative max-fee estimate from your own node RPC.';
+    const renderablePostIds = sortedPostIds.filter((postId) =>
+        isRenderableTopLevelPost(postsRef.current[postId])
+    );
     const visiblePostIds = proposalMode
-        ? sortedPostIds.filter((postId) => {
+        ? renderablePostIds.filter((postId) => {
             const post = postsRef.current[postId];
             return !post?.replyToPostId && !!post?.message?.toLowerCase().includes(normalizedProposalTag);
         })
-        : sortedPostIds;
+        : renderablePostIds;
 
     useEffect(() => {
         if (!proposalMode) {
