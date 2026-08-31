@@ -2976,6 +2976,32 @@ describe('createAiProviderBridge', () => {
     ])
   })
 
+  it('gives GPT-5.6 Sol story generation enough time in fast mode', async () => {
+    const invokeProvider = jest
+      .fn()
+      .mockRejectedValue(new Error('provider unavailable'))
+
+    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await bridge.generateStoryOptions({
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+      storyOptionCount: 1,
+      fastStoryMode: true,
+      requestTimeoutMs: 9000,
+      keywords: ['organ', 'garage'],
+      includeNoise: false,
+      hasCustomStory: false,
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(invokeProvider.mock.calls[0][0].profile).toMatchObject({
+      requestTimeoutMs: 90000,
+      deadlineMs: 95000,
+    })
+  })
+
   it('supports a single strong story option without forcing a second fallback path', async () => {
     const invokeProvider = jest.fn().mockResolvedValue({
       rawText: JSON.stringify({
