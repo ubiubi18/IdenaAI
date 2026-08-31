@@ -5810,7 +5810,6 @@ describe('createAiProviderBridge', () => {
     const result = await bridge.generateFlipPanels({
       provider: 'openai',
       model: 'gpt-4.1-mini',
-      imageModel: 'gpt-image-1-mini',
       imageSize: '1024x1024',
       requestTimeoutMs: 15000,
       fastBuild: true,
@@ -5827,6 +5826,7 @@ describe('createAiProviderBridge', () => {
     })
 
     expect(result.ok).toBe(true)
+    expect(result.imageModel).toBe('gpt-image-2')
     expect(result.panelRenderModeUsed).toBe('sheet_fast')
     expect(result.generatedPanelCount).toBe(1)
     expect(result.panels).toHaveLength(1)
@@ -5842,6 +5842,10 @@ describe('createAiProviderBridge', () => {
     )
     expect(result.panelMetadataByIndex).toHaveLength(4)
     expect(httpClient.post).toHaveBeenCalledTimes(1)
+    expect(httpClient.post.mock.calls[0][1]).toMatchObject({
+      model: 'gpt-image-2',
+      quality: 'low',
+    })
   })
 
   it('adds a stable human character continuity anchor to every panel prompt', async () => {
