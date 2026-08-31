@@ -87,6 +87,7 @@ const MAX_PROBABILITY_ENSEMBLE_RUNS = 3
 const PROBABILITY_FIRST_RUN_STOP_THRESHOLD = 0.95
 const PROBABILITY_SECOND_RUN_STOP_THRESHOLD = 0.82
 const PROBABILITY_ENSEMBLE_FALLBACK_RESERVE_MS = 4500
+const GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS = 90 * 1000
 
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
@@ -7364,6 +7365,11 @@ Flip hash: ${hash}
     const fastStoryMode = payload.fastStoryMode === true
     const provider = normalizeProvider(payload.provider)
     const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
+    const modelStoryRequestTimeoutFloorMs =
+      isOpenAiCompatibleProvider(provider) &&
+      model.toLowerCase() === 'gpt-5.6-sol'
+        ? GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS
+        : 0
     const providerDailyBudgetRemainingUsd =
       resolveProviderDailyBudgetRemainingForOperation({
         payload,
@@ -7428,7 +7434,8 @@ Flip hash: ${hash}
       benchmarkProfile: 'custom',
       requestTimeoutMs: Math.max(
         Number(payload.requestTimeoutMs || defaultStoryRequestTimeoutMs),
-        minimumStoryRequestTimeoutMs
+        minimumStoryRequestTimeoutMs,
+        modelStoryRequestTimeoutFloorMs
       ),
       maxOutputTokens: Math.max(
         Number(payload.maxOutputTokens || defaultStoryMaxOutputTokens),
@@ -7442,7 +7449,8 @@ Flip hash: ${hash}
       deadlineMs: Math.max(
         Math.max(
           Number(payload.requestTimeoutMs || defaultStoryRequestTimeoutMs),
-          minimumStoryRequestTimeoutMs
+          minimumStoryRequestTimeoutMs,
+          modelStoryRequestTimeoutFloorMs
         ) + 5000,
         fastStoryMode ? 16000 : 22000
       ),
@@ -7451,7 +7459,8 @@ Flip hash: ${hash}
       ...profile,
       requestTimeoutMs: Math.max(
         Number(profile.requestTimeoutMs) || 0,
-        minimumStoryRequestTimeoutMs
+        minimumStoryRequestTimeoutMs,
+        modelStoryRequestTimeoutFloorMs
       ),
       maxOutputTokens: Math.max(
         Number(profile.maxOutputTokens) || 0,
@@ -7461,7 +7470,8 @@ Flip hash: ${hash}
         Number(profile.deadlineMs) || 0,
         Math.max(
           Number(profile.requestTimeoutMs) || 0,
-          minimumStoryRequestTimeoutMs
+          minimumStoryRequestTimeoutMs,
+          modelStoryRequestTimeoutFloorMs
         ) + 5000,
         fastStoryMode ? 16000 : 22000
       ),
