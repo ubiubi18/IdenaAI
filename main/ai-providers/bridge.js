@@ -113,6 +113,23 @@ const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
 }
 
 const OPENAI_IMAGE_PRICING_USD_PER_IMAGE = {
+  'gpt-image-2': {
+    low: {
+      '1024x1024': 0.006,
+      '1024x1536': 0.005,
+      '1536x1024': 0.005,
+    },
+    medium: {
+      '1024x1024': 0.053,
+      '1024x1536': 0.041,
+      '1536x1024': 0.041,
+    },
+    high: {
+      '1024x1024': 0.211,
+      '1024x1536': 0.165,
+      '1536x1024': 0.165,
+    },
+  },
   'gpt-image-1': {
     '1024x1024': 0.042,
     '1024x1536': 0.063,
@@ -491,14 +508,21 @@ function estimateTextCostUsd(usage = {}, model = '') {
   )
 }
 
-function resolveOpenAiImageUnitPrice(model, size) {
+function resolveOpenAiImageUnitPrice(model, size, quality = 'low') {
   const normalizedModel = String(model || '')
     .trim()
     .toLowerCase()
   const normalizedSize = String(size || '').trim() || '1024x1024'
   const byModel = OPENAI_IMAGE_PRICING_USD_PER_IMAGE[normalizedModel]
   if (!byModel) return null
-  return byModel[normalizedSize] || byModel['1024x1024'] || null
+  const normalizedQuality = String(quality || 'low')
+    .trim()
+    .toLowerCase()
+  const byQuality =
+    byModel[normalizedQuality] && typeof byModel[normalizedQuality] === 'object'
+      ? byModel[normalizedQuality]
+      : byModel
+  return byQuality[normalizedSize] || byQuality['1024x1024'] || null
 }
 
 function parseImageSizeParts(value) {
@@ -4879,8 +4903,8 @@ function buildImageTimeoutCandidates(
   return Array.from(new Set(values))
 }
 
-function buildImageProfileCandidates({provider, imageModel, imageSize}) {
-  const model = String(imageModel || '').trim() || 'gpt-image-1-mini'
+function buildImageProfileCandidates({imageModel, imageSize}) {
+  const model = String(imageModel || '').trim() || 'gpt-image-2'
   const size = normalizeProviderImageSize(imageSize)
   const candidates = [{imageModel: model, imageSize: size, reason: 'requested'}]
 
@@ -4890,16 +4914,6 @@ function buildImageProfileCandidates({provider, imageModel, imageSize}) {
       imageSize: '1024x1024',
       reason: 'smaller-size',
     })
-  }
-
-  if (isOpenAiCompatibleProvider(provider)) {
-    if (model.toLowerCase() !== 'gpt-image-1-mini') {
-      candidates.push({
-        imageModel: 'gpt-image-1-mini',
-        imageSize: '1024x1024',
-        reason: 'faster-model',
-      })
-    }
   }
 
   return candidates.filter((item, index, list) => {
@@ -5684,6 +5698,7 @@ function getProviderBudgetCostUsd({
   model = '',
   imageModel = '',
   imageSize = '',
+  imageQuality = '',
   generatedImages = 0,
 } = {}) {
   if (
@@ -5701,7 +5716,11 @@ function getProviderBudgetCostUsd({
       costUsd += textCostUsd
     }
 
-    const unitPrice = resolveOpenAiImageUnitPrice(imageModel, imageSize)
+    const unitPrice = resolveOpenAiImageUnitPrice(
+      imageModel,
+      imageSize,
+      imageQuality
+    )
     const imageCount = Number(generatedImages)
     if (
       Number.isFinite(unitPrice) &&
@@ -9088,7 +9107,7 @@ Flip hash: ${hash}
     const provider = normalizeProvider(payload.provider)
     const fastBuild = payload.fastBuild !== false
     const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
-    const imageModel = String(payload.imageModel || 'gpt-image-1-mini').trim()
+    const imageModel = String(payload.imageModel || 'gpt-image-2').trim()
     const requestedImageSize = String(payload.imageSize || '1024x1024').trim()
     const imageSize = normalizeProviderImageSize(requestedImageSize)
     const providerDailyBudgetRemainingUsd =
@@ -9101,7 +9120,10 @@ Flip hash: ${hash}
       providerDailyBudgetRemainingUsd,
       'flip panel generation'
     )
-    const imageQuality = String(payload.imageQuality || '').trim()
+    const imageQuality = String(
+      payload.imageQuality ||
+        (imageModel.toLowerCase().includes('gpt-image-2') ? 'low' : '')
+    ).trim()
     const imageStyle = String(payload.imageStyle || '').trim()
     const providerConfig = payload.providerConfig || null
     const apiKey = getApiKey(provider, providerConfig)
@@ -9402,6 +9424,7 @@ Flip hash: ${hash}
                 provider,
                 imageModel: profileCandidate.imageModel,
                 imageSize: profileCandidate.imageSize,
+                imageQuality,
                 generatedImages: 1,
               })
               if (
@@ -9480,7 +9503,11 @@ Flip hash: ${hash}
             model
           )
           const imageUnitPrice = isOpenAiCompatibleProvider(provider)
-            ? resolveOpenAiImageUnitPrice(sheetImageModel, sheetImageSizeUsed)
+            ? resolveOpenAiImageUnitPrice(
+                sheetImageModel,
+                sheetImageSizeUsed,
+                imageQuality
+              )
             : null
           const sheetEstimatedImageCostUsd = Number.isFinite(imageUnitPrice)
             ? imageUnitPrice
@@ -9693,6 +9720,7 @@ Flip hash: ${hash}
                     provider,
                     imageModel: profileCandidate.imageModel,
                     imageSize: profileCandidate.imageSize,
+                    imageQuality,
                     generatedImages: 1,
                   })
                 if (
@@ -9776,7 +9804,11 @@ Flip hash: ${hash}
           panelImageModelUsed[panelIndex] = panelImageModel
           panelImageSizeUsed[panelIndex] = panelImageSize
           const unitPrice = isOpenAiCompatibleProvider(provider)
-            ? resolveOpenAiImageUnitPrice(panelImageModel, panelImageSize)
+            ? resolveOpenAiImageUnitPrice(
+                panelImageModel,
+                panelImageSize,
+                imageQuality
+              )
             : null
           if (unitPrice != null) {
             estimatedImageCostUsd += unitPrice
@@ -10136,7 +10168,7 @@ Flip hash: ${hash}
   async function generateImageSearchResults(payload = {}) {
     const provider = normalizeProvider(payload.provider)
     const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
-    const imageModel = String(payload.imageModel || 'gpt-image-1-mini').trim()
+    const imageModel = String(payload.imageModel || 'gpt-image-2').trim()
     const requestedImageSize = String(payload.imageSize || '1024x1024').trim()
     const imageSize = normalizeProviderImageSize(requestedImageSize)
     const providerDailyBudgetRemainingUsd =
@@ -10149,7 +10181,10 @@ Flip hash: ${hash}
       providerDailyBudgetRemainingUsd,
       'AI image search'
     )
-    const imageQuality = String(payload.imageQuality || '').trim()
+    const imageQuality = String(
+      payload.imageQuality ||
+        (imageModel.toLowerCase().includes('gpt-image-2') ? 'low' : '')
+    ).trim()
     const imageStyle = String(payload.imageStyle || '').trim()
     const maxImages = Math.max(
       1,
@@ -10199,6 +10234,7 @@ Flip hash: ${hash}
           provider,
           imageModel,
           imageSize,
+          imageQuality,
           generatedImages: 1,
         })
       if (
@@ -10291,7 +10327,7 @@ Flip hash: ${hash}
       })
       usage = addTokenUsage(usage, response.usage || createEmptyTokenUsage())
       const unitPrice = isOpenAiCompatibleProvider(provider)
-        ? resolveOpenAiImageUnitPrice(imageModel, imageSize)
+        ? resolveOpenAiImageUnitPrice(imageModel, imageSize, imageQuality)
         : null
       if (unitPrice != null) {
         estimatedImageCostUsd += unitPrice

@@ -27,12 +27,41 @@ describe('settings-context ai solver normalization', () => {
   it('keeps the default system reserve for AI sessions', () => {
     expect(buildAiSolverSettings()).toMatchObject({
       model: 'gpt-5.5',
+      flipBuilderStoryProvider: 'openai',
+      flipBuilderStoryModel: 'gpt-5.6-sol',
+      flipBuilderImageProvider: 'openai',
+      flipBuilderImageModel: 'gpt-image-2',
+      flipBuilderImageQuality: 'low',
+      flipBuilderImageSize: '1024x1024',
+      flipBuilderGenerationMode: 'fast',
       shortSessionOpenAiFastModel: 'gpt-5.5',
       probabilityReasoningEffort: 'xhigh',
       autoReportBestFlipEnabled: false,
       memoryBudgetGiB: 32,
       systemReserveGiB: 6,
       localAiMemoryReference: 'molmo2-4b',
+    })
+  })
+
+  it('normalizes persisted flip-builder model policy independently', () => {
+    expect(
+      buildAiSolverSettings({
+        flipBuilderStoryProvider: '',
+        flipBuilderStoryModel: '',
+        flipBuilderImageProvider: '',
+        flipBuilderImageModel: '',
+        flipBuilderImageQuality: 'unsupported',
+        flipBuilderImageSize: '',
+        flipBuilderGenerationMode: 'unsupported',
+      })
+    ).toMatchObject({
+      flipBuilderStoryProvider: 'openai',
+      flipBuilderStoryModel: 'gpt-5.6-sol',
+      flipBuilderImageProvider: 'openai',
+      flipBuilderImageModel: 'gpt-image-2',
+      flipBuilderImageQuality: 'low',
+      flipBuilderImageSize: '1024x1024',
+      flipBuilderGenerationMode: 'fast',
     })
   })
 

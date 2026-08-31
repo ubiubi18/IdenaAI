@@ -1,9 +1,10 @@
 import { useEffect, useReducer, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
-import { getPoster, getPosterWithIndexerApi, getPubkeyWithIdenaIndexerApi, getPubkeyWithRpc, type Message, type Poster } from "./logic/asyncUtils";
+import { type Message, type Poster } from "./logic/asyncUtils";
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from "./App.exports";
 import ConversationComponent from "./components/ConversationComponent";
 import { isValidAddress } from "./logic/utils";
+import { resolveMessagingRecipient } from "./logic/messageRecipients";
 
 type MessagesProps = {
     copyMessageTxHandler: (location: string, recipients: string[], replyToMessageId?: string | undefined) => Promise<void>,
@@ -67,9 +68,9 @@ function Messages() {
         SET_NEW_POSTS_ADDED_DELAY,
     } = useOutletContext() as MessagesProps;
 
-    const [addNewRecipient, setAddNewRecipient] = useState<string>(zeroAddress);
+    const [addNewRecipient, setAddNewRecipient] = useState<string>('');
     const [loadingNewRecipient, setLoadingNewRecipient] = useState<boolean>(false);
-    const [addressInvalid, setAddressInvalid] = useState<string>('pubkey missing');
+    const [addressInvalid, setAddressInvalid] = useState<string>('');
 
     const [recipients, setRecipients] = useState<string[]>([]);
 
@@ -97,6 +98,7 @@ function Messages() {
             }
 
             if (candidate === zeroAddress) {
+                setAddressInvalid('zero address');
                 throw new Error('cannot add zero address');
             }
 
@@ -108,39 +110,19 @@ function Messages() {
                 throw new Error('a message can have at most 15 recipients');
             }
 
-            let recipient = postersRef.current[candidate];
+            const result = await resolveMessagingRecipient({
+                address: candidate,
+                posters: postersRef.current,
+                preferredSource: findPostsWithRef.current,
+                rpcClient: rpcClientRef.current,
+                indexerApiUrl: indexerApiUrlRef.current,
+            });
 
-            if (!recipient) {
-                const poster = await (
-                    findPostsWithRef.current === 'rpc'
-                        ? getPoster(rpcClientRef.current, candidate, true)
-                        : getPosterWithIndexerApi(indexerApiUrlRef.current, candidate)
-                );
-
-                if (poster) {
-                    postersRef.current[candidate] = poster;
-                    recipient = poster;
-                }
-            }
-
-            if (!recipient) {
-                setAddressInvalid('not found');
-                throw new Error('recipient not found');
-            }
-
-            if (!recipient.pubkey) {
-                if (findPostsWithRef.current === 'indexer-api') {
-                    const pubkey = await getPubkeyWithIdenaIndexerApi(indexerApiUrlRef.current, recipient.address);
-                    postersRef.current[candidate].pubkey = pubkey ?? '';
-                } else {
-                    const pubkey = await getPubkeyWithRpc(rpcClientRef.current, recipient.address);
-                    postersRef.current[candidate].pubkey = pubkey ?? '';
-                }
-
-                if (!recipient.pubkey) {
-                    setAddressInvalid('pubkey missing');
-                    throw new Error('recipient public key missing');
-                }
+            if (result.error) {
+                setAddressInvalid(result.error);
+                throw new Error(result.error === 'pubkey missing'
+                    ? 'recipient public key is not published yet'
+                    : 'recipient not found');
             }
 
             setAddressInvalid('');
@@ -196,10 +178,10 @@ function Messages() {
         </div>
         <div className="mb-4">
             <p className="mb-1">Add recipient address:</p>
-            <input className="w-full mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" value={addNewRecipient} onChange={e => { setAddressInvalid(''); setAddNewRecipient(e.target.value); }} />
+            <input className="w-full mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" placeholder="0x..." value={addNewRecipient} onChange={e => { setAddressInvalid(''); setAddNewRecipient(e.target.value); }} />
             {addressInvalid && <div className="flex gap-2 text-[11px] text-red-400">
-                <span>Invalid address: {addressInvalid}.</span>
-                {addressInvalid === 'pubkey missing' && addNewRecipient !== zeroAddress && <><span className="text-blue-400 hover:underline hover:cursor-pointer" onClick={(e) => handleSubmitPubkeyModal(e, addNewRecipient)}>Manually Provide Pubkey</span><span>then try again</span></>}
+                <span>{addressInvalid === 'pubkey missing' ? 'Recipient public key is not published yet.' : `Invalid address: ${addressInvalid}.`}</span>
+                {addressInvalid === 'pubkey missing' && addNewRecipient.trim() && addNewRecipient.trim().toLowerCase() !== zeroAddress && <><span className="text-blue-400 hover:underline hover:cursor-pointer" onClick={(e) => handleSubmitPubkeyModal(e, addNewRecipient.trim().toLowerCase())}>Manually provide pubkey</span><span>then try again</span></>}
             </div>}
             <div>
                 <button className="h-7 w-30 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10" disabled={loadingNewRecipient} onClick={() => addRecipient()}>{loadingNewRecipient ? 'Loading...' : 'Add Recipient'}</button>
