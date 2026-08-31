@@ -5866,6 +5866,12 @@ describe('createAiProviderBridge', () => {
     expect(result.panels[0].panelPrompt).toContain(
       'Across the four quadrants, vary camera distance and framing: establishing setup, trigger moment, peak consequence, and settled aftermath.'
     )
+    expect(result.panels[0].panelPrompt).toContain(
+      'Mandatory accessibility requirements (override conflicting style requests):'
+    )
+    expect(result.panels[0].panelPrompt).toContain(
+      'Make story-essential details large, clearly separated, and easy to recognize for viewers with low vision.'
+    )
     expect(result.panelMetadataByIndex).toHaveLength(4)
     expect(httpClient.post).toHaveBeenCalledTimes(1)
     expect(httpClient.post.mock.calls[0][1]).toMatchObject({
@@ -5903,6 +5909,8 @@ describe('createAiProviderBridge', () => {
       imageModel: 'gpt-image-1-mini',
       imageSize: '1024x1024',
       requestTimeoutMs: 15000,
+      panelRenderMode: 'panels',
+      visualStyle: 'Dark low-key noir scene with detailed background clutter.',
       textAuditEnabled: false,
       maxRetries: 0,
       keywords: ['shock', 'ghost'],
@@ -5919,7 +5927,7 @@ describe('createAiProviderBridge', () => {
       'Continuity anchor for the full 4-panel sequence:'
     )
     expect(result.panels[0].panelPrompt).toContain(
-      'Panel-to-panel differentiation requirements:'
+      'Panel-specific differentiation:'
     )
     expect(result.panels[0].panelPrompt).toContain(
       'Recurring subject: keep the same person'
@@ -5929,6 +5937,24 @@ describe('createAiProviderBridge', () => {
     )
     expect(result.panels[0].panelPrompt).toContain(
       'Do not change clothing colors, face, hairstyle, or prop design between panels unless the story explicitly shows that change.'
+    )
+    expect(result.panels[0].panelPrompt).toContain(
+      'Always use a bright, high-key palette with even lighting and strong foreground/background contrast. Never create a dark or dim scene.'
+    )
+    expect(result.panels[0].panelPrompt).toContain(
+      'Keep the composition minimal and uncluttered; include only story-essential subjects and objects.'
+    )
+    expect(result.panels[0].panelPrompt).toContain(
+      'Use clean silhouettes, bold outlines, and simple shapes; never rely on tiny, faint, dark, or low-contrast details to explain the action.'
+    )
+    expect(
+      result.panels[0].panelPrompt.indexOf(
+        'Mandatory accessibility requirements (override conflicting style requests):'
+      )
+    ).toBeGreaterThan(
+      result.panels[0].panelPrompt.indexOf(
+        'Dark low-key noir scene with detailed background clutter.'
+      )
     )
   })
 

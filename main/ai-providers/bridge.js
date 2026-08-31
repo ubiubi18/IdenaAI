@@ -88,6 +88,13 @@ const PROBABILITY_FIRST_RUN_STOP_THRESHOLD = 0.95
 const PROBABILITY_SECOND_RUN_STOP_THRESHOLD = 0.82
 const PROBABILITY_ENSEMBLE_FALLBACK_RESERVE_MS = 4500
 const GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS = 90 * 1000
+const FLIP_IMAGE_ACCESSIBILITY_REQUIREMENTS = [
+  'Mandatory accessibility requirements (override conflicting style requests):',
+  '- Always use a bright, high-key palette with even lighting and strong foreground/background contrast. Never create a dark or dim scene.',
+  '- Keep the composition minimal and uncluttered; include only story-essential subjects and objects.',
+  '- Make story-essential details large, clearly separated, and easy to recognize for viewers with low vision.',
+  '- Use clean silhouettes, bold outlines, and simple shapes; never rely on tiny, faint, dark, or low-contrast details to explain the action.',
+]
 
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
@@ -4508,6 +4515,7 @@ function buildPanelPrompt({
       : '',
     'Style requirements:',
     visualStyle,
+    ...FLIP_IMAGE_ACCESSIBILITY_REQUIREMENTS,
     'Output image only.',
   ].join('\n')
 }
@@ -4560,6 +4568,7 @@ function buildStoryboardSheetPrompt({
     ...panelLines,
     'Style requirements:',
     visualStyle,
+    ...FLIP_IMAGE_ACCESSIBILITY_REQUIREMENTS,
     'Output image only.',
   ]
     .filter(Boolean)
