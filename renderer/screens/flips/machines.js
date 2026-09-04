@@ -1418,7 +1418,7 @@ export const imageSearchMachine = createMachine({
     query: '',
     searchMode: 'web',
     aiProvider: 'openai',
-    aiModel: 'gpt-6-astra',
+    aiModel: 'gpt-5.6-sol',
     aiProviderConfig: null,
     aiProviderDailyBudgetEnabled: true,
     aiProviderDailyBudgetRemainingUsd: null,

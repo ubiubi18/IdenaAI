@@ -14,7 +14,7 @@ const PROVIDERS = {
 }
 
 const DEFAULT_MODELS = {
-  [PROVIDERS.OpenAI]: 'gpt-6-astra',
+  [PROVIDERS.OpenAI]: 'gpt-5.6-sol',
   [PROVIDERS.LocalAI]: '',
   [PROVIDERS.OpenAICompatible]: 'gpt-4o-mini',
   [PROVIDERS.Gemini]: 'gemini-2.0-flash',
@@ -26,6 +26,11 @@ const DEFAULT_MODELS = {
   [PROVIDERS.OpenRouter]: 'openai/gpt-4o-mini',
   [PROVIDERS.Moonshot]: 'kimi-k2.6',
   [PROVIDERS.DeepInfra]: 'Qwen/Qwen3.6-35B-A3B',
+}
+
+const DEFAULT_STORY_MODELS = {
+  ...DEFAULT_MODELS,
+  [PROVIDERS.OpenAI]: 'gpt-6-astra',
 }
 
 const PROVIDER_CONFIG_DEFAULTS = {
@@ -164,6 +169,7 @@ const CUSTOM_LIMITS = {
 module.exports = {
   PROVIDERS,
   DEFAULT_MODELS,
+  DEFAULT_STORY_MODELS,
   PROVIDER_CONFIG_DEFAULTS,
   OPENAI_COMPATIBLE_PROVIDERS,
   STRICT_PROFILE,

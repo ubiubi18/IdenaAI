@@ -24,9 +24,9 @@ describe('settings-context ai solver normalization', () => {
     })
   })
 
-  it('keeps the default system reserve for AI sessions', () => {
+  it('defaults to Sol for solving and Astra for stories without changing resource limits', () => {
     expect(buildAiSolverSettings()).toMatchObject({
-      model: 'gpt-6-astra',
+      model: 'gpt-5.6-sol',
       flipBuilderStoryProvider: 'openai',
       flipBuilderStoryModel: 'gpt-6-astra',
       flipBuilderImageProvider: 'openai',
@@ -34,7 +34,7 @@ describe('settings-context ai solver normalization', () => {
       flipBuilderImageQuality: 'low',
       flipBuilderImageSize: '1024x1024',
       flipBuilderGenerationMode: 'fast',
-      shortSessionOpenAiFastModel: 'gpt-6-astra',
+      shortSessionOpenAiFastModel: 'gpt-5.6-sol',
       probabilityReasoningEffort: 'xhigh',
       autoReportBestFlipEnabled: false,
       memoryBudgetGiB: 32,
@@ -105,7 +105,7 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
-      shortSessionOpenAiFastModel: 'gpt-6-astra',
+      shortSessionOpenAiFastModel: 'gpt-5.6-sol',
     })
   })
 
@@ -159,7 +159,7 @@ describe('settings-context ai solver normalization', () => {
     })
   })
 
-  it('migrates the old OpenAI default model to Astra', () => {
+  it('migrates the old OpenAI default model to Sol', () => {
     expect(
       buildAiSolverSettings({
         provider: 'openai',
@@ -168,23 +168,26 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       provider: 'openai',
-      model: 'gpt-6-astra',
+      model: 'gpt-5.6-sol',
       shortSessionOpenAiFastModel: 'gpt-5.4-mini',
     })
   })
 
-  it('preserves saved model choices, budgets, and consent', () => {
-    const saved = {
-      provider: 'openai',
-      model: 'gpt-5.5',
-      flipBuilderStoryModel: 'gpt-5.6-sol',
-      providerDailyBudgetEnabled: true,
-      providerDailyBudgetUsd: 15,
-      mode: 'session-auto',
-      onchainAutoSubmitConsentAt: '2026-09-01T10:00:00.000Z',
+  it.each(['gpt-5.5', 'gpt-5.6-sol', 'gpt-6-astra'])(
+    'preserves saved %s model choices, budgets, and consent',
+    (model) => {
+      const saved = {
+        provider: 'openai',
+        model,
+        flipBuilderStoryModel: 'gpt-5.6-sol',
+        providerDailyBudgetEnabled: true,
+        providerDailyBudgetUsd: 15,
+        mode: 'session-auto',
+        onchainAutoSubmitConsentAt: '2026-09-01T10:00:00.000Z',
+      }
+      expect(buildAiSolverSettings(saved)).toMatchObject(saved)
     }
-    expect(buildAiSolverSettings(saved)).toMatchObject(saved)
-  })
+  )
 
   it('keeps the internal node preference while routing through an ephemeral rehearsal node', () => {
     expect(
