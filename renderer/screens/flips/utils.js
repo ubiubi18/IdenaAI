@@ -27,6 +27,27 @@ const StackBlur = require('stackblur-canvas')
 export const FLIP_LENGTH = 4
 export const DEFAULT_FLIP_ORDER = [0, 1, 2, 3]
 
+const SUBMIT_PANEL_WIDTH = 240
+const SUBMIT_PANEL_HEIGHT = 180
+const SUBMIT_JPEG_QUALITY = 0.6
+
+export async function compressFlipImagesForSubmit(images) {
+  const source = Array.isArray(images) ? images.slice(0, FLIP_LENGTH) : []
+  return Promise.all(
+    source.map((image) => {
+      const value = String(image || '').trim()
+      if (!value.startsWith('data:')) return value
+      return resizeImageToDataUrl(value, {
+        width: SUBMIT_PANEL_WIDTH,
+        height: SUBMIT_PANEL_HEIGHT,
+        type: 'image/jpeg',
+        quality: SUBMIT_JPEG_QUALITY,
+        exact: true,
+      })
+    })
+  )
+}
+
 export function getRandomKeywordPair() {
   function getRandomInt(min, max) {
     // eslint-disable-next-line no-param-reassign
@@ -233,8 +254,12 @@ export async function publishFlip({
   )
     throw new Error(i18n.t('You must shuffle flip before submit'))
 
+  // Every publish entry point, including drafts edited after generation, must
+  // pass through the same protocol-sized encoding immediately before RLP.
+  const submitImages = await compressFlipImagesForSubmit(protectedImages)
+
   const [publicHex, privateHex] = flipToHex(
-    hint ? protectedImages : originalOrder.map((num) => protectedImages[num]),
+    hint ? submitImages : originalOrder.map((num) => submitImages[num]),
     hint ? order : orderPermutations
   )
 
