@@ -12,9 +12,14 @@ const STORY_COMPLIANCE_KEYS = [
   'no_screen_or_page_keyword_cheat',
   'causal_clarity',
   'consensus_clarity',
+  'age_12_clarity',
+  'everyday_knowledge_only',
+  'large_visual_cues',
+  'simple_action_chain',
+  'obvious_final_outcome',
 ]
 
-const STORY_OPTIONS_SCHEMA_NAME = 'idena_story_options_v2'
+const STORY_OPTIONS_SCHEMA_NAME = 'idena_story_options_v3'
 function normalizeStoryOptionCount(value) {
   const parsed = Number.parseInt(value, 10)
   if (!Number.isFinite(parsed)) return 2

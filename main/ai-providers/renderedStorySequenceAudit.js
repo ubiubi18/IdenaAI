@@ -1,4 +1,8 @@
 const {extractJsonBlock} = require('./decision')
+const {
+  COMMON_SENSE_FLIP_REJECTION_RULES,
+  COMMON_SENSE_FLIP_STORY_RULES,
+} = require('./flipStoryRules')
 
 const REQUIRED_SEQUENCE_CHECKS = [
   'keyword_clarity',
@@ -8,6 +12,9 @@ const REQUIRED_SEQUENCE_CHECKS = [
   'premature_reveal',
   'state_regression',
   'panel_distinctness',
+  'common_sense_simplicity',
+  'large_cue_readability',
+  'final_outcome_clarity',
 ]
 
 function normalizeBoolean(value, fallback = false) {
@@ -136,6 +143,9 @@ function buildRenderedStorySequenceAuditPrompt(context = {}) {
     '    "premature_reveal": {"passed": true, "panel_indices": [], "notes": ""},',
     '    "state_regression": {"passed": true, "panel_indices": [], "notes": ""},',
     '    "panel_distinctness": {"passed": true, "notes": ""},',
+    '    "common_sense_simplicity": {"passed": true, "notes": ""},',
+    '    "large_cue_readability": {"passed": true, "notes": ""},',
+    '    "final_outcome_clarity": {"passed": true, "notes": ""},',
     '    "shuffled_order": {"passed": true, "forms_meaningful_story": false, "notes": ""}',
     '  },',
     '  "summary": ""',
@@ -153,6 +163,9 @@ function buildRenderedStorySequenceAuditPrompt(context = {}) {
     '- Fail premature_reveal if an object, event, damage, reveal, or outcome planned for a later panel is already visible earlier.',
     '- Fail state_regression if a later image reverses an irreversible change, restores an earlier state, closes an opened object, repairs damage, or otherwise resets the story without the plan saying so.',
     '- Adjacent panels must show visibly distinct states, while still preserving continuity.',
+    '- Apply these common-sense rules when judging common_sense_simplicity, large_cue_readability, final_outcome_clarity, story_alignment, and causal_progression:',
+    ...COMMON_SENSE_FLIP_STORY_RULES,
+    ...COMMON_SENSE_FLIP_REJECTION_RULES,
     '- Evaluate every supplied shuffled candidate. safe_shuffle_candidate must identify the safest candidate that clearly cannot be read as a meaningful chronological story. Use 0 if none is safe.',
     '- Use verdict=accept only when all checks pass, score is at least 85, and a safe shuffled candidate exists.',
     '- Use verdict=repair only when one or two specific rendered panels can fix the problem without changing the story plan.',

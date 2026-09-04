@@ -31,13 +31,11 @@ describe('story prompt exemplars', () => {
     expect(result.lines.join('\n')).toContain('Positive:')
     expect(result.lines.join('\n')).toContain('Negative:')
     expect(result.lines.join('\n')).toContain(
-      'The person observes the final result.'
+      'the order needs explanation and the final result is unclear'
     )
-    expect(result.lines.join('\n')).toContain('garment bag peels open')
-    expect(result.lines.join('\n')).toContain(
-      'instead of defaulting to spills or overturned props'
-    )
-    expect(result.lines.join('\n')).toContain('reveals, blocked routes')
+    expect(result.lines.join('\n')).toContain('paints the large beak yellow')
+    expect(result.lines.join('\n')).toContain('one main action per panel')
+    expect(result.lines.join('\n')).toContain('large keyword objects')
     expect(result.lines.join('\n')).not.toContain(
       'Do not include inappropriate, sexual, violent, or shocking content.'
     )
