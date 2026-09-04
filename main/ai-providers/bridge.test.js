@@ -59,6 +59,11 @@ function makeComplianceReport(overrides = {}) {
     no_screen_or_page_keyword_cheat: 'pass',
     causal_clarity: 'pass',
     consensus_clarity: 'pass',
+    age_12_clarity: 'pass',
+    everyday_knowledge_only: 'pass',
+    large_visual_cues: 'pass',
+    simple_action_chain: 'pass',
+    obvious_final_outcome: 'pass',
     ...overrides,
   }
 }
@@ -2903,13 +2908,20 @@ describe('createAiProviderBridge', () => {
     expect(callPayload.promptText).toContain('4-panel storyboard checklist')
     expect(callPayload.promptText).toContain('causality >= 4')
     expect(callPayload.promptText).toContain(
-      'Think like a storyboard collaborator, not a policy robot.'
+      'understandable at a glance to a typical 12-year-old'
+    )
+    expect(callPayload.promptText).toContain(
+      'Avoid multi-object chain reactions and complicated accidents'
+    )
+    expect(callPayload.promptText).toContain('obvious_final_outcome')
+    expect(callPayload.promptText).toContain(
+      'Think like a storyboard collaborator who is explaining one ordinary action visually.'
     )
     expect(callPayload.promptText).toContain(
       'Compact positive/negative exemplars (openai_like_compact_exemplars):'
     )
     expect(callPayload.promptText).toContain(
-      'The person observes the final result.'
+      'the order needs explanation and the final result is unclear'
     )
     expect(callPayload.promptText).toContain(
       'Allow ordinary fear, tension, conflict, surprise, creepy atmosphere, safe tool use, accidental mess, and non-graphic consequences when they improve clarity.'
@@ -2925,6 +2937,9 @@ describe('createAiProviderBridge', () => {
     )
     expect(auditPayload.promptText).toContain(
       'panel 4 must be a direct visible consequence of panel 3'
+    )
+    expect(auditPayload.promptText).toContain(
+      'Reject a story that needs verbal explanation or special knowledge'
     )
     expect(result.stories[0].title.toLowerCase()).toContain('literal flow')
     expect(result.stories[0].storySummary.toLowerCase()).toContain('note')
@@ -3093,16 +3108,16 @@ describe('createAiProviderBridge', () => {
     expect(callPayload.promptText).not.toContain('Internal workflow:')
     expect(callPayload.promptText).not.toContain('"compliance_report"')
     expect(callPayload.promptText).toContain(
-      'do not default the peak or ending to toppled props, overturned furniture, or scattered contents unless that is truly the clearest story beat'
+      'Use one main actor, one obvious goal or problem, and one direct action chain'
     )
     expect(callPayload.promptText).toContain(
-      'Prefer final frames defined by a reveal, blocked route, trapped pose, bright exposure, repaired arrangement, clear escape gap, or newly stable layout instead of generic wreckage.'
+      'Prefer a visibly completed goal, a finished object, or a clearly broken non-living object as the ending.'
     )
     expect(callPayload.promptText).toContain(
-      'Vary the trigger mechanism too: conceal/reveal, slip-and-chase, mistaken appearance, blocked route, awkward repair, escape, or sudden exposure to light.'
+      'Use one major action per panel; do not build chains of objects colliding, rolling, dragging, or revealing one another.'
     )
     expect(callPayload.promptText).toContain(
-      '- mistaken appearance followed by reveal'
+      '- prepare -> act -> progress -> completed goal'
     )
     expect(
       callPayload.promptOptions.structuredOutput.responseFormat.json_schema
@@ -3330,15 +3345,12 @@ describe('createAiProviderBridge', () => {
     const callPayload = invokeProvider.mock.calls[0][0]
     expect(callPayload.promptText).toContain('Pair-fit steering:')
     expect(callPayload.promptText).toContain(
-      'If both keywords are mostly objects, place them inside one believable human situation'
+      'If both keywords are mostly objects, give one person a familiar goal'
     )
     expect(callPayload.promptText).toContain(
-      'Avoid object-object collisions as the default.'
+      'Do not make the objects trigger a chain reaction.'
     )
-    expect(callPayload.promptText).toContain('repair-gone-wrong')
-    expect(callPayload.promptText).toContain(
-      'chase after something slipping free'
-    )
+    expect(callPayload.promptText).not.toContain('repair-gone-wrong')
   })
 
   it('uses provider freeform draft rescue before local fallback in single-story mode', async () => {
@@ -3401,7 +3413,7 @@ describe('createAiProviderBridge', () => {
     )
     expect(rescueCall[0].promptText).toContain('Pair-fit steering:')
     expect(rescueCall[0].promptText).toContain(
-      'If both keywords are mostly objects, place them inside one believable human situation'
+      'If both keywords are mostly objects, give one person a familiar goal'
     )
     expect(result.metrics.fallback_used).toBe(false)
     expect(result.stories).toHaveLength(1)
@@ -4215,7 +4227,7 @@ describe('createAiProviderBridge', () => {
     expect(fastPrompt).toContain('Positive:')
     expect(fastPrompt).toContain('Negative:')
     expect(fastPrompt).toContain(
-      'same porch repeated four times, tiny expression changes'
+      'the important clue is tiny, and two different panel orders make equal sense'
     )
     expect(fastPrompt).toContain(
       'vary archetype choice; do not default to bump-and-spill unless it is the clearest fit'
@@ -4784,7 +4796,7 @@ describe('createAiProviderBridge', () => {
     )
   })
 
-  it('varies ambiguous local fallback consequences beyond spilled objects', async () => {
+  it('keeps ambiguous local fallback stories simple and progressive', async () => {
     const logger = mockLogger()
     const invokeProvider = jest.fn().mockRejectedValue(new Error('ENOTFOUND'))
 
@@ -4803,15 +4815,37 @@ describe('createAiProviderBridge', () => {
     const joinedPanels = result.stories[0].panels.join(' ').toLowerCase()
 
     expect(result.metrics.fallback_used).toBe(true)
-    expect(joinedPanels).not.toMatch(/\bspill|spills|spilled\b/)
-    expect(joinedPanels).not.toContain('a sudden bump sends')
-    expect(joinedPanels).not.toContain('a person places the magazine beside')
-    expect(joinedPanels).toMatch(
-      /rolls away|snaps open|unfurls|tangles|blocks|bright light|re-hooked|steadied/
+    expect(joinedPanels).toMatch(/empty display shelf|empty open crate/)
+    expect(joinedPanels).toMatch(/finished display|packed open crate/)
+    expect(joinedPanels).toContain('magazine')
+    expect(joinedPanels).toContain('hoola hoop')
+    expect(joinedPanels).not.toMatch(
+      /rolls away|snaps open|unfurls|tangles|blocks|re-hooked|steadied/
     )
-    expect(joinedPanels).toMatch(
-      /shopper|stagehand|traveler|teacher|vendor|gardener/
-    )
+  })
+
+  it('uses a simple visible task when a raw keyword is a location', async () => {
+    const invokeProvider = jest
+      .fn()
+      .mockRejectedValue(new Error('provider unavailable'))
+    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.generateStoryOptions({
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+      storyOptionCount: 1,
+      keywords: ['organ', 'garage'],
+      includeNoise: false,
+      hasCustomStory: false,
+    })
+
+    const joinedPanels = result.stories[0].panels.join(' ').toLowerCase()
+    expect(result.metrics.fallback_used).toBe(true)
+    expect(joinedPanels).toContain('dusty organ')
+    expect(joinedPanels).toContain('clean organ')
+    expect(joinedPanels).toContain('garage')
+    expect(joinedPanels).not.toMatch(/rolls away|drags|skids|chain reaction/)
   })
 
   it('keeps tense but non-graphic tool-use stories instead of over-blocking them', async () => {
@@ -4871,6 +4905,11 @@ describe('createAiProviderBridge', () => {
               no_screen_or_page_keyword_cheat: 'pass',
               causal_clarity: 'pass',
               consensus_clarity: 'pass',
+              age_12_clarity: 'pass',
+              everyday_knowledge_only: 'pass',
+              large_visual_cues: 'pass',
+              simple_action_chain: 'pass',
+              obvious_final_outcome: 'pass',
             },
             risk_flags: [],
             revision_if_risky: '',
@@ -4932,6 +4971,11 @@ describe('createAiProviderBridge', () => {
               no_screen_or_page_keyword_cheat: 'pass',
               causal_clarity: 'pass',
               consensus_clarity: 'pass',
+              age_12_clarity: 'pass',
+              everyday_knowledge_only: 'pass',
+              large_visual_cues: 'pass',
+              simple_action_chain: 'pass',
+              obvious_final_outcome: 'pass',
             },
             risk_flags: [],
             revision_if_risky: '',
@@ -5168,6 +5212,11 @@ describe('createAiProviderBridge', () => {
               no_screen_or_page_keyword_cheat: 'pass',
               causal_clarity: 'pass',
               consensus_clarity: 'pass',
+              age_12_clarity: 'pass',
+              everyday_knowledge_only: 'pass',
+              large_visual_cues: 'pass',
+              simple_action_chain: 'pass',
+              obvious_final_outcome: 'pass',
             },
             risk_flags: [],
             revision_if_risky: '',
@@ -5218,6 +5267,11 @@ describe('createAiProviderBridge', () => {
               no_screen_or_page_keyword_cheat: 'pass',
               causal_clarity: 'pass',
               consensus_clarity: 'pass',
+              age_12_clarity: 'pass',
+              everyday_knowledge_only: 'pass',
+              large_visual_cues: 'pass',
+              simple_action_chain: 'pass',
+              obvious_final_outcome: 'pass',
             },
             risk_flags: [],
             revision_if_risky: '',
@@ -6295,6 +6349,9 @@ describe('createAiProviderBridge', () => {
       premature_reveal: {passed: true, panel_indices: []},
       state_regression: {passed: true, panel_indices: []},
       panel_distinctness: {passed: true},
+      common_sense_simplicity: {passed: true},
+      large_cue_readability: {passed: true},
+      final_outcome_clarity: {passed: true},
       shuffled_order: {passed: true, forms_meaningful_story: false},
     })
     const firstChecks = passingChecks()

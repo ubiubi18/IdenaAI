@@ -35,6 +35,10 @@ const {
   validateStoryOptionsPayload,
 } = require('./storySchema')
 const {evaluateStoryQuality} = require('./storyQuality')
+const {
+  COMMON_SENSE_FLIP_REJECTION_RULES,
+  COMMON_SENSE_FLIP_STORY_RULES,
+} = require('./flipStoryRules')
 const {selectStoryOptionPair} = require('./storyDiversity')
 const {
   buildRenderedStoryRepairGuidance,
@@ -901,10 +905,10 @@ function buildSingleStoryPairFitLines(senseSelection, keywordA, keywordB) {
 
   if (bothMostlyObjects) {
     lines.push(
-      '- If both keywords are mostly objects, place them inside one believable human situation such as packing, cleaning, rehearsal, delivery, costume prep, shopping, repair, or travel.'
+      '- If both keywords are mostly objects, give one person a familiar goal such as cleaning, packing, displaying, building, or repairing them.'
     )
     lines.push(
-      '- Avoid object-object collisions as the default. Prefer snag, reveal, tangle, blocked path, runaway object, concealment, recovery, repair-gone-wrong, or a chase after something slipping free.'
+      '- Do not make the objects trigger a chain reaction. Let the person move or change one large object at a time toward the final goal.'
     )
   }
 
@@ -3416,6 +3420,90 @@ function buildKeywordFallbackPanels(
   return buildGenericLockedFallbackPanels(firstSense, secondSense)
 }
 
+function buildSimpleCommonSenseFallbackPanels(
+  keywordA,
+  keywordB,
+  variant,
+  humanStorySeed
+) {
+  const primaryLabel = normalizeKeywordFallbackValue(keywordA, 'object A')
+  const secondaryLabel = normalizeKeywordFallbackValue(keywordB, 'object B')
+  const primaryIsLocation = hasAnyKeywordHint(
+    primaryLabel,
+    LOCATION_KEYWORD_HINTS
+  )
+  const secondaryIsLocation = hasAnyKeywordHint(
+    secondaryLabel,
+    LOCATION_KEYWORD_HINTS
+  )
+  let locationLabel = ''
+  if (primaryIsLocation) {
+    locationLabel = primaryLabel
+  } else if (secondaryIsLocation) {
+    locationLabel = secondaryLabel
+  }
+  const subjectLabel = primaryIsLocation ? secondaryLabel : primaryLabel
+  const subjectIsActor = isStoryActorLikeLabel(subjectLabel)
+
+  if (locationLabel) {
+    if (subjectIsActor) {
+      return [
+        prependSeedToPanel(
+          `In a bright ${locationLabel}, the ${subjectLabel} stands beside one large mess and a broom.`,
+          humanStorySeed
+        ),
+        `The ${subjectLabel} picks up the broom inside the ${locationLabel}.`,
+        `The ${subjectLabel} sweeps the mess into one large pile inside the ${locationLabel}.`,
+        `The clean ${locationLabel} and the filled dustpan are obvious beside the ${subjectLabel}.`,
+      ]
+    }
+
+    if (variant === 1) {
+      return [
+        prependSeedToPanel(
+          `In a bright ${locationLabel}, a person stands beside a dusty ${subjectLabel} and a large cleaning brush.`,
+          humanStorySeed
+        ),
+        `The person puts the large brush against the dusty ${subjectLabel} in the ${locationLabel}.`,
+        `The person brushes the dust into one large pile beside the ${subjectLabel}.`,
+        `The clean ${subjectLabel}, the dust pile, and the brush are obvious inside the ${locationLabel}.`,
+      ]
+    }
+
+    return [
+      prependSeedToPanel(
+        `In a bright ${locationLabel}, a person stands beside a dusty ${subjectLabel} and a large cleaning cloth.`,
+        humanStorySeed
+      ),
+      `The person presses the large cloth against the dusty ${subjectLabel} in the ${locationLabel}.`,
+      `The person wipes the ${subjectLabel}, leaving one large clean section visible in the ${locationLabel}.`,
+      `The clean ${subjectLabel} stands in the ${locationLabel} while the person sets down the cloth.`,
+    ]
+  }
+
+  if (variant === 1) {
+    return [
+      prependSeedToPanel(
+        `A person stands beside the ${primaryLabel}, the ${secondaryLabel}, and an empty open crate.`,
+        humanStorySeed
+      ),
+      `The person places the ${primaryLabel} inside the open crate while the ${secondaryLabel} stays beside it.`,
+      `The person places the ${secondaryLabel} beside the ${primaryLabel} inside the open crate.`,
+      `The packed open crate clearly holds the ${primaryLabel} and the ${secondaryLabel} together.`,
+    ]
+  }
+
+  return [
+    prependSeedToPanel(
+      `A person stands beside the ${primaryLabel}, the ${secondaryLabel}, and an empty display shelf.`,
+      humanStorySeed
+    ),
+    `The person places the ${primaryLabel} on the empty shelf while the ${secondaryLabel} stays beside it.`,
+    `The person places the ${secondaryLabel} beside the ${primaryLabel} on the shelf.`,
+    `The finished display clearly shows the ${primaryLabel} and the ${secondaryLabel} together.`,
+  ]
+}
+
 function buildKeywordFallbackStories({
   keywordA,
   keywordB,
@@ -3457,27 +3545,42 @@ function buildKeywordFallbackStories({
     ? chooseNoisePanelIndex(`${safeKeywordA}-${safeKeywordB}`)
     : null
 
-  const optionOnePanels = hasCustomPanels
-    ? normalizedCustomPanels
-    : buildKeywordFallbackPanels(
-        safeKeywordA,
-        safeKeywordB,
-        0,
-        humanStorySeed,
-        selection
-      )
-
-  const optionTwoPanels = hasCustomPanels
-    ? normalizedCustomPanels.map((panel, index) =>
-        index === 0 ? `${panel} (alternative opening)` : panel
-      )
-    : buildKeywordFallbackPanels(
-        safeKeywordA,
-        safeKeywordB,
-        1,
-        humanStorySeed,
-        selection
-      )
+  let optionOnePanels
+  let optionTwoPanels
+  if (hasCustomPanels) {
+    optionOnePanels = normalizedCustomPanels
+    optionTwoPanels = normalizedCustomPanels.map((panel, index) =>
+      index === 0 ? `${panel} (alternative opening)` : panel
+    )
+  } else if (isStoryboardStarter) {
+    optionOnePanels = buildSimpleCommonSenseFallbackPanels(
+      safeKeywordA,
+      safeKeywordB,
+      0,
+      humanStorySeed
+    )
+    optionTwoPanels = buildSimpleCommonSenseFallbackPanels(
+      safeKeywordA,
+      safeKeywordB,
+      1,
+      humanStorySeed
+    )
+  } else {
+    optionOnePanels = buildKeywordFallbackPanels(
+      safeKeywordA,
+      safeKeywordB,
+      0,
+      humanStorySeed,
+      selection
+    )
+    optionTwoPanels = buildKeywordFallbackPanels(
+      safeKeywordA,
+      safeKeywordB,
+      1,
+      humanStorySeed,
+      selection
+    )
+  }
 
   const fallbackReason = String(fallbackReasonText || '').trim()
   const primaryFallbackRationale = fallbackReason
@@ -3729,31 +3832,24 @@ function buildStoryCreativityLines({fastMode = false}) {
   if (fastMode) {
     return [
       'Creative steering:',
-      '- Think like a storyboard partner helping a human creator get to a strong idea quickly.',
-      '- Give vivid, editable story seeds, not stiff compliance prose.',
-      '- Specific places, props, reveals, accidents, and reactions beat generic object bumps.',
-      '- Rotate archetypes: snag-and-reveal, runaway object, tangled props, blocked path, crooked result, concealment reveal, repair, escape, recovery.',
-      '- Vary the trigger mechanism too: conceal/reveal, slip-and-chase, mistaken appearance, blocked route, awkward repair, escape, or sudden exposure to light.',
-      '- Allow suspense, humor, eerie tone, awkwardness, and small surprises if the panel order stays obvious.',
-      '- Do not default to bump-and-spill stories unless that is clearly the strongest fit.',
-      '- Do not default to toppled racks, overturned trunks, dropped bags, or spilled contents as the ending shape.',
-      '- Prefer final frames defined by a reveal, blocked route, trapped pose, bright exposure, repaired arrangement, clear escape gap, or newly stable layout instead of generic wreckage.',
+      '- Think like a storyboard partner helping a human creator reach one strong, simple idea quickly.',
+      '- Prefer one familiar task with one actor and one obvious result.',
+      '- Use one major action per panel; do not build chains of objects colliding, rolling, dragging, or revealing one another.',
+      '- Prefer a visibly completed goal, a finished object, or a clearly broken non-living object as the ending.',
+      '- Allow mild humor or surprise only when it remains instantly understandable without explanation.',
       '- Never write filler like "one concrete move", "visible external change", or "stable aftermath".',
     ]
   }
 
   return [
     'Creative direction:',
-    '- Think like a storyboard collaborator, not a policy robot.',
-    '- Return ideas a human would actually want to personalize and rewrite.',
-    '- Specific rooms, props, accidents, reveals, and aftermaths beat neutral keyword collisions.',
-    '- Rotate story archetypes instead of repeating the same collision template: snag/reveal, blockage, runaway object, tangled props, concealment/discovery, crooked-result, repair, escape, cleanup, recovery.',
-    '- Vary the trigger and reaction mechanism too: conceal/reveal, slip-and-chase, mistaken appearance, blocked route, awkward repair, escape, sudden exposure, pursuit, or containment.',
-    '- Small suspense, weirdness, irony, or eerie mood are welcome if the order stays instantly readable.',
-    '- If the keywords feel awkward together, invent a human situation that makes them feel natural.',
-    '- Do not default to drops, spills, and broken objects unless they are truly the clearest version.',
-    '- Do not keep ending on overturned props or toppled furniture when a more specific aftermath would read better.',
-    '- Prefer end states defined by reveals, blocked routes, exposure to light, trapped or tangled poses, repaired setups, clear escape paths, or newly stable arrangements.',
+    '- Think like a storyboard collaborator who is explaining one ordinary action visually.',
+    '- Return ideas a human can understand immediately and personalize easily.',
+    '- Prefer one familiar task with one actor and one obvious result.',
+    '- Use one major action per panel; avoid chain reactions, tangled mechanisms, and several moving props.',
+    '- Prefer a visibly completed goal, a finished object, or a clearly broken non-living object as the ending.',
+    '- Mild humor or surprise is welcome only when it does not add another inference step.',
+    '- If the keywords feel awkward together, choose the simplest literal everyday relationship between them.',
     '- Never write filler like "one concrete move", "visible external change", or "stable aftermath".',
   ]
 }
@@ -3800,10 +3896,10 @@ function buildSingleStoryPromptLines({
     '- one single story chain only',
     '- panel 4 must be a real visible consequence of panel 3',
     '- make panel 1 and panel 4 clearly look different',
-    '- do not default the peak or ending to toppled props, overturned furniture, or scattered contents unless that is truly the clearest story beat',
     '- no letters, numbers, labels, logos, watermarks, signs, or text-dependent clues',
     ...contentSafetyBoundaryLines,
     '- no waking-up template, no thumbs up/down ending, no counting trick, no page/screen keyword cheat',
+    ...COMMON_SENSE_FLIP_STORY_RULES,
     '',
     'Aim for:',
     '- one specific place',
@@ -3813,13 +3909,12 @@ function buildSingleStoryPromptLines({
     '- natural wording instead of compliance prose',
     '',
     'Good story shapes:',
-    '- reveal and reaction',
-    '- obstacle and workaround',
-    '- runaway object or blocked path',
-    '- chase after something slipping free',
-    '- mistaken appearance followed by reveal',
-    '- awkward repair or recovery attempt',
-    '- tangle, snag, concealment, recovery, repair, or crooked-result aftermath',
+    '- prepare -> act -> progress -> completed goal',
+    '- gather parts -> build -> finish -> use the finished object',
+    '- notice damage -> repair -> finish -> show the repaired object',
+    '- whole object -> direct impact -> visible damage -> clearly destroyed object',
+    '- simple obstacle -> direct workaround -> progress -> goal reached',
+    ...COMMON_SENSE_FLIP_REJECTION_RULES,
     '',
     ...buildSingleStoryPairFitLines(senseSelection, safeKeywordA, safeKeywordB),
     '',
@@ -3927,7 +4022,12 @@ function buildStoryOptionsPrompt({
     "no_enumeration_logic": "pass/fail",
     "no_screen_or_page_keyword_cheat": "pass/fail",
     "causal_clarity": "pass/fail",
-    "consensus_clarity": "pass/fail"
+    "consensus_clarity": "pass/fail",
+    "age_12_clarity": "pass/fail",
+    "everyday_knowledge_only": "pass/fail",
+    "large_visual_cues": "pass/fail",
+    "simple_action_chain": "pass/fail",
+    "obvious_final_outcome": "pass/fail"
   },
   "risk_flags": ["<list any remaining ambiguity or report-risk factors>"],
   "revision_if_risky": "<if any risk flag exists, rewrite the concept once and provide the safer version instead>"
@@ -4022,6 +4122,7 @@ function buildStoryOptionsPrompt({
     '- Do not rely on a sequence of enumerated objects or counting logic.',
     '- Do not satisfy the keywords only by showing them inside a page, screen, painting, or printed collage.',
     '- Use exactly one coherent before-event-after storyline across 4 images.',
+    ...COMMON_SENSE_FLIP_STORY_RULES,
     '',
     'Design rules for low report risk:',
     '- Prefer everyday physical actions and visible cause-effect.',
@@ -4049,13 +4150,11 @@ function buildStoryOptionsPrompt({
     '- big readable state changes even at small size',
     '',
     'Story shapes that often work:',
-    '- mishap and aftermath',
-    '- reveal and reaction',
-    '- obstacle and workaround',
-    '- pursuit, escape, containment, or recovery',
-    '- repair, transformation, loss, or cleanup',
-    '- snag-and-reveal or tangled-prop chain reactions',
-    '- runaway object, blocked path, or crooked-result reversals',
+    '- prepare -> act -> progress -> completed goal',
+    '- gather parts -> build -> finish -> use the finished object',
+    '- notice damage -> repair -> finish -> show the repaired object',
+    '- whole object -> direct impact -> visible damage -> clearly destroyed object',
+    '- simple obstacle -> direct workaround -> progress -> goal reached',
     '',
     'Fast rejection rules:',
     '- reject if more than one panel order seems plausible',
@@ -4064,6 +4163,7 @@ function buildStoryOptionsPrompt({
     '- reject if the story needs explanation',
     '- reject if keywords are present but not functionally important',
     '- reject if ending is only emotion without visible outcome',
+    ...COMMON_SENSE_FLIP_REJECTION_RULES,
     '',
     'Scoring rubric (1-5 for each candidate before final selection):',
     '- keyword_clarity',
@@ -4093,6 +4193,11 @@ function buildStoryOptionsPrompt({
     '   - no_screen_or_page_keyword_cheat',
     '   - causal_clarity',
     '   - consensus_clarity',
+    '   - age_12_clarity',
+    '   - everyday_knowledge_only',
+    '   - large_visual_cues',
+    '   - simple_action_chain',
+    '   - obvious_final_outcome',
     '4. Reject any candidate that fails any hard constraint.',
     '5. Among remaining candidates, choose the one with:',
     '   - the clearest causal chain,',
@@ -4229,6 +4334,7 @@ function buildStoryOptionsPromptFast({
     '- no text overlays, letters, numbers, labels, logos, or watermarks',
     ...contentSafetyBoundaryLines,
     '- no counting puzzles, no symbolism, no surreal jokes',
+    ...COMMON_SENSE_FLIP_STORY_RULES,
     normalizedStoryCount === 1
       ? '- make the one option vivid, specific, and easy for a human to tweak'
       : '- keep the two options meaningfully different in scene, action, or outcome',
@@ -4236,6 +4342,7 @@ function buildStoryOptionsPromptFast({
     '- panel 4 must be a visible consequence of panel 3',
     '- each panel must show a visible state progression from the previous panel',
     '- avoid repeated stock phrases; use natural concise wording',
+    ...COMMON_SENSE_FLIP_REJECTION_RULES,
     ...creativityLines,
     ...exemplarConfig.lines,
     ...lockedSenseLines,
@@ -4262,7 +4369,12 @@ function buildStoryOptionsPromptFast({
     '        "no_enumeration_logic": "pass",',
     '        "no_screen_or_page_keyword_cheat": "pass",',
     '        "causal_clarity": "pass",',
-    '        "consensus_clarity": "pass"',
+    '        "consensus_clarity": "pass",',
+    '        "age_12_clarity": "pass",',
+    '        "everyday_knowledge_only": "pass",',
+    '        "large_visual_cues": "pass",',
+    '        "simple_action_chain": "pass",',
+    '        "obvious_final_outcome": "pass"',
     '      },',
     '      "risk_flags": [],',
     '      "revision_if_risky": ""',
@@ -4290,7 +4402,12 @@ function buildStoryOptionsPromptFast({
           '        "no_enumeration_logic": "pass",',
           '        "no_screen_or_page_keyword_cheat": "pass",',
           '        "causal_clarity": "pass",',
-          '        "consensus_clarity": "pass"',
+          '        "consensus_clarity": "pass",',
+          '        "age_12_clarity": "pass",',
+          '        "everyday_knowledge_only": "pass",',
+          '        "large_visual_cues": "pass",',
+          '        "simple_action_chain": "pass",',
+          '        "obvious_final_outcome": "pass"',
           '      },',
           '      "risk_flags": [],',
           '      "revision_if_risky": ""',
@@ -4398,6 +4515,8 @@ function buildStoryAuditPrompt(basePrompt, conceptJson) {
     '- no near-duplicate panels',
     '- no off-screen main event',
     '- no text dependence and no counting logic',
+    ...COMMON_SENSE_FLIP_STORY_RULES,
+    ...COMMON_SENSE_FLIP_REJECTION_RULES,
     'Re-score minimum thresholds:',
     '- causality >= 4',
     '- consensus_safety >= 4',
