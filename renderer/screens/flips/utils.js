@@ -27,25 +27,56 @@ const StackBlur = require('stackblur-canvas')
 export const FLIP_LENGTH = 4
 export const DEFAULT_FLIP_ORDER = [0, 1, 2, 3]
 
-const SUBMIT_PANEL_WIDTH = 240
-const SUBMIT_PANEL_HEIGHT = 180
-const SUBMIT_JPEG_QUALITY = 0.6
+const MAX_FLIP_HEX_LENGTH = 2 * 1024 * 1024
+const SUBMIT_IMAGE_PROFILES = [
+  {width: 240, height: 180, quality: 0.6},
+  {width: 200, height: 150, quality: 0.5},
+  {width: 160, height: 120, quality: 0.4},
+]
 
-export async function compressFlipImagesForSubmit(images) {
+export async function compressFlipImagesForSubmit(
+  images,
+  profile = SUBMIT_IMAGE_PROFILES[0]
+) {
   const source = Array.isArray(images) ? images.slice(0, FLIP_LENGTH) : []
   return Promise.all(
     source.map((image) => {
-      const value = String(image || '').trim()
-      if (!value.startsWith('data:')) return value
+      const value = typeof image === 'string' ? image.trim() : image
+      if (!value) return value
       return resizeImageToDataUrl(value, {
-        width: SUBMIT_PANEL_WIDTH,
-        height: SUBMIT_PANEL_HEIGHT,
+        width: profile.width,
+        height: profile.height,
         type: 'image/jpeg',
-        quality: SUBMIT_JPEG_QUALITY,
+        quality: profile.quality,
         exact: true,
       })
     })
   )
+}
+
+async function prepareFlipPayloadForSubmit({
+  protectedImages,
+  originalOrder,
+  order,
+  orderPermutations,
+  hint,
+}) {
+  for (const profile of SUBMIT_IMAGE_PROFILES) {
+    // eslint-disable-next-line no-await-in-loop
+    const submitImages = await compressFlipImagesForSubmit(
+      protectedImages,
+      profile
+    )
+    const payload = flipToHex(
+      hint ? submitImages : originalOrder.map((num) => submitImages[num]),
+      hint ? order : orderPermutations
+    )
+    if (payload[0].length + payload[1].length <= MAX_FLIP_HEX_LENGTH) {
+      return payload
+    }
+  }
+
+  throw new Error(i18n.t('Cannot submit flip, content is too big'))
 }
 
 export function getRandomKeywordPair() {
@@ -229,7 +260,13 @@ export async function publishFlip({
   orderPermutations,
   hint,
 }) {
-  if (protectedImages.some((x) => !x))
+  if (
+    !Array.isArray(protectedImages) ||
+    protectedImages.length < FLIP_LENGTH ||
+    protectedImages
+      .slice(0, FLIP_LENGTH)
+      .some((image) => (typeof image === 'string' ? !image.trim() : !image))
+  )
     throw new Error(i18n.t('You must use 4 images for a flip'))
 
   const flips = getFlipsBridge().getFlips()
@@ -254,17 +291,15 @@ export async function publishFlip({
   )
     throw new Error(i18n.t('You must shuffle flip before submit'))
 
-  // Every publish entry point, including drafts edited after generation, must
-  // pass through the same protocol-sized encoding immediately before RLP.
-  const submitImages = await compressFlipImagesForSubmit(protectedImages)
-
-  const [publicHex, privateHex] = flipToHex(
-    hint ? submitImages : originalOrder.map((num) => submitImages[num]),
-    hint ? order : orderPermutations
-  )
-
-  if (publicHex.length + privateHex.length > 2 * 1024 * 1024)
-    throw new Error(i18n.t('Cannot submit flip, content is too big'))
+  // All publish entry points share this final adaptive size check, including
+  // drafts created by older releases and images loaded from non-data URLs.
+  const [publicHex, privateHex] = await prepareFlipPayloadForSubmit({
+    protectedImages,
+    originalOrder,
+    order,
+    orderPermutations,
+    hint,
+  })
 
   const {result, error} = await submitFlip(publicHex, privateHex, keywordPairId)
 

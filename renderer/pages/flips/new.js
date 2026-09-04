@@ -43,7 +43,6 @@ import {
 import {useIdentityState} from '../../shared/providers/identity-context'
 import {flipMasterMachine} from '../../screens/flips/machines'
 import {
-  compressFlipImagesForSubmit,
   publishFlip,
   isPendingKeywordPair,
   getAdversarialImage,
@@ -2655,9 +2654,9 @@ export default function NewFlipPage() {
         }
       },
       protectFlip: async (flip) => ({
-        protectedImages: await compressFlipImagesForSubmit(
-          Array.isArray(flip.images) ? flip.images : Array.from({length: 4})
-        ),
+        protectedImages: Array.isArray(flip.images)
+          ? flip.images.slice(0, 4)
+          : Array.from({length: 4}),
         adversarialImage: '',
       }),
       loadAdversarial: async () => Promise.resolve(),
