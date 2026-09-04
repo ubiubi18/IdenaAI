@@ -330,7 +330,7 @@ describe('createAiProviderBridge', () => {
 
   it.each([
     ['gpt-5.5', 'gpt-5.4'],
-    ['gpt-6-astra', 'gpt-5.5'],
+    ['gpt-6-astra', 'gpt-5.6-sol'],
   ])(
     'falls back from unavailable %s provider tests to %s',
     async (requestedModel, usedModel) => {
@@ -382,7 +382,7 @@ describe('createAiProviderBridge', () => {
 
   it.each([
     ['gpt-5.5', 'gpt-5.4'],
-    ['gpt-6-astra', 'gpt-5.5'],
+    ['gpt-6-astra', 'gpt-5.6-sol'],
   ])(
     'falls back from unavailable %s solve requests to %s',
     async (requestedModel, usedModel) => {
