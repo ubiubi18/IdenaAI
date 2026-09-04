@@ -127,6 +127,8 @@ function buildRenderedPanelAuditPrompt(context = {}) {
     'Alignment rules:',
     '- compare the rendered panel to the planned panel description',
     '- fail if the scene is ambiguous, missing the main event, or visually off-plan',
+    '- compare this panel with the adjacent planned states; fail if an object, reveal, damage, or outcome reserved for a later panel is already visible',
+    '- fail if this panel reverses an irreversible earlier state, such as closing an opened present, restoring a broken object, or removing an established consequence without an explicit planned reversal',
     'Policy risk rules:',
     '- allow non-graphic tension, fear, suspense, eerie scenes, and safe tool use',
     '- only flag clearly extreme or provider-triggering imagery such as graphic violence, gore, explicit injury, direct weapon harm against a person or animal, torture, dismemberment, or explicit sexual content',

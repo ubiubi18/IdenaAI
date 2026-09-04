@@ -87,4 +87,75 @@ describe('render feedback loop', () => {
     ])
     expect(result.repairPanelIndices).toEqual([2])
   })
+
+  test('repairs a premature reveal identified by the sequence audit', () => {
+    const result = evaluateRenderedStoryFeedback({
+      storyPanels: [
+        'A person receives a closed present.',
+        'The person starts opening the present.',
+        'A clown springs out for the first time.',
+        'The open present and clown remain visible.',
+      ],
+      renderedPanels: [
+        makePanel('data:image/png;base64,AAA='),
+        makePanel('data:image/png;base64,BBB='),
+        makePanel('data:image/png;base64,CCC='),
+        makePanel('data:image/png;base64,DDD='),
+      ],
+      textAuditByPanel: [{}, {}, {}, {}],
+      validatorAuditByPanel: [{}, {}, {}, {}],
+      sequenceAudit: {
+        invoked: true,
+        complete: true,
+        passed: false,
+        score: 72,
+        failureReasons: ['premature_reveal'],
+        repairPanelIndices: [1],
+        repairGuidanceByPanel: {
+          1: 'Remove the clown; it must first appear in panel 3.',
+        },
+        shouldReplan: false,
+      },
+      keywords: ['present', 'clown'],
+      hasAlternativeOption: false,
+    })
+
+    expect(result.verdict).toBe('repair_selected_panels')
+    expect(result.failureReasons).toEqual(
+      expect.arrayContaining(['rendered_sequence_audit', 'premature_reveal'])
+    )
+    expect(result.repairPanelIndices).toEqual([1])
+    expect(
+      buildRenderedStoryRepairGuidance(result, {
+        keywordA: 'present',
+        keywordB: 'clown',
+      })[1]
+    ).toContain('Remove the clown; it must first appear in panel 3.')
+  })
+
+  test('requires a story replan when the sequence audit is incomplete', () => {
+    const result = evaluateRenderedStoryFeedback({
+      storyPanels: ['one', 'two', 'three', 'four'],
+      renderedPanels: [
+        makePanel('data:image/png;base64,AAA='),
+        makePanel('data:image/png;base64,BBB='),
+        makePanel('data:image/png;base64,CCC='),
+        makePanel('data:image/png;base64,DDD='),
+      ],
+      sequenceAudit: {
+        invoked: true,
+        complete: false,
+        passed: false,
+        score: 0,
+        failureReasons: ['sequence_audit_incomplete'],
+        repairPanelIndices: [],
+        repairGuidanceByPanel: {},
+        shouldReplan: true,
+      },
+      keywords: ['palace', 'monster'],
+    })
+
+    expect(result.verdict).toBe('replan_story')
+    expect(result.metrics.renderedSequenceAuditFail).toBe(true)
+  })
 })

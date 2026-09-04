@@ -43,6 +43,12 @@ const {
   mergeRenderedStoryMetrics,
   recordRenderedStoryMetrics,
 } = require('./renderFeedback')
+const {
+  buildRenderedStorySequenceAuditPrompt,
+  createUnavailableSequenceAudit,
+  normalizeShuffleCandidates,
+  parseRenderedStorySequenceAudit,
+} = require('./renderedStorySequenceAudit')
 const {buildStoryPromptExemplarLines} = require('./storyPromptExemplars')
 const {
   createRenderedPanelValidatorHooks,
@@ -5659,6 +5665,52 @@ function addCostSummary(left = {}, right = {}) {
   }
 }
 
+function addOptionalUsd(left, right) {
+  const a = normalizeUsdCost(left)
+  const b = normalizeUsdCost(right)
+  return a == null && b == null ? null : (a || 0) + (b || 0)
+}
+
+function mergePanelGenerationAccounting(previous, next, latencyMs) {
+  const combinedCosts = addCostSummary(previous.costs, next.costs)
+  return {
+    ...next,
+    latencyMs,
+    generatedPanelCount:
+      (Number(previous.generatedPanelCount) || 0) +
+      (Number(next.generatedPanelCount) || 0),
+    aiActionCount:
+      (Number(previous.aiActionCount) || 0) + (Number(next.aiActionCount) || 0),
+    validatorAuditActionCount:
+      (Number(previous.validatorAuditActionCount) || 0) +
+      (Number(next.validatorAuditActionCount) || 0),
+    textOverlayRetryCount:
+      (Number(previous.textOverlayRetryCount) || 0) +
+      (Number(next.textOverlayRetryCount) || 0),
+    tokenUsage: addTokenUsage(previous.tokenUsage, next.tokenUsage),
+    costs: {
+      ...(next.costs || {}),
+      ...combinedCosts,
+      estimatedTextUsd: addOptionalUsd(
+        previous.costs && previous.costs.estimatedTextUsd,
+        next.costs && next.costs.estimatedTextUsd
+      ),
+      estimatedValidatorTextUsd: addOptionalUsd(
+        previous.costs && previous.costs.estimatedValidatorTextUsd,
+        next.costs && next.costs.estimatedValidatorTextUsd
+      ),
+      estimatedSequenceAuditTextUsd: addOptionalUsd(
+        previous.costs && previous.costs.estimatedSequenceAuditTextUsd,
+        next.costs && next.costs.estimatedSequenceAuditTextUsd
+      ),
+      estimatedImageUsd: addOptionalUsd(
+        previous.costs && previous.costs.estimatedImageUsd,
+        next.costs && next.costs.estimatedImageUsd
+      ),
+    },
+  }
+}
+
 function normalizeProviderDailyBudgetRemainingUsd(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
@@ -9251,10 +9303,17 @@ Flip hash: ${hash}
       typeof payload.renderFeedbackEnabled === 'boolean'
         ? payload.renderFeedbackEnabled
         : true
+    const sequenceAuditEnabled = payload.sequenceAuditEnabled === true
     const textAuditModel = String(payload.textAuditModel || 'gpt-5.5').trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel
     ).trim()
+    const sequenceAuditModel = String(
+      payload.sequenceAuditModel || validatorModel
+    ).trim()
+    const sequenceAuditShuffleCandidates = normalizeShuffleCandidates(
+      payload.sequenceAuditShuffleCandidates
+    )
     const textAuditMaxRetries = Math.max(
       0,
       Math.min(
@@ -9277,13 +9336,31 @@ Flip hash: ${hash}
       0,
       Number.parseInt(payload.renderFeedbackSwitchCount, 10) || 0
     )
+    const requestedRenderFeedbackMaxRepairs = Number.parseInt(
+      payload.renderFeedbackMaxRepairs,
+      10
+    )
     const renderFeedbackMaxRepairs = Math.max(
       0,
-      Math.min(2, Number.parseInt(payload.renderFeedbackMaxRepairs, 10) || 1)
+      Math.min(
+        2,
+        Number.isFinite(requestedRenderFeedbackMaxRepairs)
+          ? requestedRenderFeedbackMaxRepairs
+          : 1
+      )
+    )
+    const requestedRenderFeedbackMaxSwitches = Number.parseInt(
+      payload.renderFeedbackMaxSwitches,
+      10
     )
     const renderFeedbackMaxSwitches = Math.max(
       0,
-      Math.min(2, Number.parseInt(payload.renderFeedbackMaxSwitches, 10) || 1)
+      Math.min(
+        2,
+        Number.isFinite(requestedRenderFeedbackMaxSwitches)
+          ? requestedRenderFeedbackMaxSwitches
+          : 1
+      )
     )
     const renderFeedbackHistory = Array.isArray(payload.renderFeedbackHistory)
       ? payload.renderFeedbackHistory.slice(0, 8)
@@ -9297,6 +9374,13 @@ Flip hash: ${hash}
     const textAuditRequestTimeoutMs = Math.max(
       Number(payload.textAuditRequestTimeoutMs) || 0,
       12 * 1000
+    )
+    const sequenceAuditRequestTimeoutMs = Math.max(
+      Number(payload.sequenceAuditRequestTimeoutMs) || 0,
+      isOpenAiCompatibleProvider(provider) &&
+        sequenceAuditModel.toLowerCase() === 'gpt-5.6-sol'
+        ? GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS
+        : 45 * 1000
     )
 
     const profile = sanitizeBenchmarkProfile({
@@ -9320,7 +9404,22 @@ Flip hash: ${hash}
       deadlineMs: Math.max(textAuditRequestTimeoutMs + 2000, 15000),
     })
     textAuditProfile.requestTimeoutMs = textAuditRequestTimeoutMs
+    const sequenceAuditProfile = sanitizeBenchmarkProfile({
+      benchmarkProfile: 'custom',
+      requestTimeoutMs: sequenceAuditRequestTimeoutMs,
+      maxOutputTokens: Math.max(
+        900,
+        Number.parseInt(payload.sequenceAuditMaxOutputTokens, 10) || 1200
+      ),
+      temperature: 0,
+      maxRetries: 0,
+      maxConcurrency: 1,
+      deadlineMs: Math.max(sequenceAuditRequestTimeoutMs + 2000, 47000),
+    })
+    sequenceAuditProfile.requestTimeoutMs = sequenceAuditRequestTimeoutMs
     const startedAt = now()
+    let validatorAuditUsage = createEmptyTokenUsage()
+    let validatorAuditActionCount = 0
     const renderedPanelValidatorHooks = createRenderedPanelValidatorHooks(
       dependencies.storyValidatorHooks,
       {
@@ -9333,7 +9432,8 @@ Flip hash: ${hash}
                 throw new Error('rendered_panel_validator_missing_image')
               }
 
-              return invokeProvider({
+              validatorAuditActionCount += 1
+              const providerResult = await invokeProvider({
                 provider,
                 model: validatorModel,
                 flip: {
@@ -9350,6 +9450,11 @@ Flip hash: ${hash}
                   promptPhase: 'rendered_panel_validator',
                 },
               })
+              validatorAuditUsage = addTokenUsage(
+                validatorAuditUsage,
+                normalizeProviderResponse(providerResult).tokenUsage
+              )
+              return providerResult
             }
           : null,
       }
@@ -9373,6 +9478,9 @@ Flip hash: ${hash}
       validatorModel: validatorEnabled ? validatorModel : '',
       validatorMaxRetries,
       renderFeedbackEnabled,
+      sequenceAuditEnabled,
+      sequenceAuditModel: sequenceAuditEnabled ? sequenceAuditModel : '',
+      sequenceAuditShuffleCandidateCount: sequenceAuditShuffleCandidates.length,
       selectedStoryId: activeStory.id,
       alternativeStoryCount: alternativeStoryOptions.length,
     })
@@ -9386,7 +9494,8 @@ Flip hash: ${hash}
     const canUseSheetFastMode =
       panelRenderMode === 'sheet_fast' &&
       regenerateIndices.length === 4 &&
-      renderFeedbackIteration === 0
+      renderFeedbackIteration === 0 &&
+      !sequenceAuditEnabled
     const sheetPanelMetadata = storyPanels
       .slice(0, 4)
       .map((panelStory, index) => ({
@@ -9632,11 +9741,27 @@ Flip hash: ${hash}
     const promptByPanel = Array.from({length: 4}, () => '')
     const panelImageModelUsed = Array.from({length: 4}, () => imageModel)
     const panelImageSizeUsed = Array.from({length: 4}, () => imageSize)
-    const textAuditByPanel = Array.from({length: 4}, () =>
-      createEmptyPanelTextAuditResult()
+    const existingTextAuditByPanel = Array.isArray(
+      payload.existingTextAuditByPanel
     )
-    const validatorAuditByPanel = Array.from({length: 4}, () =>
-      createEmptyRenderedPanelAuditResult()
+      ? payload.existingTextAuditByPanel
+      : []
+    const existingValidatorAuditByPanel = Array.isArray(
+      payload.existingValidatorAuditByPanel
+    )
+      ? payload.existingValidatorAuditByPanel
+      : []
+    const textAuditByPanel = Array.from({length: 4}, (_, index) =>
+      existingTextAuditByPanel[index] &&
+      typeof existingTextAuditByPanel[index] === 'object'
+        ? {...existingTextAuditByPanel[index]}
+        : createEmptyPanelTextAuditResult()
+    )
+    const validatorAuditByPanel = Array.from({length: 4}, (_, index) =>
+      existingValidatorAuditByPanel[index] &&
+      typeof existingValidatorAuditByPanel[index] === 'object'
+        ? {...existingValidatorAuditByPanel[index]}
+        : createEmptyRenderedPanelAuditResult()
     )
     const validatorMetrics = {
       validator_invoked: 0,
@@ -9969,7 +10094,74 @@ Flip hash: ${hash}
       )
     }
 
-    const estimatedTextCostUsd = estimateTextCostUsd(usage, model)
+    const generationUsage = normalizeTokenUsage(usage)
+    usage = addTokenUsage(usage, validatorAuditUsage)
+    let sequenceAuditUsage = createEmptyTokenUsage()
+    let sequenceAudit = createUnavailableSequenceAudit('disabled')
+    let sequenceAuditActionCount = 0
+
+    if (sequenceAuditEnabled) {
+      sequenceAuditActionCount = 1
+      const sequenceAuditPrompt = buildRenderedStorySequenceAuditPrompt({
+        storyPanels,
+        keywords: [keywordA, keywordB],
+        shuffleCandidates: sequenceAuditShuffleCandidates,
+      })
+      try {
+        const providerResponse = await invokeProvider({
+          provider,
+          model: sequenceAuditModel,
+          flip: {
+            hash: `rendered-story-sequence-${startedAt}-${renderFeedbackIteration}`,
+            leftImage: '',
+            rightImage: '',
+            images: nextPanels.slice(0, 4),
+            keywords: [keywordA, keywordB],
+          },
+          profile: sequenceAuditProfile,
+          apiKey,
+          providerConfig,
+          promptText: sequenceAuditPrompt,
+          promptOptions: {
+            promptPhase: 'rendered_story_sequence_audit',
+          },
+        })
+        const normalizedResponse = normalizeProviderResponse(providerResponse)
+        sequenceAuditUsage = normalizedResponse.tokenUsage
+        usage = addTokenUsage(usage, sequenceAuditUsage)
+        sequenceAudit = parseRenderedStorySequenceAudit(
+          normalizedResponse.rawText,
+          {shuffleCandidates: sequenceAuditShuffleCandidates}
+        )
+      } catch (error) {
+        sequenceAudit = {
+          ...createUnavailableSequenceAudit('sequence_audit_unavailable'),
+          invoked: true,
+          verdict: 'replan',
+          failureReasons: ['sequence_audit_unavailable'],
+          shouldReplan: true,
+        }
+        logger.info('AI rendered story sequence audit unavailable', {
+          provider,
+          model: sequenceAuditModel,
+          error: String((error && error.message) || error || '')
+            .trim()
+            .slice(0, 240),
+        })
+      }
+    }
+
+    const generationTextCostUsd = estimateTextCostUsd(generationUsage, model)
+    const validatorAuditTextCostUsd = validatorEnabled
+      ? estimateTextCostUsd(validatorAuditUsage, validatorModel)
+      : null
+    const sequenceAuditTextCostUsd = sequenceAuditEnabled
+      ? estimateTextCostUsd(sequenceAuditUsage, sequenceAuditModel)
+      : null
+    const estimatedTextCostUsd = addOptionalUsd(
+      addOptionalUsd(generationTextCostUsd, validatorAuditTextCostUsd),
+      sequenceAuditTextCostUsd
+    )
     const estimatedUsd =
       (estimatedTextCostUsd || 0) +
       (Number.isFinite(estimatedImageCostUsd) ? estimatedImageCostUsd : 0)
@@ -9980,6 +10172,7 @@ Flip hash: ${hash}
       model,
       imageModel,
       imageSize,
+      panelRenderModeUsed: 'panels',
       latencyMs: now() - startedAt,
       includeNoise,
       noisePanelIndex: includeNoise ? noisePanelIndex : null,
@@ -9990,6 +10183,11 @@ Flip hash: ${hash}
       validatorEnabled,
       validatorModel: validatorEnabled ? validatorModel : '',
       validatorMaxRetries,
+      sequenceAuditEnabled,
+      sequenceAuditModel: sequenceAuditEnabled ? sequenceAuditModel : '',
+      sequenceAudit,
+      validatorAuditActionCount,
+      aiActionCount: 1 + validatorAuditActionCount + sequenceAuditActionCount,
       selectedStory: {
         id: activeStory.id,
         title: activeStory.title,
@@ -10021,6 +10219,8 @@ Flip hash: ${hash}
         estimatedUsd,
         actualUsd: estimatedUsd,
         estimatedTextUsd: estimatedTextCostUsd,
+        estimatedValidatorTextUsd: validatorAuditTextCostUsd,
+        estimatedSequenceAuditTextUsd: sequenceAuditTextCostUsd,
         estimatedImageUsd: Number.isFinite(estimatedImageCostUsd)
           ? estimatedImageCostUsd
           : null,
@@ -10033,6 +10233,7 @@ Flip hash: ${hash}
       renderedPanels: baseResult.panels,
       textAuditByPanel,
       validatorAuditByPanel,
+      sequenceAudit,
       keywords: [keywordA, keywordB],
       hasAlternativeOption:
         fullStoryBuild && alternativeStoryOptions.length > 0,
@@ -10061,6 +10262,10 @@ Flip hash: ${hash}
       repairPanelIndices: renderFeedbackReport.repairPanelIndices,
       keywordCoverage: renderFeedbackReport.metrics.keywordCoverage,
       nearDuplicatePairs: renderFeedbackReport.nearDuplicatePairs,
+      sequenceAuditPassed: sequenceAuditEnabled
+        ? Boolean(sequenceAudit.passed)
+        : null,
+      safeShuffleCandidateIndex: sequenceAudit.safeShuffleCandidateIndex,
     })
 
     if (
@@ -10081,6 +10286,8 @@ Flip hash: ${hash}
         storyPanels,
         senseSelection,
         existingPanels: nextPanels,
+        existingTextAuditByPanel: textAuditByPanel,
+        existingValidatorAuditByPanel: validatorAuditByPanel,
         regenerateIndices: renderFeedbackReport.repairPanelIndices,
         repairGuidanceByPanel: buildRenderedStoryRepairGuidance(
           renderFeedbackReport,
@@ -10093,11 +10300,16 @@ Flip hash: ${hash}
         renderFeedbackSwitchCount,
         renderFeedbackHistory: nextRenderHistory,
       })
-      repairedResult.renderFeedbackMetrics = mergeRenderedStoryMetrics(
+      const accountedRepairedResult = mergePanelGenerationAccounting(
+        baseResult,
+        repairedResult,
+        now() - startedAt
+      )
+      accountedRepairedResult.renderFeedbackMetrics = mergeRenderedStoryMetrics(
         renderFeedbackMetrics,
         repairedResult.renderFeedbackMetrics
       )
-      return repairedResult
+      return accountedRepairedResult
     }
 
     if (
@@ -10144,17 +10356,23 @@ Flip hash: ${hash}
         alternativeFeedback.score > renderFeedbackReport.score
       ) {
         renderFeedbackMetrics.switched_to_alternative_option += 1
-        alternativeResult.renderFeedback = {
-          ...(alternativeResult.renderFeedback || {}),
+        const accountedAlternativeResult = mergePanelGenerationAccounting(
+          baseResult,
+          alternativeResult,
+          now() - startedAt
+        )
+        accountedAlternativeResult.renderFeedback = {
+          ...(accountedAlternativeResult.renderFeedback || {}),
           switchedToAlternativeOption: true,
           previousStoryId: activeStory.id,
           previousStoryTitle: activeStory.title,
         }
-        alternativeResult.renderFeedbackMetrics = mergeRenderedStoryMetrics(
-          renderFeedbackMetrics,
-          alternativeResult.renderFeedbackMetrics
-        )
-        return alternativeResult
+        accountedAlternativeResult.renderFeedbackMetrics =
+          mergeRenderedStoryMetrics(
+            renderFeedbackMetrics,
+            alternativeResult.renderFeedbackMetrics
+          )
+        return accountedAlternativeResult
       }
     }
 

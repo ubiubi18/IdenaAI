@@ -238,5 +238,7 @@ describe('storyValidatorHooks', () => {
     expect(prompt).toContain(
       'allow non-graphic tension, fear, suspense, eerie scenes, and safe tool use'
     )
+    expect(prompt).toContain('reserved for a later panel is already visible')
+    expect(prompt).toContain('closing an opened present')
   })
 })
