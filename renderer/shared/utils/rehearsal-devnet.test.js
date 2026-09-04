@@ -7,6 +7,13 @@ const {
 } = require('./rehearsal-devnet')
 
 describe('rehearsal devnet payloads', () => {
+  it('defaults rehearsal solving to Sol', () => {
+    expect(buildRehearsalSolverLanePayload()).toMatchObject({
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+    })
+  })
+
   it('keeps the regular rehearsal timing by default', () => {
     expect(
       buildRehearsalNetworkPayload({

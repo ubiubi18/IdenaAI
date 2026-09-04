@@ -108,6 +108,35 @@ function makeStrictStoryResponse(stories, providerMeta = null) {
 }
 
 describe('createAiProviderBridge', () => {
+  it.each([
+    [undefined, 'gpt-5.6-sol'],
+    ['gpt-6-astra', 'gpt-6-astra'],
+  ])('solves with %s using %s', async (model, expectedModel) => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: '{"answer":"left","confidence":0.99}',
+      usage: {promptTokens: 100, completionTokens: 20, totalTokens: 120},
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn().mockResolvedValue(undefined),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await solveFlipBatch(bridge, {
+      provider: 'openai',
+      model,
+      benchmarkProfile: 'custom',
+      maxRetries: 0,
+      uncertaintyRepromptEnabled: false,
+      flips: [{hash: 'default-model-flip'}],
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(invokeProvider.mock.calls[0][0].model).toBe(expectedModel)
+    expect(result.model).toBe(expectedModel)
+    expect(result.results[0].error).toBeNull()
+  })
+
   it('marks remaining flips as deadline_exceeded once budget is passed', async () => {
     const writeBenchmarkLog = jest.fn().mockResolvedValue(undefined)
     const invokeProvider = jest
@@ -652,7 +681,6 @@ describe('createAiProviderBridge', () => {
 
     const result = await bridge.reviewValidationReports({
       provider: 'openai',
-      model: 'gpt-5.6-sol',
       benchmarkProfile: 'custom',
       requestTimeoutMs: 1000,
       maxRetries: 0,
@@ -687,6 +715,7 @@ describe('createAiProviderBridge', () => {
     })
 
     expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(invokeProvider.mock.calls[0][0].model).toBe('gpt-5.6-sol')
     expect(result.summary).toMatchObject({
       totalFlips: 2,
       approved: 1,
@@ -3101,7 +3130,6 @@ describe('createAiProviderBridge', () => {
 
     const result = await bridge.generateStoryOptions({
       provider: 'openai',
-      model: 'gpt-4o-mini',
       fastStoryMode: true,
       storyOptionCount: 1,
       keywords: ['curl', 'giant'],
@@ -3111,6 +3139,7 @@ describe('createAiProviderBridge', () => {
 
     expect(invokeProvider).toHaveBeenCalledTimes(1)
     const callPayload = invokeProvider.mock.calls[0][0]
+    expect(callPayload.model).toBe('gpt-6-astra')
     expect(callPayload.promptText).toContain(
       'Generate exactly 1 editable 4-panel flip storyboard as strict JSON only.'
     )
@@ -5902,7 +5931,6 @@ describe('createAiProviderBridge', () => {
 
     const result = await bridge.generateFlipPanels({
       provider: 'openai',
-      model: 'gpt-4.1-mini',
       imageSize: '1024x1024',
       requestTimeoutMs: 15000,
       fastBuild: true,
@@ -5919,6 +5947,7 @@ describe('createAiProviderBridge', () => {
     })
 
     expect(result.ok).toBe(true)
+    expect(result.model).toBe('gpt-6-astra')
     expect(result.imageModel).toBe('gpt-image-2')
     expect(result.panelRenderModeUsed).toBe('sheet_fast')
     expect(result.generatedPanelCount).toBe(1)
