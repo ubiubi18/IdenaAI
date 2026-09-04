@@ -43,6 +43,7 @@ import {
 import {useIdentityState} from '../../shared/providers/identity-context'
 import {flipMasterMachine} from '../../screens/flips/machines'
 import {
+  compressFlipImagesForSubmit,
   publishFlip,
   isPendingKeywordPair,
   getAdversarialImage,
@@ -306,9 +307,6 @@ const IDENA_PANEL_HEIGHT = 330
 const IDENA_COMPOSITE_WIDTH = IDENA_PANEL_WIDTH * 2
 const IDENA_COMPOSITE_HEIGHT = IDENA_PANEL_HEIGHT * 2
 const DEFAULT_AI_IMAGE_SIZE = '1024x1024'
-const IDENA_SUBMIT_PANEL_WIDTH = 240
-const IDENA_SUBMIT_PANEL_HEIGHT = 180
-const IDENA_SUBMIT_JPEG_QUALITY = 0.6
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10)
@@ -559,85 +557,6 @@ function loadDataImage(dataUrl) {
     image.onerror = () => reject(new Error('Unable to decode generated image'))
     image.src = dataUrl
   })
-}
-
-function drawImageCover(ctx, image, targetWidth, targetHeight) {
-  const sourceWidth = image.naturalWidth || image.width
-  const sourceHeight = image.naturalHeight || image.height
-  if (!sourceWidth || !sourceHeight) {
-    return false
-  }
-  const sourceRatio = sourceWidth / sourceHeight
-  const targetRatio = targetWidth / targetHeight
-  let cropWidth = sourceWidth
-  let cropHeight = sourceHeight
-  let cropX = 0
-  let cropY = 0
-
-  if (sourceRatio > targetRatio) {
-    cropWidth = Math.round(sourceHeight * targetRatio)
-    cropX = Math.max(0, Math.floor((sourceWidth - cropWidth) / 2))
-  } else if (sourceRatio < targetRatio) {
-    cropHeight = Math.round(sourceWidth / targetRatio)
-    cropY = Math.max(0, Math.floor((sourceHeight - cropHeight) / 2))
-  }
-
-  ctx.drawImage(
-    image,
-    cropX,
-    cropY,
-    cropWidth,
-    cropHeight,
-    0,
-    0,
-    targetWidth,
-    targetHeight
-  )
-  return true
-}
-
-async function compressPanelForSubmit(dataUrl) {
-  const image = await loadDataImage(dataUrl)
-  const canvas = document.createElement('canvas')
-  canvas.width = IDENA_SUBMIT_PANEL_WIDTH
-  canvas.height = IDENA_SUBMIT_PANEL_HEIGHT
-  const ctx = canvas.getContext('2d')
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  if (!drawImageCover(ctx, image, canvas.width, canvas.height)) {
-    throw new Error('Generated panel has invalid dimensions')
-  }
-
-  return canvas.toDataURL('image/jpeg', IDENA_SUBMIT_JPEG_QUALITY)
-}
-
-async function compressPanelsForSubmit(images) {
-  const source = Array.isArray(images) ? images.slice(0, 4) : []
-  return Promise.all(
-    source.map(async (imageDataUrl) => {
-      const value = String(imageDataUrl || '').trim()
-      if (!value.startsWith('data:')) return value
-      return compressPanelForSubmit(value)
-    })
-  )
-}
-
-function pickSubmitImageSource(flip = {}) {
-  const protectedImages = Array.isArray(flip.protectedImages)
-    ? flip.protectedImages.slice(0, 4)
-    : []
-  if (protectedImages.some((item) => Boolean(String(item || '').trim()))) {
-    return protectedImages
-  }
-  return Array.isArray(flip.images) ? flip.images.slice(0, 4) : []
-}
-
-async function prepareFlipForSubmit(flip = {}) {
-  const sourceImages = pickSubmitImageSource(flip)
-  const protectedImages = await compressPanelsForSubmit(sourceImages)
-  return {
-    ...flip,
-    protectedImages,
-  }
 }
 
 async function normalizePanelForBuilder(dataUrl) {
@@ -2736,7 +2655,7 @@ export default function NewFlipPage() {
         }
       },
       protectFlip: async (flip) => ({
-        protectedImages: await compressPanelsForSubmit(
+        protectedImages: await compressFlipImagesForSubmit(
           Array.isArray(flip.images) ? flip.images : Array.from({length: 4})
         ),
         adversarialImage: '',
@@ -2748,7 +2667,7 @@ export default function NewFlipPage() {
             ? flip.originalOrder.slice()
             : [0, 1, 2, 3],
         }),
-      submitFlip: async (flip) => publishFlip(await prepareFlipForSubmit(flip)),
+      submitFlip: async (flip) => publishFlip(flip),
     },
     actions: {
       onMined: () => {
