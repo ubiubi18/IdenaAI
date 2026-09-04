@@ -25,7 +25,7 @@ describe('flip submit image preparation', () => {
     getFlipsBridge.mockReturnValue({getFlips: () => []})
   })
 
-  it('encodes all data URL panels with the protocol submit profile', async () => {
+  it('normalizes all populated image sources with the submit profile', async () => {
     resizeImageToDataUrl.mockImplementation(async (_, options) =>
       JSON.stringify(options)
     )
@@ -38,7 +38,7 @@ describe('flip submit image preparation', () => {
       'data:image/png;base64,Qw==',
     ])
 
-    expect(resizeImageToDataUrl).toHaveBeenCalledTimes(2)
+    expect(resizeImageToDataUrl).toHaveBeenCalledTimes(3)
     expect(resizeImageToDataUrl).toHaveBeenCalledWith(
       'data:image/png;base64,QQ==',
       {
@@ -50,7 +50,16 @@ describe('flip submit image preparation', () => {
       }
     )
     expect(result).toHaveLength(4)
-    expect(result[2]).toBe('https://example.test/panel.jpg')
+    expect(resizeImageToDataUrl).toHaveBeenCalledWith(
+      'https://example.test/panel.jpg',
+      {
+        width: 240,
+        height: 180,
+        type: 'image/jpeg',
+        quality: 0.6,
+        exact: true,
+      }
+    )
     expect(result[3]).toBe('')
   })
 
@@ -73,5 +82,84 @@ describe('flip submit image preparation', () => {
 
     expect(resizeImageToDataUrl).toHaveBeenCalledTimes(4)
     expect(submitFlipRpc).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a smaller profile when the encoded RLP is still too large', async () => {
+    const oversizedSubmitDataUrl = `data:image/jpeg;base64,${'A'.repeat(
+      400000
+    )}`
+    resizeImageToDataUrl.mockImplementation(async (_, options) =>
+      options.width === 240
+        ? oversizedSubmitDataUrl
+        : 'data:image/jpeg;base64,QQ=='
+    )
+    submitFlipRpc.mockResolvedValue({result: {txHash: 'submitted'}})
+
+    await expect(
+      publishFlip({
+        keywordPairId: 1,
+        protectedImages: Array.from(
+          {length: 4},
+          () => 'data:image/png;base64,QQ=='
+        ),
+        originalOrder: [0, 1, 2, 3],
+        order: [3, 2, 1, 0],
+        adversarialImageId: 0,
+        orderPermutations: [3, 2, 1, 0],
+      })
+    ).resolves.toEqual({txHash: 'submitted'})
+
+    expect(resizeImageToDataUrl).toHaveBeenCalledTimes(8)
+    expect(
+      resizeImageToDataUrl.mock.calls
+        .slice(0, 4)
+        .every(([, options]) => options.width === 240)
+    ).toBe(true)
+    expect(
+      resizeImageToDataUrl.mock.calls
+        .slice(4)
+        .every(([, options]) => options.width === 200)
+    ).toBe(true)
+    expect(submitFlipRpc).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects before RPC when every submit profile exceeds the limit', async () => {
+    const oversizedSubmitDataUrl = `data:image/jpeg;base64,${'A'.repeat(
+      400000
+    )}`
+    resizeImageToDataUrl.mockResolvedValue(oversizedSubmitDataUrl)
+
+    await expect(
+      publishFlip({
+        keywordPairId: 1,
+        protectedImages: Array.from(
+          {length: 4},
+          () => 'data:image/png;base64,QQ=='
+        ),
+        originalOrder: [0, 1, 2, 3],
+        order: [3, 2, 1, 0],
+        adversarialImageId: 0,
+        orderPermutations: [3, 2, 1, 0],
+      })
+    ).rejects.toThrow('Cannot submit flip, content is too big')
+
+    expect(resizeImageToDataUrl).toHaveBeenCalledTimes(12)
+    expect(submitFlipRpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects an incomplete image set before encoding or RPC submission', async () => {
+    await expect(
+      publishFlip({
+        keywordPairId: 1,
+        protectedImages: ['data:image/png;base64,QQ=='],
+        originalOrder: [0, 1, 2, 3],
+        order: [3, 2, 1, 0],
+        adversarialImageId: 0,
+        orderPermutations: [3, 2, 1, 0],
+      })
+    ).rejects.toThrow('You must use 4 images for a flip')
+
+    expect(resizeImageToDataUrl).not.toHaveBeenCalled()
+    expect(submitFlipRpc).not.toHaveBeenCalled()
   })
 })
