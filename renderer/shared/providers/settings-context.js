@@ -34,16 +34,16 @@ const CHANGE_LANGUAGE = 'CHANGE_LANGUAGE'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.5',
+  model: 'gpt-6-astra',
   flipBuilderStoryProvider: 'openai',
-  flipBuilderStoryModel: 'gpt-5.6-sol',
+  flipBuilderStoryModel: 'gpt-6-astra',
   flipBuilderImageProvider: 'openai',
   flipBuilderImageModel: 'gpt-image-2',
   flipBuilderImageQuality: 'low',
   flipBuilderImageSize: '1024x1024',
   flipBuilderGenerationMode: 'fast',
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.5',
+  shortSessionOpenAiFastModel: 'gpt-6-astra',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   localAiMemoryReference: resolveManagedLocalRuntimeMemoryReference(
@@ -105,6 +105,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
 }
 
 const OPENAI_SHORT_SESSION_FAST_MODELS = [
+  'gpt-6-astra',
   'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',
@@ -416,7 +417,7 @@ function buildAiSolverSettings(settings = {}) {
     nextSettings.provider === 'openai' &&
     ['gpt-4o-mini', 'gpt-5.4'].includes(nextSettings.model)
   ) {
-    nextSettings.model = 'gpt-5.5'
+    nextSettings.model = DEFAULT_AI_SOLVER_SETTINGS.model
   }
 
   nextSettings.onchainAutoSubmitConsentAt = String(

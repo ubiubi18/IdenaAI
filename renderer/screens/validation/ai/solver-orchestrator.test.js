@@ -82,7 +82,7 @@ describe('solver-orchestrator planning', () => {
 
     expect(plan.candidateFlips).toHaveLength(7)
     expect(plan.provider).toBe('openai')
-    expect(plan.model).toBe('gpt-5.5')
+    expect(plan.model).toBe('gpt-6-astra')
     expect(plan.candidateFlips.some((flip) => flip.hash === 'short-2')).toBe(
       false
     )

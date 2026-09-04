@@ -306,6 +306,44 @@ function applyProviderExtraBody(payload, providerConfig = {}) {
   }
 }
 
+function normalizeModelPayload(payload, providerConfig = {}) {
+  if (!/^gpt-6-astra(?:-|$)/u.test(String(payload.model || ''))) return payload
+
+  const normalized = {...payload}
+  for (const parameter of [
+    'temperature',
+    'top_p',
+    'top_logprobs',
+    'logprobs',
+  ]) {
+    delete normalized[parameter]
+  }
+  if (normalized.max_tokens !== undefined) {
+    if (normalized.max_completion_tokens === undefined) {
+      normalized.max_completion_tokens = normalized.max_tokens
+    }
+    delete normalized.max_tokens
+  }
+  if (
+    !normalized.reasoning_effort ||
+    ['none', 'minimal'].includes(normalized.reasoning_effort)
+  ) {
+    normalized.reasoning_effort = 'low'
+  }
+  if (normalized.prompt_cache_retention !== undefined) {
+    delete normalized.prompt_cache_retention
+    normalized.prompt_cache_options = {ttl: '30m'}
+  }
+  const {hostname} = new URL(resolveOpenAiEndpoint(providerConfig))
+  if (
+    hostname === 'eu.api.openai.com' &&
+    ['fast', 'priority'].includes(normalized.service_tier)
+  ) {
+    normalized.service_tier = 'default'
+  }
+  return normalized
+}
+
 function dedupePayloadVariants(payloads) {
   const seen = new Set()
   const result = []
@@ -456,7 +494,17 @@ function buildOpenAiPayloadVariants({
       serviceTier,
       reasoningEffort,
     }),
-  ].map((payload) => applyProviderExtraBody(payload, providerConfig))
+  ].map((payload) =>
+    normalizeModelPayload(
+      applyProviderExtraBody(
+        /^gpt-6-astra(?:-|$)/u.test(model)
+          ? {...payload, max_completion_tokens: profile.maxOutputTokens}
+          : payload,
+        providerConfig
+      ),
+      providerConfig
+    )
+  )
 
   return dedupePayloadVariants(payloads)
 }
@@ -710,10 +758,16 @@ async function testOpenAiProvider({
   )
   await httpClient.post(
     endpoint,
-    {
-      model,
-      messages: [{role: 'user', content: 'Reply with text: ok'}],
-    },
+    normalizeModelPayload(
+      {
+        model,
+        messages: [{role: 'user', content: 'Reply with text: ok'}],
+        ...(/^gpt-6-astra(?:-|$)/u.test(model)
+          ? {max_completion_tokens: 512}
+          : {}),
+      },
+      providerConfig
+    ),
     {
       timeout: requestTimeoutMs,
       headers: createAuthHeaders(apiKey, providerConfig),
@@ -737,18 +791,21 @@ async function testOpenAiFastMode({
   )
   const response = await httpClient.post(
     endpoint,
-    {
-      model,
-      messages: [
-        {
-          role: 'user',
-          content: 'Reply with the single lowercase word ok.',
-        },
-      ],
-      max_completion_tokens: 16,
-      service_tier: serviceTier,
-      reasoning_effort: reasoningEffort,
-    },
+    normalizeModelPayload(
+      {
+        model,
+        messages: [
+          {
+            role: 'user',
+            content: 'Reply with the single lowercase word ok.',
+          },
+        ],
+        max_completion_tokens: model === 'gpt-6-astra' ? 256 : 16,
+        service_tier: serviceTier,
+        reasoning_effort: reasoningEffort,
+      },
+      providerConfig
+    ),
     {
       timeout: requestTimeoutMs,
       headers: createAuthHeaders(apiKey, providerConfig),

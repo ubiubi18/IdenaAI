@@ -61,7 +61,7 @@ export function ImageSearchDialog({
   const aiSolverSettings = React.useMemo(
     () => ({
       provider: 'openai',
-      model: 'gpt-5.5',
+      model: 'gpt-6-astra',
       ...(settings && settings.aiSolver ? settings.aiSolver : {}),
     }),
     [settings]

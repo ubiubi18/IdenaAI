@@ -99,7 +99,7 @@ import {getAiProviderDailyBudgetStatus} from '../../shared/utils/ai-provider-bud
 
 const DEFAULT_MODELS = {
   'local-ai': '',
-  openai: 'gpt-5.5',
+  openai: 'gpt-6-astra',
   'openai-compatible': 'gpt-4o-mini',
   gemini: 'gemini-2.0-flash',
   anthropic: 'claude-3-7-sonnet-latest',
@@ -157,6 +157,7 @@ const HOSTED_QWEN_INFERENCE_LINKS = [
 const MODEL_PRESETS = {
   'local-ai': [],
   openai: [
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -172,6 +173,7 @@ const MODEL_PRESETS = {
     'o4-mini',
   ],
   'openai-compatible': [
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -211,6 +213,7 @@ const MODEL_PRESETS = {
 }
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
+  'gpt-6-astra',
   'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',
@@ -254,7 +257,7 @@ const DEFAULT_AI_SETTINGS = {
   provider: 'openai',
   model: DEFAULT_MODELS.openai,
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.5',
+  shortSessionOpenAiFastModel: 'gpt-6-astra',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   mode: 'manual',
@@ -5267,13 +5270,13 @@ export default function AiSettingsPage() {
                                       provider: activeProvider,
                                       model:
                                         aiSolver.shortSessionOpenAiFastModel ||
-                                        'gpt-5.5',
+                                        DEFAULT_AI_SETTINGS.shortSessionOpenAiFastModel,
                                       providerConfig,
                                     })
                                   notify(
                                     result && result.accepted
-                                      ? t('GPT-5.5 fast path accepted')
-                                      : t('GPT-5.5 fast path downgraded'),
+                                      ? t('Fast path accepted')
+                                      : t('Fast path downgraded'),
                                     result && result.accepted
                                       ? t(
                                           '{{model}} accepted Priority processing and low reasoning in {{latency}} ms.',
@@ -5298,7 +5301,7 @@ export default function AiSettingsPage() {
                                   )
                                 } catch (error) {
                                   notify(
-                                    t('GPT-5.5 fast-path test failed'),
+                                    t('Fast-path test failed'),
                                     formatErrorForToast(error),
                                     'error'
                                   )
