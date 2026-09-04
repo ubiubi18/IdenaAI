@@ -102,7 +102,7 @@ import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-6-astra',
+  model: 'gpt-5.6-sol',
   flipBuilderStoryProvider: 'openai',
   flipBuilderStoryModel: 'gpt-6-astra',
   flipBuilderImageProvider: 'openai',

@@ -61,7 +61,7 @@ const SHORT_SESSION_OPENAI_FAST_MODELS = [
   'gpt-5.4',
   'gpt-5.4-mini',
 ]
-const SHORT_SESSION_OPENAI_DEFAULT_FAST_MODEL = 'gpt-6-astra'
+const SHORT_SESSION_OPENAI_DEFAULT_FAST_MODEL = 'gpt-5.6-sol'
 const SHORT_SESSION_OPENAI_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_MAX_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS = 0
@@ -1341,7 +1341,7 @@ export function planValidationAiSolve({
     .trim()
     .toLowerCase()
   const defaultModel =
-    String(aiSolver.model || 'gpt-6-astra').trim() || 'gpt-6-astra'
+    String(aiSolver.model || 'gpt-5.6-sol').trim() || 'gpt-5.6-sol'
   const shortSessionOpenAiFastMode = resolveShortSessionOpenAiFastMode({
     sessionType,
     aiSolver,

@@ -8,6 +8,7 @@ const {createProviderHttpClient, parseRemoteUrl} = require('./url-policy')
 const {
   PROVIDERS,
   DEFAULT_MODELS,
+  DEFAULT_STORY_MODELS,
   PROVIDER_CONFIG_DEFAULTS,
   OPENAI_COMPATIBLE_PROVIDERS,
 } = require('./constants')
@@ -7547,7 +7548,7 @@ Flip hash: ${hash}
     const disableLocalFallback = payload.disableLocalFallback === true
     const fastStoryMode = payload.fastStoryMode === true
     const provider = normalizeProvider(payload.provider)
-    const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
+    const model = String(payload.model || DEFAULT_STORY_MODELS[provider]).trim()
     const modelStoryRequestTimeoutFloorMs =
       isOpenAiCompatibleProvider(provider) &&
       ['gpt-6-astra', 'gpt-5.6-sol'].includes(model.toLowerCase())
@@ -9299,7 +9300,7 @@ Flip hash: ${hash}
   async function generateFlipPanels(payload = {}) {
     const provider = normalizeProvider(payload.provider)
     const fastBuild = payload.fastBuild !== false
-    const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
+    const model = String(payload.model || DEFAULT_STORY_MODELS[provider]).trim()
     const imageModel = String(payload.imageModel || 'gpt-image-2').trim()
     const requestedImageSize = String(payload.imageSize || '1024x1024').trim()
     const imageSize = normalizeProviderImageSize(requestedImageSize)
@@ -9427,7 +9428,7 @@ Flip hash: ${hash}
         : true
     const sequenceAuditEnabled = payload.sequenceAuditEnabled === true
     const textAuditModel = String(
-      payload.textAuditModel || DEFAULT_MODELS.openai
+      payload.textAuditModel || DEFAULT_STORY_MODELS.openai
     ).trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel

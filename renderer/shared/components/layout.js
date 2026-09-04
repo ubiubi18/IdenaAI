@@ -105,7 +105,7 @@ global.setZoomLevel = global.setZoomLevel || (() => {})
 
 const AVAILABLE_TIMEOUT = global.isDev || global.isTest ? 0 : 1000 * 5
 const AI_PROVIDER_DEFAULT_MODELS = {
-  openai: 'gpt-6-astra',
+  openai: 'gpt-5.6-sol',
   anthropic: 'claude-3-7-sonnet-latest',
   gemini: 'gemini-2.0-flash',
   xai: 'grok-2-vision-latest',
