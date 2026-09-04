@@ -97,7 +97,7 @@ const MAX_PROBABILITY_ENSEMBLE_RUNS = 3
 const PROBABILITY_FIRST_RUN_STOP_THRESHOLD = 0.95
 const PROBABILITY_SECOND_RUN_STOP_THRESHOLD = 0.82
 const PROBABILITY_ENSEMBLE_FALLBACK_RESERVE_MS = 4500
-const GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS = 90 * 1000
+const REASONING_STORY_TIMEOUT_FLOOR_MS = 90 * 1000
 const FLIP_IMAGE_ACCESSIBILITY_REQUIREMENTS = [
   'Mandatory accessibility requirements (override conflicting style requests):',
   '- Always use a bright, high-key palette with even lighting and strong foreground/background contrast. Never create a dark or dim scene.',
@@ -109,6 +109,8 @@ const FLIP_IMAGE_ACCESSIBILITY_REQUIREMENTS = [
 // Snapshot values for transparent benchmark estimation. Update as providers
 // revise pricing. Values are USD per 1M tokens or per generated image.
 const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
+  // GPT-6 Astra standard pricing checked on 2026-09-04.
+  'gpt-6-astra': {input: 10, output: 50},
   // GPT-5.6 Sol checked on 2026-08-30; earlier OpenAI entries on 2026-05-14.
   'gpt-5.6-sol': {input: 4, output: 20},
   'gpt-5.5': {input: 5, output: 30},
@@ -166,6 +168,7 @@ const OPENAI_IMAGE_PRICING_USD_PER_IMAGE = {
 }
 
 const OPENAI_UNAVAILABLE_MODEL_FALLBACKS = {
+  'gpt-6-astra': 'gpt-5.5',
   'gpt-5.5': 'gpt-5.4',
   'gpt-5.5-mini': 'gpt-5.4-mini',
 }
@@ -7547,8 +7550,8 @@ Flip hash: ${hash}
     const model = String(payload.model || DEFAULT_MODELS[provider]).trim()
     const modelStoryRequestTimeoutFloorMs =
       isOpenAiCompatibleProvider(provider) &&
-      model.toLowerCase() === 'gpt-5.6-sol'
-        ? GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS
+      ['gpt-6-astra', 'gpt-5.6-sol'].includes(model.toLowerCase())
+        ? REASONING_STORY_TIMEOUT_FLOOR_MS
         : 0
     const providerDailyBudgetRemainingUsd =
       resolveProviderDailyBudgetRemainingForOperation({
@@ -9423,7 +9426,9 @@ Flip hash: ${hash}
         ? payload.renderFeedbackEnabled
         : true
     const sequenceAuditEnabled = payload.sequenceAuditEnabled === true
-    const textAuditModel = String(payload.textAuditModel || 'gpt-5.5').trim()
+    const textAuditModel = String(
+      payload.textAuditModel || DEFAULT_MODELS.openai
+    ).trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel
     ).trim()
@@ -9497,8 +9502,10 @@ Flip hash: ${hash}
     const sequenceAuditRequestTimeoutMs = Math.max(
       Number(payload.sequenceAuditRequestTimeoutMs) || 0,
       isOpenAiCompatibleProvider(provider) &&
-        sequenceAuditModel.toLowerCase() === 'gpt-5.6-sol'
-        ? GPT_5_6_SOL_STORY_TIMEOUT_FLOOR_MS
+        ['gpt-6-astra', 'gpt-5.6-sol'].includes(
+          sequenceAuditModel.toLowerCase()
+        )
+        ? REASONING_STORY_TIMEOUT_FLOOR_MS
         : 45 * 1000
     )
 

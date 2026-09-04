@@ -14,7 +14,7 @@ const PROVIDERS = {
 }
 
 const DEFAULT_MODELS = {
-  [PROVIDERS.OpenAI]: 'gpt-5.5',
+  [PROVIDERS.OpenAI]: 'gpt-6-astra',
   [PROVIDERS.LocalAI]: '',
   [PROVIDERS.OpenAICompatible]: 'gpt-4o-mini',
   [PROVIDERS.Gemini]: 'gemini-2.0-flash',

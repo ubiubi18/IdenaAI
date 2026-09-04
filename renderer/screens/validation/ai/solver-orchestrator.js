@@ -54,13 +54,14 @@ const IMAGE_PREP_PER_FLIP_MS = {
 const FRAME_REVIEW_PREP_MIN_MS = 900
 const MIN_PER_FLIP_SOLVE_BUDGET_MS = 2500
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
+  'gpt-6-astra',
   'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',
   'gpt-5.4',
   'gpt-5.4-mini',
 ]
-const SHORT_SESSION_OPENAI_DEFAULT_FAST_MODEL = 'gpt-5.5'
+const SHORT_SESSION_OPENAI_DEFAULT_FAST_MODEL = 'gpt-6-astra'
 const SHORT_SESSION_OPENAI_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_MAX_PARALLEL_CONCURRENCY = 6
 const SHORT_SESSION_OPENAI_PARALLEL_LAUNCH_DELAY_MS = 0
@@ -1339,7 +1340,8 @@ export function planValidationAiSolve({
   const provider = String(aiSolver.provider || 'openai')
     .trim()
     .toLowerCase()
-  const defaultModel = String(aiSolver.model || 'gpt-5.5').trim() || 'gpt-5.5'
+  const defaultModel =
+    String(aiSolver.model || 'gpt-6-astra').trim() || 'gpt-6-astra'
   const shortSessionOpenAiFastMode = resolveShortSessionOpenAiFastMode({
     sessionType,
     aiSolver,

@@ -25,6 +25,112 @@ function makeUnsupportedParameterError(param, message = '') {
 }
 
 describe('openai provider adapter', () => {
+  test.each(['none', 'minimal', 'low', 'high'])(
+    'normalizes Astra %s reasoning without unsupported sampling parameters',
+    async (reasoningEffort) => {
+      const httpClient = {
+        post: jest.fn().mockResolvedValue({
+          data: {choices: [{message: {content: '{"answer":"left"}'}}]},
+        }),
+      }
+      await callOpenAi({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gpt-6-astra',
+        flip: {leftImage: 'data:image/png;base64,AAA'},
+        prompt: 'Choose the coherent sequence.',
+        profile: {temperature: 0, maxOutputTokens: 512, requestTimeoutMs: 5000},
+        promptOptions: {
+          openAiReasoningEffort: reasoningEffort,
+          structuredOutput: {
+            responseFormat: STORY_OPTIONS_OPENAI_RESPONSE_FORMAT,
+          },
+        },
+        providerConfig: {
+          extraBody: {
+            temperature: 1,
+            top_p: 0.9,
+            top_logprobs: 2,
+            logprobs: true,
+            prompt_cache_retention: '24h',
+            max_tokens: 999999,
+          },
+        },
+      })
+      expect(httpClient.post).toHaveBeenCalledTimes(1)
+      const payload = httpClient.post.mock.calls[0][1]
+      expect(payload).toMatchObject({
+        model: 'gpt-6-astra',
+        max_completion_tokens: 512,
+        reasoning_effort: reasoningEffort === 'high' ? 'high' : 'low',
+        response_format: STORY_OPTIONS_OPENAI_RESPONSE_FORMAT,
+        prompt_cache_options: {ttl: '30m'},
+      })
+      for (const field of [
+        'temperature',
+        'top_p',
+        'top_logprobs',
+        'logprobs',
+        'max_tokens',
+        'prompt_cache_retention',
+      ]) {
+        expect(payload).not.toHaveProperty(field)
+      }
+      expect(payload.messages[0].content[1]).toEqual({
+        type: 'image_url',
+        image_url: {url: 'data:image/png;base64,AAA'},
+      })
+    }
+  )
+
+  test('keeps Astra output bounded through compatibility retries', async () => {
+    const httpClient = {
+      post: jest
+        .fn()
+        .mockRejectedValue(makeUnsupportedParameterError('response_format')),
+    }
+    await expect(
+      callOpenAi({
+        httpClient,
+        apiKey: 'test-key',
+        model: 'gpt-6-astra',
+        prompt: 'Return JSON.',
+        profile: {maxOutputTokens: 512, requestTimeoutMs: 5000},
+        promptOptions: {
+          structuredOutput: {
+            responseFormat: STORY_OPTIONS_OPENAI_RESPONSE_FORMAT,
+          },
+        },
+      })
+    ).rejects.toBeDefined()
+    expect(httpClient.post.mock.calls.length).toBeGreaterThan(1)
+    for (const [, payload] of httpClient.post.mock.calls) {
+      expect(payload.max_completion_tokens).toBe(512)
+      expect(payload.reasoning_effort).toBe('low')
+    }
+  })
+
+  test('uses the default tier for Astra on the EU endpoint', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {choices: [{message: {content: 'ok'}}], service_tier: 'default'},
+      }),
+    }
+    const result = await testOpenAiFastMode({
+      httpClient,
+      apiKey: 'test-key',
+      model: 'gpt-6-astra',
+      providerConfig: {baseUrl: 'https://eu.api.openai.com/v1'},
+    })
+    expect(httpClient.post.mock.calls[0][1]).toMatchObject({
+      model: 'gpt-6-astra',
+      max_completion_tokens: 256,
+      reasoning_effort: 'low',
+      service_tier: 'default',
+    })
+    expect(result.priorityDowngraded).toBe(true)
+  })
+
   test('falls back from max_tokens to max_completion_tokens', async () => {
     const httpClient = {
       post: jest

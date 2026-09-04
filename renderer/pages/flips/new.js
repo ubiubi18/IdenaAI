@@ -102,9 +102,9 @@ import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.5',
+  model: 'gpt-6-astra',
   flipBuilderStoryProvider: 'openai',
-  flipBuilderStoryModel: 'gpt-5.6-sol',
+  flipBuilderStoryModel: 'gpt-6-astra',
   flipBuilderImageProvider: 'openai',
   flipBuilderImageModel: 'gpt-image-2',
   flipBuilderImageQuality: 'low',
@@ -152,6 +152,7 @@ const CUSTOM_MODEL_OPTION = '__custom_model__'
 
 const REASONING_MODEL_PRESETS = {
   openai: [
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -166,6 +167,7 @@ const REASONING_MODEL_PRESETS = {
     'o4-mini',
   ],
   'openai-compatible': [
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -244,6 +246,7 @@ const AI_FLIP_IMAGE_CAPABLE_PROVIDERS = new Set(AI_FLIP_IMAGE_PROVIDER_OPTIONS)
 // GPT-5.6 Sol checked on 2026-08-30; earlier OpenAI entries on 2026-05-14;
 // Moonshot Kimi K2.6 on 2026-06-01; DeepInfra Qwen3.6 on 2026-07-03.
 const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
+  'gpt-6-astra': {input: 10, output: 50},
   'gpt-5.6-sol': {input: 4, output: 20},
   'gpt-5.5': {input: 5, output: 30},
   // gpt-5.5-mini is currently resolved through the configured 5.4-mini fallback.
@@ -1720,7 +1723,7 @@ export default function NewFlipPage() {
     .trim()
     .toLowerCase()
   const aiReasoningModel = String(
-    aiSolverSettings.flipBuilderStoryModel || 'gpt-5.6-sol'
+    aiSolverSettings.flipBuilderStoryModel || 'gpt-6-astra'
   ).trim()
   const aiImageProvider = String(
     aiSolverSettings.flipBuilderImageProvider || 'openai'
