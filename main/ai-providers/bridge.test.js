@@ -328,114 +328,124 @@ describe('createAiProviderBridge', () => {
     ).rejects.not.toThrow(/customSecret12345678/)
   })
 
-  it('falls back from unavailable GPT-5.5 provider tests to GPT-5.4', async () => {
-    const logger = mockLogger()
-    const httpClient = {
-      post: jest
-        .fn()
-        .mockRejectedValueOnce({
-          response: {
-            status: 404,
-            data: {
-              error: {
-                code: 'model_not_found',
-                message:
-                  'The model `gpt-5.5` does not exist or you do not have access to it.',
-              },
-            },
-          },
-        })
-        .mockResolvedValueOnce({
-          data: {
-            choices: [{message: {content: 'ok'}}],
-          },
-        }),
-    }
-
-    const bridge = createAiProviderBridge(logger, {httpClient})
-    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
-
-    const result = await bridge.testProvider({
-      provider: 'openai',
-      model: 'gpt-5.5',
-    })
-
-    expect(httpClient.post).toHaveBeenCalledTimes(2)
-    expect(httpClient.post.mock.calls[0][1].model).toBe('gpt-5.5')
-    expect(httpClient.post.mock.calls[1][1].model).toBe('gpt-5.4')
-    expect(result).toMatchObject({
-      ok: true,
-      provider: 'openai',
-      model: 'gpt-5.4',
-      modelFallback: {
-        requestedModel: 'gpt-5.5',
-        usedModel: 'gpt-5.4',
-        reason: 'model_not_found',
-      },
-    })
-  })
-
-  it('falls back from unavailable GPT-5.5 solve requests to GPT-5.4', async () => {
-    const logger = mockLogger()
-    const httpClient = {
-      post: jest
-        .fn()
-        .mockRejectedValueOnce({
-          response: {
-            status: 404,
-            data: {
-              error: {
-                code: 'model_not_found',
-                message:
-                  'The model `gpt-5.5` does not exist or you do not have access to it.',
-              },
-            },
-          },
-        })
-        .mockResolvedValueOnce({
-          data: {
-            choices: [
-              {
-                message: {
-                  content: '{"answer":"left","confidence":0.9}',
+  it.each([
+    ['gpt-5.5', 'gpt-5.4'],
+    ['gpt-6-astra', 'gpt-5.5'],
+  ])(
+    'falls back from unavailable %s provider tests to %s',
+    async (requestedModel, usedModel) => {
+      const logger = mockLogger()
+      const httpClient = {
+        post: jest
+          .fn()
+          .mockRejectedValueOnce({
+            response: {
+              status: 404,
+              data: {
+                error: {
+                  code: 'model_not_found',
+                  message: `The model ${requestedModel} does not exist or you do not have access to it.`,
                 },
               },
-            ],
-            usage: {
-              prompt_tokens: 100,
-              completion_tokens: 20,
-              total_tokens: 120,
             },
-          },
-        }),
+          })
+          .mockResolvedValueOnce({
+            data: {
+              choices: [{message: {content: 'ok'}}],
+            },
+          }),
+      }
+
+      const bridge = createAiProviderBridge(logger, {httpClient})
+      bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+      const result = await bridge.testProvider({
+        provider: 'openai',
+        model: requestedModel,
+      })
+
+      expect(httpClient.post).toHaveBeenCalledTimes(2)
+      expect(httpClient.post.mock.calls[0][1].model).toBe(requestedModel)
+      expect(httpClient.post.mock.calls[1][1].model).toBe(usedModel)
+      expect(result).toMatchObject({
+        ok: true,
+        provider: 'openai',
+        model: usedModel,
+        modelFallback: {
+          requestedModel,
+          usedModel,
+          reason: 'model_not_found',
+        },
+      })
     }
+  )
 
-    const bridge = createAiProviderBridge(logger, {httpClient})
-    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+  it.each([
+    ['gpt-5.5', 'gpt-5.4'],
+    ['gpt-6-astra', 'gpt-5.5'],
+  ])(
+    'falls back from unavailable %s solve requests to %s',
+    async (requestedModel, usedModel) => {
+      const logger = mockLogger()
+      const httpClient = {
+        post: jest
+          .fn()
+          .mockRejectedValueOnce({
+            response: {
+              status: 404,
+              data: {
+                error: {
+                  code: 'model_not_found',
+                  message: `The model ${requestedModel} does not exist or you do not have access to it.`,
+                },
+              },
+            },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              choices: [
+                {
+                  message: {
+                    content: '{"answer":"left","confidence":0.9}',
+                  },
+                },
+              ],
+              usage: {
+                prompt_tokens: 100,
+                completion_tokens: 20,
+                total_tokens: 120,
+              },
+            },
+          }),
+      }
 
-    const result = await solveFlipBatch(bridge, {
-      provider: 'openai',
-      model: 'gpt-5.5',
-      benchmarkProfile: 'custom',
-      deadlineMs: 10000,
-      requestTimeoutMs: 1000,
-      maxConcurrency: 1,
-      maxRetries: 0,
-      maxOutputTokens: 64,
-      forceDecision: false,
-      uncertaintyRepromptEnabled: false,
-      flips: [{hash: 'flip-gpt55-fallback'}],
-    })
+      const bridge = createAiProviderBridge(logger, {httpClient})
+      bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    expect(httpClient.post).toHaveBeenCalledTimes(2)
-    expect(httpClient.post.mock.calls[0][1].model).toBe('gpt-5.5')
-    expect(httpClient.post.mock.calls[1][1].model).toBe('gpt-5.4')
-    expect(result.results[0].modelFallback).toEqual({
-      requestedModel: 'gpt-5.5',
-      usedModel: 'gpt-5.4',
-      reason: 'model_not_found',
-    })
-  })
+      const result = await solveFlipBatch(bridge, {
+        provider: 'openai',
+        model: requestedModel,
+        benchmarkProfile: 'custom',
+        deadlineMs: 10000,
+        requestTimeoutMs: 1000,
+        maxConcurrency: 1,
+        maxRetries: 0,
+        maxOutputTokens: 64,
+        forceDecision: false,
+        uncertaintyRepromptEnabled: false,
+        flips: [{hash: 'flip-gpt55-fallback'}],
+      })
+
+      expect(httpClient.post).toHaveBeenCalledTimes(2)
+      expect(httpClient.post.mock.calls[0][1].model).toBe(requestedModel)
+      expect(httpClient.post.mock.calls[1][1].model).toBe(usedModel)
+      expect(result.results[0].modelFallback).toEqual({
+        requestedModel,
+        usedModel,
+        reason: 'model_not_found',
+      })
+    }
+  )
 
   it('merges session-level prompt options into solveFlipBatch provider calls', async () => {
     const invokeProvider = jest
@@ -2991,31 +3001,34 @@ describe('createAiProviderBridge', () => {
     ])
   })
 
-  it('gives GPT-5.6 Sol story generation enough time in fast mode', async () => {
-    const invokeProvider = jest
-      .fn()
-      .mockRejectedValue(new Error('provider unavailable'))
+  it.each(['gpt-6-astra', 'gpt-5.6-sol'])(
+    'gives %s story generation enough time in fast mode',
+    async (model) => {
+      const invokeProvider = jest
+        .fn()
+        .mockRejectedValue(new Error('provider unavailable'))
 
-    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
-    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+      const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+      bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
 
-    await bridge.generateStoryOptions({
-      provider: 'openai',
-      model: 'gpt-5.6-sol',
-      storyOptionCount: 1,
-      fastStoryMode: true,
-      requestTimeoutMs: 9000,
-      keywords: ['organ', 'garage'],
-      includeNoise: false,
-      hasCustomStory: false,
-    })
+      await bridge.generateStoryOptions({
+        provider: 'openai',
+        model,
+        storyOptionCount: 1,
+        fastStoryMode: true,
+        requestTimeoutMs: 9000,
+        keywords: ['organ', 'garage'],
+        includeNoise: false,
+        hasCustomStory: false,
+      })
 
-    expect(invokeProvider).toHaveBeenCalledTimes(1)
-    expect(invokeProvider.mock.calls[0][0].profile).toMatchObject({
-      requestTimeoutMs: 90000,
-      deadlineMs: 95000,
-    })
-  })
+      expect(invokeProvider).toHaveBeenCalledTimes(1)
+      expect(invokeProvider.mock.calls[0][0].profile).toMatchObject({
+        requestTimeoutMs: 90000,
+        deadlineMs: 95000,
+      })
+    }
+  )
 
   it('supports a single strong story option without forcing a second fallback path', async () => {
     const invokeProvider = jest.fn().mockResolvedValue({

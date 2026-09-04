@@ -101,7 +101,7 @@ const REHEARSAL_AI_PROVIDER_OPTIONS = [
 ]
 
 const REHEARSAL_AI_DEFAULT_MODELS = {
-  openai: 'gpt-5.5',
+  openai: 'gpt-6-astra',
   anthropic: 'claude-3-7-sonnet-latest',
   gemini: 'gemini-2.0-flash',
   xai: 'grok-2-vision-latest',
@@ -116,6 +116,7 @@ const REHEARSAL_AI_DEFAULT_MODELS = {
 
 const REHEARSAL_AI_MODEL_PRESETS = {
   openai: [
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -153,6 +154,7 @@ const REHEARSAL_AI_MODEL_PRESETS = {
   ],
   moonshot: ['kimi-k2.6'],
   'openai-compatible': [
+    'gpt-6-astra',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -288,7 +290,11 @@ function resolveRehearsalAiProvider(aiSolver = {}) {
 function resolveRehearsalAiModel(provider, model = '') {
   const value = String(model || '').trim()
 
-  return value || REHEARSAL_AI_DEFAULT_MODELS[provider] || 'gpt-5.5'
+  return (
+    value ||
+    REHEARSAL_AI_DEFAULT_MODELS[provider] ||
+    REHEARSAL_AI_DEFAULT_MODELS.openai
+  )
 }
 
 function normalizeLogs(value) {
@@ -2802,7 +2808,7 @@ function NodeSettings() {
                     }
                     placeholder={
                       REHEARSAL_AI_DEFAULT_MODELS[rehearsalAiProvider] ||
-                      'gpt-5.5'
+                      REHEARSAL_AI_DEFAULT_MODELS.openai
                     }
                     isDisabled={isPreparingRehearsalAi}
                   />

@@ -26,15 +26,15 @@ describe('settings-context ai solver normalization', () => {
 
   it('keeps the default system reserve for AI sessions', () => {
     expect(buildAiSolverSettings()).toMatchObject({
-      model: 'gpt-5.5',
+      model: 'gpt-6-astra',
       flipBuilderStoryProvider: 'openai',
-      flipBuilderStoryModel: 'gpt-5.6-sol',
+      flipBuilderStoryModel: 'gpt-6-astra',
       flipBuilderImageProvider: 'openai',
       flipBuilderImageModel: 'gpt-image-2',
       flipBuilderImageQuality: 'low',
       flipBuilderImageSize: '1024x1024',
       flipBuilderGenerationMode: 'fast',
-      shortSessionOpenAiFastModel: 'gpt-5.5',
+      shortSessionOpenAiFastModel: 'gpt-6-astra',
       probabilityReasoningEffort: 'xhigh',
       autoReportBestFlipEnabled: false,
       memoryBudgetGiB: 32,
@@ -56,7 +56,7 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       flipBuilderStoryProvider: 'openai',
-      flipBuilderStoryModel: 'gpt-5.6-sol',
+      flipBuilderStoryModel: 'gpt-6-astra',
       flipBuilderImageProvider: 'openai',
       flipBuilderImageModel: 'gpt-image-2',
       flipBuilderImageQuality: 'low',
@@ -105,21 +105,24 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
-      shortSessionOpenAiFastModel: 'gpt-5.5',
+      shortSessionOpenAiFastModel: 'gpt-6-astra',
     })
   })
 
-  it('accepts full short-session fast models', () => {
-    expect(
-      buildAiSolverSettings({
+  it.each(['gpt-6-astra', 'gpt-5.6-sol'])(
+    'accepts %s for short-session fast mode',
+    (model) => {
+      expect(
+        buildAiSolverSettings({
+          shortSessionOpenAiFastEnabled: true,
+          shortSessionOpenAiFastModel: model,
+        })
+      ).toMatchObject({
         shortSessionOpenAiFastEnabled: true,
-        shortSessionOpenAiFastModel: 'gpt-5.6-sol',
+        shortSessionOpenAiFastModel: model,
       })
-    ).toMatchObject({
-      shortSessionOpenAiFastEnabled: true,
-      shortSessionOpenAiFastModel: 'gpt-5.6-sol',
-    })
-  })
+    }
+  )
 
   it('normalizes the auto-report best-flip switch', () => {
     expect(
@@ -156,7 +159,7 @@ describe('settings-context ai solver normalization', () => {
     })
   })
 
-  it('migrates the old OpenAI default model to GPT-5.5', () => {
+  it('migrates the old OpenAI default model to Astra', () => {
     expect(
       buildAiSolverSettings({
         provider: 'openai',
@@ -165,9 +168,22 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       provider: 'openai',
-      model: 'gpt-5.5',
+      model: 'gpt-6-astra',
       shortSessionOpenAiFastModel: 'gpt-5.4-mini',
     })
+  })
+
+  it('preserves saved model choices, budgets, and consent', () => {
+    const saved = {
+      provider: 'openai',
+      model: 'gpt-5.5',
+      flipBuilderStoryModel: 'gpt-5.6-sol',
+      providerDailyBudgetEnabled: true,
+      providerDailyBudgetUsd: 15,
+      mode: 'session-auto',
+      onchainAutoSubmitConsentAt: '2026-09-01T10:00:00.000Z',
+    }
+    expect(buildAiSolverSettings(saved)).toMatchObject(saved)
   })
 
   it('keeps the internal node preference while routing through an ephemeral rehearsal node', () => {
