@@ -43,24 +43,24 @@ function buildStoryPromptExemplarLines({
   const variants = {
     [STORY_PROMPT_VARIANTS.OPENAI_LIKE]: {
       positive:
-        'Positive: before: A costume assistant carries a feathered mask past a garment rack. trigger: The mask ribbon snags a hidden zipper pull. reaction: The garment bag peels open and reveals a bright stage cape. after: The open bag, hanging mask, and exposed cape stay visible beside the assistant.',
+        'Positive: before: A child holds a brush beside a large gray bird statue with a gray beak. trigger: The child dips the brush in yellow paint. reaction: The child paints the large beak yellow. after: The finished bright-yellow beak and the brush are clearly visible.',
       negative:
-        'Negative: before: A person interacts with both jar and cat. trigger: The person uses jar as a clear tool. reaction: Same kitchen again with only a changed face. after: The person observes the final result.',
-      cue: 'Use short literal noun-verb sentences, make the aftermath physically obvious, and vary toward reveals, blocked routes, repaired setups, or exposed changes instead of defaulting to spills or overturned props.',
+        'Negative: several small props roll, snag, drag, and reveal one another; the order needs explanation and the final result is unclear.',
+      cue: 'Use short literal noun-verb sentences, one main action per panel, large keyword objects, and a completed goal, finished object, or clearly broken non-living object at the end.',
     },
     [STORY_PROMPT_VARIANTS.GEMINI]: {
       positive:
-        'Positive: before: A gardener hangs a seed packet beside a porch hook. trigger: A gust catches the packet string and yanks open a folded shade. reaction: The shade drops across half the steps while the packet spins in the air. after: The lowered shade and dangling seed packet stay visible on the porch.',
+        'Positive: before: A child uses large binoculars to see three friends approaching. trigger: The child puts the binoculars on a table and starts inflating balloons. reaction: The finished balloons and cake are ready beside the binoculars. after: The friends arrive and the party begins beside the binoculars.',
       negative:
-        'Negative: same porch repeated four times, tiny expression changes, and the final panel only says the gardener feels worried.',
-      cue: 'Keep each panel composition visibly distinct and rotate between bent, blocked, tangled, revealed, lit-up, or runaway outcomes instead of repeating spills or toppled furniture.',
+        'Negative: several people perform unrelated tasks, the important clue is tiny, and two different panel orders make equal sense.',
+      cue: 'Keep one familiar goal, one main actor, large readable objects, and an ending that shows the goal was reached.',
     },
     [STORY_PROMPT_VARIANTS.ANTHROPIC]: {
       positive:
-        'Positive: before: A student holds a flashlight near a basement door. trigger: The door swings open and a ghost appears on the stairs. reaction: The flashlight beam sweeps across hanging coats and catches a hidden exit sign shape in the mirror. after: The student backs against the wall while the ghost and bright beam remain visible.',
+        'Positive: before: A worker places a wooden box on the ground beside a large hammer. trigger: The worker lifts the hammer over the box. reaction: The hammer strikes and splits the box. after: The broken box lies in two large pieces beside the hammer.',
       negative:
-        'Negative: abstract fear with no concrete accident, repeated staircase views, and no stable result state.',
-      cue: 'Prefer calm, literal, everyday physical scenes with one coherent cause-and-effect chain, and vary the visible consequence type toward reveals, exposure, blockages, recoveries, or stable changed layouts instead of leaning on dropped or overturned props.',
+        'Negative: an obscure machine changes internally, only a small dial moves, and specialist knowledge is needed to understand the result.',
+      cue: 'Prefer calm, literal, everyday physical scenes with one direct action chain and one large irreversible result.',
     },
   }
 

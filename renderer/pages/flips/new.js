@@ -306,7 +306,9 @@ const IDENA_PANEL_HEIGHT = 330
 const IDENA_COMPOSITE_WIDTH = IDENA_PANEL_WIDTH * 2
 const IDENA_COMPOSITE_HEIGHT = IDENA_PANEL_HEIGHT * 2
 const DEFAULT_AI_IMAGE_SIZE = '1024x1024'
-const MAX_SUBMIT_PANEL_DATA_URL_LENGTH = 130000
+const IDENA_SUBMIT_PANEL_WIDTH = 240
+const IDENA_SUBMIT_PANEL_HEIGHT = 180
+const IDENA_SUBMIT_JPEG_QUALITY = 0.6
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10)
@@ -594,48 +596,18 @@ function drawImageCover(ctx, image, targetWidth, targetHeight) {
   return true
 }
 
-function encodeJpegWithBudget(
-  canvas,
-  maxLength = MAX_SUBMIT_PANEL_DATA_URL_LENGTH
-) {
-  const qualitySteps = [0.9, 0.82, 0.74, 0.66, 0.58, 0.5, 0.42]
-  let fallback = ''
-  for (const quality of qualitySteps) {
-    const encoded = canvas.toDataURL('image/jpeg', quality)
-    fallback = encoded
-    if (encoded.length <= maxLength) {
-      return encoded
-    }
-  }
-  return fallback
-}
-
 async function compressPanelForSubmit(dataUrl) {
   const image = await loadDataImage(dataUrl)
-  const firstPass = document.createElement('canvas')
-  firstPass.width = IDENA_PANEL_WIDTH
-  firstPass.height = IDENA_PANEL_HEIGHT
-  const firstCtx = firstPass.getContext('2d')
-  firstCtx.clearRect(0, 0, firstPass.width, firstPass.height)
-  if (!drawImageCover(firstCtx, image, firstPass.width, firstPass.height)) {
+  const canvas = document.createElement('canvas')
+  canvas.width = IDENA_SUBMIT_PANEL_WIDTH
+  canvas.height = IDENA_SUBMIT_PANEL_HEIGHT
+  const ctx = canvas.getContext('2d')
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  if (!drawImageCover(ctx, image, canvas.width, canvas.height)) {
     throw new Error('Generated panel has invalid dimensions')
   }
 
-  const firstEncoded = encodeJpegWithBudget(firstPass)
-  if (firstEncoded.length <= MAX_SUBMIT_PANEL_DATA_URL_LENGTH) {
-    return firstEncoded
-  }
-
-  const fallback = document.createElement('canvas')
-  fallback.width = 320
-  fallback.height = 240
-  const fallbackCtx = fallback.getContext('2d')
-  fallbackCtx.clearRect(0, 0, fallback.width, fallback.height)
-  if (!drawImageCover(fallbackCtx, image, fallback.width, fallback.height)) {
-    throw new Error('Generated panel has invalid dimensions')
-  }
-
-  return encodeJpegWithBudget(fallback, 115000)
+  return canvas.toDataURL('image/jpeg', IDENA_SUBMIT_JPEG_QUALITY)
 }
 
 async function compressPanelsForSubmit(images) {

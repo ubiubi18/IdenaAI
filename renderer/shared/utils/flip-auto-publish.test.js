@@ -19,6 +19,11 @@ function passingOption(overrides = {}) {
       no_screen_or_page_keyword_cheat: 'pass',
       causal_clarity: 'pass',
       consensus_clarity: 'pass',
+      age_12_clarity: 'pass',
+      everyday_knowledge_only: 'pass',
+      large_visual_cues: 'pass',
+      simple_action_chain: 'pass',
+      obvious_final_outcome: 'pass',
     },
     failedComplianceKeys: [],
     riskFlags: [],
@@ -148,7 +153,30 @@ describe('audited flip auto publish gates', () => {
 
     expect(result.passed).toBe(false)
     expect(result.reasons).toContain(
-      'story_compliance_failed:keyword_relevance,no_text_needed,no_order_labels,no_inappropriate_content,single_story_only,no_waking_up_template,no_thumbs_up_down,no_enumeration_logic,no_screen_or_page_keyword_cheat,causal_clarity,consensus_clarity'
+      'story_compliance_failed:keyword_relevance,no_text_needed,no_order_labels,no_inappropriate_content,single_story_only,no_waking_up_template,no_thumbs_up_down,no_enumeration_logic,no_screen_or_page_keyword_cheat,causal_clarity,consensus_clarity,age_12_clarity,everyday_knowledge_only,large_visual_cues,simple_action_chain,obvious_final_outcome'
+    )
+  })
+
+  it('rejects a story that fails a common-sense simplicity check', () => {
+    const result = evaluateAutoPublishStoryDraft({
+      option: passingOption({
+        complianceReport: {
+          ...passingOption().complianceReport,
+          simple_action_chain: 'fail',
+        },
+      }),
+      keywords: ['organ', 'garage'],
+      panels: [
+        'A child stands beside an organ in a garage.',
+        'The child picks up a cloth beside the organ.',
+        'The child wipes dust from the organ.',
+        'The clean organ stands in the garage beside the child.',
+      ],
+    })
+
+    expect(result.passed).toBe(false)
+    expect(result.reasons).toContain(
+      'story_compliance_failed:simple_action_chain'
     )
   })
 

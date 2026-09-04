@@ -24,6 +24,9 @@ function passingChecks() {
     premature_reveal: {passed: true, panel_indices: [], notes: ''},
     state_regression: {passed: true, panel_indices: [], notes: ''},
     panel_distinctness: {passed: true, notes: ''},
+    common_sense_simplicity: {passed: true, notes: ''},
+    large_cue_readability: {passed: true, notes: ''},
+    final_outcome_clarity: {passed: true, notes: ''},
     shuffled_order: {
       passed: true,
       forms_meaningful_story: false,
@@ -44,6 +47,13 @@ describe('rendered story sequence audit', () => {
     expect(prompt).toContain('state_regression')
     expect(prompt).toContain('Candidate 1: 3 -> 1 -> 4 -> 2')
     expect(prompt).toContain('safe_shuffle_candidate')
+    expect(prompt).toContain('common_sense_simplicity')
+    expect(prompt).toContain(
+      'understandable at a glance to a typical 12-year-old'
+    )
+    expect(prompt).toContain(
+      'Reject a story unless its final result is large, stable, and immediately obvious'
+    )
   })
 
   it('accepts only a complete high-confidence audit with a safe shuffle', () => {

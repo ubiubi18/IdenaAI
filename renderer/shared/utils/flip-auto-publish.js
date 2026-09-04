@@ -10,6 +10,11 @@ const REQUIRED_STORY_COMPLIANCE = [
   'no_screen_or_page_keyword_cheat',
   'causal_clarity',
   'consensus_clarity',
+  'age_12_clarity',
+  'everyday_knowledge_only',
+  'large_visual_cues',
+  'simple_action_chain',
+  'obvious_final_outcome',
 ]
 
 const AUDITED_SHUFFLE_CANDIDATES = [
