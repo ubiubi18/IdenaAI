@@ -56,6 +56,8 @@ function createEmptyRenderedStoryMetrics() {
     panel_repair_count: 0,
     rendered_near_duplicate_fail: 0,
     rendered_alignment_fail: 0,
+    rendered_sequence_audit_fail: 0,
+    shuffled_story_ambiguity_fail: 0,
   }
 }
 
@@ -84,6 +86,7 @@ function evaluateRenderedStoryFeedback({
   renderedPanels = [],
   textAuditByPanel = [],
   validatorAuditByPanel = [],
+  sequenceAudit = null,
   keywords = [],
   hasAlternativeOption = false,
 }) {
@@ -233,6 +236,33 @@ function evaluateRenderedStoryFeedback({
     missingKeywords.length > 0 || visibilityFailPanels.length >= 2
   const severeAlignmentFailure = alignmentFailPanels.length >= 2
   const severeRepetition = consecutiveNearDuplicates.length > 0
+  const normalizedSequenceAudit =
+    sequenceAudit && sequenceAudit.invoked ? sequenceAudit : null
+
+  if (normalizedSequenceAudit && !normalizedSequenceAudit.passed) {
+    failureReasons.push('rendered_sequence_audit')
+    const sequenceFailureReasons = Array.isArray(
+      normalizedSequenceAudit.failureReasons
+    )
+      ? normalizedSequenceAudit.failureReasons
+      : []
+    sequenceFailureReasons.forEach((reason) => {
+      const normalizedReason = String(reason || '').trim()
+      if (normalizedReason) failureReasons.push(normalizedReason)
+    })
+    normalizePanelIndices(normalizedSequenceAudit.repairPanelIndices).forEach(
+      (panelIndex) => repairPanels.add(panelIndex)
+    )
+  }
+
+  const sequenceAuditRequiresReplan = Boolean(
+    normalizedSequenceAudit &&
+      !normalizedSequenceAudit.passed &&
+      normalizedSequenceAudit.shouldReplan
+  )
+  const sequenceAuditIncomplete = Boolean(
+    normalizedSequenceAudit && !normalizedSequenceAudit.complete
+  )
   const repairPanelIndices = normalizePanelIndices(Array.from(repairPanels))
 
   let score = 100
@@ -242,11 +272,16 @@ function evaluateRenderedStoryFeedback({
   score -= alignmentFailPanels.length * 20
   score -= nearDuplicatePairs.length * 24
   score -= weakKeywordCoverage.length * 6
+  if (normalizedSequenceAudit) {
+    score = Math.min(score, Number(normalizedSequenceAudit.score) || 0)
+  }
   score = Math.max(0, Math.min(100, score))
 
   let verdict = 'accept_rendered_story'
   if (failureReasons.length > 0) {
     if (
+      !sequenceAuditRequiresReplan &&
+      !sequenceAuditIncomplete &&
       repairPanelIndices.length === 1 &&
       !severeKeywordFailure &&
       !severeAlignmentFailure &&
@@ -255,13 +290,17 @@ function evaluateRenderedStoryFeedback({
       verdict = 'repair_selected_panels'
     } else if (
       hasAlternativeOption &&
-      (severeKeywordFailure ||
+      (sequenceAuditRequiresReplan ||
+        sequenceAuditIncomplete ||
+        severeKeywordFailure ||
         severeAlignmentFailure ||
         severeRepetition ||
         repairPanelIndices.length >= 2)
     ) {
       verdict = 'reject_story_and_use_alternative_option'
     } else if (
+      !sequenceAuditRequiresReplan &&
+      !sequenceAuditIncomplete &&
       repairPanelIndices.length > 0 &&
       repairPanelIndices.length <= 2
     ) {
@@ -283,6 +322,7 @@ function evaluateRenderedStoryFeedback({
     alignmentFailPanels,
     nearDuplicatePairs,
     consecutiveNearDuplicates,
+    sequenceAudit: normalizedSequenceAudit,
     metrics: {
       keywordCoverage,
       textLeakPanelCount: textLeakPanels.length,
@@ -291,6 +331,16 @@ function evaluateRenderedStoryFeedback({
       nearDuplicatePairCount: nearDuplicatePairs.length,
       renderedNearDuplicateFail: nearDuplicatePairs.length > 0,
       renderedAlignmentFail: alignmentFailPanels.length > 0,
+      renderedSequenceAuditFail: Boolean(
+        normalizedSequenceAudit && !normalizedSequenceAudit.passed
+      ),
+      shuffledStoryAmbiguityFail: Boolean(
+        normalizedSequenceAudit &&
+          Array.isArray(normalizedSequenceAudit.failureReasons) &&
+          normalizedSequenceAudit.failureReasons.includes(
+            'shuffled_story_ambiguity'
+          )
+      ),
     },
   }
 }
@@ -321,6 +371,12 @@ function recordRenderedStoryMetrics(metrics, report) {
   }
   if (item.metrics && item.metrics.renderedAlignmentFail) {
     target.rendered_alignment_fail += 1
+  }
+  if (item.metrics && item.metrics.renderedSequenceAuditFail) {
+    target.rendered_sequence_audit_fail += 1
+  }
+  if (item.metrics && item.metrics.shuffledStoryAmbiguityFail) {
+    target.shuffled_story_ambiguity_fail += 1
   }
 
   return target
@@ -366,6 +422,16 @@ function buildRenderedStoryRepairGuidance(report, context = {}) {
       lines.push(
         'Story-level repair: differentiate this panel from the previous one with a clearly different composition and visible state change.'
       )
+    }
+
+    const sequenceGuidance = String(
+      (item.sequenceAudit &&
+        item.sequenceAudit.repairGuidanceByPanel &&
+        item.sequenceAudit.repairGuidanceByPanel[panelIndex]) ||
+        ''
+    ).trim()
+    if (sequenceGuidance) {
+      lines.push(`Sequence-level repair: ${sequenceGuidance}`)
     }
 
     if (lines.length > 0) {
