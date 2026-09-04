@@ -92,6 +92,11 @@ import {
   getAiProviderDailyBudgetStatus,
   isRemoteAiProvider,
 } from '../../shared/utils/ai-provider-budget'
+import {
+  buildAuditedShuffleCandidates,
+  evaluateAutoPublishRender,
+  selectAuditedStoryCandidate,
+} from '../../shared/utils/flip-auto-publish'
 import {getFlipsBridge} from '../../shared/utils/flips-bridge'
 
 const DEFAULT_AI_SOLVER_SETTINGS = {
@@ -138,7 +143,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   customProviderChatPath: '/chat/completions',
 }
 
-const FULL_AUTO_NODE_PUBLISH_MAX_LEDGER_ACTIONS = 4
+const FULL_AUTO_NODE_PUBLISH_MAX_LEDGER_ACTIONS = 15
 const FULL_AUTO_NODE_PUBLISH_MAX_USD = 2
 const FULL_AUTO_NODE_PUBLISH_MAX_REQUEST_TIMEOUT_MS = 20 * 1000
 const FULL_AUTO_NODE_PUBLISH_MAX_DEADLINE_MS = 75 * 1000
@@ -3052,22 +3057,50 @@ export default function NewFlipPage() {
 
   const publishDrawerDisclosure = useDisclosure()
 
-  const shuffleDraftForSubmit = useCallback(async () => {
-    send('PICK_SHUFFLE')
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0)
-    })
-    const targetOrder = buildValidShuffleOrder(
-      order,
-      originalOrder,
-      adversarialImageId
-    )
-    send('MANUAL_SHUFFLE', {order: targetOrder})
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0)
-    })
-    send('PICK_SUBMIT')
-  }, [adversarialImageId, order, originalOrder, send])
+  const shuffleDraftForSubmit = useCallback(
+    async (auditedPanelOrder = null) => {
+      send('PICK_SHUFFLE')
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
+      let targetOrder = null
+      if (Array.isArray(auditedPanelOrder)) {
+        const validPanelOrder =
+          auditedPanelOrder.length === 4 &&
+          auditedPanelOrder.every(
+            (panelIndex) =>
+              Number.isInteger(panelIndex) && panelIndex >= 0 && panelIndex < 4
+          ) &&
+          new Set(auditedPanelOrder).size === 4
+        if (!validPanelOrder) {
+          throw new Error('The audited shuffle order is invalid.')
+        }
+        targetOrder = auditedPanelOrder.map(
+          (panelIndex) => originalOrder[panelIndex]
+        )
+        if (
+          targetOrder.some((item) => item == null) ||
+          !isValidShuffleOrder(originalOrder, targetOrder, adversarialImageId)
+        ) {
+          throw new Error(
+            'The audited shuffle order is not valid for this flip.'
+          )
+        }
+      } else {
+        targetOrder = buildValidShuffleOrder(
+          order,
+          originalOrder,
+          adversarialImageId
+        )
+      }
+      send('MANUAL_SHUFFLE', {order: targetOrder})
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0)
+      })
+      send('PICK_SUBMIT')
+    },
+    [adversarialImageId, order, originalOrder, send]
+  )
 
   const ensureAiSolverBridge = useCallback(() => {
     if (!global.aiSolver) {
@@ -3209,6 +3242,8 @@ export default function NewFlipPage() {
       optimize = false,
       basePanels = null,
       runPayloadOverride = null,
+      storyOptionCountOverride = null,
+      auditedAutoRun = false,
     } = {}) => {
       if (!(await ensureKeywordsReady())) {
         return null
@@ -3223,6 +3258,8 @@ export default function NewFlipPage() {
 
         const reasoningModel = String(aiReasoningModel).trim()
         const isFastMode = aiGenerationMode !== 'strict'
+        const requestedStoryOptionCount =
+          Number(storyOptionCountOverride) === 2 ? 2 : storyOptionCount
         let storyTemperature = 0.72
         if (isFastMode && optimize) {
           storyTemperature = 0.82
@@ -3236,14 +3273,14 @@ export default function NewFlipPage() {
             ? normalizeStoryPanelsInput(basePanels)
             : storyPanelsDraft
         const shouldUseSpecificityOptimize =
-          storyOptionCount === 1 &&
+          requestedStoryOptionCount === 1 &&
           optimize &&
           hasMeaningfulDraftPanelsForSpecificity(seededPanels)
         const storyGenerationMaxOutputTokens =
           resolveStoryGenerationMaxOutputTokens({
             configuredMaxOutputTokens: aiSolverSettings.maxOutputTokens,
             fastMode: isFastMode,
-            storyOptionCount,
+            storyOptionCount: requestedStoryOptionCount,
             optimize,
           })
         const providerBudgetRunPayload =
@@ -3260,7 +3297,7 @@ export default function NewFlipPage() {
             aiSolverSettings
           ),
           model: reasoningModel,
-          storyOptionCount,
+          storyOptionCount: requestedStoryOptionCount,
           disableLocalFallback: true,
           keywords: [keywordA, keywordB],
           includeNoise: storyIncludeNoise,
@@ -3278,7 +3315,7 @@ export default function NewFlipPage() {
                 normalizeStoryOptionFromBackend(item, index)
               )
             : [],
-          storyOptionCount
+          requestedStoryOptionCount
         )
 
         if (!options.length) {
@@ -3325,12 +3362,12 @@ export default function NewFlipPage() {
         let storyOptionsMessage = t(
           'Choose the better option, customize if needed, then build flip.'
         )
-        if (storyOptionCount === 1) {
+        if (requestedStoryOptionCount === 1) {
           storyOptionsMessage = t(
             'Review the story draft, rewrite any weak panel text, then build flip.'
           )
         }
-        if (storyOptionCount === 1 && optimize) {
+        if (requestedStoryOptionCount === 1 && optimize) {
           storyOptionsMessage = t(
             'The draft was rewritten to be more specific. Check the place, trigger, and final aftermath, then build the flip.'
           )
@@ -3343,6 +3380,11 @@ export default function NewFlipPage() {
         if (fallbackStorySeed || fallbackWasUsed) {
           storyOptionsMessage = t(
             'The AI returned an editable storyboard proposal. It is loaded into the panel editor so you can sharpen the place, trigger, and aftermath, or run Refine with AI before building the flip.'
+          )
+        }
+        if (auditedAutoRun) {
+          storyOptionsMessage = t(
+            'Two story candidates were generated. The optional run is checking both before it spends money on images.'
           )
         }
 
@@ -3418,7 +3460,11 @@ export default function NewFlipPage() {
   const applyGeneratedPanelsToBuilder = useCallback(
     async (
       panels,
-      {returnToSubmit = false, autoShuffleSubmit = false} = {}
+      {
+        returnToSubmit = false,
+        autoShuffleSubmit = false,
+        auditedShuffleOrder = null,
+      } = {}
     ) => {
       const normalizedPanels = await normalizeGeneratedPanelsForBuilder(panels)
       const shouldReturnToSubmit = returnToSubmit || is('submit')
@@ -3439,7 +3485,7 @@ export default function NewFlipPage() {
 
       if (shouldReturnToSubmit) {
         if (autoShuffleSubmit) {
-          await shuffleDraftForSubmit()
+          await shuffleDraftForSubmit(auditedShuffleOrder)
           return
         }
         await new Promise((resolve) => {
@@ -3460,6 +3506,7 @@ export default function NewFlipPage() {
       includeNoiseOverride = null,
       noisePanelIndexOverride = null,
       runPayloadOverride = null,
+      strictAudit = false,
     } = {}) => {
       if (!(await ensureKeywordsReady())) {
         return
@@ -3472,7 +3519,7 @@ export default function NewFlipPage() {
       })
       const startedAt = Date.now()
       try {
-        const isFastMode = aiGenerationMode !== 'strict'
+        const isFastMode = !strictAudit && aiGenerationMode !== 'strict'
         if (!isFastMode) {
           await ensureAiStoryRunReady()
         }
@@ -3498,10 +3545,13 @@ export default function NewFlipPage() {
         const effectiveStoryPanels = Array.isArray(storyPanelsOverride)
           ? normalizeStoryPanelsInput(storyPanelsOverride)
           : storyPanelsDraft
-        const effectiveIncludeNoise =
+        let effectiveIncludeNoise =
           includeNoiseOverride == null
             ? storyIncludeNoise
             : Boolean(includeNoiseOverride)
+        if (strictAudit) {
+          effectiveIncludeNoise = false
+        }
         const effectiveNoisePanelIndex =
           noisePanelIndexOverride == null
             ? storyNoisePanelIndex
@@ -3511,6 +3561,27 @@ export default function NewFlipPage() {
         )
         const providerBudgetRunPayload =
           getProviderBudgetRunPayload(currentImageProvider)
+        const sequenceAuditShuffleCandidates = strictAudit
+          ? buildAuditedShuffleCandidates().filter((candidate) => {
+              const candidateOrder = candidate.map(
+                (panelIndex) => originalOrder[panelIndex]
+              )
+              return (
+                !candidateOrder.some((item) => item == null) &&
+                isValidShuffleOrder(
+                  originalOrder,
+                  candidateOrder,
+                  adversarialImageId
+                )
+              )
+            })
+          : []
+
+        if (strictAudit && sequenceAuditShuffleCandidates.length === 0) {
+          throw new Error(
+            'No structurally valid shuffle candidate is available for audit.'
+          )
+        }
 
         const response = await global.aiSolver.generateFlipPanels({
           ...baseRunPayload,
@@ -3524,6 +3595,15 @@ export default function NewFlipPage() {
           textAuditModel: panelTextAuditModel,
           textAuditEnabled: !isFastMode,
           textAuditMaxRetries: isFastMode ? 0 : 1,
+          validatorEnabled: strictAudit || !isFastMode,
+          validatorModel: panelTextAuditModel,
+          validatorMaxRetries: strictAudit ? 1 : undefined,
+          renderFeedbackEnabled: true,
+          renderFeedbackMaxRepairs: strictAudit ? 1 : undefined,
+          renderFeedbackMaxSwitches: strictAudit ? 0 : undefined,
+          sequenceAuditEnabled: strictAudit,
+          sequenceAuditModel: panelTextAuditModel,
+          sequenceAuditShuffleCandidates,
           imageModel: aiImageModel,
           imageSize: aiImageSize,
           imageQuality: aiImageQuality,
@@ -3570,6 +3650,9 @@ export default function NewFlipPage() {
         if (normalizedPanelDataUrls.length < 4) {
           throw new Error('Panel generation returned less than 4 panels')
         }
+        const autoPublishRenderAudit = strictAudit
+          ? evaluateAutoPublishRender({response})
+          : null
         let finalPanelDataUrls = normalizedPanelDataUrls.slice(0, 4)
         const panelMetadataByIndex =
           response && Array.isArray(response.panelMetadataByIndex)
@@ -3624,8 +3707,14 @@ export default function NewFlipPage() {
         )
 
         await applyGeneratedPanelsToBuilder(finalPanelDataUrls, {
-          returnToSubmit: true,
-          autoShuffleSubmit: true,
+          returnToSubmit:
+            !strictAudit || Boolean(autoPublishRenderAudit.passed),
+          autoShuffleSubmit:
+            !strictAudit || Boolean(autoPublishRenderAudit.passed),
+          auditedShuffleOrder:
+            strictAudit && autoPublishRenderAudit.passed
+              ? autoPublishRenderAudit.shuffleOrder
+              : null,
         })
 
         if (
@@ -3658,6 +3747,14 @@ export default function NewFlipPage() {
               ? Number(response.costs.actualUsd)
               : null,
         })
+
+        if (strictAudit && !autoPublishRenderAudit.passed) {
+          throw new Error(
+            `Audited auto publish stopped before submit: ${autoPublishRenderAudit.reasons.join(
+              ', '
+            )}.`
+          )
+        }
 
         const textAuditItems = Array.isArray(response.textAuditByPanel)
           ? response.textAuditByPanel
@@ -3749,8 +3846,10 @@ export default function NewFlipPage() {
             response && response.panelRenderModeUsed
               ? response.panelRenderModeUsed
               : '',
+          response,
+          autoPublishRenderAudit,
           buildRunMetrics: {
-            actionCount: 1,
+            actionCount: Math.max(1, Number(response.aiActionCount) || 1),
             estimatedUsd:
               response &&
               response.costs &&
@@ -3789,6 +3888,7 @@ export default function NewFlipPage() {
       aiReasoningModel,
       aiReasoningProvider,
       aiSolverSettings,
+      adversarialImageId,
       appendGenerationLedger,
       applyGeneratedPanelsToBuilder,
       baseRunPayload,
@@ -3802,6 +3902,7 @@ export default function NewFlipPage() {
       keywordA,
       keywordB,
       notify,
+      originalOrder,
       router,
       selectedStoryId,
       storyIncludeNoise,
@@ -3813,7 +3914,12 @@ export default function NewFlipPage() {
   )
 
   const resolveAutoFlipDraftResult = useCallback(
-    async ({forceFreshDraft = false, runPayloadOverride = null} = {}) => {
+    async ({
+      forceFreshDraft = false,
+      runPayloadOverride = null,
+      storyOptionCountOverride = null,
+      auditedAutoRun = false,
+    } = {}) => {
       if (!(await ensureKeywordsReady())) {
         return null
       }
@@ -3841,6 +3947,8 @@ export default function NewFlipPage() {
         draftResult = await generateStoryAlternatives({
           optimize: false,
           runPayloadOverride,
+          storyOptionCountOverride,
+          auditedAutoRun,
         })
       }
 
@@ -3849,6 +3957,7 @@ export default function NewFlipPage() {
       }
 
       const canSpecificityOptimize =
+        Number(storyOptionCountOverride) !== 2 &&
         storyOptionCount === 1 &&
         hasMeaningfulDraftPanelsForSpecificity(draftResult.storyPanels)
 
@@ -3857,6 +3966,8 @@ export default function NewFlipPage() {
           optimize: true,
           basePanels: draftResult.storyPanels,
           runPayloadOverride,
+          storyOptionCountOverride,
+          auditedAutoRun,
         })
 
         if (
@@ -3932,7 +4043,7 @@ export default function NewFlipPage() {
   const runFullyAutomatedNodeFlipPublish = useCallback(async () => {
     if (!allowFullyAutomatedNodePublish) {
       notify(
-        t('Full auto publish is disabled'),
+        t('Audited automatic publish is disabled'),
         t(
           'This risky mode stays off by default. Turn on the explicit warning switch first if you still want to use it on your own risk.'
         ),
@@ -3969,6 +4080,8 @@ export default function NewFlipPage() {
       const draftResult = await resolveAutoFlipDraftResult({
         forceFreshDraft: true,
         runPayloadOverride: fullAutoNodePublishRunPayload,
+        storyOptionCountOverride: 2,
+        auditedAutoRun: true,
       })
 
       if (!draftResult || !Array.isArray(draftResult.storyPanels)) {
@@ -3977,18 +4090,45 @@ export default function NewFlipPage() {
         )
       }
 
+      const selectedStoryCandidate = selectAuditedStoryCandidate({
+        options: draftResult.options,
+        keywords: [keywordA, keywordB],
+      })
+      if (!selectedStoryCandidate.passed) {
+        throw new Error(
+          `Audited auto publish stopped before image generation: ${selectedStoryCandidate.reasons.join(
+            ', '
+          )}.`
+        )
+      }
+      const selectedDraftOption = selectedStoryCandidate.option
+      const selectedStoryPanels = selectedStoryCandidate.panels
+      applyStoryOptionToDraft(selectedDraftOption)
+
       const buildResult = await buildFlipWithAi({
         regenerateIndices: [0, 1, 2, 3],
         storyOptionsOverride: draftResult.options,
-        selectedStoryIdOverride: draftResult.selectedStoryId,
-        storyPanelsOverride: draftResult.storyPanels,
-        includeNoiseOverride: draftResult.includeNoise,
+        selectedStoryIdOverride: String(selectedDraftOption.id || ''),
+        storyPanelsOverride: selectedStoryPanels,
+        includeNoiseOverride: false,
         noisePanelIndexOverride: draftResult.noisePanelIndex,
         runPayloadOverride: fullAutoNodePublishRunPayload,
+        strictAudit: true,
       })
 
       if (!buildResult || buildResult.ok !== true) {
         return
+      }
+
+      const finalRenderAudit =
+        buildResult.autoPublishRenderAudit ||
+        evaluateAutoPublishRender({response: buildResult.response})
+      if (!finalRenderAudit.passed) {
+        throw new Error(
+          `Audited auto publish stopped before submit: ${finalRenderAudit.reasons.join(
+            ', '
+          )}.`
+        )
       }
 
       const autoRunActionCount =
@@ -4035,15 +4175,15 @@ export default function NewFlipPage() {
       })
       send('SUBMIT')
       notify(
-        t('Fully automated submit started'),
+        t('Audited automatic submit started'),
         t(
-          'AI generated a draft, built the flip, shuffled it, and started publishing it for the current node keyword pair. Monitor the result carefully.'
+          'AI passed the story, individual-panel, full-sequence, and shuffled-order checks before publishing the current node keyword pair.'
         ),
         'warning'
       )
     } catch (error) {
       const message = formatAiRunError(error)
-      notify(t('Fully automated publish failed'), message, 'error')
+      notify(t('Audited automatic publish stopped'), message, 'error')
       if (/API key missing|AI helper is disabled/i.test(message)) {
         router.push('/settings/ai')
       }
@@ -4052,6 +4192,7 @@ export default function NewFlipPage() {
     }
   }, [
     allowFullyAutomatedNodePublish,
+    applyStoryOptionToDraft,
     buildFlipWithAi,
     ensureAiImageRunReady,
     ensureAiStoryRunReady,
@@ -4059,6 +4200,8 @@ export default function NewFlipPage() {
     fullAutoNodePublishRunPayload,
     keywordPairId,
     keywordSource,
+    keywordA,
+    keywordB,
     notify,
     offline,
     resolveAutoFlipDraftResult,
@@ -6771,7 +6914,7 @@ export default function NewFlipPage() {
                                             color="orange.700"
                                           >
                                             {t(
-                                              'Experimental: fully automated real-node flip publishing'
+                                              'Optional: audited automatic real-node publishing'
                                             )}
                                           </Text>
                                           <Text
@@ -6780,7 +6923,7 @@ export default function NewFlipPage() {
                                             mt={1}
                                           >
                                             {t(
-                                              'Disabled by default. In testing so far, the full pipeline from story to publish has not been reliable enough for consistently good results.'
+                                              'Off by default and not saved. Enabling the switch does nothing by itself. The action button explicitly approves one audited run and its on-chain submission.'
                                             )}
                                           </Text>
                                         </Box>
@@ -6797,7 +6940,7 @@ export default function NewFlipPage() {
                                       </Flex>
                                       <Text fontSize="xs" color="muted">
                                         {t(
-                                          'Use this on your own risk. Manual flip builder flow is still the recommended path: adjust the story text yourself, rebuild weak panels, and work over the final images before publishing.'
+                                          'The optional run stops unless the story, every panel, the complete sequence, and one shuffled order pass. The manual builder remains unchanged.'
                                         )}
                                       </Text>
                                       <Text fontSize="xs" color="muted">
@@ -6842,7 +6985,7 @@ export default function NewFlipPage() {
                                           }
                                         >
                                           {t(
-                                            'Run full auto on current node pair'
+                                            'Approve audited run and submit on-chain'
                                           )}
                                         </SecondaryButton>
                                       </Stack>

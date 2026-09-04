@@ -6103,6 +6103,91 @@ describe('createAiProviderBridge', () => {
     expect(httpClient.post).toHaveBeenCalledTimes(2)
   })
 
+  it('includes provider-assisted panel audit usage in action and cost accounting', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          data: [{b64_json: 'AAA=', mime_type: 'image/png'}],
+          usage: {prompt_tokens: 10, completion_tokens: 0, total_tokens: 10},
+        },
+      }),
+      get: jest.fn(),
+    }
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: JSON.stringify({
+        ocr_text_check: {
+          passed: true,
+          detected_text: [],
+          confidence: 0.95,
+        },
+        keyword_visibility_check: {
+          passed: true,
+          keywords: [
+            {keyword: 'shock', visible: true, confidence: 0.9},
+            {keyword: 'ghost', visible: true, confidence: 0.9},
+          ],
+        },
+        alignment_check: {
+          passed: true,
+          aligned: true,
+          confidence: 0.9,
+          mismatch_reasons: [],
+        },
+        policy_risk_check: {
+          passed: true,
+          risk_level: 'low',
+          triggered_categories: [],
+          should_replan: false,
+          should_retry_panel: false,
+        },
+      }),
+      usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient,
+      invokeProvider,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.generateFlipPanels({
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
+      imageModel: 'gpt-image-1-mini',
+      imageSize: '1024x1024',
+      requestTimeoutMs: 15000,
+      textAuditEnabled: false,
+      validatorEnabled: true,
+      validatorMaxRetries: 0,
+      renderFeedbackEnabled: false,
+      maxRetries: 0,
+      regenerateIndices: [0],
+      existingPanels: [
+        'data:image/png;base64,OLD0',
+        'data:image/png;base64,OLD1',
+        'data:image/png;base64,OLD2',
+        'data:image/png;base64,OLD3',
+      ],
+      keywords: ['shock', 'ghost'],
+      storyPanels: [
+        'A person walks quietly through a hallway.',
+        'A ghost appears and shocks the person.',
+        'The person drops a cup and steps back.',
+        'Water spreads while the ghost remains visible.',
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.validatorAuditActionCount).toBe(1)
+    expect(result.aiActionCount).toBe(2)
+    expect(result.tokenUsage).toEqual({
+      promptTokens: 30,
+      completionTokens: 10,
+      totalTokens: 40,
+    })
+    expect(result.costs.estimatedValidatorTextUsd).toBeGreaterThan(0)
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+  })
+
   it('repairs a single rendered panel after story-level feedback finds near-duplicate progression', async () => {
     const httpClient = {
       post: jest
@@ -6182,6 +6267,157 @@ describe('createAiProviderBridge', () => {
       panel_repair_count: 1,
       rendered_near_duplicate_fail: 1,
     })
+    expect(httpClient.post).toHaveBeenCalledTimes(5)
+  })
+
+  it('repairs a premature reveal and accepts only the re-audited four-panel sequence', async () => {
+    const imagePayload = (value) => ({
+      data: {
+        data: [{b64_json: value, mime_type: 'image/png'}],
+        usage: {prompt_tokens: 10, completion_tokens: 0, total_tokens: 10},
+      },
+    })
+    const httpClient = {
+      post: jest
+        .fn()
+        .mockResolvedValueOnce(imagePayload('AAA='))
+        .mockResolvedValueOnce(imagePayload('BBB='))
+        .mockResolvedValueOnce(imagePayload('CCC='))
+        .mockResolvedValueOnce(imagePayload('DDD='))
+        .mockResolvedValueOnce(imagePayload('EEE=')),
+      get: jest.fn(),
+    }
+    const passingChecks = () => ({
+      keyword_clarity: {passed: true},
+      story_alignment: {passed: true},
+      character_scene_continuity: {passed: true},
+      causal_progression: {passed: true},
+      premature_reveal: {passed: true, panel_indices: []},
+      state_regression: {passed: true, panel_indices: []},
+      panel_distinctness: {passed: true},
+      shuffled_order: {passed: true, forms_meaningful_story: false},
+    })
+    const firstChecks = passingChecks()
+    firstChecks.premature_reveal = {
+      passed: false,
+      panel_indices: [2],
+      notes: 'The surprise object appears before its planned reveal.',
+    }
+    const invokeProvider = jest
+      .fn()
+      .mockResolvedValueOnce({
+        rawText: JSON.stringify({
+          verdict: 'repair',
+          passed: false,
+          score: 72,
+          failure_reasons: ['premature_reveal'],
+          repair_panel_indices: [2],
+          repair_guidance_by_panel: [
+            {
+              panel: 2,
+              instruction:
+                'Keep the present closed and remove the clown until panel 3.',
+            },
+          ],
+          should_replan_story: false,
+          safe_shuffle_candidate: 1,
+          checks: firstChecks,
+        }),
+        usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+      })
+      .mockResolvedValueOnce({
+        rawText: JSON.stringify({
+          verdict: 'accept',
+          passed: true,
+          score: 95,
+          failure_reasons: [],
+          repair_panel_indices: [],
+          repair_guidance_by_panel: [],
+          should_replan_story: false,
+          safe_shuffle_candidate: 2,
+          checks: passingChecks(),
+        }),
+        usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+      })
+    const storyValidatorHooks = {
+      ocrTextCheck: jest.fn().mockResolvedValue({passed: true}),
+      keywordVisibilityCheck: jest.fn().mockResolvedValue({
+        passed: true,
+        keywords: [
+          {keyword: 'present', visible: true, confidence: 0.9},
+          {keyword: 'clown', visible: true, confidence: 0.9},
+        ],
+      }),
+      alignmentCheck: jest
+        .fn()
+        .mockResolvedValue({passed: true, aligned: true}),
+      policyRiskCheck: jest
+        .fn()
+        .mockResolvedValue({passed: true, risk_level: 'low'}),
+    }
+
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient,
+      invokeProvider,
+      storyValidatorHooks,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.generateFlipPanels({
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+      imageModel: 'gpt-image-1-mini',
+      imageSize: '1024x1024',
+      panelRenderMode: 'sheet_fast',
+      fastBuild: true,
+      requestTimeoutMs: 15000,
+      textAuditEnabled: false,
+      validatorEnabled: true,
+      validatorMaxRetries: 0,
+      renderFeedbackMaxRepairs: 1,
+      renderFeedbackMaxSwitches: 0,
+      sequenceAuditEnabled: true,
+      sequenceAuditModel: 'gpt-5.6-sol',
+      sequenceAuditShuffleCandidates: [
+        [2, 0, 3, 1],
+        [3, 1, 0, 2],
+      ],
+      maxRetries: 0,
+      keywords: ['present', 'clown'],
+      storyPanels: [
+        'A person receives a closed present.',
+        'The person starts opening the present while it remains closed.',
+        'A clown springs out of the open present for the first time.',
+        'The open present and clown remain visible on the floor.',
+      ],
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.panelRenderModeUsed).toBe('panels')
+    expect(result.panels[1].imageDataUrl).toBe('data:image/png;base64,EEE=')
+    expect(result.panels[1].panelPrompt).toContain(
+      'Keep the present closed and remove the clown until panel 3.'
+    )
+    expect(result.sequenceAudit).toMatchObject({
+      invoked: true,
+      complete: true,
+      passed: true,
+      safeShuffleOrder: [3, 1, 0, 2],
+    })
+    expect(result.renderFeedback.verdict).toBe('accept_rendered_story')
+    expect(result.validatorAuditByPanel).toHaveLength(4)
+    expect(result.validatorAuditByPanel.every((item) => item.passed)).toBe(true)
+    expect(result.aiActionCount).toBe(4)
+    expect(result.generatedPanelCount).toBe(5)
+    expect(result.tokenUsage.totalTokens).toBe(110)
+    expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(
+      invokeProvider.mock.calls.every(
+        ([call]) =>
+          call.promptOptions.promptPhase === 'rendered_story_sequence_audit' &&
+          call.flip.images.length === 4
+      )
+    ).toBe(true)
     expect(httpClient.post).toHaveBeenCalledTimes(5)
   })
 
