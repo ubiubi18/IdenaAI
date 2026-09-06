@@ -1,5 +1,5 @@
-import { useNavigate, useOutletContext, useParams } from "react-router";
-import type { Post, Tip } from "./logic/asyncUtils";
+import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
+import type { Post, PostTips, Tip } from "./logic/asyncUtils";
 import PostComponent from "./components/PostComponent";
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from "./App.exports";
 
@@ -26,7 +26,7 @@ type PostOutletProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
+    tipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     activeContractAddress: string,
@@ -35,6 +35,7 @@ type PostOutletProps = {
 function PostOutlet() {
     const { postId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
 
     const {
         postsRef,
@@ -67,6 +68,9 @@ function PostOutlet() {
         navigate(-1);
     };
 
+    const spotlightReplyPostId = location.state.spotlightReplyPostId;
+    const spotlightDiscussionPostId = location.state.spotlightDiscussionPostId;
+
     return (<>
         <button className="mb-3 text-[13px] hover:cursor-pointer hover:underline" onClick={handleGoBack}>&lt; Back</button>
         <PostComponent
@@ -96,6 +100,8 @@ function PostOutlet() {
             makePostsWith={makePostsWith}
             activeContractAddress={activeContractAddress}
             isPostOutlet={true}
+            spotlightReplyPostId={spotlightReplyPostId}
+            spotlightDiscussionPostId={spotlightDiscussionPostId}
         />
     </>);
 }

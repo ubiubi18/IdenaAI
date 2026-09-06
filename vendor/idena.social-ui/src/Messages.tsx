@@ -9,6 +9,7 @@ import { resolveMessagingRecipient } from "./logic/messageRecipients";
 type MessagesProps = {
     copyMessageTxHandler: (location: string, recipients: string[], replyToMessageId?: string | undefined) => Promise<void>,
     submitMessageHandler: (location: string, recipients: string[], replyToMessageId?: string) => Promise<void>
+    submitMessageLikeHandler: (emoji: string, location: string, recipients: string[], replyToMessageId: string) => Promise<void>,
     nodeAvailable: boolean,
     makePostsWith: string,
     credentialsInvalid: string,
@@ -23,10 +24,12 @@ type MessagesProps = {
     browserStateHistoryRef: React.RefObject<Record<string, BrowserStateHistorySettings>>,
     setBrowserStateHistorySettings: (pageDomSetting: Partial<BrowserStateHistorySettings>, rerender?: boolean) => void,
     submittingMessage: string,
+    submittingLike: string,
     inputPostDisabled: boolean,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
+    handleOpenLikesModal: (e: MouseEventLocal, likePosts: Message[]) => void,
     handleSubmitPubkeyModal: (e: MouseEventLocal, address: string) => void,
     handleOpenRpcSendMessageModal: (location: string, recipients: string[], replyToMessageId?: string | undefined) => void,
     messageSettingsInvalid: boolean,
@@ -34,7 +37,10 @@ type MessagesProps = {
     handleSetInputCredentialsApplied: (newValue: boolean) => Promise<void>,
     findPostsWithRef: React.RefObject<string>,
     indexerApiUrlRef: React.RefObject<string>,
+    replyPostsTreeRef: React.RefObject<Record<string, string>>,
+    deOrphanedReplyPostsTreeRef: React.RefObject<Record<string, string>>,
     SET_NEW_POSTS_ADDED_DELAY: number,
+    messagePrefix: string,
 };
 
 function Messages() {
@@ -43,6 +49,7 @@ function Messages() {
     const {
         copyMessageTxHandler,
         submitMessageHandler,
+        submitMessageLikeHandler,
         makePostsWith,
         zeroAddress,
         postersRef,
@@ -54,10 +61,12 @@ function Messages() {
         browserStateHistoryRef,
         setBrowserStateHistorySettings,
         submittingMessage,
+        submittingLike,
         inputPostDisabled,
         postMediaAttachmentsRef,
         handleOpenAddMediaModal,
         handleExpandImageModal,
+        handleOpenLikesModal,
         handleSubmitPubkeyModal,
         handleOpenRpcSendMessageModal,
         messageSettingsInvalid,
@@ -65,7 +74,10 @@ function Messages() {
         handleSetInputCredentialsApplied,
         findPostsWithRef,
         indexerApiUrlRef,
+        replyPostsTreeRef,
+        deOrphanedReplyPostsTreeRef,
         SET_NEW_POSTS_ADDED_DELAY,
+        messagePrefix,
     } = useOutletContext() as MessagesProps;
 
     const [addNewRecipient, setAddNewRecipient] = useState<string>('');
@@ -187,10 +199,10 @@ function Messages() {
                 <button className="h-7 w-30 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10" disabled={loadingNewRecipient} onClick={() => addRecipient()}>{loadingNewRecipient ? 'Loading...' : 'Add Recipient'}</button>
             </div>
         </div>
-        <div className="mb-4">
+        {!!recipients.length && <div className="mb-4">
             <p>Recipients:</p>
             {recipients.map(recipient => <><p className="inline">{recipient}</p><button className="ml-2 text-[10px] align-[2.5px] h-4 w-5 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => removeRecipient(recipient)}>✖</button></>)}
-        </div>
+        </div>}
         <div className="mb-4">
             <textarea
                 id='message-input-main'
@@ -220,6 +232,8 @@ function Messages() {
                     key={conversationKey}
                     conversationKey={conversationKey}
                     postersAddress={postersAddress}
+                    replyPostsTreeRef={replyPostsTreeRef}
+                    deOrphanedReplyPostsTreeRef={deOrphanedReplyPostsTreeRef}
                     postersRef={postersRef}
                     conversationsRef={conversationsRef}
                     messagesRef={messagesRef}
@@ -230,13 +244,17 @@ function Messages() {
                     messageSettingsInvalid={messageSettingsInvalid}
                     copyMessageTxHandler={copyMessageTxHandler}
                     submitMessageHandler={submitMessageHandler}
+                    submitMessageLikeHandler={submitMessageLikeHandler}
                     makePostsWith={makePostsWith}
                     handleOpenRpcSendMessageModal={handleOpenRpcSendMessageModal}
                     SET_NEW_POSTS_ADDED_DELAY={SET_NEW_POSTS_ADDED_DELAY}
+                    handleOpenLikesModal={handleOpenLikesModal}
                     handleSubmitPubkeyModal={handleSubmitPubkeyModal}
                     handleOpenAddMediaModal={handleOpenAddMediaModal}
                     handleExpandImageModal={handleExpandImageModal}
                     submittingMessage={submittingMessage}
+                    submittingLike={submittingLike}
+                    messagePrefix={messagePrefix}
                 />;
             })}
         </div>

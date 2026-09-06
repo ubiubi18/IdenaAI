@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate, useOutletContext, useParams } from "react-router";
-import { getPoster, getPosterWithIndexerApi, type Post, type Poster, type RpcClient, type Tip } from "./logic/asyncUtils";
+import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
+import { getPoster, getPosterWithIndexerApi, type Post, type Poster, type PostTips, type RpcClient, type Tip } from "./logic/asyncUtils";
 import { getDisplayAddress, getIdentityStatus } from "./logic/utils";
-import PostComponent from "./components/PostComponent";
-import { type BrowserStateHistorySettings, type PostMediaAttachment } from "./App.exports";
-import SortPostsByComponent from "./components/SortPostsByComponent";
+import { defaultProfileActivity, type BrowserStateHistorySettings, type PostMediaAttachment, type ProfileActivity } from "./App.exports";
 import LdsSpinnerComponent from "./components/LdsSpinnerComponent";
 
 type MouseEventLocal = React.MouseEvent<HTMLElement, MouseEvent>;
@@ -33,22 +31,21 @@ type AddressProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
+    tipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     activeContractAddress: string,
     rpcClientRef: React.RefObject<RpcClient | undefined>,
     findPostsWithRef: React.RefObject<string>,
     indexerApiUrlRef: React.RefObject<string>,
+    profileActivityRef: React.RefObject<Record<string, ProfileActivity>>,
 };
 
-function Address() {
+function Profile() {
     const { address } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
     const [, setPosterLoadNonce] = useState(0);
-
-    const { key: locationKey } = location;
 
     const {
         latestPosts,
@@ -81,13 +78,8 @@ function Address() {
         rpcClientRef,
         findPostsWithRef,
         indexerApiUrlRef,
+        profileActivityRef,
     } = useOutletContext() as AddressProps;
-
-    if (!browserStateHistoryRef.current[locationKey]?.sortPostsBy) {
-        setBrowserStateHistorySettings({ sortPostsBy: 'latest-posts' });
-    }
-
-    const sortPostsBy = browserStateHistoryRef.current[locationKey].sortPostsBy;
 
     useEffect(() => {
         const findPostsWith = findPostsWithRef.current;
@@ -107,13 +99,11 @@ function Address() {
             : getPosterWithIndexerApi(indexerApiUrl, address);
 
         posterPromise.then((result) => {
-            if (cancelled) {
+            if (cancelled || !result) {
                 return;
             }
-            if (result) {
-                postersRef.current[address] = result;
-                setPosterLoadNonce((value) => value + 1);
-            }
+            postersRef.current[address] = result;
+            setPosterLoadNonce((value) => value + 1);
         });
 
         return () => {
@@ -122,13 +112,9 @@ function Address() {
     }, [address, postersRef, rpcClientRef, findPostsWithRef, indexerApiUrlRef]);
 
     const poster = postersRef.current[address!] ?? {};
+    const profileActivity = profileActivityRef.current[address!] ?? defaultProfileActivity;
 
     const posterDisplayAddress = poster.address ? getDisplayAddress(poster.address) : '';
-
-    const filteredOrderedPosts = (sortPostsBy === 'latest-posts' ? latestPosts : latestActivity).filter(postId => {
-        const post = postsRef.current[postId];
-        return post.poster === address;
-    });
 
     const handleGoBack = () => {
         navigate(-1);
@@ -158,45 +144,48 @@ function Address() {
                     </div>
                 </div>
             </div>
-            <div className="h-8 mb-5 flex border-b-1 border-gray-500 gap-3">
-                <p className={location.pathname === `/address/${poster.address}` ? "px-3 border-b-3" : "px-3 hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/address/${poster.address}`)}>Posts</p>
+            <div className="text-[14px] text-center gap-1 sm:gap-3 sm:text-[16px] h-8 mb-5 flex flex-row border-b-1 border-gray-500">
+                <div className="flex-auto"><p className={location.pathname === `/profile/${poster.address}` ? "border-b-3" : "hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/profile/${poster.address}`)}>Posts</p></div>
+                <div className="flex-auto"><p className={location.pathname === `/profile/${poster.address}/replies` ? "border-b-3" : "hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/profile/${poster.address}/replies`)}>Replies</p></div>
+                <div className="flex-auto"><p className={location.pathname === `/profile/${poster.address}/comments` ? "border-b-3" : "hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/profile/${poster.address}/comments`)}>Comments</p></div>
+                <div className="flex-auto"><p className={location.pathname === `/profile/${poster.address}/likes` ? "border-b-3" : "hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/profile/${poster.address}/likes`)}>Likes</p></div>
+                <div className="flex-auto"><p className={location.pathname === `/profile/${poster.address}/tips` ? "border-b-3" : "hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/profile/${poster.address}/tips`)}>Tips</p></div>
+                <div className="flex-auto"><p className={location.pathname === `/profile/${poster.address}/media` ? "border-b-3" : "hover:border-b-3 hover:cursor-pointer"} onClick={(e) => handleClickAddress(e, `/profile/${poster.address}/media`)}>Media</p></div>
             </div>
-            <SortPostsByComponent sortPostsBy={sortPostsBy} setBrowserStateHistorySettings={setBrowserStateHistorySettings} />
-            <ul>
-                {filteredOrderedPosts.map((postId) => (
-                    <li key={postId}>
-                        <PostComponent
-                            postId={postId}
-                            postsRef={postsRef}
-                            replyPostsTreeRef={replyPostsTreeRef}
-                            deOrphanedReplyPostsTreeRef={deOrphanedReplyPostsTreeRef}
-                            discussPrefix={discussPrefix}
-                            SET_NEW_POSTS_ADDED_DELAY={SET_NEW_POSTS_ADDED_DELAY}
-                            inputPostDisabled={inputPostDisabled}
-                            copyPostTxHandler={copyPostTxHandler}
-                            submitPostHandler={submitPostHandler}
-                            submitLikeHandler={submitLikeHandler}
-                            submittingPost={submittingPost}
-                            submittingLike={submittingLike}
-                            submittingTip={submittingTip}
-                            browserStateHistoryRef={browserStateHistoryRef}
-                            setBrowserStateHistorySettings={setBrowserStateHistorySettings}
-                            handleOpenLikesModal={handleOpenLikesModal}
-                            handleOpenTipsModal={handleOpenTipsModal}
-                            handleOpenSendTipModal={handleOpenSendTipModal}
-                            handleOpenAddMediaModal={handleOpenAddMediaModal}
-                            handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
-                            handleExpandImageModal={handleExpandImageModal}
-                            tipsRef={tipsRef}
-                            postMediaAttachmentsRef={postMediaAttachmentsRef}
-                            makePostsWith={makePostsWith}
-                            activeContractAddress={activeContractAddress}
-                        />
-                    </li>
-                ))}
-            </ul>
+            <Outlet
+                context={{
+                    address,
+                    latestPosts,
+                    latestActivity,
+                    postsRef,
+                    replyPostsTreeRef,
+                    deOrphanedReplyPostsTreeRef,
+                    discussPrefix,
+                    SET_NEW_POSTS_ADDED_DELAY,
+                    inputPostDisabled,
+                    copyPostTxHandler,
+                    submitPostHandler,
+                    submitLikeHandler,
+                    submittingPost,
+                    submittingLike,
+                    submittingTip,
+                    browserStateHistoryRef,
+                    setBrowserStateHistorySettings,
+                    handleOpenLikesModal,
+                    handleOpenTipsModal,
+                    handleOpenSendTipModal,
+                    handleOpenAddMediaModal,
+                    handleOpenRpcMakePostModal,
+                    handleExpandImageModal,
+                    tipsRef,
+                    postMediaAttachmentsRef,
+                    makePostsWith,
+                    activeContractAddress,
+                    profileActivity,
+                }}
+            />
         </>}
     </>);
 }
 
-export default Address;
+export default Profile;

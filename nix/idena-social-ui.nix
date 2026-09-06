@@ -7,7 +7,7 @@
 
 buildNpmPackage {
   pname = "idena-social-ui";
-  version = "12.5.0";
+  version = "12.8.0";
   inherit src;
 
   nodejs = nodejs_24;
