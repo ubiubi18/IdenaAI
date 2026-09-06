@@ -1,6 +1,7 @@
 import {keccak256} from 'js-sha3';
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {processMessage, type Poster} from './asyncUtils';
+import {likeEmoji} from './utils';
 
 const sender = '0x0000000000000000000000000000000000000001';
 const recipient = '0x0000000000000000000000000000000000000002';
@@ -243,5 +244,65 @@ describe('desktop direct-message processing', () => {
         );
 
         expect(result).toEqual({continued: true});
+    });
+
+    it('classifies a reply heart as a non-orphaned message reaction', async () => {
+        const plaintext = JSON.stringify([
+            [sender, recipient],
+            '',
+            likeEmoji,
+            '',
+            '1',
+            [],
+            [],
+            '',
+            [],
+        ]);
+        const messageHash = keccak256(plaintext);
+        const ciphertexts = ['YQ==', 'Yg=='];
+        const decryptWithHost = vi.fn().mockResolvedValue({
+            plaintext,
+            role: 'recipient',
+            ciphertextIndexes: [1],
+        });
+
+        const result = await processMessage(
+            {
+                txHash: `0x${'55'.repeat(32)}`,
+                eventArgs: [
+                    sender,
+                    '0x02000000',
+                    toHex(ciphertexts.join(',')),
+                    toHex(messageHash),
+                    toHex('true'),
+                ],
+                eventArgs2nd: [sender, '0x', '0x01000000', '0x01000000'],
+                method: 'sendMessage',
+                timestamp: 2,
+            },
+            '',
+            '',
+            recipient,
+            {current: {}},
+            '',
+            {current: {[sender]: poster(sender), [recipient]: poster(recipient)}},
+            {current: vi.fn()},
+            [],
+            {current: 'rpc'},
+            {current: 'https://api.idena.io'},
+            decryptWithHost,
+        );
+
+        expect(result.continued).toBeUndefined();
+        expect(result.newMessage).toMatchObject({
+            messageId: '2',
+            replyToMessageId: '1',
+            isLike: true,
+            orphaned: false,
+        });
+        await expect(result.messagePromise).resolves.toEqual({
+            id: '2',
+            message: likeEmoji,
+        });
     });
 });

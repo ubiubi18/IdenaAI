@@ -1,4 +1,4 @@
-import { MAX_POST_MEDIA_BYTES_RPC, type Post, type Tip, type RpcPostCostEstimate } from './logic/asyncUtils';
+import { MAX_POST_MEDIA_BYTES_RPC, type Post, type PostTips, type Tip, type RpcPostCostEstimate } from './logic/asyncUtils';
 import { useLocation, useOutletContext } from 'react-router';
 import PostComponent from './components/PostComponent';
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from './App.exports';
@@ -37,7 +37,7 @@ type LatestPostsProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
+    tipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     estimatePostCostHandler: (inputText: string, mediaFile?: File | undefined) => Promise<RpcPostCostEstimate | null>,

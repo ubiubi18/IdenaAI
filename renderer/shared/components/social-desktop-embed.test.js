@@ -9,7 +9,7 @@ const {
 } = require('./social-desktop-rpc-policy')
 const {IDENA_SOCIAL_ENTRY_URL} = require('../../../main/idena-social-protocol')
 
-describe('idena.social v12.5 desktop RPC boundary', () => {
+describe('idena.social v12.8 desktop RPC boundary', () => {
   it('targets the exact v12 contract', () => {
     expect(SOCIAL_CONTRACT_ADDRESS).toBe(
       '0x840e092e31e9656fF15E541505039ed77585338E'
