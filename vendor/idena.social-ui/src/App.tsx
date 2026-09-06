@@ -3,11 +3,11 @@ import Modal from 'react-modal';
 import { hexToUint8Array } from 'idena-sdk-js-lite';
 import { keccak256, sha3_256 } from 'js-sha3';
 import { encrypt } from 'eciesjs';
-import { type Message, type Post, type Poster, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getBlockHeightFromTxHash, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPosterAndPost, getPastTxsWithIdenaIndexerApi, getPostIdFromChannelId, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getReplyPosts, getRpcClient, getTransactionDetailsIndexerApi, getTransactionDetailsRpc, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewMedia, resolveNewMessages, resolveNewPosters, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, type RpcClient } from './logic/asyncUtils';
+import { type Message, type Post, type Poster, type PostTips, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getBlockHeightFromTxHash, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPosterAndPost, getPastTxsWithIdenaIndexerApi, getPostIdFromChannelId, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getRpcClient, getTransactionDetailsIndexerApi, getTransactionDetailsRpc, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewMedia, resolveNewMessages, resolveNewPosters, saveReplyPostId, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, type RpcClient } from './logic/asyncUtils';
 import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
 import { createDesktopMessageCryptoClient, createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
 import { Link, Outlet, useLocation } from 'react-router';
-import type { BrowserStateHistorySettings, EventTransaction, MouseEventLocal, PostMediaAttachment } from './App.exports';
+import { defaultProfileActivity, type BrowserStateHistorySettings, type EventTransaction, type MouseEventLocal, type PostMediaAttachment, type ProfileActivity } from './App.exports';
 import ModalLikesTipsComponent from './components/ModalLikesTipsComponent';
 import ModalSendTipComponent from './components/ModalSendTipComponent';
 import ModalAddMediaComponent from './components/ModalAddMediaComponent';
@@ -19,6 +19,8 @@ import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSo
 import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageComponent';
 import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
 import DesktopNavigation from './components/DesktopNavigation';
+import ScanBlocksComponent from './components/ScanBlocksComponent';
+import ScrollToTopComponent from './components/ScrollToTopComponent';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
 
@@ -39,7 +41,7 @@ const sendMessageMethod = 'sendMessage';
 const allMethods = [makePostMethod, sendTipMethod, sendMessageMethod];
 const thisChannelId = '';
 const discussPrefix = 'discuss:';
-const postChannelRegex = new RegExp(String.raw`${discussPrefix}[\d]+$`, 'i');
+const messagePrefix = 'message:';
 const zeroAddress = '0x0000000000000000000000000000000000000000';
 const callbackUrl = new URL('confirm-tx.html', socialBaseUrl).toString();
 const termsOfServiceUrl = new URL('terms-of-service.html', socialBaseUrl).toString();
@@ -47,6 +49,7 @@ const attributionsUrl = new URL('attributions.html', socialBaseUrl).toString();
 
 const POLLING_INTERVAL = 10000;
 const SCANNING_INTERVAL = 10;
+const SCANNING_INTERVAL_MESSAGES = 1000;
 const SCAN_PAST_POSTS_TTL = 1 * 60;
 const INDEXER_API_ITEMS_LIMIT = 20;
 const SET_NEW_POSTS_ADDED_DELAY = 20;
@@ -152,7 +155,7 @@ function App() {
 
     const location = useLocation();
 
-    const { key: locationKey } = location;
+    const { key: locationKey, pathname } = location;
 
     const [nodeAvailable, setNodeAvailable] = useState<boolean>(true);
     const nodeAvailableRef = useRef(nodeAvailable);
@@ -239,7 +242,7 @@ function App() {
     const browserStateHistoryRef = useRef<Record<string, BrowserStateHistorySettings>>({});
     const postMediaAttachmentsRef = useRef<Record<string, PostMediaAttachment | undefined>>({});
     const copyTxHandlerEnabledRef = useRef<boolean>(true);
-    const tipsRef = useRef<Record<string, { totalAmount: number, tips: Tip[] }>>({});
+    const tipsRef = useRef<Record<string, PostTips>>({});
     const [idenaWalletBalance, setIdenaWalletBalance] = useState<string>('0');
     const postLatestActivityRef = useRef({} as Record<string, number>);
     const latestMessagesForwardQueueRef = useRef([] as EventTransaction[]);
@@ -247,10 +250,11 @@ function App() {
     const [latestConversationActivity, setLatestConversationActivity] = useState<string[]>([]); // ['0x011', '0x022']
     const conversationsRef = useRef<Record<string, string[]>>({}); // { '0x011': ['messageId1', 'messageId2', 'messageId3'], }
     const messagesRef = useRef<Record<string, Message>>({});
+    const profileActivityRef = useRef<Record<string, ProfileActivity>>({});
 
     // modals
     const [modalOpen, setModalOpen] = useState<string>('');
-    const modalLikePostsRef = useRef<Post[]>([]);
+    const modalLikePostsRef = useRef<Array<Post | Message>>([]);
     const modalTipsRef = useRef<Tip[]>([]);
     const modalSendTipRef = useRef<Post>(undefined);
     const modalAddMediaRef = useRef<string>('');
@@ -793,8 +797,6 @@ function App() {
 
                 const newLatestPosts: string[] = [];
 
-                let newReplyPostsCollection = {};
-
                 const postersPromised: string[] = [];
                 const posterPromises = [];
                 const messagePromises = [];
@@ -833,11 +835,14 @@ function App() {
                             newPost!,
                             postsRef,
                             postLatestActivityRef,
-                            postChannelRegex,
                             discussPrefix,
                         );
 
                         postLatestActivityRef.current = { ...postLatestActivityRef.current, ...newPostLatestActivity };
+
+                        const profileActivity = { ...(profileActivityRef.current[newTip.tipper] ?? defaultProfileActivity) };
+                        profileActivity.tips = isRecurseForward ? [postId, ...profileActivity.tips] : [...profileActivity.tips, postId];
+                        profileActivityRef.current[newTip.tipper] = profileActivity;
 
                         continue;
                     }
@@ -866,7 +871,7 @@ function App() {
                     } = await getNewPosterAndPost(
                         transaction,
                         thisChannelId,
-                        postChannelRegex,
+                        discussPrefix,
                         rpcClientRef.current!,
                         postsRef,
                         postersRef,
@@ -885,9 +890,7 @@ function App() {
                     messagePromise && messagePromises.push(messagePromise);
                     mediaPromise && mediaPromises.push(mediaPromise);
 
-                    const isTopLevelPost = !newPost!.replyToPostId && newPost!.channelId === thisChannelId;
-
-                    if (isTopLevelPost) {
+                    if (newPost!.postLevel === 'Post') {
                         newLatestPosts.push(newPost!.postId);
                     }
 
@@ -896,7 +899,6 @@ function App() {
                         newPost!,
                         postsRef,
                         postLatestActivityRef,
-                        postChannelRegex,
                         discussPrefix,
                     );
 
@@ -911,7 +913,7 @@ function App() {
 
                     const updatedPosts: Record<string, Post> = {};
 
-                    if (postChannelRegex.test(newPost!.channelId)) {
+                    if (newPost!.postLevel === 'Comment') {
                         const discussionPostId = getPostIdFromChannelId(newPost!.timestamp, newPost!.channelId, discussPrefix, newPost!.contractAddress);
                         const discussionPost = postsRef.current[discussionPostId];
                         const orphaned = !discussionPost || discussionPost.orphaned;
@@ -919,11 +921,13 @@ function App() {
                         const channelId = discussPrefix + discussionPostId;
                         postsRef.current = { ...postsRef.current, [channelId]: { orphaned } as Post };
 
-                        getReplyPosts(
+                        const replyToPost = postsRef.current[channelId];
+
+                        saveReplyPostId(
                             newPost!.postId,
                             channelId,
+                            replyToPost,
                             isRecurseForward,
-                            postsRef.current,
                             replyPostsTreeRef.current,
                             forwardOrphanedReplyPostsTreeRef.current,
                             backwardOrphanedReplyPostsTreeRef.current,
@@ -935,13 +939,14 @@ function App() {
                         if (!isObjectEmpty(newForwardOrphanedReplyPosts) || !isObjectEmpty(newBackwardOrphanedReplyPosts)) {
                             newPost!.orphaned = true;
                         }
+                    } else {
+                        const replyToPost = postsRef.current[newPost!.replyToPostId];
 
-                    } else if (newPost!.channelId === thisChannelId) {
-                        getReplyPosts(
+                        saveReplyPostId(
                             newPost!.postId,
                             newPost!.replyToPostId,
+                            replyToPost,
                             isRecurseForward,
-                            postsRef.current,
                             replyPostsTreeRef.current,
                             forwardOrphanedReplyPostsTreeRef.current,
                             backwardOrphanedReplyPostsTreeRef.current,
@@ -953,8 +958,6 @@ function App() {
                         if (!isObjectEmpty(newForwardOrphanedReplyPosts) || !isObjectEmpty(newBackwardOrphanedReplyPosts)) {
                             newPost!.orphaned = true;
                         }
-
-                        newReplyPostsCollection = { ...newReplyPostsCollection, ...newReplyPosts };
 
                         deOrphanReplyPosts(
                             newPost!.postId,
@@ -977,9 +980,6 @@ function App() {
                             newDeOrphanedReplyPosts,
                             updatedPosts,
                         );
-
-                    } else {
-                        throw 'this should not happen';
                     }
 
                     postsRef.current = { ...postsRef.current, ...updatedPosts, ...newPosts };
@@ -987,6 +987,24 @@ function App() {
                     deOrphanedReplyPostsTreeRef.current = { ...deOrphanedReplyPostsTreeRef.current, ...newDeOrphanedReplyPosts };
                     forwardOrphanedReplyPostsTreeRef.current = { ...forwardOrphanedReplyPostsTreeRef.current, ...newForwardOrphanedReplyPosts };
                     backwardOrphanedReplyPostsTreeRef.current = { ...backwardOrphanedReplyPostsTreeRef.current, ...newBackwardOrphanedReplyPosts };
+
+                    const profileActivity = { ...(profileActivityRef.current[newPost!.poster] ?? defaultProfileActivity) };
+                    if (newPost!.isLike) {
+                        profileActivity.likes = isRecurseForward ? [newPost!.postId, ...profileActivity.likes] : [...profileActivity.likes, newPost!.postId];
+                    }
+                    if (newPost!.postLevel === 'Comment' && !newPost!.isLike) {
+                        profileActivity.comments = isRecurseForward ? [newPost!.postId, ...profileActivity.comments] : [...profileActivity.comments, newPost!.postId];
+                    }
+                    if (newPost!.postLevel === 'Reply' && !newPost!.isLike) {
+                        profileActivity.replies = isRecurseForward ? [newPost!.postId, ...profileActivity.replies] : [...profileActivity.replies, newPost!.postId];
+                    }
+                    if (newPost!.postLevel === 'Post' && !newPost!.isLike) {
+                        profileActivity.posts = isRecurseForward ? [newPost!.postId, ...profileActivity.posts] : [...profileActivity.posts, newPost!.postId];
+                    }
+                    if (newPost!.hasMedia) {
+                        profileActivity.media = isRecurseForward ? [newPost!.postId, ...profileActivity.media] : [...profileActivity.media, newPost!.postId];
+                    }
+                    profileActivityRef.current[newPost!.poster] = profileActivity;
                 }
 
                 await resolveNewPosters(posterPromises, postersRef);
@@ -1083,7 +1101,7 @@ function App() {
             (async function recurseBackwardMessages() {
                 if (nodeAvailableRef.current && (scanningPastBlocks || latestMessagesBackwardQueueRef.current.length)) {
                     const recurseDirection = 'backward';
-                    recurseBackwardIntervalId = setTimeout(messagesProcessorFactory(recurseDirection, recurseBackwardMessages, latestMessagesBackwardQueueRef), POLLING_INTERVAL);
+                    recurseBackwardIntervalId = setTimeout(messagesProcessorFactory(recurseDirection, recurseBackwardMessages, latestMessagesBackwardQueueRef), SCANNING_INTERVAL_MESSAGES);
                 }
             } as RecurseBackwardMessages)();
 
@@ -1130,11 +1148,53 @@ function App() {
                         continue;
                     }
 
+                    const newReplyPosts: Record<string, string> = {};
+                    const newForwardOrphanedReplyPosts: Record<string, string> = {};
+                    const newBackwardOrphanedReplyPosts: Record<string, string> = {};
+                    const newDeOrphanedReplyPosts: Record<string, string> = {};
+                    const updatedMessages: Record<string, Message> = {};
+
+                    if (newMessage!.isLike) {
+                        const replyToMessage = messagesRef.current[newMessage!.replyToMessageId];
+
+                        saveReplyPostId(
+                            newMessage!.messageId,
+                            messagePrefix + newMessage!.replyToMessageId,
+                            replyToMessage,
+                            isRecurseForward,
+                            replyPostsTreeRef.current,
+                            forwardOrphanedReplyPostsTreeRef.current,
+                            backwardOrphanedReplyPostsTreeRef.current,
+                            newReplyPosts,
+                            newForwardOrphanedReplyPosts,
+                            newBackwardOrphanedReplyPosts,
+                        );
+
+                        if (!isObjectEmpty(newForwardOrphanedReplyPosts) || !isObjectEmpty(newBackwardOrphanedReplyPosts)) {
+                            newMessage!.orphaned = true;
+                        }
+                    }
+
+                    deOrphanReplyPosts(
+                        messagePrefix + newMessage!.messageId,
+                        forwardOrphanedReplyPostsTreeRef.current,
+                        backwardOrphanedReplyPostsTreeRef.current,
+                        messagesRef.current,
+                        newForwardOrphanedReplyPosts,
+                        newBackwardOrphanedReplyPosts,
+                        newDeOrphanedReplyPosts,
+                        updatedMessages,
+                    );
+
                     posterPromise && posterPromises.push(posterPromise);
                     messagePromise && messagePromises.push(messagePromise);
                     mediaPromise && mediaPromises.push(mediaPromise);
 
-                    messagesRef.current = { ...messagesRef.current, [newMessage!.messageId]: newMessage! };
+                    replyPostsTreeRef.current = { ...replyPostsTreeRef.current, ...newReplyPosts };
+                    deOrphanedReplyPostsTreeRef.current = { ...deOrphanedReplyPostsTreeRef.current, ...newDeOrphanedReplyPosts };
+                    messagesRef.current = { ...messagesRef.current, ...updatedMessages, [newMessage!.messageId]: newMessage! };
+                    forwardOrphanedReplyPostsTreeRef.current = { ...forwardOrphanedReplyPostsTreeRef.current, ...newForwardOrphanedReplyPosts };
+                    backwardOrphanedReplyPostsTreeRef.current = { ...backwardOrphanedReplyPostsTreeRef.current, ...newBackwardOrphanedReplyPosts };
                     newMessages.push(newMessage);
                 }
 
@@ -1645,9 +1705,39 @@ function App() {
         await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
     };
 
-    const handleOpenLikesModal = (e: MouseEventLocal, likePosts: Post[]) => {
+    const submitMessageLikeHandler = async (emoji: string, _location: string, recipients: string[], replyToMessageId: string) => {
+        if (!nodeAvailable) {
+            alert('Node unavailable, cannot like!');
+            return;
+        }
+
+        if (messageSettingsInvalid) {
+            alert('Messaging encryption is unavailable. Open Settings for details.');
+            return;
+        }
+
+        // Message reactions use the same host-mediated encryption path as
+        // regular messages so embedded mode never exposes the node key to the
+        // renderer.
+        const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), ...recipients], '', emoji, '', replyToMessageId, [], [], '', []]);
+        const rawMessageHash = keccak256(rawMessage);
+
+        let message: string[];
+        try {
+            message = await encryptMessageForRecipients(rawMessage, recipients);
+        } catch (error) {
+            alert(`Unable to encrypt message reaction: ${error instanceof Error ? error.message : 'unknown error'}`);
+            return;
+        }
+
+        setSubmittingLike(replyToMessageId);
+
+        await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+    };
+
+    const handleOpenLikesModal = (e: MouseEventLocal, likeItems: Array<Post | Message>) => {
         e.stopPropagation();
-        modalLikePostsRef.current = [ ...likePosts ];
+        modalLikePostsRef.current = [ ...likeItems ];
         setModalOpen('likes');
     };
 
@@ -2084,6 +2174,7 @@ function App() {
                             replyPostsTreeRef,
                             deOrphanedReplyPostsTreeRef,
                             discussPrefix,
+                            messagePrefix,
                             scanningPastBlocks,
                             setScanningPastBlocks,
                             noMorePastBlocks,
@@ -2095,6 +2186,7 @@ function App() {
                             submitLikeHandler,
                             copyMessageTxHandler,
                             submitMessageHandler,
+                            submitMessageLikeHandler,
                             submittingPost,
                             submittingLike,
                             submittingTip,
@@ -2140,8 +2232,27 @@ function App() {
                             messageSettingsInvalid,
                             findPostsWithRef: inputFindingPastPostsRef,
                             indexerApiUrlRef,
+                            profileActivityRef,
                         }}
                     />
+                    {pathname !== '/settings' && (
+                        <div className="mb-5">
+                            <ScanBlocksComponent
+                                currentBlockCaptured={currentBlockCaptured}
+                                scanningPastBlocks={scanningPastBlocks}
+                                setScanningPastBlocks={setScanningPastBlocks}
+                                noMorePastBlocks={noMorePastBlocks}
+                                pastBlockCaptured={pastBlockCaptured}
+                                nodeAvailable={nodeAvailable}
+                                displayCurrentBlock={false}
+                            />
+                        </div>
+                    )}
+                    {pathname !== '/settings' && (
+                        <div className="sticky bottom-4 text-right">
+                            <ScrollToTopComponent width="w-14" />
+                        </div>
+                    )}
                 </div>
             </div>
             <div onClick={(e) => e.stopPropagation()}>

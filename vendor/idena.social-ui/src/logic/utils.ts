@@ -3,7 +3,9 @@ import * as secp256k1 from "@noble/secp256k1";
 import { keccak_256 } from "js-sha3";
 import { CallContractAttachment, contractArgumentFormat, hexToUint8Array, privateKeyToPublicKey, publicKeyToAddress, toHexString, Transaction, transactionType } from "idena-sdk-js-lite";
 import type { PostMediaAttachment } from "../App.exports";
+import { getPostIdFromChannelId, type Post } from "./asyncUtils";
 
+export const likeEmoji = '❤️';
 export const dnaBase = 1e18;
 
 export function getDisplayAddress(address: string) {
@@ -402,4 +404,50 @@ export function extractSenderInfoFromRawTx(rawTx: string): { address?: string; p
     } catch (error) {
         return { error };
     }
+}
+
+export function getSpotlightPostDetails(targetPost: Post, postsRef: React.RefObject<Record<string, Post>>, discussPrefix: string) {
+    let replyPostId;
+    let discussionPostId;
+    let postItemKey;
+    let parentPostId;
+    let parentPost;
+
+    switch (targetPost?.postLevel) {
+    case 'Post': {
+        parentPostId = targetPost.postId;
+        parentPost = targetPost;
+        postItemKey = targetPost.postId;
+        break;
+    }
+    case 'Reply': {
+        replyPostId = targetPost.postId;
+        const replyPost = postsRef.current[replyPostId];
+        parentPostId = replyPost?.replyToPostId;
+        parentPost = postsRef.current[parentPostId];
+        postItemKey = `${parentPostId}-${replyPostId}`;
+        break;
+    }
+    case 'Comment': {
+        discussionPostId = targetPost.postId;
+        const discussionPost = postsRef.current[discussionPostId];
+        replyPostId = getPostIdFromChannelId(
+            discussionPost.timestamp,
+            discussionPost.channelId,
+            discussPrefix,
+            discussionPost.contractAddress,
+        );
+        const replyPost = postsRef.current[replyPostId];
+        parentPostId = replyPost?.replyToPostId;
+        parentPost = postsRef.current[parentPostId];
+        postItemKey = `${parentPostId}-${replyPostId}-${discussionPostId}`;
+        break;
+    }
+    default: {
+        // this shouldn't happen.
+        break;
+    }
+    }
+
+    return { replyPostId, discussionPostId, postItemKey, parentPost };
 }

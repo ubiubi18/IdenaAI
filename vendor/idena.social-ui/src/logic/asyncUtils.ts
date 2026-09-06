@@ -3,7 +3,7 @@ import Decimal from "decimal.js";
 import imageType from 'image-type';
 import isSvg from 'is-svg';
 import { decrypt } from "eciesjs";
-import { calculateMaxFee, decodeBlockBodyTransactions, decryptAESGCM, dna2num, dnaBase, extractSenderInfoFromRawTx, getCallTransaction, getMakePostTransactionPayload, getSendMessageTransactionPayload, hex2str, hexToDecimal, isValidLowerCaseAddress, sanitizeStr, str2bytes } from "./utils";
+import { calculateMaxFee, decodeBlockBodyTransactions, decryptAESGCM, dna2num, dnaBase, extractSenderInfoFromRawTx, getCallTransaction, getMakePostTransactionPayload, getSendMessageTransactionPayload, hex2str, hexToDecimal, isValidLowerCaseAddress, likeEmoji, sanitizeStr, str2bytes } from "./utils";
 import { CallContractAttachment, ProtoStoreToIpfsAttachmentSchema, contractArgumentFormat, hexToUint8Array, toHexString, Transaction, transactionType, type ContractArgumentFormatValue, type TransactionTypeValue } from "idena-sdk-js-lite";
 import ErrorLoadingMedia from '../assets/error-loading-media.png';
 import type { EventTransaction } from "../App.exports";
@@ -91,6 +91,9 @@ export type Post = {
     message?: string,
     txHash: string,
     replyToPostId: string,
+    postLevel: 'Post' | 'Reply' | 'Comment',
+    isLike: boolean,
+    hasMedia: boolean,
     image?: string,
     video?: string,
     cid?: string,
@@ -114,10 +117,14 @@ export type Message = {
     textPassword: string,
     mediaPassword: string,
     sendersDetails_atTimeOfMessage:  { stake: number, state: string, age: number },
+    isLike: boolean,
+    orphaned: boolean,
 };
 
 export type Poster = { address: string, stake: string, age: number, pubkey: string, state: string };
 export type Tip = { postId: string, txHash: string, timestamp: number, tipper: string, tipperDetails_atTimeOfTip: { stake: number, state: string, age: number }, amount: number, burnAmount: number };
+export type PostTips = { postId: string, totalAmount: number, tips: Tip[] };
+
 export type NodeDetails = { idenaNodeUrl: string, idenaNodeApiKey: string };
 
 export const getRpcClient = (nodeDetails: NodeDetails, setNodeAvailable: React.Dispatch<React.SetStateAction<boolean>>) =>
@@ -565,7 +572,7 @@ export const getTransactionDetailsIndexerApi = async (
 export const getNewPosterAndPost = async (
     transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number, contractAddress?: string },
     thisChannelId: string,
-    postChannelRegex: RegExp,
+    discussPrefix: string,
     rpcClient: RpcClient,
     postsRef: React.RefObject<Record<string, Post>>,
     postersRef: React.RefObject<Record<string, Poster>>,
@@ -586,7 +593,10 @@ export const getNewPosterAndPost = async (
     const media = hex2str(eventArgs[6]);
     const mediaType = hex2str(eventArgs[7]);
 
-    if (channelId !== thisChannelId && !postChannelRegex.test(channelId)) {
+    const postChannelRegex = new RegExp(String.raw`${discussPrefix}[\d]+$`, 'i');
+    const isDiscussionComment = postChannelRegex.test(channelId);
+
+    if (channelId !== thisChannelId && !isDiscussionComment) {
         return { continued: true };
     }
 
@@ -630,8 +640,13 @@ export const getNewPosterAndPost = async (
         age: NaN,
     };
 
+    const postLevel = isDiscussionComment ? 'Comment' : replyToPostId ? 'Reply' : 'Post';
+
+    const isLike = message === likeEmoji && !!replyToPostId;
+    const hasMedia = !!(media && mediaType);
+
     const messagePromise = message && getMessage(postId, message, rpcClient);
-    const mediaPromise = (media && mediaType) && getMedia(postId, media, rpcClient);
+    const mediaPromise = hasMedia && getMedia(postId, media, rpcClient);
 
     const newPost = {
         timestamp,
@@ -642,6 +657,9 @@ export const getNewPosterAndPost = async (
         txHash,
         replyToPostId,
         contractAddress,
+        postLevel,
+        isLike,
+        hasMedia,
         orphaned: false,
     } as Post;
 
@@ -797,7 +815,7 @@ const isValidImageUrlCheck = (url: string, wait = 2000): Promise<boolean> => {
 export const processTip = async (
     transaction: { txHash: string, eventArgs: string[], eventArgs2nd: string[], timestamp: number, blockHeight?: number, contractAddress?: string },
     rpcClient: RpcClient,
-    tipsRef: React.RefObject<Record<string, { totalAmount: number, tips: Tip[] }>>,
+    tipsRef: React.RefObject<Record<string, PostTips>>,
     postersRef: React.RefObject<Record<string, Poster>>,
     isRecurseForward: boolean,
     postersPromised: string[],
@@ -840,7 +858,8 @@ export const processTip = async (
         burnAmount,
     };
 
-    const updatedPostTips = {
+    const updatedPostTips: PostTips = {
+        postId,
         totalAmount: (tipsRef.current[postId]?.totalAmount ?? 0) + amount,
         tips: isRecurseForward ? [ newTip, ...(tipsRef.current[postId]?.tips ?? []) ] : [ ...(tipsRef.current[postId]?.tips ?? []), newTip ],
     };
@@ -1137,6 +1156,8 @@ export const processMessage = async (
     const messagePromise = sanitizedInputText && getMessage(newMessageId, sanitizedInputText, rpcClientRef.current!, textPassword);
     const mediaPromise = (media && mediaType) && getMedia(newMessageId, media, rpcClientRef.current!, mediaPassword);
 
+    const isLike = sanitizedInputText === likeEmoji && !!replyToMessageId;
+
     const newMessage = {
         timestamp,
         txHash,
@@ -1150,6 +1171,8 @@ export const processMessage = async (
         textPassword,
         mediaPassword,
         sendersDetails_atTimeOfMessage,
+        isLike,
+        orphaned: false,
     } as Message;
 
     let posterPromise: Promise<Poster> | undefined;
@@ -1166,11 +1189,11 @@ export const processMessage = async (
     return { newMessage, posterPromise, mediaPromise, messagePromise };
 };
 
-export const getReplyPosts = (
-    newPostId: string,
+export const saveReplyPostId = (
+    newReplyPostId: string,
     replyToPostId: string,
+    replyToPost: Post | Message,
     isRecurseForward: boolean,
-    postsRef: Record<string, Post>,
     replyPostsTreeRef: Record<string, string>,
     forwardOrphanedReplyPostsTreeRef: Record<string, string>,
     backwardOrphanedReplyPostsTreeRef: Record<string, string>,
@@ -1179,19 +1202,17 @@ export const getReplyPosts = (
     newBackwardOrphanedReplyPosts: Record<string, string>,
 ) => {
     if (replyToPostId) {
-        const replyToPost = postsRef[replyToPostId];
-
         if (!replyToPost || replyToPost.orphaned) {
             if (isRecurseForward) {
                 const childPostIds = getChildPostIds(replyToPostId, forwardOrphanedReplyPostsTreeRef);
-                newForwardOrphanedReplyPosts[`${replyToPostId}-${childPostIds.length}`] = newPostId;
+                newForwardOrphanedReplyPosts[`${replyToPostId}-${childPostIds.length}`] = newReplyPostId;
             } else {
                 const childPostIds = getChildPostIds(replyToPostId, backwardOrphanedReplyPostsTreeRef);
-                newBackwardOrphanedReplyPosts[`${replyToPostId}-${childPostIds.length}`] = newPostId;
+                newBackwardOrphanedReplyPosts[`${replyToPostId}-${childPostIds.length}`] = newReplyPostId;
             }
         } else {
             const childPostIds = getChildPostIds(replyToPostId, replyPostsTreeRef);
-            newReplyPosts[`${replyToPostId}-${childPostIds.length}`] = newPostId;
+            newReplyPosts[`${replyToPostId}-${childPostIds.length}`] = newReplyPostId;
         }
     }
 };
@@ -1200,11 +1221,11 @@ export const deOrphanReplyPosts = (
     parentId: string,
     forwardOrphanedReplyPostsTreeRef: Record<string, string>,
     backwardOrphanedReplyPostsTreeRef: Record<string, string>,
-    postsRef: Record<string, Post>,
+    postsRef: Record<string, Post> | Record<string, Message>,
     newForwardOrphanedReplyPosts: Record<string, string>,
     newBackwardOrphanedReplyPosts: Record<string, string>,
     newDeOrphanedReplyPosts: Record<string, string>,
-    newPosts: Record<string, Post>
+    newPosts: Record<string, Post> | Record<string, Message>,
 ) => {
     const newForwardDeOrphanedIds = getChildPostIds(parentId, forwardOrphanedReplyPostsTreeRef).map((deOrphanedId, index) => ({ recurseForward: true, oldKey: `${parentId}-${index}`, deOrphanedId }));
     const newBackwardDeOrphanedIds = getChildPostIds(parentId, backwardOrphanedReplyPostsTreeRef).map((deOrphanedId, index) => ({ recurseForward: false, oldKey: `${parentId}-${index}`, deOrphanedId }));
@@ -1472,7 +1493,6 @@ export const getNewPostLatestActivity = (
     newPost: Post,
     postsRef: React.RefObject<Record<string, Post>>,
     postLatestActivityRef: React.RefObject<Record<string, number>>,
-    postChannelRegex: RegExp,
     discussPrefix: string,
 ) => {
     const newPostLatestActivity: Record<string, number> = {};
@@ -1485,11 +1505,12 @@ export const getNewPostLatestActivity = (
 
             const replyToPostId: string = loopPost!.replyToPostId;
             const channelId = loopPost!.channelId;
+            const postLevel = loopPost!.postLevel;
             const timestamp = loopPost!.timestamp;
 
             if (replyToPostId) {
                 loopPost = postsRef.current[replyToPostId];
-            } else if (postChannelRegex.test(channelId)) {
+            } else if (postLevel === 'Comment') {
                 const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix, loopPost.contractAddress);
                 loopPost = postsRef.current[discussionPostId];
             } else {
@@ -1502,12 +1523,13 @@ export const getNewPostLatestActivity = (
 
         const replyToPostId = newPost!.replyToPostId;
         const channelId = newPost!.channelId;
+        const postLevel = newPost!.postLevel;
         const timestamp = newPost!.timestamp;
 
         if (replyToPostId) {
             newTimestamp = (postLatestActivityRef.current[replyToPostId] ?? 0) > newTimestamp ? postLatestActivityRef.current[replyToPostId] : newTimestamp;
             newPostLatestActivity[replyToPostId] = newTimestamp;
-        } else if (postChannelRegex.test(channelId)) {
+        } else if (postLevel === 'Comment') {
             const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix, newPost.contractAddress);
             newTimestamp = (postLatestActivityRef.current[discussionPostId] ?? 0) > newTimestamp ? postLatestActivityRef.current[discussionPostId] : newTimestamp;
             newPostLatestActivity[discussionPostId] = newTimestamp;
