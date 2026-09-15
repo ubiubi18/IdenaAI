@@ -1,5 +1,9 @@
 # Worklog (Desktop)
 
+Historical implementation notes. Commands and paths reflect the checkout at
+the time; obsolete screenshots and generated index snapshots have been removed
+from the current tree and remain available in Git history.
+
 ## 2026-03-22 - Step 1: UI-first AI helper foundation
 
 ### Inspected

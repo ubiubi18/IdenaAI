@@ -107,6 +107,12 @@ data/
 downloads/
 build/
 
+# Generated research indexes and retired UI captures
+/docs/deep-research-index.json
+/docs/chatgpt-connector-index.json
+/docs/ai-test-unit-ui*.png
+/docs/flips-new-ui*.png
+
 # Nix build result symlinks
 result
 result-*
