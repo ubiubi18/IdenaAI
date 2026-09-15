@@ -121,3 +121,5 @@ result-*
 /idena-go/
 /idena-wasm/
 /idena-wasm-binding/
+# Host-local operations and private deployment configuration.
+/local-operations/
