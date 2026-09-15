@@ -98,6 +98,8 @@
       "!data/**",
       "!logs",
       "!logs/**",
+      "!local-operations",
+      "!local-operations/**",
       "!build",
       "!build/**",
       "!dist",

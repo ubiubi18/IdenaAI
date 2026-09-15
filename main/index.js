@@ -9,6 +9,7 @@ const {
   Tray,
   Menu,
   nativeTheme,
+  nativeImage,
   protocol,
   safeStorage,
   screen,
@@ -202,6 +203,10 @@ const aiTestUnitBridge = createAiTestUnitBridge({
   logger,
   aiProviderBridge,
 })
+const {createFlipGenerationRuntime} = require('./flip-generation-runtime')
+const scheduledFlips = require('./stores/flips')
+
+let flipGenerationTimer = null
 const localAiFederated = createLocalAiFederated({
   logger,
   isDev,
@@ -2184,6 +2189,25 @@ async function bootstrapApp() {
     resolveIdenaSocialRoot(app.getAppPath(), app.isPackaged)
   )
   await aiProviderBridge.initializePersistentProviderKeys()
+  const flipGeneration = createFlipGenerationRuntime({
+    getSettings: loadMainSettings,
+    rpc: performNodeRpc,
+    bridge: aiProviderBridge,
+    flips: scheduledFlips,
+    prepareDb,
+    profilePath: appDataPath('userData'),
+    nativeImage,
+    onFailure: (status) =>
+      logger.warn('Post-session flip generation stopped', {status}),
+  })
+  const runScheduledFlips = () => {
+    flipGeneration.tick().catch(() => {
+      logger.warn('Post-session flip generation snapshot unavailable')
+    })
+  }
+  flipGenerationTimer = setInterval(runScheduledFlips, 30000)
+  flipGenerationTimer.unref()
+  runScheduledFlips()
   const i18nConfig = getI18nConfig()
 
   i18next.init(i18nConfig, (err) => {
@@ -2210,6 +2234,8 @@ app
     logger.error('Failed to bootstrap Electron runtime', error)
     app.exit(1)
   })
+
+app.on('before-quit', () => clearInterval(flipGenerationTimer))
 
 if (!app.isDefaultProtocolClient('dna')) {
   // Define custom protocol handler. Deep linking works on packaged versions of the application!
