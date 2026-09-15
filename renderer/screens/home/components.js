@@ -1089,6 +1089,11 @@ export function ReplenishStakeDrawer({onSuccess, onMined, onError, ...props}) {
     (prev, current) => prev && (current[1].show ? current[1].value : true),
     true
   )
+  const canSubmit =
+    allChecked &&
+    !isMining &&
+    Number.isFinite(Number(sendValue)) &&
+    Number(sendValue) > 0
 
   return (
     <AdDrawer isMining={isMining} {...props}>
@@ -1128,6 +1133,8 @@ export function ReplenishStakeDrawer({onSuccess, onMined, onError, ...props}) {
               onSubmit={(e) => {
                 e.preventDefault()
 
+                if (!canSubmit) return
+
                 setIsMining.on()
 
                 submit({amount: sendValue})
@@ -1138,8 +1145,9 @@ export function ReplenishStakeDrawer({onSuccess, onMined, onError, ...props}) {
                   {t('Amount')}
                 </FormLabel>
                 <DnaInput
+                  step="any"
                   value={sendValue}
-                  onChange={(e) => setSendValue(Number(e.target.value))}
+                  onChange={(e) => setSendValue(e.target.value)}
                 />
                 <FormHelperText fontSize="md">
                   <Flex justify="space-between">
@@ -1267,7 +1275,7 @@ export function ReplenishStakeDrawer({onSuccess, onMined, onError, ...props}) {
           <PrimaryButton
             form="replenishStake"
             type="submit"
-            isDisabled={!allChecked || !sendValue}
+            isDisabled={!canSubmit}
             isLoading={isMining}
             loadingText={t('Mining...')}
           >
