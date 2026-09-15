@@ -3,7 +3,7 @@ import * as secp256k1 from "@noble/secp256k1";
 import { keccak_256 } from "js-sha3";
 import { CallContractAttachment, contractArgumentFormat, hexToUint8Array, privateKeyToPublicKey, publicKeyToAddress, toHexString, Transaction, transactionType } from "idena-sdk-js-lite";
 import type { PostMediaAttachment } from "../App.exports";
-import { getPostIdFromChannelId, type Post } from "./asyncUtils";
+import { type Post } from "./asyncUtils";
 
 export const likeEmoji = '❤️';
 export const dnaBase = 1e18;
@@ -232,7 +232,7 @@ export function getMakePostTransactionPayload(makePostMethod: string, inputPost:
 }
 
 export function getSendMessageTransactionPayload(sendMessageMethod: string, inputMessage: string[], inputMessageHash: string) {
-    const txAmount = new Decimal(0.00001);
+    const txAmount = new Decimal(0.00002);
     const args = [
         {
             format: contractArgumentFormat.String,
@@ -406,38 +406,34 @@ export function extractSenderInfoFromRawTx(rawTx: string): { address?: string; p
     }
 }
 
-export function getSpotlightPostDetails(targetPost: Post, postsRef: React.RefObject<Record<string, Post>>, discussPrefix: string) {
-    let replyPostId;
-    let discussionPostId;
-    let postItemKey;
-    let parentPostId;
+export function getSpotlightPostDetails(spotlightPost: Post, postsRef: React.RefObject<Record<string, Post>>) {
+    let discussionPostId = '';
+    let postItemKey = '';
+    let replyPostId = '';
+    let parentPostId = '';
+    let replyPost;
     let parentPost;
 
-    switch (targetPost?.postLevel) {
+    switch (spotlightPost?.postLevel) {
     case 'Post': {
-        parentPostId = targetPost.postId;
-        parentPost = targetPost;
-        postItemKey = targetPost.postId;
+        parentPostId = spotlightPost.postId;
+        parentPost = spotlightPost;
+        postItemKey = parentPostId;
         break;
     }
     case 'Reply': {
-        replyPostId = targetPost.postId;
-        const replyPost = postsRef.current[replyPostId];
+        replyPostId = spotlightPost.postId;
+        replyPost = postsRef.current[replyPostId];
         parentPostId = replyPost?.replyToPostId;
         parentPost = postsRef.current[parentPostId];
         postItemKey = `${parentPostId}-${replyPostId}`;
         break;
     }
     case 'Comment': {
-        discussionPostId = targetPost.postId;
+        discussionPostId = spotlightPost.postId;
         const discussionPost = postsRef.current[discussionPostId];
-        replyPostId = getPostIdFromChannelId(
-            discussionPost.timestamp,
-            discussionPost.channelId,
-            discussPrefix,
-            discussionPost.contractAddress,
-        );
-        const replyPost = postsRef.current[replyPostId];
+        replyPostId = discussionPost.channelPostId;
+        replyPost = postsRef.current[replyPostId];
         parentPostId = replyPost?.replyToPostId;
         parentPost = postsRef.current[parentPostId];
         postItemKey = `${parentPostId}-${replyPostId}-${discussionPostId}`;
@@ -450,4 +446,26 @@ export function getSpotlightPostDetails(targetPost: Post, postsRef: React.RefObj
     }
 
     return { replyPostId, discussionPostId, postItemKey, parentPost };
+}
+
+export function getPostActivities(post: Post | undefined, postersAddress: string, postsRef: React.RefObject<Record<string, Post>>) {
+    if (!post) return [];
+    const replyToPost = postsRef.current[post.replyToPostId];
+
+    let newPostActivities: string[] = [];
+
+    if (replyToPost?.poster === postersAddress && post.postLevel === 'Reply') {
+        newPostActivities = [ ...newPostActivities, `${post.timestamp}-${post.postId}-reply` ];
+    } else if (replyToPost?.poster === postersAddress && post.postLevel === 'Comment') {
+        newPostActivities = [ ...newPostActivities, `${post.timestamp}-${post.postId}-commentReply` ];
+    } else if (post.postLevel === 'Comment') {
+        const postId = post.channelPostId;
+        const channelPost = postsRef.current[postId];
+
+        if (channelPost?.poster === postersAddress) {
+            newPostActivities = [ ...newPostActivities, `${post.timestamp}-${post.postId}-comment` ];
+        }
+    }
+
+    return newPostActivities;
 }

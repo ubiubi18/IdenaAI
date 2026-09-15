@@ -6,6 +6,7 @@ type DesktopNavigationProps = {
 
 const navigationItems = [
     { label: 'Feed', path: '/' },
+    { label: 'Post activity', path: '/postactivity' },
     { label: 'Direct messages', path: '/messages' },
     { label: 'Settings', path: '/settings' },
 ];

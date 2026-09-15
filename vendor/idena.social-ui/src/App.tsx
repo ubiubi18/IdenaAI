@@ -3,8 +3,8 @@ import Modal from 'react-modal';
 import { hexToUint8Array } from 'idena-sdk-js-lite';
 import { keccak256, sha3_256 } from 'js-sha3';
 import { encrypt } from 'eciesjs';
-import { type Message, type Post, type Poster, type PostTips, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getBlockHeightFromTxHash, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPosterAndPost, getPastTxsWithIdenaIndexerApi, getPostIdFromChannelId, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getRpcClient, getTransactionDetailsIndexerApi, getTransactionDetailsRpc, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewMedia, resolveNewMessages, resolveNewPosters, saveReplyPostId, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, type RpcClient } from './logic/asyncUtils';
-import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
+import { type Message, type Post, type Poster, type PostTips, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getBlockHeightFromTxHash, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPosterAndPost, getPastTxsWithIdenaIndexerApi, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getRpcClient, getTransactionDetailsIndexerApi, getTransactionDetailsRpc, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewMedia, resolveNewMessages, resolveNewPosters, saveReplyPostId, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, type RpcClient } from './logic/asyncUtils';
+import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, getPostActivities, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
 import { createDesktopMessageCryptoClient, createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
 import { Link, Outlet, useLocation } from 'react-router';
 import { defaultProfileActivity, type BrowserStateHistorySettings, type EventTransaction, type MouseEventLocal, type PostMediaAttachment, type ProfileActivity } from './App.exports';
@@ -20,7 +20,7 @@ import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageCompon
 import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
 import DesktopNavigation from './components/DesktopNavigation';
 import ScanBlocksComponent from './components/ScanBlocksComponent';
-import ScrollToTopComponent from './components/ScrollToTopComponent';
+import ScrollToTopButtonComponent from './components/ScrollToTopButtonComponent';
 const socialBaseUrl = new URL('./', window.location.href);
 const officialIndexerApiUrl = 'https://api.idena.io';
 
@@ -251,6 +251,7 @@ function App() {
     const conversationsRef = useRef<Record<string, string[]>>({}); // { '0x011': ['messageId1', 'messageId2', 'messageId3'], }
     const messagesRef = useRef<Record<string, Message>>({});
     const profileActivityRef = useRef<Record<string, ProfileActivity>>({});
+    const postActivityRef = useRef<string[]>([]);
 
     // modals
     const [modalOpen, setModalOpen] = useState<string>('');
@@ -835,14 +836,17 @@ function App() {
                             newPost!,
                             postsRef,
                             postLatestActivityRef,
-                            discussPrefix,
                         );
 
                         postLatestActivityRef.current = { ...postLatestActivityRef.current, ...newPostLatestActivity };
 
                         const profileActivity = { ...(profileActivityRef.current[newTip.tipper] ?? defaultProfileActivity) };
-                        profileActivity.tips = isRecurseForward ? [postId, ...profileActivity.tips] : [...profileActivity.tips, postId];
+                        profileActivity.tips = isRecurseForward ? [`${postId}|${newTip.txHash}`, ...profileActivity.tips] : [...profileActivity.tips, `${postId}|${newTip.txHash}`];
                         profileActivityRef.current[newTip.tipper] = profileActivity;
+
+                        if (postsRef.current[postId]?.poster === postersAddress) {
+                            postActivityRef.current = [ ...postActivityRef.current, `${newTip.timestamp}-${postId}|${newTip.txHash}-tip` ];
+                        }
 
                         continue;
                     }
@@ -899,7 +903,6 @@ function App() {
                         newPost!,
                         postsRef,
                         postLatestActivityRef,
-                        discussPrefix,
                     );
 
                     postLatestActivityRef.current = { ...postLatestActivityRef.current, ...newPostLatestActivity };
@@ -911,10 +914,10 @@ function App() {
                     const newBackwardOrphanedReplyPosts: Record<string, string> = {};
                     const newDeOrphanedReplyPosts: Record<string, string> = {};
 
-                    const updatedPosts: Record<string, Post> = {};
+                    const updatedDeorphanedPosts: Record<string, Post> = {};
 
                     if (newPost!.postLevel === 'Comment') {
-                        const discussionPostId = getPostIdFromChannelId(newPost!.timestamp, newPost!.channelId, discussPrefix, newPost!.contractAddress);
+                        const discussionPostId = newPost!.channelPostId;
                         const discussionPost = postsRef.current[discussionPostId];
                         const orphaned = !discussionPost || discussionPost.orphaned;
 
@@ -961,28 +964,30 @@ function App() {
 
                         deOrphanReplyPosts(
                             newPost!.postId,
+                            newPost!,
                             forwardOrphanedReplyPostsTreeRef.current,
                             backwardOrphanedReplyPostsTreeRef.current,
                             postsRef.current,
                             newForwardOrphanedReplyPosts,
                             newBackwardOrphanedReplyPosts,
                             newDeOrphanedReplyPosts,
-                            updatedPosts,
+                            updatedDeorphanedPosts,
                         );
 
                         deOrphanReplyPosts(
                             discussPrefix + newPost!.postId,
+                            newPost!,
                             forwardOrphanedReplyPostsTreeRef.current,
                             backwardOrphanedReplyPostsTreeRef.current,
                             postsRef.current,
                             newForwardOrphanedReplyPosts,
                             newBackwardOrphanedReplyPosts,
                             newDeOrphanedReplyPosts,
-                            updatedPosts,
+                            updatedDeorphanedPosts,
                         );
                     }
 
-                    postsRef.current = { ...postsRef.current, ...updatedPosts, ...newPosts };
+                    postsRef.current = { ...postsRef.current, ...updatedDeorphanedPosts, ...newPosts };
                     replyPostsTreeRef.current = { ...replyPostsTreeRef.current, ...newReplyPosts };
                     deOrphanedReplyPostsTreeRef.current = { ...deOrphanedReplyPostsTreeRef.current, ...newDeOrphanedReplyPosts };
                     forwardOrphanedReplyPostsTreeRef.current = { ...forwardOrphanedReplyPostsTreeRef.current, ...newForwardOrphanedReplyPosts };
@@ -1005,6 +1010,34 @@ function App() {
                         profileActivity.media = isRecurseForward ? [newPost!.postId, ...profileActivity.media] : [...profileActivity.media, newPost!.postId];
                     }
                     profileActivityRef.current[newPost!.poster] = profileActivity;
+
+
+                    let newPostActivities: string[] = [];
+
+                    if (newPost!.poster === postersAddress) {
+                        const postTips = tipsRef.current[newPost!.postId];
+
+                        if (postTips) {
+                            const tips = postTips.tips;
+
+                            for (let index = 0; index < tips.length; index++) {
+                                const tip = tips[index];
+                                newPostActivities = [ ...newPostActivities, `${tip.timestamp}-${tip.postId}|${tip.txHash}-tip` ];
+                            }
+                        }
+                    }
+
+                    if (!newPost!.orphaned) {
+                        newPostActivities = [ ...newPostActivities, ...getPostActivities(newPost!, postersAddress, postsRef) ];
+                    }
+
+                    const updatedDeorphanedPostsArray = Object.keys(updatedDeorphanedPosts);
+                    for (let index = 0; index < updatedDeorphanedPostsArray.length; index++) {
+                        const post = updatedDeorphanedPosts[updatedDeorphanedPostsArray[index]];
+                        newPostActivities = [ ...newPostActivities, ...getPostActivities(post, postersAddress, postsRef) ];
+                    }
+
+                    postActivityRef.current = [ ...postActivityRef.current, ...newPostActivities ];
                 }
 
                 await resolveNewPosters(posterPromises, postersRef);
@@ -1177,6 +1210,7 @@ function App() {
 
                     deOrphanReplyPosts(
                         messagePrefix + newMessage!.messageId,
+                        newMessage!,
                         forwardOrphanedReplyPostsTreeRef.current,
                         backwardOrphanedReplyPostsTreeRef.current,
                         messagesRef.current,
@@ -2233,6 +2267,7 @@ function App() {
                             findPostsWithRef: inputFindingPastPostsRef,
                             indexerApiUrlRef,
                             profileActivityRef,
+                            postActivityRef,
                         }}
                     />
                     {pathname !== '/settings' && (
@@ -2250,7 +2285,7 @@ function App() {
                     )}
                     {pathname !== '/settings' && (
                         <div className="sticky bottom-4 text-right">
-                            <ScrollToTopComponent width="w-14" />
+                            <ScrollToTopButtonComponent width="w-14" />
                         </div>
                     )}
                 </div>

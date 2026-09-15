@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import topUpSvg from '../assets/top-up-direction-move.svg';
 import topUpSvgWhite from '../assets/top-up-direction-move-white.svg';
 
-type ScrollToTopComponentProps = {
+type ScrollToTopButtonComponentProps = {
     width?: string,
 };
 
-function ScrollToTopComponent(props: ScrollToTopComponentProps) {
+function ScrollToTopButtonComponent(props: ScrollToTopButtonComponentProps) {
 
     const {
         width,
@@ -31,10 +31,13 @@ function ScrollToTopComponent(props: ScrollToTopComponentProps) {
 
     const scrollToTop = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        setImgSrc(topUpSvg);
     };
 
     return (
         <img
+            id="scrollToTopButton"
             src={imgSrc}
             className={`m-2 inline-block hover:cursor-pointer ${width ?? 'w-20'} ${!isVisible ? 'invisible' : ''}`}
             onClick={() => scrollToTop()}
@@ -44,4 +47,4 @@ function ScrollToTopComponent(props: ScrollToTopComponentProps) {
     );
 };
 
-export default ScrollToTopComponent;
+export default ScrollToTopButtonComponent;
