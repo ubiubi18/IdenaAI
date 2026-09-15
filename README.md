@@ -294,11 +294,17 @@ the Nix store, and the same source-runtime session-auto guard applies.
 | `npm run pack`          | Create an unpacked developer build                      |
 | `npm run release:check` | Run release-oriented source, safety, and build checks   |
 
+### Source Mirrors and Smaller Checkouts
+
 Source setup creates ignored `idena-go/` and `idena-wasm-binding/` directories
-at the repository root. The social UI is tracked under `vendor/idena.social-ui/`;
+at the repository root. Each source checkout is shallow and pinned to the
+manifest revision, keeping upstream history and generated binaries out of the
+main Git checkout. The social UI is tracked under `vendor/idena.social-ui/`;
 its origin and integration notes are in
 [`UPSTREAM.json`](vendor/idena.social-ui/UPSTREAM.json). Keep generated source
 mirrors, model weights, runtime profiles, and build output out of commits.
+
+### Contributing
 
 For contributions, keep changes focused and run the checks relevant to the
 behavior you changed. Common code checks are:
