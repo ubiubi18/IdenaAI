@@ -42,6 +42,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   flipBuilderImageQuality: 'low',
   flipBuilderImageSize: '1024x1024',
   flipBuilderGenerationMode: 'fast',
+  postSessionFlipGenerationEnabled: false,
   shortSessionOpenAiFastEnabled: false,
   shortSessionOpenAiFastModel: 'gpt-5.6-sol',
   memoryBudgetGiB: 32,

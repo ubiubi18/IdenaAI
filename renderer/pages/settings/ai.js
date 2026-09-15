@@ -12,6 +12,7 @@ import {
   Stack,
   Text,
   Switch,
+  Checkbox,
   useToast,
   InputRightElement,
   InputGroup,
@@ -5651,6 +5652,24 @@ export default function AiSettingsPage() {
                         {t('Enable auto-solve next session')}
                       </PrimaryButton>
                     </Stack>
+                    <Checkbox
+                      isChecked={
+                        aiSolver.postSessionFlipGenerationEnabled === true
+                      }
+                      onChange={(event) =>
+                        updateAiSolverSettings({
+                          postSessionFlipGenerationEnabled:
+                            event.target.checked,
+                        })
+                      }
+                    >
+                      {t('Generate required flip drafts after each session')}
+                    </Checkbox>
+                    <Text color="muted" fontSize="sm">
+                      {t(
+                        'Starts once after a random 30-minute to 4-hour delay. Uses your configured providers and daily budget. Review and publish the drafts in Flips.'
+                      )}
+                    </Text>
                     <Stack isInline spacing={2}>
                       <SecondaryButton
                         isDisabled={!providerKeyStatus.primaryReady}
