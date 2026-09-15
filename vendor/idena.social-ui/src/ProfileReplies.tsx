@@ -71,10 +71,16 @@ function ProfileReplies() {
                 const {
                     postItemKey,
                     parentPost,
-                } = getSpotlightPostDetails(replyPost, postsRef, discussPrefix);
+                } = getSpotlightPostDetails(replyPost, postsRef);
+
+                const showPostComponent = parentPost;
+                if (!showPostComponent) {
+                    return null;
+                }
 
                 return <li key={postItemKey}>
-                    {parentPost && <PostComponent
+                    <PostComponent
+                        uniqueKey={postItemKey}
                         postId={parentPost.postId}
                         postsRef={postsRef}
                         replyPostsTreeRef={replyPostsTreeRef}
@@ -101,7 +107,7 @@ function ProfileReplies() {
                         makePostsWith={makePostsWith}
                         activeContractAddress={activeContractAddress}
                         spotlightReplyPostId={replyPostId}
-                    />}
+                    />
                 </li>;
             })}
         </ul>

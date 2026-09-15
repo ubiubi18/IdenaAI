@@ -347,6 +347,7 @@ function LatestPosts() {
             {visiblePostIds.map((postId) => (
                 <li key={postId} className="w-full">
                     <PostComponent
+                        uniqueKey={postId}
                         postId={postId}
                         postsRef={postsRef}
                         replyPostsTreeRef={replyPostsTreeRef}
