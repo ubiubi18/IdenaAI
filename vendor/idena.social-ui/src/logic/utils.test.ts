@@ -1,6 +1,29 @@
 import {describe, expect, it} from 'vitest';
 import {Transaction, privateKeyToAddress, privateKeyToPublicKey, toHexString} from 'idena-sdk-js-lite';
-import {decodeBlockBodyTransactions, extractSenderInfoFromRawTx, getMessageLines} from './utils';
+import {decodeBlockBodyTransactions, extractSenderInfoFromRawTx, getMessageLines, getPostActivities, getSpotlightPostDetails} from './utils';
+import type {Post} from './asyncUtils';
+
+describe('post activity across contract generations', () => {
+    const ownAddress = '0x0000000000000000000000000000000000000001';
+    const parent = {postId: 'preV12:1', postLevel: 'Post', poster: ownAddress} as Post;
+    const reply = {postId: 'preV12:2', postLevel: 'Reply', replyToPostId: parent.postId, poster: ownAddress} as Post;
+    const comment = {postId: 'preV12:3', postLevel: 'Comment', channelPostId: reply.postId, timestamp: 100} as Post;
+    const postsRef = {current: {[parent.postId]: parent, [reply.postId]: reply, [comment.postId]: comment}};
+
+    it('keeps a comment attached to its original contract post IDs', () => {
+        expect(getSpotlightPostDetails(comment, postsRef)).toMatchObject({
+            discussionPostId: 'preV12:3',
+            replyPostId: 'preV12:2',
+            parentPost: parent,
+        });
+        expect(getPostActivities(comment, ownAddress, postsRef)).toEqual(['100-preV12:3-comment']);
+    });
+
+    it('skips deleted or not-yet-scanned posts without breaking the activity scan', () => {
+        expect(getPostActivities(undefined, ownAddress, postsRef)).toEqual([]);
+        expect(getPostActivities({...comment, channelPostId: 'missing'}, ownAddress, postsRef)).toEqual([]);
+    });
+});
 
 const encodeVarint = (input: number) => {
     const bytes: number[] = [];

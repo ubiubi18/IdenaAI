@@ -88,6 +88,7 @@ export type Post = {
     poster: string,
     posterDetails_atTimeOfPost: { stake: number, state: string, age: number },
     channelId: string,
+    channelPostId: string,
     message?: string,
     txHash: string,
     replyToPostId: string,
@@ -628,6 +629,10 @@ export const getNewPosterAndPost = async (
         if (newReplyExistsAndRespectsTime === false) {
             return { continued: true };
         }
+
+        if (replyToPost?.isLike) {
+            return { continued: true };
+        }
     }
 
     const posterDetails_atTimeOfPost = !preV9 ? {
@@ -641,6 +646,7 @@ export const getNewPosterAndPost = async (
     };
 
     const postLevel = isDiscussionComment ? 'Comment' : replyToPostId ? 'Reply' : 'Post';
+    const channelPostId = isDiscussionComment ? getPostIdFromChannelId(timestamp, channelId, discussPrefix, contractAddress) : '';
 
     const isLike = message === likeEmoji && !!replyToPostId;
     const hasMedia = !!(media && mediaType);
@@ -654,6 +660,7 @@ export const getNewPosterAndPost = async (
         poster,
         posterDetails_atTimeOfPost,
         channelId,
+        channelPostId,
         txHash,
         replyToPostId,
         contractAddress,
@@ -858,10 +865,11 @@ export const processTip = async (
         burnAmount,
     };
 
+    const existingPostTips = tipsRef.current[postId];
     const updatedPostTips: PostTips = {
         postId,
-        totalAmount: (tipsRef.current[postId]?.totalAmount ?? 0) + amount,
-        tips: isRecurseForward ? [ newTip, ...(tipsRef.current[postId]?.tips ?? []) ] : [ ...(tipsRef.current[postId]?.tips ?? []), newTip ],
+        totalAmount: (existingPostTips?.totalAmount ?? 0) + amount,
+        tips: isRecurseForward ? [ newTip, ...(existingPostTips?.tips ?? []) ] : [ ...(existingPostTips?.tips ?? []), newTip ],
     };
 
     let posterPromise: Promise<Poster> | undefined;
@@ -1093,6 +1101,10 @@ export const processMessage = async (
         return { continued: true };
     }
 
+    if (replyToMessageId && messagesRef.current[replyToMessageId]?.isLike) {
+        return { continued: true };
+    }
+
     if (participantsRaw.length !== messageEvent.length) {
         return { continued: true };
     }
@@ -1219,6 +1231,7 @@ export const saveReplyPostId = (
 
 export const deOrphanReplyPosts = (
     parentId: string,
+    parentPost: Post | Message,
     forwardOrphanedReplyPostsTreeRef: Record<string, string>,
     backwardOrphanedReplyPostsTreeRef: Record<string, string>,
     postsRef: Record<string, Post> | Record<string, Message>,
@@ -1240,6 +1253,11 @@ export const deOrphanReplyPosts = (
             newForwardOrphanedReplyPosts[childDetails.oldKey] = '';
         } else {
             newBackwardOrphanedReplyPosts[childDetails.oldKey] = '';
+        }
+
+        if (parentPost.isLike) {
+            newPosts[childDetails.deOrphanedId] = undefined as unknown as (Post | Message);
+            continue;
         }
 
         newDeOrphanedReplyPosts[newKey] = childDetails.deOrphanedId;
@@ -1493,7 +1511,6 @@ export const getNewPostLatestActivity = (
     newPost: Post,
     postsRef: React.RefObject<Record<string, Post>>,
     postLatestActivityRef: React.RefObject<Record<string, number>>,
-    discussPrefix: string,
 ) => {
     const newPostLatestActivity: Record<string, number> = {};
 
@@ -1504,14 +1521,12 @@ export const getNewPostLatestActivity = (
             newPostLatestActivity[loopPost!.postId] = newPost!.timestamp;
 
             const replyToPostId: string = loopPost!.replyToPostId;
-            const channelId = loopPost!.channelId;
             const postLevel = loopPost!.postLevel;
-            const timestamp = loopPost!.timestamp;
 
             if (replyToPostId) {
                 loopPost = postsRef.current[replyToPostId];
             } else if (postLevel === 'Comment') {
-                const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix, loopPost.contractAddress);
+                const discussionPostId = loopPost!.channelPostId as string;
                 loopPost = postsRef.current[discussionPostId];
             } else {
                 loopPost = undefined;
@@ -1522,15 +1537,13 @@ export const getNewPostLatestActivity = (
         postLatestActivityRef.current[newPost!.postId] = newTimestamp;
 
         const replyToPostId = newPost!.replyToPostId;
-        const channelId = newPost!.channelId;
         const postLevel = newPost!.postLevel;
-        const timestamp = newPost!.timestamp;
 
         if (replyToPostId) {
             newTimestamp = (postLatestActivityRef.current[replyToPostId] ?? 0) > newTimestamp ? postLatestActivityRef.current[replyToPostId] : newTimestamp;
             newPostLatestActivity[replyToPostId] = newTimestamp;
         } else if (postLevel === 'Comment') {
-            const discussionPostId = getPostIdFromChannelId(timestamp, channelId, discussPrefix, newPost.contractAddress);
+            const discussionPostId = newPost!.channelPostId;
             newTimestamp = (postLatestActivityRef.current[discussionPostId] ?? 0) > newTimestamp ? postLatestActivityRef.current[discussionPostId] : newTimestamp;
             newPostLatestActivity[discussionPostId] = newTimestamp;
         }
