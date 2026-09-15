@@ -16,7 +16,7 @@
     "main/index.js": "0fb9ec68d308791d0ba840637081fae5d0dcb388457fa9577e9ef8910f5a6391",
     "main/node-artifact-policy.js": "fdb3fe87f484a917e8fb14c17afa60dfb9cf678cf05dba7d45db6c009d0e1cf8",
     "main/utils/fetch-client.js": "09db5ae64b17b9e882078c873deb708ab10313aecf965d2cacfb33d379764071",
-    "package-lock.json": "683b5e8e095b4402597d7b1b080abb549c1481c54fc87df9a5b2a7b7ce0f8807",
+    "package-lock.json": "cfdd177e714f8f5eee79717215bd16e6a10e1272cd31e8c9067188a382a939c2",
     "package.json": "287a11c53f99bd92217b42ccd3a237c136e99ae99bccfab05d3cd194c23952e3",
     "scripts/build-node-from-sources.js": "54d882e09942006146a9d4b0b6f677857a0c8940d2a3efc30399eb7e234af66f",
     "scripts/check-application-release-lock.js": "5f9d8f10dcf6776385d71f5cbc0ec0342f4c405867a3d1a9d45ba5a570a18686",

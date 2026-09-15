@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# shellcheck disable=SC1091,SC2153
+# shellcheck source=/usr/local/libexec/idena-auto-transfer/idena-auto-common.sh
+source /usr/local/libexec/idena-auto-transfer/idena-auto-common.sh
+
+readonly STATE_FILE="${STATE_DIR}/source-state.json"
+readonly LOCK_FILE="${STATE_DIR}/source.lock"
+readonly MODE="${1:---run}"
+
+case "$MODE" in
+  --run | --dry-run | --status) ;;
+  *) fail "usage: $0 [--run|--dry-run|--status]" ;;
+esac
+
+load_config
+
+# Read the journal only after acquiring the lock, including status reads.
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
+state='{"version":1,"active":null,"completed":[]}'
+if [[ -s "$STATE_FILE" ]]; then
+  state="$(jq -c . "$STATE_FILE")"
+fi
+
+if [[ "$MODE" == --status ]]; then
+  jq '{
+    version,
+    active: (if .active == null then null else {status:.active.status,submittedAt:.active.submittedAt} end),
+    completedCount: (.completed | length)
+  }' <<<"$state"
+  exit 0
+fi
+
+if ! node_is_synced; then
+  log "source deferred: local Idena node is not fully synchronized with peers"
+  exit 0
+fi
+
+source_address="$(current_address)"
+# SOURCE_ADDRESS is loaded and validated by load_config in the shared helper.
+# shellcheck disable=SC2153
+[[ "${source_address,,}" == "${SOURCE_ADDRESS,,}" ]] || fail "active source identity does not match the configured identity"
+
+target_state="$(identity_state_for "$TARGET_ADDRESS")"
+case "$target_state" in
+  Undefined | Killed | "") fail "target identity cannot receive replenished stake" ;;
+esac
+
+now="$(date +%s)"
+pending="$(pending_transactions_for "$source_address")"
+recent="$(recent_transactions_for "$source_address")"
+
+# Recover an automated transfer if the process stopped after submission but
+# before its local journal update.
+if [[ "$(jq -r '.active == null' <<<"$state")" == true ]]; then
+  adopted_pending="$(jq -r \
+    --arg from "${SOURCE_ADDRESS,,}" \
+    --arg to "${TARGET_ADDRESS,,}" \
+    --arg amount "$BATCH_AMOUNT_IDNA" \
+    --arg payload "${TRANSFER_PAYLOAD_HEX,,}" '
+      [.result.transactions[]? |
+        select((.type == "send") and
+               (((.from // "") | ascii_downcase) == $from) and
+               (((.to // "") | ascii_downcase) == $to) and
+               (((.amount // "0") | tonumber) == ($amount | tonumber)) and
+               (((.payload // "") | ascii_downcase) == $payload))] |
+      first | .hash // empty
+    ' <<<"$pending")"
+  if [[ -n "$adopted_pending" ]]; then
+    state="$(jq -c --arg hash "$adopted_pending" --argjson now "$now" --argjson pending "$pending" \
+      '.active=({hash:$hash,status:"submitted",submittedAt:$now,recovered:true} +
+        ($pending.result.transactions[] | select(.hash == $hash) | {nonce,epoch}))' <<<"$state")"
+    [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+    log "source recovered an unjournaled pending transfer"
+  fi
+fi
+
+active_hash="$(jq -r '.active.hash // empty' <<<"$state")"
+if [[ -n "$active_hash" ]]; then
+  confirmed_response="$(transaction_by_hash "$active_hash")"
+  require_rpc_result "$confirmed_response" "look up active transfer"
+  if hash_is_confirmed "$confirmed_response" "$active_hash"; then
+    state="$(jq -c --arg hash "$active_hash" --argjson now "$now" '
+      .completed += [{hash:$hash,confirmedAt:$now}] |
+      .active = null
+    ' <<<"$state")"
+    [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+    log "source transfer confirmed"
+  elif hash_is_pending "$pending" "$active_hash" || jq -e '.result != null' >/dev/null <<<"$confirmed_response"; then
+    log "source transfer remains pending"
+    exit 0
+  else
+    active_record="$(jq -c '.active' <<<"$state")"
+    if transaction_is_invalidated "$active_record" "$source_address"; then
+      state="$(jq -c --argjson now "$now" '
+        .abandoned += [.active + {status:"invalidated",resolvedAt:$now}] |
+        .active = null
+      ' <<<"$state")"
+      [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+      log "source retired a missing transfer whose epoch or nonce is no longer valid"
+      exit 0
+    fi
+    submitted_at="$(jq -r '.active.submittedAt // 0' <<<"$state")"
+    if ((now - submitted_at >= 1800)); then
+      state="$(jq -c '.active.status="needs_review"' <<<"$state")"
+      [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+      fail "source transfer disappeared from both chain and mempool; automatic retry is blocked"
+    fi
+    log "source transfer is awaiting network visibility"
+    exit 0
+  fi
+fi
+
+# Reconcile a recently confirmed marked transfer from the crash window.
+recent_unjournaled="$(jq -r \
+  --arg from "${SOURCE_ADDRESS,,}" \
+  --arg to "${TARGET_ADDRESS,,}" \
+  --arg amount "$BATCH_AMOUNT_IDNA" \
+  --arg payload "${TRANSFER_PAYLOAD_HEX,,}" \
+  --argjson cutoff "$((now - 1800))" \
+  --argjson state "$state" '
+    [.result.transactions[]? as $tx |
+      select(($tx.type == "send") and
+             ((($tx.from // "") | ascii_downcase) == $from) and
+             ((($tx.to // "") | ascii_downcase) == $to) and
+             ((($tx.amount // "0") | tonumber) == ($amount | tonumber)) and
+             ((($tx.payload // "") | ascii_downcase) == $payload) and
+             (($tx.timestamp // 0) >= $cutoff) and
+             ([ $state.completed[].hash ] | index($tx.hash) | not)) |
+      $tx.hash] |
+    .[]
+  ' <<<"$recent")"
+while IFS= read -r recovered_hash; do
+  [[ -n "$recovered_hash" ]] || continue
+  state="$(jq -c --arg hash "$recovered_hash" --argjson now "$now" \
+    '.completed += [{hash:$hash,confirmedAt:$now,recovered:true}]' <<<"$state")"
+done <<<"$recent_unjournaled"
+[[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+
+if slot="$(transaction_slot "$source_address" "$pending")"; then
+  :
+else
+  slot_status=$?
+  if ((slot_status == 2)); then
+    log "source deferred: an outgoing transaction is already pending"
+    exit 0
+  fi
+  exit "$slot_status"
+fi
+
+balance="$(balance_for "$source_address")"
+minimum_before_estimate="$(decimal_sum3 "$BATCH_AMOUNT_IDNA" "0" "$FEE_RESERVE_IDNA")"
+if ! decimal_ge "$balance" "$minimum_before_estimate"; then
+  log "source idle: balance is below one transferable batch plus reserve"
+  exit 0
+fi
+
+tx_args="$(jq -cn \
+  --arg from "$SOURCE_ADDRESS" \
+  --arg to "$TARGET_ADDRESS" \
+  --arg amount "$BATCH_AMOUNT_IDNA" \
+  --arg payload "$TRANSFER_PAYLOAD_HEX" \
+  --argjson slot "$slot" \
+  '{from:$from,to:$to,amount:$amount,payload:$payload} + $slot')"
+if estimate="$(estimate_transaction "$tx_args")"; then
+  :
+else
+  estimate_status=$?
+  if ((estimate_status == 2)); then
+    log "source idle: balance does not cover one transferable batch plus current fee"
+    exit 0
+  fi
+  exit "$estimate_status"
+fi
+fee="$(jq -er '.result.txFee' <<<"$estimate")"
+required="$(decimal_sum3 "$BATCH_AMOUNT_IDNA" "$fee" "$FEE_RESERVE_IDNA")"
+
+if ! decimal_ge "$balance" "$required"; then
+  log "source idle: balance is below one transferable batch plus fees"
+  exit 0
+fi
+
+if [[ "$MODE" == --dry-run ]]; then
+  jq -n --arg amount "$BATCH_AMOUNT_IDNA" --arg fee "$fee" \
+    '{dryRun:true,wouldSubmitTransfer:true,amount:$amount,estimatedFee:$fee}'
+  exit 0
+fi
+
+tx_hash="$(submit_transaction "$tx_args")"
+state="$(jq -c --arg hash "$tx_hash" --argjson now "$now" --argjson slot "$slot" \
+  '.active=({hash:$hash,status:"submitted",submittedAt:$now} + $slot)' <<<"$state")"
+atomic_write_json "$STATE_FILE" "$state"
+log "source submitted one automated transfer batch"

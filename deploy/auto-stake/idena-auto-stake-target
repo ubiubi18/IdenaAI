@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# shellcheck disable=SC1091,SC2153
+# shellcheck source=/usr/local/libexec/idena-auto-transfer/idena-auto-common.sh
+source /usr/local/libexec/idena-auto-transfer/idena-auto-common.sh
+
+readonly STATE_FILE="${STATE_DIR}/target-state.json"
+readonly LOCK_FILE="${STATE_DIR}/target.lock"
+readonly MODE="${1:---run}"
+readonly MIN_DELAY_SECONDS=60
+
+case "$MODE" in
+  --run | --dry-run | --status) ;;
+  *) fail "usage: $0 [--run|--dry-run|--status]" ;;
+esac
+
+load_config
+
+# Read the journal only after acquiring the lock, including status reads.
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
+state='{"version":1,"receipts":{}}'
+if [[ -s "$STATE_FILE" ]]; then
+  state="$(jq -c . "$STATE_FILE")"
+fi
+
+if [[ "$MODE" == --status ]]; then
+  jq '{
+    version,
+    waiting: ([.receipts[] | select(.status == "waiting")] | length),
+    submitted: ([.receipts[] | select(.status == "submitted")] | length),
+    completed: ([.receipts[] | select(.status == "completed")] | length),
+    needsReview: ([.receipts[] | select(.status == "needs_review")] | length)
+  }' <<<"$state"
+  exit 0
+fi
+
+if ! node_is_synced; then
+  log "target deferred: local Idena node is not fully synchronized with peers"
+  exit 0
+fi
+
+target_address="$(current_address)"
+# TARGET_ADDRESS is loaded and validated by load_config in the shared helper.
+# shellcheck disable=SC2153
+[[ "${target_address,,}" == "${TARGET_ADDRESS,,}" ]] || fail "active target identity does not match the configured identity"
+
+target_state="$(identity_state_for "$target_address")"
+case "$target_state" in
+  Undefined | Killed | "") fail "active target identity cannot receive replenished stake" ;;
+esac
+
+now="$(date +%s)"
+pending="$(pending_transactions_for "$target_address")"
+recent="$(recent_transactions_for "$target_address")"
+
+incoming_hashes="$(jq -r \
+  --arg from "${SOURCE_ADDRESS,,}" \
+  --arg to "${TARGET_ADDRESS,,}" \
+  --arg amount "$BATCH_AMOUNT_IDNA" \
+  --arg payload "${TRANSFER_PAYLOAD_HEX,,}" '
+    [.result.transactions[]? |
+      select((.type == "send") and
+             (((.from // "") | ascii_downcase) == $from) and
+             (((.to // "") | ascii_downcase) == $to) and
+             (((.amount // "0") | tonumber) == ($amount | tonumber)) and
+             (((.payload // "") | ascii_downcase) == $payload))] |
+    .[].hash
+  ' <<<"$recent")"
+
+while IFS= read -r transfer_hash; do
+  [[ -n "$transfer_hash" ]] || continue
+  if ! jq -e --arg hash "$transfer_hash" '.receipts[$hash] != null' >/dev/null <<<"$state"; then
+    state="$(jq -c --arg hash "$transfer_hash" --argjson now "$now" \
+      '.receipts[$hash]={status:"waiting",firstSeen:$now,stakeTxHash:null}' <<<"$state")"
+    log "target observed a confirmed automated transfer"
+  fi
+done <<<"$incoming_hashes"
+[[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+
+# Confirm or conservatively halt each previously submitted stake transaction.
+while IFS=$'\t' read -r transfer_hash stake_hash submitted_at; do
+  [[ -n "$transfer_hash" && -n "$stake_hash" ]] || continue
+  confirmed_response="$(transaction_by_hash "$stake_hash")"
+  require_rpc_result "$confirmed_response" "look up active stake transaction"
+  if hash_is_confirmed "$confirmed_response" "$stake_hash"; then
+    state="$(jq -c --arg transfer "$transfer_hash" --argjson now "$now" \
+      '.receipts[$transfer].status="completed" | .receipts[$transfer].completedAt=$now' <<<"$state")"
+    [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+    log "target stake replenishment confirmed"
+  elif hash_is_pending "$pending" "$stake_hash" || jq -e '.result != null' >/dev/null <<<"$confirmed_response"; then
+    :
+  elif ((now - submitted_at >= 1800)); then
+    state="$(jq -c --arg transfer "$transfer_hash" \
+      '.receipts[$transfer].status="needs_review"' <<<"$state")"
+    [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+    fail "stake transaction disappeared from both chain and mempool; automatic retry is blocked"
+  fi
+done < <(jq -r '.receipts | to_entries[] | select(.value.status == "submitted") | [.key,.value.stakeTxHash,(.value.submittedAt // 0)] | @tsv' <<<"$state")
+
+if jq -e '[.receipts[] | select(.status == "submitted")] | length > 0' >/dev/null <<<"$state"; then
+  log "target waiting for the active stake transaction to confirm"
+  exit 0
+fi
+
+candidate="$(jq -r --argjson now "$now" --argjson delay "$MIN_DELAY_SECONDS" '
+  .receipts | to_entries |
+  map(select(.value.status == "waiting" and (($now - .value.firstSeen) >= $delay))) |
+  sort_by(.value.firstSeen) |
+  first | .key // empty
+' <<<"$state")"
+[[ -n "$candidate" ]] || { log "target idle: no confirmed transfer has completed its delay"; exit 0; }
+
+stake_payload="${STAKE_PAYLOAD_PREFIX_HEX}${candidate#0x}"
+
+# Recover a stake transaction from the submission/journal crash window.
+adopted_pending="$(jq -r \
+  --arg from "${TARGET_ADDRESS,,}" \
+  --arg amount "$BATCH_AMOUNT_IDNA" \
+  --arg payload "${stake_payload,,}" '
+    [.result.transactions[]? |
+      select((.type == "replenishStake") and
+             (((.from // "") | ascii_downcase) == $from) and
+             (((.to // "") | ascii_downcase) == $from) and
+             (((.amount // "0") | tonumber) == ($amount | tonumber)) and
+             (((.payload // "") | ascii_downcase) == $payload))] |
+    first | .hash // empty
+  ' <<<"$pending")"
+if [[ -n "$adopted_pending" ]]; then
+  state="$(jq -c --arg transfer "$candidate" --arg hash "$adopted_pending" --argjson now "$now" '
+    .receipts[$transfer].status="submitted" |
+    .receipts[$transfer].stakeTxHash=$hash |
+    .receipts[$transfer].submittedAt=$now |
+    .receipts[$transfer].recovered=true
+  ' <<<"$state")"
+  [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+  log "target recovered an unjournaled pending stake transaction"
+  exit 0
+fi
+
+adopted_confirmed="$(jq -r \
+  --arg from "${TARGET_ADDRESS,,}" \
+  --arg amount "$BATCH_AMOUNT_IDNA" \
+  --arg payload "${stake_payload,,}" '
+    [.result.transactions[]? |
+      select((.type == "replenishStake") and
+             (((.from // "") | ascii_downcase) == $from) and
+             (((.to // "") | ascii_downcase) == $from) and
+             (((.amount // "0") | tonumber) == ($amount | tonumber)) and
+             (((.payload // "") | ascii_downcase) == $payload))] |
+    first | .hash // empty
+  ' <<<"$recent")"
+if [[ -n "$adopted_confirmed" ]]; then
+  state="$(jq -c --arg transfer "$candidate" --arg hash "$adopted_confirmed" --argjson now "$now" '
+    .receipts[$transfer].status="completed" |
+    .receipts[$transfer].stakeTxHash=$hash |
+    .receipts[$transfer].completedAt=$now |
+    .receipts[$transfer].recovered=true
+  ' <<<"$state")"
+  [[ "$MODE" == --dry-run ]] || atomic_write_json "$STATE_FILE" "$state"
+  log "target recovered an unjournaled confirmed stake transaction"
+  exit 0
+fi
+
+if slot="$(transaction_slot "$target_address" "$pending")"; then
+  :
+else
+  slot_status=$?
+  if ((slot_status == 2)); then
+    log "target deferred: an outgoing transaction is already pending"
+    exit 0
+  fi
+  exit "$slot_status"
+fi
+
+balance="$(balance_for "$target_address")"
+minimum_before_estimate="$(decimal_sum3 "$BATCH_AMOUNT_IDNA" "0" "$FEE_RESERVE_IDNA")"
+if ! decimal_ge "$balance" "$minimum_before_estimate"; then
+  log "target deferred: transferred balance does not cover one stake batch plus reserve"
+  exit 0
+fi
+
+tx_args="$(jq -cn \
+  --arg from "$TARGET_ADDRESS" \
+  --arg amount "$BATCH_AMOUNT_IDNA" \
+  --arg payload "$stake_payload" \
+  --argjson slot "$slot" \
+  '{type:22,from:$from,to:$from,amount:$amount,payload:$payload} + $slot')"
+if estimate="$(estimate_transaction "$tx_args")"; then
+  :
+else
+  estimate_status=$?
+  if ((estimate_status == 2)); then
+    log "target deferred: transferred balance does not cover one stake batch plus current fee"
+    exit 0
+  fi
+  exit "$estimate_status"
+fi
+fee="$(jq -er '.result.txFee' <<<"$estimate")"
+required="$(decimal_sum3 "$BATCH_AMOUNT_IDNA" "$fee" "$FEE_RESERVE_IDNA")"
+
+if ! decimal_ge "$balance" "$required"; then
+  log "target deferred: transferred balance does not yet cover one stake batch plus fees"
+  exit 0
+fi
+
+if [[ "$MODE" == --dry-run ]]; then
+  jq -n --arg amount "$BATCH_AMOUNT_IDNA" --arg fee "$fee" \
+    '{dryRun:true,wouldSubmitStake:true,amount:$amount,estimatedFee:$fee}'
+  exit 0
+fi
+
+stake_hash="$(submit_transaction "$tx_args")"
+state="$(jq -c --arg transfer "$candidate" --arg hash "$stake_hash" --argjson now "$now" --argjson slot "$slot" '
+  .receipts[$transfer].status="submitted" |
+  .receipts[$transfer].stakeTxHash=$hash |
+  .receipts[$transfer].submittedAt=$now |
+  .receipts[$transfer].nonce=$slot.nonce |
+  .receipts[$transfer].epoch=$slot.epoch
+' <<<"$state")"
+atomic_write_json "$STATE_FILE" "$state"
+log "target submitted one automated stake replenishment"
