@@ -49,7 +49,7 @@ const EXPECTED_COMPONENTS = {
 }
 
 const EXPECTED_TOOLCHAINS = {
-  go: '1.26.5',
+  go: '1.26.8',
   rust: '1.97.0',
   node: '24.18.0',
   npm: '11.16.0',
@@ -122,7 +122,7 @@ function requirePinSet(lock, name, expectedNames) {
 function verifyLockIdentity(lock) {
   if (
     lock.schema !== 1 ||
-    lock.releaseId !== 'idena-mainnet-legacy-compat-2026.07.17-rc7' ||
+    lock.releaseId !== 'idena-mainnet-legacy-compat-2026.09.20-rc9' ||
     !['candidate', 'approved', 'retired'].includes(lock.status)
   ) {
     throw new Error('Unexpected compatibility lock identity')

@@ -90,7 +90,7 @@ describe('build node from sources script', () => {
     const inputs = {
       arch: 'arm64',
       bindingCommit: 'b'.repeat(40),
-      goToolchain: 'go1.26.5',
+      goToolchain: 'go1.26.8',
       platform: 'darwin',
       sourceCommit: commit,
     }
