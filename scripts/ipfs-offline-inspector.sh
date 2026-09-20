@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GO_TOOLCHAIN="${IDENA_GO_GOTOOLCHAIN:-go1.26.5}"
+GO_TOOLCHAIN="${IDENA_GO_GOTOOLCHAIN:-go1.26.8}"
 
 if [[ -z "${GO_BIN:-}" ]]; then
   if ! GO_BIN="$(command -v go)"; then
