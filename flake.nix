@@ -7,11 +7,20 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      go1268For = pkgs: pkgs.go_1_26.overrideAttrs (_: {
+        version = "1.26.8";
+        src = pkgs.fetchurl {
+          url = "https://go.dev/dl/go1.26.8.src.tar.gz";
+          hash = "sha256-Tjm5jkL5RvoFrIvFtxh335fb23y7Gnd7VBZnrXEX/S4=";
+        };
+      });
     in
     {
       packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
+          go1268 = go1268For pkgs;
+          buildGo1268Module = pkgs.buildGoModule.override { go = go1268; };
           idenaWasmBinding = pkgs.fetchFromGitHub {
             owner = "ubiubi18";
             repo = "idena-wasm-binding";
@@ -19,6 +28,7 @@
             hash = "sha256-CIn3o3Tw9KJuJ5AJ7UMDIq0AkghyLfj4boTJSk5DARA=";
           };
           idenaGo = pkgs.callPackage ./nix/idena-go.nix {
+            buildGoModule = buildGo1268Module;
             inherit idenaWasmBinding;
           };
           idenaSocialUi = pkgs.callPackage ./nix/idena-social-ui.nix {
@@ -61,6 +71,7 @@
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
+          go1268 = go1268For pkgs;
         in
         {
           default = pkgs.mkShell {
@@ -69,7 +80,7 @@
               gcc
               git
               gnumake
-              go
+              go1268
               nodejs_24
               pkg-config
               python3
