@@ -10,7 +10,7 @@ const {bindingLibName} = require('./build-node-from-sources')
 const {readManifest} = require('./setup-sources')
 
 const ROOT = path.resolve(__dirname, '..')
-const GO_TOOLCHAIN = process.env.IDENA_GO_GOTOOLCHAIN || 'go1.26.5'
+const GO_TOOLCHAIN = process.env.IDENA_GO_GOTOOLCHAIN || 'go1.26.8'
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u
 
 function readOptionValue(argv, index, option) {
