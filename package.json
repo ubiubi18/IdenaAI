@@ -247,7 +247,7 @@
     "object-path": "^0.11.8",
     "postcss": "^8.5.10",
     "serialize-javascript": "^7.0.5",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "shell-quote": "^1.8.3",
     "tar": "^7.5.13",
     "terser": "^4.8.1"
@@ -256,7 +256,7 @@
     "electron-winstaller@5.4.0": true,
     "fsevents": false,
     "leveldown@5.6.0": true,
-    "sharp@0.35.3": true
+    "sharp@0.35.4": true
   },
   "prettier": {
     "trailingComma": "es5",
