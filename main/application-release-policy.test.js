@@ -26,7 +26,7 @@ function candidateLock(root) {
     schema: 1,
     releaseId: 'idena-ai-0.1.0-test',
     status: 'candidate',
-    compatibilityReleaseId: 'idena-mainnet-legacy-compat-2026.07.17-rc7',
+    compatibilityReleaseId: 'idena-mainnet-legacy-compat-2026.09.20-rc9',
     consensusChangesAllowed: false,
     protectedFiles: protectedFileDigests(root),
     requiredTargets: [...REQUIRED_TARGETS],

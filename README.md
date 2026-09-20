@@ -54,7 +54,7 @@ GUI session such as VNC or RDP to run Electron.
 | Git                  | Clone this repository and the pinned node sources                            |
 | Python               | `3.11+` for helper pipelines and native dependency builds                    |
 | Platform build tools | Required for Electron's native dependencies; see below                       |
-| Go                   | Needed for managed-node builds and rehearsal; the builder selects `go1.26.5` |
+| Go                   | Needed for managed-node builds and rehearsal; the builder selects `go1.26.8` |
 
 [`.nvmrc`](.nvmrc) pins Node for version-manager users. Dependency versions and
 commands live in [`package.json`](package.json); the exact dependency tree is
