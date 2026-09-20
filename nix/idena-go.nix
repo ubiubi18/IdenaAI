@@ -12,11 +12,11 @@ buildGoModule rec {
   src = fetchFromGitHub {
     owner = "ubiubi18";
     repo = "idena-go";
-    rev = "eeb73fbaf80493e3bcbc4a661fa3a7e2f07ec2bd";
-    hash = "sha256-swiy4fm/6gPNxQm3M1rdOPqzNig0q8KcvNf/HbXBzeU=";
+    rev = "c478705fedf60c16f721482898b9081ad9d56580";
+    hash = "sha256-lZMC7X4WjaRfUItIQYjNm41woUdmB2b4ehB58w0vz4k=";
   };
 
-  vendorHash = "sha256-TsXSafgco4H/f/NFE1coNYfhivLMw6hcJuFUH0TzLUk=";
+  vendorHash = "sha256-YTaXY55mqIXtzPS20S8GtgvYICudaSoHJKhpx8YlJh4=";
   subPackages = [ "." ];
 
   postPatch = ''
