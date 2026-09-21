@@ -1,7 +1,13 @@
 import {submitFlip as submitFlipRpc} from '../../shared/api/dna'
 import {resizeImageToDataUrl} from '../../shared/utils/image-canvas'
 import {getFlipsBridge} from '../../shared/utils/flips-bridge'
-import {compressFlipImagesForSubmit, publishFlip} from './utils'
+import {
+  archiveFlips,
+  archiveFlipsForEpoch,
+  compressFlipImagesForSubmit,
+  publishFlip,
+  shouldArchiveEpochFlips,
+} from './utils'
 
 jest.mock('../../shared/api/dna', () => ({
   submitFlip: jest.fn(),
@@ -161,5 +167,76 @@ describe('flip submit image preparation', () => {
 
     expect(resizeImageToDataUrl).not.toHaveBeenCalled()
     expect(submitFlipRpc).not.toHaveBeenCalled()
+  })
+})
+
+describe('epoch flip archiving', () => {
+  const buildFlips = () => [
+    {id: 'older-draft', type: 'draft', epoch: 226},
+    {id: 'current-draft', type: 'draft', epoch: 227},
+    {id: 'legacy-draft', type: 'draft'},
+    {id: 'already-archived', type: 'archived', epoch: 227},
+  ]
+
+  const archivedTypes = (saveFlips) =>
+    Object.fromEntries(
+      saveFlips.mock.calls[0][0].map((flip) => [flip.id, flip.type])
+    )
+
+  it('keeps drafts that belong to the epoch being archived', () => {
+    const saveFlips = jest.fn()
+    getFlipsBridge.mockReturnValue({getFlips: buildFlips, saveFlips})
+
+    archiveFlipsForEpoch(227)
+
+    expect(archivedTypes(saveFlips)).toEqual({
+      'older-draft': 'archived',
+      'current-draft': 'draft',
+      'legacy-draft': 'archived',
+      'already-archived': 'archived',
+    })
+  })
+
+  it('archives every flip when the operator archives them explicitly', () => {
+    const saveFlips = jest.fn()
+    getFlipsBridge.mockReturnValue({getFlips: buildFlips, saveFlips})
+
+    archiveFlips()
+
+    expect(Object.values(archivedTypes(saveFlips))).toEqual([
+      'archived',
+      'archived',
+      'archived',
+      'archived',
+    ])
+  })
+
+  it('requires a resolved identity before an epoch archives flips', () => {
+    const base = {epoch: 227, isValidated: true, isArchived: false}
+
+    expect(shouldArchiveEpochFlips({...base, identityAddress: ''})).toBe(false)
+    expect(shouldArchiveEpochFlips({...base, identityAddress: '   '})).toBe(
+      false
+    )
+    expect(shouldArchiveEpochFlips({...base, identityAddress: '0xabc'})).toBe(
+      true
+    )
+    expect(
+      shouldArchiveEpochFlips({
+        ...base,
+        identityAddress: '0xabc',
+        isValidated: false,
+      })
+    ).toBe(false)
+    expect(
+      shouldArchiveEpochFlips({
+        ...base,
+        identityAddress: '0xabc',
+        isArchived: true,
+      })
+    ).toBe(false)
+    expect(
+      shouldArchiveEpochFlips({...base, epoch: null, identityAddress: '0xabc'})
+    ).toBe(false)
   })
 })
