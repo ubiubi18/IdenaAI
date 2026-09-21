@@ -7,9 +7,22 @@ const {DEFAULT_STORY_MODELS} = require('./ai-providers/constants')
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
 // The renderer stores flip types in lower case; see renderer/shared/types.js.
 const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
+// Higher identity states publish one or two flips beyond the epoch minimum
+// when unused keyword pairs allow it.
+const EXTRA_FLIPS_BY_STATE = {verified: 1, human: 2}
 
 function isDraftFlip(flip) {
   return DRAFT_FLIP_TYPES.includes(String(flip?.type || '').toLowerCase())
+}
+
+function extraFlipsForState(state) {
+  return (
+    EXTRA_FLIPS_BY_STATE[
+      String(state || '')
+        .trim()
+        .toLowerCase()
+    ] || 0
+  )
 }
 
 function dayKey(value) {
@@ -57,9 +70,13 @@ function selectMissingPairs(identity, drafts, sessionEndedAt) {
     required > pairs.length
   )
     return []
+  const target = Math.min(
+    required + extraFlipsForState(identity.state),
+    pairs.length
+  )
   return pairs
     .filter((pair) => !pair.used && !occupied.has(String(pair.id)))
-    .slice(0, Math.max(0, required - published - reservedDrafts))
+    .slice(0, Math.max(0, target - published - reservedDrafts))
 }
 
 function normalizePanelImages(response, nativeImage) {
