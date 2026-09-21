@@ -34,6 +34,8 @@ From the exact reviewed source checkout on the managed host:
 ```sh
 sudo /srv/sharechain/idena-ai/source/deploy/install-electron-userns-apparmor.sh
 sudo /srv/sharechain/idena-ai/source/deploy/install-provider-credential-broker.sh
+sudo IDENA_AI_SOURCE_ROOT=/srv/sharechain/idena-ai/source \
+  /srv/sharechain/idena-ai/source/deploy/install-provider-credential-cli.sh
 ```
 
 Ubuntu hosts that restrict unprivileged user namespaces need the path-specific
@@ -48,6 +50,30 @@ The installer deliberately does not restart IdenaAI. Once the updated app is
 running, open **AI settings**, load the key, and select **Keep after restart**.
 Then use **Test fast path** to test the exact GPT-5.5 request used by short
 session: Priority service tier with low reasoning effort.
+
+### Store the key from a terminal
+
+The operator can store the key from a shell instead of the settings UI. The
+command reads it from a hidden prompt, so it does not appear in the process
+list or the shell history, and it writes the same encrypted file the broker
+reads:
+
+```sh
+sudo idena-ai-set-provider-key
+sudo idena-ai-set-provider-key --provider deepseek --restart
+sudo idena-ai-set-provider-key --list
+```
+
+Without `--credential` the command takes the encrypted path from the broker
+unit of the selected console. A host that runs more than one console needs the
+instance explicitly, for example:
+
+```sh
+sudo idena-ai-set-provider-key --service idena-ai-3-console.service
+```
+
+A running app loads the stored key at startup, so restart the console
+(`--restart`) before testing it. `--clear` removes the stored key again.
 
 After the encrypted status is visible, test restart recovery:
 

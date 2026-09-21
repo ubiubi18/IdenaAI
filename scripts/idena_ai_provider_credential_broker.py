@@ -29,6 +29,13 @@ MIN_CREDENTIAL_BYTES = 16
 MAX_CREDENTIAL_BYTES = 4096
 PROTOCOL_VERSION = 1
 CREDENTIAL_NAME = "idena-ai-openai-api-key"
+DEEPSEEK_CREDENTIAL_NAME = "idena-ai-deepseek-api-key"
+
+
+def derive_deepseek_credential_path(credential_path: Path) -> Path:
+    return credential_path.with_name(
+        f"{credential_path.stem}.deepseek{credential_path.suffix}"
+    )
 
 
 class BrokerError(Exception):
@@ -321,7 +328,7 @@ def main() -> int:
     deepseek_path = (
         Path(args.deepseek_credential)
         if args.deepseek_credential
-        else credential_path.with_name(f"{credential_path.stem}.deepseek{credential_path.suffix}")
+        else derive_deepseek_credential_path(credential_path)
     )
     if not all(path.is_absolute() for path in (socket_path, credential_path, deepseek_path)):
         print("credential broker paths must be absolute", file=sys.stderr)
@@ -336,7 +343,7 @@ def main() -> int:
         allowed_uid=user.pw_uid,
         allowed_cgroup=str(args.allowed_cgroup or ""),
         deepseek_vault=CredentialVault(
-            deepseek_path, credential_name="idena-ai-deepseek-api-key"
+            deepseek_path, credential_name=DEEPSEEK_CREDENTIAL_NAME
         ),
     )
     os.chmod(socket_path, 0o600)

@@ -78,10 +78,10 @@ jobs:
         run: python -m unittest discover -s scripts -p '*_test.py'
 
       - name: Check deployment script syntax
-        run: bash -n deploy/install-provider-credential-broker.sh deploy/install-idena-node-watchdog.sh deploy/install-idena-vnc-lite.sh
+        run: bash -n deploy/install-provider-credential-broker.sh deploy/install-provider-credential-cli.sh deploy/install-idena-node-watchdog.sh deploy/install-idena-vnc-lite.sh
 
       - name: Test automatic transfers and staking with synthetic RPC
         run: python -m unittest discover -s deploy/auto-stake -p 'test_*.py'
 
       - name: Lint deployment scripts
-        run: shellcheck deploy/install-provider-credential-broker.sh deploy/install-idena-node-watchdog.sh deploy/install-idena-vnc-lite.sh deploy/auto-stake/idena-auto-common.sh deploy/auto-stake/idena-auto-transfer-source deploy/auto-stake/idena-auto-stake-target
+        run: shellcheck deploy/install-provider-credential-broker.sh deploy/install-provider-credential-cli.sh deploy/install-idena-node-watchdog.sh deploy/install-idena-vnc-lite.sh deploy/auto-stake/idena-auto-common.sh deploy/auto-stake/idena-auto-transfer-source deploy/auto-stake/idena-auto-stake-target

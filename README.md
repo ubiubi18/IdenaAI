@@ -128,6 +128,9 @@ DeepSeek does not generate images. Scheduled drafts use the same selections.
 On hosts with the credential broker installed, **Keep after restart** keeps the key
 encrypted across restarts. DeepSeek cost estimates use peak, uncached rates;
 the billed amount can be lower. See [DeepSeek's capabilities and pricing](https://api-docs.deepseek.com/quick_start/pricing/).
+The same key can be entered from a terminal on a managed host with
+`sudo idena-ai-set-provider-key`; see
+[unattended validation](docs/unattended-validation.md).
 
 Hosted calls send prompts and relevant images to the selected provider and can
 incur charges, including during benchmarks and rehearsal. The app's daily cap
