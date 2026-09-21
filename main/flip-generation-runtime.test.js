@@ -178,7 +178,12 @@ describe('scheduled generation runtime', () => {
     expect(drafts).toHaveLength(1)
   })
   it('preserves manual drafts and ignores archived drafts from the previous epoch', () => {
-    const identity = {requiredFlips: 2, flips: [], flipKeyWordPairs: pairs}
+    const identity = {
+      state: 'Newbie',
+      requiredFlips: 2,
+      flips: [],
+      flipKeyWordPairs: pairs,
+    }
     const stored = [
       {
         keywordPairId: 0,
@@ -194,5 +199,66 @@ describe('scheduled generation runtime', () => {
     expect(
       selectMissingPairs(identity, stored, end).map((pair) => pair.id)
     ).toEqual([1])
+  })
+
+  it('adds one extra flip for verified and two for human identities', () => {
+    const buildPairs = (count) =>
+      Array.from({length: count}, (_, id) => ({
+        id,
+        words: [10 + id, 100 + id],
+        used: false,
+      }))
+    const requiredOnly = {
+      state: 'Newbie',
+      requiredFlips: 3,
+      flips: [],
+      flipKeyWordPairs: buildPairs(9),
+    }
+    const verified = {...requiredOnly, state: 'Verified'}
+    const human = {...requiredOnly, state: 'Human'}
+
+    expect(selectMissingPairs(requiredOnly, [], end).map(({id}) => id)).toEqual(
+      [0, 1, 2]
+    )
+    expect(selectMissingPairs(verified, [], end).map(({id}) => id)).toEqual([
+      0, 1, 2, 3,
+    ])
+    expect(selectMissingPairs(human, [], end).map(({id}) => id)).toEqual([
+      0, 1, 2, 3, 4,
+    ])
+  })
+
+  it('caps the extra flips at the available keyword pairs', () => {
+    const identity = {
+      state: 'Human',
+      requiredFlips: 3,
+      flips: [],
+      flipKeyWordPairs: Array.from({length: 4}, (_, id) => ({
+        id,
+        words: [10 + id, 100 + id],
+        used: false,
+      })),
+    }
+
+    expect(selectMissingPairs(identity, [], end).map(({id}) => id)).toEqual([
+      0, 1, 2, 3,
+    ])
+  })
+
+  it('counts published flips against the extra target', () => {
+    const identity = {
+      state: 'Verified',
+      requiredFlips: 3,
+      flips: [{id: 'published-one'}],
+      flipKeyWordPairs: Array.from({length: 9}, (_, id) => ({
+        id,
+        words: [10 + id, 100 + id],
+        used: false,
+      })),
+    }
+
+    expect(selectMissingPairs(identity, [], end).map(({id}) => id)).toEqual([
+      0, 1, 2,
+    ])
   })
 })
