@@ -107,7 +107,7 @@ const REHEARSAL_AI_DEFAULT_MODELS = {
   xai: 'grok-2-vision-latest',
   mistral: 'mistral-large-latest',
   groq: 'llama-3.2-90b-vision-preview',
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-flash',
   deepinfra: 'Qwen/Qwen3.6-35B-A3B',
   openrouter: 'openai/gpt-4o-mini',
   moonshot: 'kimi-k2.6',
@@ -143,7 +143,7 @@ const REHEARSAL_AI_MODEL_PRESETS = {
     'llama-3.2-90b-vision-preview',
     'meta-llama/llama-4-scout-17b-16e-instruct',
   ],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-flash'],
   deepinfra: ['Qwen/Qwen3.6-35B-A3B'],
   openrouter: [
     'qwen/qwen3.6-35b-a3b',

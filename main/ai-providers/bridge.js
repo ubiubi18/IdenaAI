@@ -131,6 +131,11 @@ const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
   'kimi-k2.6': {input: 0.95, output: 4},
   // DeepInfra public Qwen3.6-35B-A3B pricing checked on 2026-07-03.
   'qwen/qwen3.6-35b-a3b': {input: 0.15, output: 0.95},
+  // DeepSeek V4.1 Flash checked 2026-09-21. Conservative peak/cache-miss
+  // estimates keep budget accounting nonzero without assuming discounts.
+  'deepseek-flash': {input: 0.3, output: 1.2},
+  'deepseek-v4-flash': {input: 0.3, output: 1.2},
+  'deepseek-v4-flash-vision-exp': {input: 0.3, output: 1.2},
 }
 
 const OPENAI_IMAGE_PRICING_USD_PER_IMAGE = {
@@ -335,7 +340,8 @@ function supportsImageGenerationProvider(provider) {
   return (
     (isOpenAiCompatibleProvider(provider) &&
       provider !== PROVIDERS.Moonshot &&
-      provider !== PROVIDERS.DeepInfra) ||
+      provider !== PROVIDERS.DeepInfra &&
+      provider !== PROVIDERS.DeepSeek) ||
     provider === PROVIDERS.Gemini
   )
 }
@@ -6924,43 +6930,35 @@ Flip hash: ${hash}
     }
 
     const loadedProviders = []
-
-    try {
-      const result = await persistentCredentialClient.loadProviderKey({
-        provider: PROVIDERS.OpenAI,
-      })
-
-      if (result && result.hasKey && result.apiKey) {
-        providerKeys.set(PROVIDERS.OpenAI, String(result.apiKey).trim())
-        providerKeySources.set(PROVIDERS.OpenAI, 'host-credential')
-        providerKeyOrigins.set(
-          PROVIDERS.OpenAI,
-          resolveProviderCredentialOrigin(PROVIDERS.OpenAI)
-        )
-        loadedProviders.push(PROVIDERS.OpenAI)
-        logger.info('Persistent AI provider credential loaded', {
-          provider: PROVIDERS.OpenAI,
+    let supported = false
+    let failed = false
+    for (const provider of [PROVIDERS.OpenAI, PROVIDERS.DeepSeek]) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await persistentCredentialClient.loadProviderKey({
+          provider,
         })
+        supported = supported || Boolean(result && result.supported)
+        if (result && result.hasKey && result.apiKey) {
+          providerKeys.set(provider, String(result.apiKey).trim())
+          providerKeySources.set(provider, 'host-credential')
+          providerKeyOrigins.set(
+            provider,
+            resolveProviderCredentialOrigin(provider)
+          )
+          loadedProviders.push(provider)
+          logger.info('Persistent AI provider credential loaded', {provider})
+        }
+      } catch {
+        failed = true
+        logger.warn('Persistent AI provider credential unavailable', {provider})
       }
-
-      return {
-        ok: true,
-        supported: Boolean(result && result.supported),
-        loadedProviders,
-      }
-    } catch (error) {
-      logger.warn('Persistent AI provider credential unavailable', {
-        provider: PROVIDERS.OpenAI,
-        error: String(
-          error && error.message ? error.message : 'credential_load_failed'
-        ),
-      })
-      return {
-        ok: false,
-        supported: true,
-        loadedProviders,
-        error: 'credential_load_failed',
-      }
+    }
+    return {
+      ok: !failed,
+      supported: supported || failed,
+      loadedProviders,
+      ...(failed ? {error: 'credential_load_failed'} : {}),
     }
   }
 
@@ -9299,6 +9297,7 @@ Flip hash: ${hash}
 
   async function generateFlipPanels(payload = {}) {
     const provider = normalizeProvider(payload.provider)
+    const imageProvider = normalizeProvider(payload.imageProvider || provider)
     const fastBuild = payload.fastBuild !== false
     const model = String(payload.model || DEFAULT_STORY_MODELS[provider]).trim()
     const imageModel = String(payload.imageModel || 'gpt-image-2').trim()
@@ -9307,7 +9306,7 @@ Flip hash: ${hash}
     const providerDailyBudgetRemainingUsd =
       resolveProviderDailyBudgetRemainingForOperation({
         payload,
-        provider,
+        provider: imageProvider,
         operation: 'flip panel generation',
       })
     assertProviderDailyBudgetHasRoom(
@@ -9321,6 +9320,10 @@ Flip hash: ${hash}
     const imageStyle = String(payload.imageStyle || '').trim()
     const providerConfig = payload.providerConfig || null
     const apiKey = getApiKey(provider, providerConfig)
+    const imageProviderConfig = payload.imageProvider
+      ? payload.imageProviderConfig || null
+      : providerConfig
+    const imageApiKey = getApiKey(imageProvider, imageProviderConfig)
     const [keywordA, keywordB] = normalizeKeywords(payload)
     const senseSelection = getLockedSenseSelection(
       payload.senseSelection,
@@ -9380,9 +9383,9 @@ Flip hash: ${hash}
       String(payload.visualStyle || '').trim() ||
       'Single-panel cartoon illustration, flat bright colors, clean line art, consistent environment and character style with no text overlays.'
 
-    if (!supportsImageGenerationProvider(provider)) {
+    if (!supportsImageGenerationProvider(imageProvider)) {
       throw new Error(
-        `Flip image generation is not available for provider: ${provider}. Supported providers: openai-compatible and gemini.`
+        `Flip image generation is not available for provider: ${imageProvider}. Supported providers: openai-compatible and gemini.`
       )
     }
 
@@ -9427,9 +9430,7 @@ Flip hash: ${hash}
         ? payload.renderFeedbackEnabled
         : true
     const sequenceAuditEnabled = payload.sequenceAuditEnabled === true
-    const textAuditModel = String(
-      payload.textAuditModel || DEFAULT_STORY_MODELS.openai
-    ).trim()
+    const textAuditModel = String(payload.textAuditModel || model).trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel
     ).trim()
@@ -9589,6 +9590,7 @@ Flip hash: ${hash}
 
     logger.info('AI flip image generation profile', {
       provider,
+      imageProvider,
       model,
       imageModel,
       imageSize,
@@ -9648,7 +9650,7 @@ Flip hash: ${hash}
           : profile.requestTimeoutMs
       )
       const imageProfileCandidates = buildImageProfileCandidates({
-        provider,
+        provider: imageProvider,
         imageModel,
         imageSize: sheetImageSize,
       })
@@ -9676,7 +9678,7 @@ Flip hash: ${hash}
             }
             try {
               const projectedSheetCostUsd = getProviderBudgetCostUsd({
-                provider,
+                provider: imageProvider,
                 imageModel: profileCandidate.imageModel,
                 imageSize: profileCandidate.imageSize,
                 imageQuality,
@@ -9693,14 +9695,14 @@ Flip hash: ${hash}
               // eslint-disable-next-line no-await-in-loop
               sheetResponse = await withRetries(profile.maxRetries, () =>
                 runImageProvider({
-                  provider,
+                  provider: imageProvider,
                   imageModel: profileCandidate.imageModel,
                   prompt: sheetPrompt,
                   profile: imageProfile,
-                  apiKey,
+                  apiKey: imageApiKey,
                   providerConfig: resolveProviderConfig(
-                    provider,
-                    providerConfig
+                    imageProvider,
+                    imageProviderConfig
                   ),
                   size: profileCandidate.imageSize,
                   quality: imageQuality,
@@ -9755,9 +9757,9 @@ Flip hash: ${hash}
           )
           const sheetEstimatedTextCostUsd = estimateTextCostUsd(
             sheetUsage,
-            model
+            imageProvider === provider ? model : ''
           )
-          const imageUnitPrice = isOpenAiCompatibleProvider(provider)
+          const imageUnitPrice = isOpenAiCompatibleProvider(imageProvider)
             ? resolveOpenAiImageUnitPrice(
                 sheetImageModel,
                 sheetImageSizeUsed,
@@ -9780,6 +9782,7 @@ Flip hash: ${hash}
           return {
             ok: true,
             provider,
+            imageProvider,
             model,
             imageModel,
             imageSize: sheetImageSizeUsed,
@@ -9927,8 +9930,8 @@ Flip hash: ${hash}
 
       if (shouldGenerate) {
         const panelProviderConfig = resolveProviderConfig(
-          provider,
-          providerConfig
+          imageProvider,
+          imageProviderConfig
         )
         let panelResponse = null
         let panelImageModel = imageModel
@@ -9962,7 +9965,7 @@ Flip hash: ${hash}
               : profile.requestTimeoutMs
           )
           const imageProfileCandidates = buildImageProfileCandidates({
-            provider,
+            provider: imageProvider,
             imageModel,
             imageSize,
           })
@@ -9988,7 +9991,7 @@ Flip hash: ${hash}
                 const projectedPanelCostUsd =
                   estimatedImageCostUsd +
                   getProviderBudgetCostUsd({
-                    provider,
+                    provider: imageProvider,
                     imageModel: profileCandidate.imageModel,
                     imageSize: profileCandidate.imageSize,
                     imageQuality,
@@ -10009,11 +10012,11 @@ Flip hash: ${hash}
                   profile.maxRetries,
                   () =>
                     runImageProvider({
-                      provider,
+                      provider: imageProvider,
                       imageModel: profileCandidate.imageModel,
                       prompt: panelPrompt,
                       profile: imageProfile,
-                      apiKey,
+                      apiKey: imageApiKey,
                       providerConfig: panelProviderConfig,
                       size: profileCandidate.imageSize,
                       quality: imageQuality,
@@ -10074,7 +10077,7 @@ Flip hash: ${hash}
           )
           panelImageModelUsed[panelIndex] = panelImageModel
           panelImageSizeUsed[panelIndex] = panelImageSize
-          const unitPrice = isOpenAiCompatibleProvider(provider)
+          const unitPrice = isOpenAiCompatibleProvider(imageProvider)
             ? resolveOpenAiImageUnitPrice(
                 panelImageModel,
                 panelImageSize,
@@ -10278,7 +10281,10 @@ Flip hash: ${hash}
       }
     }
 
-    const generationTextCostUsd = estimateTextCostUsd(generationUsage, model)
+    const generationTextCostUsd = estimateTextCostUsd(
+      generationUsage,
+      imageProvider === provider ? model : ''
+    )
     const validatorAuditTextCostUsd = validatorEnabled
       ? estimateTextCostUsd(validatorAuditUsage, validatorModel)
       : null
@@ -10296,6 +10302,7 @@ Flip hash: ${hash}
     const baseResult = {
       ok: true,
       provider,
+      imageProvider,
       model,
       imageModel,
       imageSize,

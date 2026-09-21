@@ -307,6 +307,32 @@ function applyProviderExtraBody(payload, providerConfig = {}) {
 }
 
 function normalizeModelPayload(payload, providerConfig = {}) {
+  const {hostname} = new URL(resolveOpenAiEndpoint(providerConfig))
+  if (hostname === 'api.deepseek.com') {
+    const deepseekPayload = {...payload}
+    // DeepSeek's Chat API supports JSON objects, not OpenAI JSON schemas.
+    // The bridge still validates the resulting story against its full schema.
+    if (deepseekPayload.response_format?.type === 'json_schema') {
+      deepseekPayload.response_format = {type: 'json_object'}
+    }
+    delete deepseekPayload.service_tier
+    if (deepseekPayload.max_completion_tokens !== undefined) {
+      deepseekPayload.max_tokens =
+        deepseekPayload.max_tokens ?? deepseekPayload.max_completion_tokens
+      delete deepseekPayload.max_completion_tokens
+    }
+    // Keep time-bounded tasks in non-thinking mode unless reasoning is requested.
+    const effort = deepseekPayload.reasoning_effort || 'none'
+    deepseekPayload.reasoning_effort =
+      {minimal: 'low', medium: 'high', xhigh: 'high'}[effort] || effort
+    deepseekPayload.thinking = {
+      type:
+        deepseekPayload.reasoning_effort === 'none' ? 'disabled' : 'enabled',
+    }
+    if (deepseekPayload.thinking.type === 'enabled')
+      delete deepseekPayload.temperature
+    return deepseekPayload
+  }
   if (!/^gpt-6-astra(?:-|$)/u.test(String(payload.model || ''))) return payload
 
   const normalized = {...payload}
@@ -334,7 +360,6 @@ function normalizeModelPayload(payload, providerConfig = {}) {
     delete normalized.prompt_cache_retention
     normalized.prompt_cache_options = {ttl: '30m'}
   }
-  const {hostname} = new URL(resolveOpenAiEndpoint(providerConfig))
   if (
     hostname === 'eu.api.openai.com' &&
     ['fast', 'priority'].includes(normalized.service_tier)
@@ -721,7 +746,13 @@ async function callOpenAi({
   const responseData = response && response.data
   const choices = responseData && responseData.choices
   const message = Array.isArray(choices) && choices.length && choices[0].message
-  const rawText = extractOpenAiRawText(message)
+  // Reasoning is not a final answer; an interrupted DeepSeek completion must
+  // not be mistaken for a finished decision or story.
+  const rawText = extractOpenAiRawText(
+    new URL(endpoint).hostname === 'api.deepseek.com' && message
+      ? {...message, reasoning_content: ''}
+      : message
+  )
   const providerMeta = extractOpenAiProviderMeta(responseData)
   const responseServiceTier = String(responseData?.service_tier || '')
     .trim()

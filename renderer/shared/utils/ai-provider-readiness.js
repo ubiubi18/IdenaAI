@@ -171,6 +171,8 @@ function formatAiProviderLabel(value) {
       return 'Moonshot Kimi'
     case 'deepinfra':
       return 'DeepInfra Qwen'
+    case 'deepseek':
+      return 'DeepSeek'
     default:
       return provider
   }
