@@ -121,6 +121,14 @@ Repository defaults are listed in
 [`main/ai-providers/constants.js`](main/ai-providers/constants.js); provider
 availability and billing depend on your account.
 
+For **DeepSeek V4.1 Flash**, select **DeepSeek** and model `deepseek-flash`.
+It supports story generation, image-based solving, and visual quality checks.
+Choose a separate image provider in the flip builder to draw the panels;
+DeepSeek does not generate images. Scheduled drafts use the same selections.
+On hosts with the credential broker installed, **Keep after restart** keeps the key
+encrypted across restarts. DeepSeek cost estimates use peak, uncached rates;
+the billed amount can be lower. See [DeepSeek's capabilities and pricing](https://api-docs.deepseek.com/quick_start/pricing/).
+
 Hosted calls send prompts and relevant images to the selected provider and can
 incur charges, including during benchmarks and rehearsal. The app's daily cap
 only limits calls from that local profile. Configure spending limits and alerts

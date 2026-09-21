@@ -28,7 +28,6 @@ MAX_REQUEST_BYTES = 16 * 1024
 MIN_CREDENTIAL_BYTES = 16
 MAX_CREDENTIAL_BYTES = 4096
 PROTOCOL_VERSION = 1
-SUPPORTED_PROVIDER = "openai"
 CREDENTIAL_NAME = "idena-ai-openai-api-key"
 
 
@@ -85,9 +84,12 @@ class CredentialVault:
         self,
         credential_path: Path,
         run_command: Callable[..., bytes] = default_run_command,
+        *,
+        credential_name: str = CREDENTIAL_NAME,
     ) -> None:
         self.credential_path = credential_path
         self.run_command = run_command
+        self.credential_name = credential_name
         self._lock = threading.Lock()
 
     def has_key(self) -> bool:
@@ -99,7 +101,7 @@ class CredentialVault:
             [
                 "/usr/bin/systemd-creds",
                 "decrypt",
-                f"--name={CREDENTIAL_NAME}",
+                f"--name={self.credential_name}",
                 str(source_path),
                 "-",
             ]
@@ -132,7 +134,7 @@ class CredentialVault:
                         "/usr/bin/systemd-creds",
                         "encrypt",
                         "--with-key=host",
-                        f"--name={CREDENTIAL_NAME}",
+                        f"--name={self.credential_name}",
                         "-",
                         str(temporary_path),
                     ],
@@ -194,15 +196,17 @@ class CredentialRequestHandler(socketserver.StreamRequestHandler):
             payload = self._read_request()
             if payload.get("version") != PROTOCOL_VERSION:
                 raise BrokerError("protocol version is unsupported")
-            if payload.get("provider") != SUPPORTED_PROVIDER:
+            provider = payload.get("provider")
+            if not isinstance(provider, str) or provider not in self.server.vaults:
                 raise BrokerError("provider is unsupported")
+            vault = self.server.vaults[provider]
 
             operation = str(payload.get("operation") or "")
             if operation == "status":
-                self._reply({"ok": True, "hasKey": self.server.vault.has_key()})
+                self._reply({"ok": True, "hasKey": vault.has_key()})
                 return
             if operation == "load":
-                credential = self.server.vault.load()
+                credential = vault.load()
                 response: dict[str, Any] = {
                     "ok": True,
                     "hasKey": credential is not None,
@@ -213,11 +217,11 @@ class CredentialRequestHandler(socketserver.StreamRequestHandler):
                 return
             if operation == "store":
                 credential = validate_credential(payload.get("credential"))
-                self.server.vault.store(credential)
+                vault.store(credential)
                 self._reply({"ok": True, "hasKey": True})
                 return
             if operation == "clear":
-                self.server.vault.clear()
+                vault.clear()
                 self._reply({"ok": True, "hasKey": False})
                 return
             raise BrokerError("operation is unsupported")
@@ -247,9 +251,14 @@ class CredentialBrokerServer(socketserver.UnixStreamServer):
         vault: CredentialVault,
         allowed_uid: int,
         allowed_cgroup: str,
+        deepseek_vault: CredentialVault | None = None,
     ) -> None:
         self.socket_path = socket_path
-        self.vault = vault
+        self.vaults = {"openai": vault}
+        if deepseek_vault is not None:
+            if deepseek_vault.credential_path.resolve() == vault.credential_path.resolve():
+                raise BrokerError("provider credential paths must be distinct")
+            self.vaults["deepseek"] = deepseek_vault
         self.allowed_uid = allowed_uid
         self.allowed_cgroup = allowed_cgroup
         socket_path.unlink(missing_ok=True)
@@ -275,6 +284,10 @@ def parse_args() -> argparse.Namespace:
             "IDENA_AI_OPENAI_CREDENTIAL",
             "/etc/credstore.encrypted/idena-ai-openai-api-key.cred",
         ),
+    )
+    parser.add_argument(
+        "--deepseek-credential",
+        default=os.environ.get("IDENA_AI_DEEPSEEK_CREDENTIAL", ""),
     )
     parser.add_argument(
         "--user",
@@ -304,7 +317,13 @@ def main() -> int:
 
     socket_path = Path(args.socket)
     credential_path = Path(args.credential)
-    if not socket_path.is_absolute() or not credential_path.is_absolute():
+    # Derive from this instance's existing path to preserve profile isolation.
+    deepseek_path = (
+        Path(args.deepseek_credential)
+        if args.deepseek_credential
+        else credential_path.with_name(f"{credential_path.stem}.deepseek{credential_path.suffix}")
+    )
+    if not all(path.is_absolute() for path in (socket_path, credential_path, deepseek_path)):
         print("credential broker paths must be absolute", file=sys.stderr)
         return 2
 
@@ -316,6 +335,9 @@ def main() -> int:
         vault=vault,
         allowed_uid=user.pw_uid,
         allowed_cgroup=str(args.allowed_cgroup or ""),
+        deepseek_vault=CredentialVault(
+            deepseek_path, credential_name="idena-ai-deepseek-api-key"
+        ),
     )
     os.chmod(socket_path, 0o600)
     os.chown(socket_path, user.pw_uid, user.pw_gid)

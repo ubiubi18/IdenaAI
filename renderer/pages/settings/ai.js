@@ -107,7 +107,7 @@ const DEFAULT_MODELS = {
   xai: 'grok-2-vision-latest',
   mistral: 'mistral-large-latest',
   groq: 'llama-3.2-90b-vision-preview',
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-flash',
   openrouter: 'openai/gpt-4o-mini',
   moonshot: 'kimi-k2.6',
   deepinfra: 'Qwen/Qwen3.6-35B-A3B',
@@ -201,7 +201,7 @@ const MODEL_PRESETS = {
     'llama-3.2-90b-vision-preview',
     'meta-llama/llama-4-scout-17b-16e-instruct',
   ],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-flash'],
   openrouter: [
     QWEN36_35B_A3B_OPENROUTER_MODEL,
     'openai/gpt-4o-mini',
@@ -237,6 +237,8 @@ const MAIN_PROVIDER_OPTIONS = [
   {value: 'moonshot', label: 'Moonshot Kimi'},
   {value: 'openai-compatible', label: 'OpenAI-compatible (custom)'},
 ]
+
+const PERSISTENT_CREDENTIAL_PROVIDERS = new Set(['openai', 'deepseek'])
 
 const CONSULT_PROVIDER_OPTIONS = MAIN_PROVIDER_OPTIONS.filter(
   ({value}) => value !== 'local-ai'
@@ -3601,7 +3603,7 @@ export default function AiSettingsPage() {
   const providerConfig = buildProviderConfigForBridge(aiSolver, activeProvider)
   const trimmedApiKey = String(apiKey || '').trim()
   let providerPersistenceDescription = t(
-    'The key is memory-only. A restart or reboot will disarm OpenAI until you load the key again.'
+    'The key is memory-only. A restart or reboot will disarm this provider until you load the key again.'
   )
 
   if (providerPersistenceStatus.checking) {
@@ -3658,7 +3660,7 @@ export default function AiSettingsPage() {
   }, [activeProvider, aiSolver, localAi])
 
   const refreshProviderPersistenceStatus = useCallback(async () => {
-    if (activeProvider !== 'openai') {
+    if (!PERSISTENT_CREDENTIAL_PROVIDERS.has(activeProvider)) {
       const unsupported = {
         checking: false,
         supported: false,
@@ -5316,7 +5318,9 @@ export default function AiSettingsPage() {
                           )}
                         </Stack>
 
-                        {activeProvider === 'openai' && (
+                        {PERSISTENT_CREDENTIAL_PROVIDERS.has(
+                          activeProvider
+                        ) && (
                           <Box
                             borderWidth="1px"
                             borderColor={
@@ -5490,7 +5494,9 @@ export default function AiSettingsPage() {
                   >
                     {modelPresets.map((value) => (
                       <option key={value} value={value}>
-                        {value}
+                        {value === 'deepseek-flash'
+                          ? t('DeepSeek V4.1 Flash (deepseek-flash)')
+                          : value}
                       </option>
                     ))}
                     <option value="custom">{t('Custom model id')}</option>

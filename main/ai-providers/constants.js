@@ -22,7 +22,7 @@ const DEFAULT_MODELS = {
   [PROVIDERS.XAI]: 'grok-2-vision-latest',
   [PROVIDERS.Mistral]: 'mistral-large-latest',
   [PROVIDERS.Groq]: 'llama-3.2-90b-vision-preview',
-  [PROVIDERS.DeepSeek]: 'deepseek-chat',
+  [PROVIDERS.DeepSeek]: 'deepseek-flash',
   [PROVIDERS.OpenRouter]: 'openai/gpt-4o-mini',
   [PROVIDERS.Moonshot]: 'kimi-k2.6',
   [PROVIDERS.DeepInfra]: 'Qwen/Qwen3.6-35B-A3B',

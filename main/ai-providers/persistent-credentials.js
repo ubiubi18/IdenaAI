@@ -3,7 +3,7 @@ const path = require('path')
 
 const DEFAULT_TIMEOUT_MS = 3000
 const MAX_RESPONSE_BYTES = 16 * 1024
-const SUPPORTED_PROVIDERS = new Set(['openai'])
+const SUPPORTED_PROVIDERS = new Set(['openai', 'deepseek'])
 
 function normalizeProvider(provider) {
   const normalized = String(provider || '')

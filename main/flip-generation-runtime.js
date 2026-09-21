@@ -2,10 +2,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const {createFlipGenerationScheduler} = require('./flip-generation-scheduler')
-const {
-  DEFAULT_MODELS,
-  DEFAULT_STORY_MODELS,
-} = require('./ai-providers/constants')
+const {DEFAULT_STORY_MODELS} = require('./ai-providers/constants')
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
 
@@ -286,9 +283,14 @@ function createFlipGenerationRuntime({
     await stillNeeded(pair, current)
     const rendered = await bridge.generateFlipPanels({
       ...budgetPayload(settings),
-      provider: imageProvider,
-      providerConfig: providerConfig(imageProvider),
-      model: provider === imageProvider ? model : DEFAULT_MODELS[imageProvider],
+      provider,
+      providerConfig: providerConfig(provider),
+      model,
+      imageProvider,
+      imageProviderConfig: providerConfig(imageProvider),
+      textAuditModel: model,
+      validatorModel: model,
+      sequenceAuditModel: model,
       imageModel,
       imageQuality: settings.flipBuilderImageQuality || 'low',
       imageSize: settings.flipBuilderImageSize || '1024x1024',

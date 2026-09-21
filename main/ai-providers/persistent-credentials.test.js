@@ -62,36 +62,39 @@ describe('persistent AI provider credentials', () => {
     )
   })
 
-  it('stores a session key without returning it in the result', async () => {
-    let socket
-    const client = createPersistentCredentialClient({
-      socketPath: '/run/idena-ai/credentials.sock',
-      connect: () => {
-        socket = new FakeSocket({ok: true, hasKey: true})
-        queueMicrotask(() => socket.emit('connect'))
-        return socket
-      },
-    })
+  it.each(['openai', 'deepseek'])(
+    'stores a %s session key without returning it in the result',
+    async (provider) => {
+      let socket
+      const client = createPersistentCredentialClient({
+        socketPath: '/run/idena-ai/credentials.sock',
+        connect: () => {
+          socket = new FakeSocket({ok: true, hasKey: true})
+          queueMicrotask(() => socket.emit('connect'))
+          return socket
+        },
+      })
 
-    const result = await client.persistProviderKey({
-      provider: 'openai',
-      apiKey: sessionCredential,
-    })
+      const result = await client.persistProviderKey({
+        provider,
+        apiKey: sessionCredential,
+      })
 
-    expect(result).toEqual({
-      ok: true,
-      provider: 'openai',
-      supported: true,
-      hasKey: true,
-    })
-    expect(result).not.toHaveProperty('apiKey')
-    expect(JSON.parse(socket.request)).toEqual({
-      version: 1,
-      operation: 'store',
-      provider: 'openai',
-      credential: sessionCredential,
-    })
-  })
+      expect(result).toEqual({
+        ok: true,
+        provider,
+        supported: true,
+        hasKey: true,
+      })
+      expect(result).not.toHaveProperty('apiKey')
+      expect(JSON.parse(socket.request)).toEqual({
+        version: 1,
+        operation: 'store',
+        provider,
+        credential: sessionCredential,
+      })
+    }
+  )
 
   it('loads an encrypted host credential only into the main-process caller', async () => {
     let socket

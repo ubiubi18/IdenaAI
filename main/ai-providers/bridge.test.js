@@ -4,6 +4,7 @@ const {selectSensePair} = require('./senseSelector')
 function mockLogger() {
   return {
     info: jest.fn(),
+    warn: jest.fn(),
     error: jest.fn(),
   }
 }
@@ -1190,76 +1191,82 @@ describe('createAiProviderBridge', () => {
     })
   })
 
-  it('loads, persists, and clears a host-bound OpenAI credential', async () => {
-    const persistentCredentialClient = {
-      loadProviderKey: jest.fn().mockResolvedValue({
-        supported: true,
-        hasKey: true,
-        apiKey: 'fixture-host-bound-credential',
-      }),
-      persistProviderKey: jest.fn().mockResolvedValue({
-        supported: true,
-        hasKey: true,
-      }),
-      hasPersistentProviderKey: jest.fn().mockResolvedValue({
+  it.each(['openai', 'deepseek'])(
+    'loads, persists, and clears a host-bound %s credential',
+    async (provider) => {
+      const persistentCredentialClient = {
+        loadProviderKey: jest
+          .fn()
+          .mockImplementation(async ({provider: requested}) => ({
+            supported: true,
+            hasKey: requested === provider,
+            apiKey:
+              requested === provider ? 'fixture-host-bound-credential' : null,
+          })),
+        persistProviderKey: jest.fn().mockResolvedValue({
+          supported: true,
+          hasKey: true,
+        }),
+        hasPersistentProviderKey: jest.fn().mockResolvedValue({
+          ok: true,
+          provider,
+          supported: true,
+          hasKey: true,
+        }),
+        clearPersistentProviderKey: jest.fn().mockResolvedValue({
+          supported: true,
+          hasKey: false,
+        }),
+      }
+      const bridge = createAiProviderBridge(mockLogger(), {
+        persistentCredentialClient,
+      })
+
+      await expect(bridge.initializePersistentProviderKeys()).resolves.toEqual({
         ok: true,
-        provider: 'openai',
+        supported: true,
+        loadedProviders: [provider],
+      })
+      expect(bridge.hasProviderKey({provider})).toEqual({
+        ok: true,
+        provider,
+        hasKey: true,
+        source: 'host-credential',
+      })
+
+      await expect(bridge.persistProviderKey({provider})).resolves.toEqual({
+        ok: true,
+        provider,
         supported: true,
         hasKey: true,
-      }),
-      clearPersistentProviderKey: jest.fn().mockResolvedValue({
+      })
+      expect(
+        persistentCredentialClient.persistProviderKey
+      ).toHaveBeenCalledWith({
+        provider,
+        apiKey: 'fixture-host-bound-credential',
+      })
+
+      await expect(
+        bridge.hasPersistentProviderKey({provider})
+      ).resolves.toMatchObject({
+        supported: true,
+        hasKey: true,
+      })
+      await expect(
+        bridge.clearPersistentProviderKey({provider})
+      ).resolves.toMatchObject({
         supported: true,
         hasKey: false,
-      }),
+      })
+      expect(bridge.hasProviderKey({provider})).toEqual({
+        ok: true,
+        provider,
+        hasKey: true,
+        source: 'session',
+      })
     }
-    const bridge = createAiProviderBridge(mockLogger(), {
-      persistentCredentialClient,
-    })
-
-    await expect(bridge.initializePersistentProviderKeys()).resolves.toEqual({
-      ok: true,
-      supported: true,
-      loadedProviders: ['openai'],
-    })
-    expect(bridge.hasProviderKey({provider: 'openai'})).toEqual({
-      ok: true,
-      provider: 'openai',
-      hasKey: true,
-      source: 'host-credential',
-    })
-
-    await expect(
-      bridge.persistProviderKey({provider: 'openai'})
-    ).resolves.toEqual({
-      ok: true,
-      provider: 'openai',
-      supported: true,
-      hasKey: true,
-    })
-    expect(persistentCredentialClient.persistProviderKey).toHaveBeenCalledWith({
-      provider: 'openai',
-      apiKey: 'fixture-host-bound-credential',
-    })
-
-    await expect(
-      bridge.hasPersistentProviderKey({provider: 'openai'})
-    ).resolves.toMatchObject({
-      supported: true,
-      hasKey: true,
-    })
-    await expect(
-      bridge.clearPersistentProviderKey({provider: 'openai'})
-    ).resolves.toMatchObject({
-      supported: true,
-      hasKey: false,
-    })
-    expect(bridge.hasProviderKey({provider: 'openai'})).toEqual({
-      ok: true,
-      provider: 'openai',
-      hasKey: true,
-      source: 'session',
-    })
-  })
+  )
 
   it('supports openai-compatible provider endpoint config', async () => {
     const httpClient = {
@@ -1348,6 +1355,52 @@ describe('createAiProviderBridge', () => {
       requestedReasoningEffort: 'low',
       appliedServiceTier: 'priority',
       priorityDowngraded: false,
+    })
+  })
+
+  it('keeps DeepSeek credentials on the official origin and uses Flash by default', async () => {
+    const httpClient = {
+      post: jest
+        .fn()
+        .mockResolvedValue({data: {choices: [{message: {content: 'ok'}}]}}),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'deepseek', apiKey: 'test-deepseek-key'})
+    const result = await bridge.testProvider({
+      provider: 'deepseek',
+      providerConfig: {baseUrl: 'https://wrong.example'},
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      provider: 'deepseek',
+      model: 'deepseek-flash',
+    })
+    expect(httpClient.post.mock.calls[0][0]).toBe(
+      'https://api.deepseek.com/v1/chat/completions'
+    )
+    expect(httpClient.post.mock.calls[0][1].model).toBe('deepseek-flash')
+  })
+
+  it('loads DeepSeek even if an independent credential fails', async () => {
+    const bridge = createAiProviderBridge(mockLogger(), {
+      persistentCredentialClient: {
+        loadProviderKey: jest.fn().mockImplementation(async ({provider}) => {
+          if (provider === 'openai') throw new Error('unavailable')
+          return {
+            supported: true,
+            hasKey: true,
+            apiKey: 'fixture-deepseek-credential',
+          }
+        }),
+      },
+    })
+    expect(await bridge.initializePersistentProviderKeys()).toMatchObject({
+      ok: false,
+      loadedProviders: ['deepseek'],
+    })
+    expect(bridge.hasProviderKey({provider: 'deepseek'})).toMatchObject({
+      hasKey: true,
+      source: 'host-credential',
     })
   })
 
@@ -5667,6 +5720,109 @@ describe('createAiProviderBridge', () => {
     ).toBe(false)
   })
 
+  it('routes images and visual audits to separate providers without crossing credentials', async () => {
+    const httpClient = {
+      post: jest.fn(async (url) => {
+        if (url.includes('/images/generations'))
+          return {data: {data: [{b64_json: 'AAA='}]}}
+        return {
+          data: {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    verdict: 'accept',
+                    passed: true,
+                    score: 95,
+                  }),
+                },
+              },
+            ],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              total_tokens: 120,
+            },
+          },
+        }
+      }),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'deepseek', apiKey: 'test-deepseek-key'})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'test-image-key'})
+    const result = await bridge.generateFlipPanels({
+      provider: 'deepseek',
+      imageProvider: 'openai',
+      imageModel: 'gpt-image-2',
+      providerConfig: {baseUrl: 'https://wrong-audit.example'},
+      imageProviderConfig: {baseUrl: 'https://wrong-image.example'},
+      storyPanels: [
+        'A person holds a gift.',
+        'They open the gift.',
+        'A clown emerges.',
+        'The person laughs.',
+      ],
+      keywords: ['present', 'clown'],
+      fastBuild: true,
+      panelRenderMode: 'panels',
+      sequenceAuditEnabled: true,
+      validatorEnabled: false,
+      textAuditEnabled: false,
+      renderFeedbackEnabled: false,
+      maxRetries: 0,
+    })
+    expect(result.ok).toBe(true)
+    expect(result.provider).toBe('deepseek')
+    expect(result.imageProvider).toBe('openai')
+    expect(result.panels).toHaveLength(4)
+    const imageCalls = httpClient.post.mock.calls.filter(([url]) =>
+      url.includes('/images/generations')
+    )
+    expect(imageCalls).toHaveLength(4)
+    imageCalls.forEach(([url, _body, config]) => {
+      expect(url).toBe('https://api.openai.com/v1/images/generations')
+      expect(config.headers.Authorization).toBe('Bearer test-image-key')
+    })
+    const auditCalls = httpClient.post.mock.calls.filter(([url]) =>
+      url.includes('/chat/completions')
+    )
+    expect(auditCalls).toHaveLength(1)
+    const [auditUrl, auditBody, auditConfig] = auditCalls[0]
+    expect(auditUrl).toBe('https://api.deepseek.com/v1/chat/completions')
+    expect(auditBody.model).toBe('deepseek-flash')
+    expect(
+      auditBody.messages.some(
+        (message) =>
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === 'image_url')
+      )
+    ).toBe(true)
+    expect(auditConfig.headers.Authorization).toBe('Bearer test-deepseek-key')
+    expect(result.costs.estimatedSequenceAuditTextUsd).toBeCloseTo(0.000054, 10)
+    expect(result.costs.estimatedImageUsd).toBeCloseTo(0.024, 10)
+  })
+
+  it('charges DeepSeek token usage to the validation budget using conservative peak estimates', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: '{"answer":"left","confidence":0.9}',
+      usage: {promptTokens: 100, completionTokens: 20, totalTokens: 120},
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      invokeProvider,
+      writeBenchmarkLog: jest.fn(),
+    })
+    bridge.setProviderKey({provider: 'deepseek', apiKey: 'test-deepseek-key'})
+    const result = await solveFlipBatch(bridge, {
+      provider: 'deepseek',
+      benchmarkProfile: 'custom',
+      uncertaintyRepromptEnabled: false,
+      probabilityEnsembleEnabled: false,
+      flips: [{hash: 'synthetic-deepseek-flip'}],
+    })
+    expect(result.results[0].answer).toBe('left')
+    expect(result.summary.costs.estimatedUsd).toBeCloseTo(0.000054, 10)
+  })
+
   it('threads locked senses into every panel prompt to prevent sense drift', async () => {
     const httpClient = {
       post: jest.fn().mockResolvedValue({
@@ -6763,6 +6919,30 @@ describe('createAiProviderBridge', () => {
     ).rejects.toThrow(
       'AI image search is not available for provider: deepinfra. Supported providers: openai-compatible and gemini.'
     )
+  })
+
+  it('rejects DeepSeek image generation before making a network request', async () => {
+    const httpClient = {post: jest.fn(), get: jest.fn()}
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'deepseek', apiKey: 'test-deepseek-key'})
+
+    await expect(
+      bridge.generateImageSearchResults({
+        provider: 'deepseek',
+        prompt: 'draw a simple scene',
+      })
+    ).rejects.toThrow('AI image search is not available for provider: deepseek')
+    await expect(
+      bridge.generateFlipPanels({
+        provider: 'deepseek',
+        keywords: ['present', 'clown'],
+        storyPanels: ['A gift.', 'Opening it.', 'A clown.', 'Laughter.'],
+      })
+    ).rejects.toThrow(
+      'Flip image generation is not available for provider: deepseek'
+    )
+    expect(httpClient.post).not.toHaveBeenCalled()
+    expect(httpClient.get).not.toHaveBeenCalled()
   })
 
   it('requires a budget contract for remote image search when the main bridge is hardened', async () => {

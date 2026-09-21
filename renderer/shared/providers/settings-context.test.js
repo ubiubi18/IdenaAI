@@ -189,6 +189,22 @@ describe('settings-context ai solver normalization', () => {
     }
   )
 
+  it('preserves saved legacy DeepSeek model choices', () => {
+    expect(
+      buildAiSolverSettings({
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        flipBuilderStoryProvider: 'deepseek',
+        flipBuilderStoryModel: 'deepseek-reasoner',
+      })
+    ).toMatchObject({
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      flipBuilderStoryProvider: 'deepseek',
+      flipBuilderStoryModel: 'deepseek-reasoner',
+    })
+  })
+
   it('keeps the internal node preference while routing through an ephemeral rehearsal node', () => {
     expect(
       buildEffectiveSettingsState(
