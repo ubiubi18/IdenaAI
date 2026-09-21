@@ -94,6 +94,27 @@ describe('scheduled generation runtime', () => {
     }
   })
   afterEach(() => fs.rmSync(directory, {recursive: true, force: true}))
+  it('uses DeepSeek for scheduled stories and audits with a separate image provider', async () => {
+    settings.flipBuilderStoryProvider = 'deepseek'
+    settings.flipBuilderImageProvider = 'openai'
+    await createFlipGenerationRuntime(options).tick()
+    expect(bridge.generateStoryOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'deepseek',
+        model: 'deepseek-flash',
+      })
+    )
+    expect(bridge.generateFlipPanels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'deepseek',
+        model: 'deepseek-flash',
+        imageProvider: 'openai',
+        validatorModel: 'deepseek-flash',
+        sequenceAuditModel: 'deepseek-flash',
+      })
+    )
+    expect(drafts).toHaveLength(1)
+  })
   it('creates a reviewable draft through the existing providers and records their costs', async () => {
     await createFlipGenerationRuntime(options).tick()
     expect(drafts).toHaveLength(1)

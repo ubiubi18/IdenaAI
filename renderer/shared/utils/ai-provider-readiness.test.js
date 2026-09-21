@@ -73,6 +73,10 @@ describe('ai-provider-readiness', () => {
     expect(formatAiProviderLabel('deepinfra')).toBe('DeepInfra Qwen')
   })
 
+  it('formats the DeepSeek provider label', () => {
+    expect(formatAiProviderLabel('deepseek')).toBe('DeepSeek')
+  })
+
   it('keeps the local AI enabled flag in the runtime payload', () => {
     expect(
       buildLocalAiRuntimePayload({

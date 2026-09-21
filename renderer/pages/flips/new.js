@@ -199,7 +199,7 @@ const REASONING_MODEL_PRESETS = {
     'llama-3.2-90b-vision-preview',
     'meta-llama/llama-4-scout-17b-16e-instruct',
   ],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-flash'],
   deepinfra: ['Qwen/Qwen3.6-35B-A3B'],
   openrouter: [
     'qwen/qwen3.6-35b-a3b',
@@ -223,7 +223,6 @@ const IMAGE_MODEL_PRESETS = {
   xai: ['grok-2-image'],
   mistral: ['pixtral-large-latest'],
   groq: ['meta-llama/llama-4-scout-17b-16e-instruct'],
-  deepseek: ['gpt-image-1-mini'],
   openrouter: ['openai/gpt-image-1-mini'],
   moonshot: [],
   deepinfra: [],
@@ -237,14 +236,14 @@ const AI_FLIP_IMAGE_PROVIDER_OPTIONS = [
   'xai',
   'mistral',
   'groq',
-  'deepseek',
 ]
 
 const AI_FLIP_IMAGE_CAPABLE_PROVIDERS = new Set(AI_FLIP_IMAGE_PROVIDER_OPTIONS)
 
 // Pricing snapshot for common provider text+vision models (USD per 1M tokens).
 // GPT-5.6 Sol checked on 2026-08-30; earlier OpenAI entries on 2026-05-14;
-// Moonshot Kimi K2.6 on 2026-06-01; DeepInfra Qwen3.6 on 2026-07-03.
+// Moonshot Kimi K2.6 on 2026-06-01; DeepInfra Qwen3.6 on 2026-07-03;
+// DeepSeek V4.1 Flash on 2026-09-21 at conservative peak/cache-miss rates.
 const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'gpt-6-astra': {input: 10, output: 50},
   'gpt-5.6-sol': {input: 4, output: 20},
@@ -263,6 +262,7 @@ const OPENAI_MODEL_PRICING_USD_PER_MTOK = {
   'o4-mini': {input: 1.1, output: 4.4},
   'kimi-k2.6': {input: 0.95, output: 4},
   'qwen/qwen3.6-35b-a3b': {input: 0.15, output: 0.95},
+  'deepseek-flash': {input: 0.3, output: 1.2},
 }
 
 // OpenAI image-generation pricing snapshot (USD per image), checked on
@@ -2304,6 +2304,13 @@ export default function NewFlipPage() {
   }, [aiImageModel, aiImageProvider])
 
   useEffect(() => {
+    if (supportsAiFlipImageProvider(aiImageProvider)) return
+    setAiImageProvider(
+      resolveDefaultImageProviderForReasoningProvider(aiReasoningProvider)
+    )
+  }, [aiImageProvider, aiReasoningProvider, setAiImageProvider])
+
+  useEffect(() => {
     const normalizedProvider = normalizeAiProviderIdForFlipBuilder(
       aiImageProvider,
       'openai'
@@ -2525,6 +2532,7 @@ export default function NewFlipPage() {
       provider === 'openai-compatible' ||
       provider === 'moonshot' ||
       provider === 'deepinfra' ||
+      provider === 'deepseek' ||
       provider === 'openrouter'
         ? resolveOpenAiModelPricing(model)
         : null
@@ -3413,22 +3421,23 @@ export default function NewFlipPage() {
       const startedAt = Date.now()
       try {
         const isFastMode = !strictAudit && aiGenerationMode !== 'strict'
-        if (!isFastMode) {
-          await ensureAiStoryRunReady()
-        }
+        await ensureAiStoryRunReady()
         await ensureAiImageRunReady()
         ensureAiSolverBridge()
         const reasoningModel = String(aiReasoningModel).trim()
-        const panelProvider = currentImageProvider
-        const panelProviderConfig = buildProviderConfig(
-          panelProvider,
+        const auditProvider = normalizeAiProviderIdForFlipBuilder(
+          aiReasoningProvider,
+          'openai'
+        )
+        const auditProviderConfig = buildProviderConfig(
+          auditProvider,
           aiSolverSettings
         )
-        const panelTextAuditModel =
-          panelProvider ===
-          normalizeAiProviderIdForFlipBuilder(aiReasoningProvider, 'openai')
-            ? reasoningModel
-            : resolveDefaultReasoningModelForProvider(panelProvider)
+        const imageProvider = currentImageProvider
+        const imageProviderConfig = buildProviderConfig(
+          imageProvider,
+          aiSolverSettings
+        )
         const effectiveStoryOptions = Array.isArray(storyOptionsOverride)
           ? storyOptionsOverride
           : storyOptions
@@ -3482,20 +3491,22 @@ export default function NewFlipPage() {
           ...providerBudgetRunPayload,
           fastBuild: isFastMode,
           panelRenderMode: isFastMode ? 'sheet_fast' : 'panels',
-          provider: panelProvider,
-          providerConfig: panelProviderConfig,
-          model: panelTextAuditModel,
-          textAuditModel: panelTextAuditModel,
+          provider: auditProvider,
+          providerConfig: auditProviderConfig,
+          model: reasoningModel,
+          imageProvider,
+          imageProviderConfig,
+          textAuditModel: reasoningModel,
           textAuditEnabled: !isFastMode,
           textAuditMaxRetries: isFastMode ? 0 : 1,
           validatorEnabled: strictAudit || !isFastMode,
-          validatorModel: panelTextAuditModel,
+          validatorModel: reasoningModel,
           validatorMaxRetries: strictAudit ? 1 : undefined,
           renderFeedbackEnabled: true,
           renderFeedbackMaxRepairs: strictAudit ? 1 : undefined,
           renderFeedbackMaxSwitches: strictAudit ? 0 : undefined,
           sequenceAuditEnabled: strictAudit,
-          sequenceAuditModel: panelTextAuditModel,
+          sequenceAuditModel: reasoningModel,
           sequenceAuditShuffleCandidates,
           imageModel: aiImageModel,
           imageSize: aiImageSize,
@@ -6543,7 +6554,11 @@ export default function NewFlipPage() {
                                               key={modelId}
                                               value={modelId}
                                             >
-                                              {modelId}
+                                              {modelId === 'deepseek-flash'
+                                                ? t(
+                                                    'DeepSeek V4.1 Flash (deepseek-flash)'
+                                                  )
+                                                : modelId}
                                             </option>
                                           )
                                         )}

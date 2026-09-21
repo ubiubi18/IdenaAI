@@ -25,6 +25,99 @@ function makeUnsupportedParameterError(param, message = '') {
 }
 
 describe('openai provider adapter', () => {
+  test.each([
+    [undefined, 'none'],
+    ['minimal', 'low'],
+    ['medium', 'high'],
+    ['xhigh', 'high'],
+    ['max', 'max'],
+  ])(
+    'sends DeepSeek text and images with compatible JSON and %s reasoning',
+    async (requested, expected) => {
+      const httpClient = {
+        post: jest.fn().mockResolvedValue({
+          data: {
+            choices: [{message: {content: '{"answer":"left"}'}}],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              total_tokens: 120,
+            },
+          },
+        }),
+      }
+      const result = await callOpenAi({
+        httpClient,
+        apiKey: 'test-deepseek-key',
+        model: 'deepseek-flash',
+        flip: {
+          images: ['data:image/png;base64,AAA', 'data:image/png;base64,BBB'],
+        },
+        prompt: 'Return JSON with the coherent sequence.',
+        profile: {
+          temperature: 0,
+          maxOutputTokens: 4096,
+          requestTimeoutMs: 5000,
+        },
+        providerConfig: {baseUrl: 'https://api.deepseek.com/v1'},
+        promptOptions: {
+          openAiServiceTier: 'priority',
+          openAiReasoningEffort: requested,
+          structuredOutput: {
+            responseFormat: STORY_OPTIONS_OPENAI_RESPONSE_FORMAT,
+          },
+        },
+      })
+      expect(httpClient.post).toHaveBeenCalledTimes(1)
+      const [endpoint, payload, config] = httpClient.post.mock.calls[0]
+      expect(endpoint).toBe('https://api.deepseek.com/v1/chat/completions')
+      expect(config.headers.Authorization).toBe('Bearer test-deepseek-key')
+      expect(payload).toMatchObject({
+        model: 'deepseek-flash',
+        max_tokens: 4096,
+        response_format: {type: 'json_object'},
+        reasoning_effort: expected,
+        thinking: {type: expected === 'none' ? 'disabled' : 'enabled'},
+      })
+      expect(payload).not.toHaveProperty('service_tier')
+      expect(payload).not.toHaveProperty('max_completion_tokens')
+      expect(
+        payload.messages[0].content.filter((part) => part.type === 'image_url')
+      ).toHaveLength(2)
+      expect(result.rawText).toBe('{"answer":"left"}')
+      expect(result.usage).toEqual({
+        promptTokens: 100,
+        completionTokens: 20,
+        totalTokens: 120,
+      })
+    }
+  )
+
+  test('does not treat unfinished DeepSeek reasoning as a final answer', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue({
+        data: {
+          choices: [
+            {
+              finish_reason: 'length',
+              message: {content: '', reasoning_content: '{"answer":"left"}'},
+            },
+          ],
+        },
+      }),
+    }
+    const result = await callOpenAi({
+      httpClient,
+      apiKey: 'test-deepseek-key',
+      model: 'deepseek-flash',
+      flip: {},
+      prompt: 'Return JSON.',
+      profile: {temperature: 0, maxOutputTokens: 512, requestTimeoutMs: 5000},
+      providerConfig: {baseUrl: 'https://api.deepseek.com/v1'},
+    })
+    expect(result.rawText).toBe('')
+  })
+
   test.each(['none', 'minimal', 'low', 'high'])(
     'normalizes Astra %s reasoning without unsupported sampling parameters',
     async (reasoningEffort) => {
