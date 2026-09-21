@@ -119,7 +119,7 @@ describe('scheduled generation runtime', () => {
     await createFlipGenerationRuntime(options).tick()
     expect(drafts).toHaveLength(1)
     expect(drafts[0]).toMatchObject({
-      type: 'Draft',
+      type: 'draft',
       keywordPairId: 0,
       epoch: 42,
       order: [0, 1, 2, 3],
@@ -163,7 +163,7 @@ describe('scheduled generation runtime', () => {
   it('stops before the image request when a manual draft filled that pair', async () => {
     bridge.generateStoryOptions.mockImplementation(async () => {
       drafts.push({
-        type: 'Draft',
+        type: 'draft',
         createdAt: new Date(time).toISOString(),
         keywordPairId: 0,
       })
@@ -182,12 +182,12 @@ describe('scheduled generation runtime', () => {
     const stored = [
       {
         keywordPairId: 0,
-        type: 'Draft',
+        type: 'draft',
         createdAt: new Date(end + 1).toISOString(),
       },
       {
         keywordPairId: 1,
-        type: 'Archived',
+        type: 'archived',
         createdAt: new Date(end - 1).toISOString(),
       },
     ]

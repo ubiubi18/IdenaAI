@@ -13,8 +13,9 @@ import {
 import {
   didArchiveFlips,
   markFlipsArchived,
-  archiveFlips,
+  archiveFlipsForEpoch,
   handleOutdatedFlips,
+  shouldArchiveEpochFlips,
 } from '../../screens/flips/utils'
 import {RPC_CONNECTION_CHANGED_EVENT} from '../utils/rpc-connection-events'
 
@@ -174,15 +175,22 @@ export function EpochValidationArchiveEffects() {
 
   React.useEffect(() => {
     if (
-      epoch &&
-      didValidate(epoch.epoch, validationIdentityScope) &&
-      !didArchiveFlips(epoch.epoch, validationIdentityScope)
+      shouldArchiveEpochFlips({
+        epoch: epoch?.epoch,
+        identityAddress: identity?.address,
+        isValidated: epoch
+          ? didValidate(epoch.epoch, validationIdentityScope)
+          : false,
+        isArchived: epoch
+          ? didArchiveFlips(epoch.epoch, validationIdentityScope)
+          : false,
+      })
     ) {
-      archiveFlips()
+      archiveFlipsForEpoch(epoch.epoch)
       handleOutdatedFlips()
       markFlipsArchived(epoch.epoch, validationIdentityScope)
     }
-  }, [epoch, validationIdentityScope])
+  }, [epoch, identity?.address, validationIdentityScope])
 
   return null
 }

@@ -136,6 +136,36 @@ export function archiveFlips() {
   )
 }
 
+export function archiveFlipsForEpoch(epoch) {
+  const currentEpoch = Number(epoch)
+  const {getFlips, saveFlips} = getFlipsBridge()
+  saveFlips(
+    getFlips().map((flip) => {
+      if (flip.type === FlipType.Archived) return flip
+      // Flips stamped with the epoch being archived were created after this
+      // epoch started, so they still belong to the running epoch.
+      if (Number.isInteger(currentEpoch) && Number(flip.epoch) === currentEpoch)
+        return flip
+      return {...flip, type: FlipType.Archived}
+    })
+  )
+}
+
+export function shouldArchiveEpochFlips({
+  epoch,
+  identityAddress,
+  isValidated,
+  isArchived,
+}) {
+  const currentEpoch = Number(epoch)
+
+  if (!Number.isInteger(currentEpoch) || currentEpoch <= 0) return false
+  // Without a resolved identity the archive marker cannot be scoped, so the
+  // archive would run again for an epoch that was already handled.
+  if (!String(identityAddress || '').trim()) return false
+  return Boolean(isValidated) && !isArchived
+}
+
 export const freshFlip = ({createdAt, modifiedAt = createdAt}) =>
   dayjs().diff(modifiedAt, 'day') < 30
 

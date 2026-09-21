@@ -5,6 +5,12 @@ const {createFlipGenerationScheduler} = require('./flip-generation-scheduler')
 const {DEFAULT_STORY_MODELS} = require('./ai-providers/constants')
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
+// The renderer stores flip types in lower case; see renderer/shared/types.js.
+const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
+
+function isDraftFlip(flip) {
+  return DRAFT_FLIP_TYPES.includes(String(flip?.type || '').toLowerCase())
+}
 
 function dayKey(value) {
   const date = new Date(value)
@@ -32,8 +38,7 @@ function selectMissingPairs(identity, drafts, sessionEndedAt) {
   const pairs = identity.flipKeyWordPairs || []
   const currentDrafts = drafts.filter(
     (draft) =>
-      ['Draft', 'Publishing', 'Published'].includes(draft.type) &&
-      Date.parse(draft.createdAt) >= sessionEndedAt
+      isDraftFlip(draft) && Date.parse(draft.createdAt) >= sessionEndedAt
   )
   const occupied = new Set(
     currentDrafts.map((draft) => String(draft.keywordPairId))
@@ -318,7 +323,7 @@ function createFlipGenerationRuntime({
     if (flips.getFlips().some((draft) => draft.id === draftId)) return
     flips.addDraft({
       id: draftId,
-      type: 'Draft',
+      type: 'draft',
       createdAt: new Date(now()).toISOString(),
       epoch: current.epoch,
       keywordPairId: pair.id,
