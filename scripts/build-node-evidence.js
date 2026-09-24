@@ -270,9 +270,7 @@ function main(argv = process.argv.slice(2)) {
     )
     console.log(`[build-node-evidence] Report: ${options.report}`)
     if (options.binaryOutput) {
-      console.log(
-        `[build-node-evidence] Binary: ${options.binaryOutput}`
-      )
+      console.log(`[build-node-evidence] Binary: ${options.binaryOutput}`)
     }
   } finally {
     fs.rmSync(tempRoot, {recursive: true, force: true})
