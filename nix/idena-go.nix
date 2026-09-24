@@ -12,11 +12,11 @@ buildGoModule rec {
   src = fetchFromGitHub {
     owner = "ubiubi18";
     repo = "idena-go";
-    rev = "c478705fedf60c16f721482898b9081ad9d56580";
-    hash = "sha256-lZMC7X4WjaRfUItIQYjNm41woUdmB2b4ehB58w0vz4k=";
+    rev = "deebf1d1a7bc2c4055427774eb3e1a0fa11537c5";
+    hash = "sha256-Iq0e/MCmifQcqFT68ZV0AMdkQyC4voFa/xjil5WyXQ0=";
   };
 
-  vendorHash = "sha256-YTaXY55mqIXtzPS20S8GtgvYICudaSoHJKhpx8YlJh4=";
+  vendorHash = "sha256-GsirT/3P59r6sBi4B/6KAmk/x2PkG4yu98DtLfyEEOg=";
   subPackages = [ "." ];
 
   postPatch = ''
@@ -24,7 +24,7 @@ buildGoModule rec {
     chmod -R u+w idena-wasm-binding
     substituteInPlace go.mod \
       --replace-fail \
-        "replace github.com/idena-network/idena-wasm-binding => github.com/ubiubi18/idena-wasm-binding v0.0.0-20260710141316-67ba065fdb02" \
+        "replace github.com/idena-network/idena-wasm-binding => github.com/ubiubi18/idena-wasm-binding v0.0.0-20260923235352-01ccca5cc3c9" \
         "replace github.com/idena-network/idena-wasm-binding => ./idena-wasm-binding"
   '';
 
