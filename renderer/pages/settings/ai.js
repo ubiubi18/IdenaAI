@@ -100,7 +100,7 @@ import {getAiProviderDailyBudgetStatus} from '../../shared/utils/ai-provider-bud
 
 const DEFAULT_MODELS = {
   'local-ai': '',
-  openai: 'gpt-5.6-sol',
+  openai: 'gpt-6-sol',
   'openai-compatible': 'gpt-4o-mini',
   gemini: 'gemini-2.0-flash',
   anthropic: 'claude-3-7-sonnet-latest',
@@ -159,6 +159,7 @@ const MODEL_PRESETS = {
   'local-ai': [],
   openai: [
     'gpt-6-astra',
+    'gpt-6-sol',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',
@@ -215,6 +216,7 @@ const MODEL_PRESETS = {
 
 const SHORT_SESSION_OPENAI_FAST_MODELS = [
   'gpt-6-astra',
+  'gpt-6-sol',
   'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',
@@ -260,7 +262,7 @@ const DEFAULT_AI_SETTINGS = {
   provider: 'openai',
   model: DEFAULT_MODELS.openai,
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.6-sol',
+  shortSessionOpenAiFastModel: 'gpt-6-sol',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   mode: 'manual',

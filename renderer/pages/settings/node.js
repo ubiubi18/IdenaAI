@@ -101,7 +101,7 @@ const REHEARSAL_AI_PROVIDER_OPTIONS = [
 ]
 
 const REHEARSAL_AI_DEFAULT_MODELS = {
-  openai: 'gpt-5.6-sol',
+  openai: 'gpt-6-sol',
   anthropic: 'claude-3-7-sonnet-latest',
   gemini: 'gemini-2.0-flash',
   xai: 'grok-2-vision-latest',
@@ -117,6 +117,7 @@ const REHEARSAL_AI_DEFAULT_MODELS = {
 const REHEARSAL_AI_MODEL_PRESETS = {
   openai: [
     'gpt-6-astra',
+    'gpt-6-sol',
     'gpt-5.6-sol',
     'gpt-5.5',
     'gpt-5.5-mini',

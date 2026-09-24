@@ -26,7 +26,7 @@ describe('settings-context ai solver normalization', () => {
 
   it('defaults to Sol for solving and Astra for stories without changing resource limits', () => {
     expect(buildAiSolverSettings()).toMatchObject({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       flipBuilderStoryProvider: 'openai',
       flipBuilderStoryModel: 'gpt-6-astra',
       flipBuilderImageProvider: 'openai',
@@ -34,7 +34,7 @@ describe('settings-context ai solver normalization', () => {
       flipBuilderImageQuality: 'low',
       flipBuilderImageSize: '1024x1024',
       flipBuilderGenerationMode: 'fast',
-      shortSessionOpenAiFastModel: 'gpt-5.6-sol',
+      shortSessionOpenAiFastModel: 'gpt-6-sol',
       probabilityReasoningEffort: 'xhigh',
       autoReportBestFlipEnabled: false,
       memoryBudgetGiB: 32,
@@ -105,11 +105,11 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       shortSessionOpenAiFastEnabled: true,
-      shortSessionOpenAiFastModel: 'gpt-5.6-sol',
+      shortSessionOpenAiFastModel: 'gpt-6-sol',
     })
   })
 
-  it.each(['gpt-6-astra', 'gpt-5.6-sol'])(
+  it.each(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol'])(
     'accepts %s for short-session fast mode',
     (model) => {
       expect(
@@ -168,12 +168,12 @@ describe('settings-context ai solver normalization', () => {
       })
     ).toMatchObject({
       provider: 'openai',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
       shortSessionOpenAiFastModel: 'gpt-5.4-mini',
     })
   })
 
-  it.each(['gpt-5.5', 'gpt-5.6-sol', 'gpt-6-astra'])(
+  it.each(['gpt-5.5', 'gpt-5.6-sol', 'gpt-6-sol', 'gpt-6-astra'])(
     'preserves saved %s model choices, budgets, and consent',
     (model) => {
       const saved = {
