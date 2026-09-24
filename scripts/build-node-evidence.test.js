@@ -5,6 +5,7 @@ const path = require('path')
 const lock = require('../compatibility/stack-lock.json')
 const {
   compatibilityPins,
+  copyNewExecutable,
   createReport,
   parseArgs,
   reportProvenance,
@@ -57,13 +58,35 @@ function reportFixture(builderId) {
 describe('node build evidence', () => {
   it('parses safe report and builder options', () => {
     const report = path.resolve('build/report.json')
+    const binaryOutput = path.resolve('build/idena-go')
     expect(
-      parseArgs(['--builder-id', 'builder-a', '--report', report])
-    ).toEqual({builderId: 'builder-a', report})
+      parseArgs([
+        '--builder-id',
+        'builder-a',
+        '--report',
+        report,
+        '--binary-output',
+        binaryOutput,
+      ])
+    ).toEqual({binaryOutput, builderId: 'builder-a', report})
     expect(() => parseArgs([])).toThrow('--builder-id')
     expect(() => parseArgs(['--builder-id', '../unsafe'])).toThrow(
       'safe characters'
     )
+  })
+
+  it('preserves an executable once and refuses overwrite', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-binary-test-'))
+    try {
+      const source = fileWithSize(dir, 'source', 32, 7)
+      const target = path.join(dir, 'nested', 'idena-go')
+      copyNewExecutable(source, target)
+      expect(fs.readFileSync(target)).toEqual(fs.readFileSync(source))
+      expect(fs.statSync(target).mode % 0o1000).toBe(0o755)
+      expect(() => copyNewExecutable(source, target)).toThrow()
+    } finally {
+      fs.rmSync(dir, {recursive: true, force: true})
+    }
   })
 
   it('requires source pins to match the compatibility lock', () => {

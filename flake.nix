@@ -24,8 +24,8 @@
           idenaWasmBinding = pkgs.fetchFromGitHub {
             owner = "ubiubi18";
             repo = "idena-wasm-binding";
-            rev = "67ba065fdb02aa07cced2a43a261e481ca5b39d9";
-            hash = "sha256-CIn3o3Tw9KJuJ5AJ7UMDIq0AkghyLfj4boTJSk5DARA=";
+            rev = "01ccca5cc3c94917725964541954a9f20e3412e9";
+            hash = "sha256-3mrpSd7yVxY+SanZBdXNC3qljHZmV2BpbhkyRQZgS0w=";
           };
           idenaGo = pkgs.callPackage ./nix/idena-go.nix {
             buildGoModule = buildGo1268Module;
