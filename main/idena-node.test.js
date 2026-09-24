@@ -6,6 +6,7 @@ const {
     getBundledNodeFileCandidates,
     getConfiguredBootstrapNodes,
     getNodeAcquisitionPolicy,
+    isWaitingForInitialSync,
     isPeerHintRetryable,
     isRpcMethodUnavailableError,
     getNodeReleaseRepos,
@@ -184,6 +185,33 @@ describe('idena node peer hints', () => {
       bootnodes.indexOf(historicalPeer)
     )
     expect(new Set(bootnodes).size).toBe(bootnodes.length)
+  })
+
+  it('retries peer hints when peers exist but initial sync remains at genesis', () => {
+    expect(
+      isWaitingForInitialSync({
+        syncing: false,
+        currentBlock: 4871137,
+        highestBlock: 4871137,
+        genesisBlock: 4871137,
+      })
+    ).toBe(true)
+    expect(
+      isWaitingForInitialSync({
+        syncing: false,
+        currentBlock: 4871138,
+        highestBlock: 4871138,
+        genesisBlock: 4871137,
+      })
+    ).toBe(false)
+    expect(
+      isWaitingForInitialSync({
+        syncing: true,
+        currentBlock: 4871137,
+        highestBlock: 11348095,
+        genesisBlock: 4871137,
+      })
+    ).toBe(false)
   })
 
   it('backs off failed hints exponentially', () => {

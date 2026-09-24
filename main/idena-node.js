@@ -431,6 +431,22 @@ function getConfiguredBootstrapNodes() {
   return uniqStrings([...defaultIpfsBootstrapNodes, ...extraBootNodes])
 }
 
+function isWaitingForInitialSync(syncStatus) {
+  if (!syncStatus || syncStatus.syncing !== false) return false
+
+  const currentBlock = Number(syncStatus.currentBlock)
+  const highestBlock = Number(syncStatus.highestBlock)
+  const genesisBlock = Number(syncStatus.genesisBlock)
+
+  return (
+    Number.isFinite(currentBlock) &&
+    Number.isFinite(highestBlock) &&
+    Number.isFinite(genesisBlock) &&
+    currentBlock === genesisBlock &&
+    highestBlock === genesisBlock
+  )
+}
+
 async function getEffectiveBootstrapNodes() {
   const cachedPeerHints = sortPeerHintsForRetry(await readPeerHints())
     .filter((hint) => hint.source === 'runtime' || hint.source === 'cache')
@@ -916,6 +932,8 @@ function startPeerAssist({port, apiKey, onLog, bootstrapNodes = []}) {
 
       peerRpcWaitLogged = false
 
+      const waitingForInitialSync = isWaitingForInitialSync(syncStatus)
+
       if (syncStatus && syncStatus.syncing && peers.length > 0) {
         await rememberPeers(peers)
         schedule(Math.min(peerAssistRetryIntervalMs, 5000))
@@ -924,8 +942,11 @@ function startPeerAssist({port, apiKey, onLog, bootstrapNodes = []}) {
 
       if (peers.length > 0) {
         await rememberPeers(peers)
-        schedule()
-        return
+        if (!waitingForInitialSync) {
+          schedule()
+          return
+        }
+        emitLog('peers found but initial sync has not started, retrying hints')
       }
 
       if (syncStatus && syncStatus.syncing) {
@@ -1918,6 +1939,7 @@ module.exports = {
     getNodeAcquisitionPolicy,
     getNodeReleaseRepos,
     getPeerHintFailureBackoffMs,
+    isWaitingForInitialSync,
     isRpcMethodUnavailableError,
     isPeerHintRetryable,
     mergePeerHints,
