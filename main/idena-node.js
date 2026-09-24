@@ -62,6 +62,14 @@ function getNodeAcquisitionPolicy(isPackaged = runtimePolicy.isPackaged) {
 const execFileAsync = promisify(execFile)
 
 const defaultIpfsBootstrapNodes = [
+  // Reachable mainnet peers observed through the legacy network on
+  // 2026-09-24. Keep the historical seeds below as fallbacks.
+  '/ip4/49.12.192.149/tcp/40405/ipfs/QmNqkSwad5HTShxVzFcYLQkRCRjrs9ZhQykqrRTQcdR7xp',
+  '/ip4/147.91.144.55/tcp/40406/ipfs/Qmbas7yV5Z41n9ZvvuDoVpaqMWNPxwrk2jSYPsUx3hVgaF',
+  '/ip4/147.91.144.55/tcp/40405/ipfs/QmdiNHGUWc72ouo92mEUnPVWMFvESDHshWVqLnyAutdN7Q',
+  '/ip4/51.178.138.211/tcp/40405/ipfs/QmTseSBwV9xPN2iEn6ViZbdPbk5MBk1HAD9SKy8B2EgSrY',
+  '/ip4/212.28.76.68/tcp/40415/ipfs/QmVMxHMU7pFf475gQRA158unEQCbmhJz6u3k81nuRueAdp',
+  '/ip6/2a01:4f8:1c17:fd5a::1/tcp/40405/ipfs/QmRH67cpeq5gZ4iUSEgarrmNuFA9axEw1DnJdc3hWUtZ3T',
   '/ip4/135.181.40.10/tcp/40405/ipfs/QmNYWtiwM1UfeCmHfWSdefrMuQdg6nycY5yS64HYqWCUhD',
   '/ip4/157.230.61.115/tcp/40403/ipfs/QmQHYY49pWWFeXXdR9rKd31bHRqRi2E4tk4CXDgYJZq5ry',
   '/ip4/124.71.148.124/tcp/40405/ipfs/QmWH9D4DjSvQyWyRUw76AopCfRS5CPR2gRnRoxP3QFaefx',

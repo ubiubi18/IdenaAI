@@ -172,6 +172,20 @@ describe('idena node peer hints', () => {
     )
   })
 
+  it('prefers refreshed mainnet peers before historical bootstrap fallbacks', () => {
+    const bootnodes = getConfiguredBootstrapNodes({})
+    const refreshedPeer =
+      '/ip4/49.12.192.149/tcp/40405/ipfs/QmNqkSwad5HTShxVzFcYLQkRCRjrs9ZhQykqrRTQcdR7xp'
+    const historicalPeer =
+      '/ip4/135.181.40.10/tcp/40405/ipfs/QmNYWtiwM1UfeCmHfWSdefrMuQdg6nycY5yS64HYqWCUhD'
+
+    expect(bootnodes).toContain(refreshedPeer)
+    expect(bootnodes.indexOf(refreshedPeer)).toBeLessThan(
+      bootnodes.indexOf(historicalPeer)
+    )
+    expect(new Set(bootnodes).size).toBe(bootnodes.length)
+  })
+
   it('backs off failed hints exponentially', () => {
     expect(
       isPeerHintRetryable(
