@@ -1,6 +1,7 @@
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
+const {encode: rlpEncode} = require('rlp')
 const {createFlipGenerationScheduler} = require('./flip-generation-scheduler')
 const {DEFAULT_STORY_MODELS} = require('./ai-providers/constants')
 
@@ -10,6 +11,66 @@ const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
 // Higher identity states publish one or two flips beyond the epoch minimum
 // when unused keyword pairs allow it.
 const EXTRA_FLIPS_BY_STATE = {verified: 1, human: 2}
+
+function permutations(values) {
+  if (values.length <= 1) return [values.slice()]
+  return values.flatMap((value, index) =>
+    permutations([...values.slice(0, index), ...values.slice(index + 1)]).map(
+      (rest) => [value, ...rest]
+    )
+  )
+}
+
+const PANEL_ORDERS = permutations([0, 1, 2, 3])
+
+// Mirrors the renderer guard: a submitted flip must not keep the original
+// panel order.
+function pickPanelShuffle(originalOrder = [0, 1, 2, 3]) {
+  const original = originalOrder.map(Number)
+  const candidates = PANEL_ORDERS.filter(
+    (order) => !order.every((value, index) => value === original[index])
+  )
+  return candidates[crypto.randomInt(candidates.length)]
+}
+
+function panelBytes(dataUrl) {
+  const match = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(String(dataUrl || ''))
+  if (!match) throw new Error('Generated panel is not a base64 image')
+  return Buffer.from(match[1], 'base64')
+}
+
+// Copy of renderer/screens/flips/utils.js shufflePics + flipToHex so scheduled
+// flips are submitted with the same payload the UI produces.
+function buildFlipSubmitPayload(pictures, shuffledOrder) {
+  const seed = PANEL_ORDERS[crypto.randomInt(PANEL_ORDERS.length)]
+  const shuffledPictures = []
+  const firstOrder = new Array(pictures.length)
+
+  seed.forEach((value, index) => {
+    shuffledPictures.push(pictures[value])
+    firstOrder[value] = index
+  })
+
+  const secondOrder = shuffledOrder.map((value) => firstOrder[value])
+  const orders =
+    crypto.randomInt(2) === 0
+      ? [firstOrder, secondOrder]
+      : [secondOrder, firstOrder]
+
+  const publicHex = `0x${Buffer.from(
+    rlpEncode([
+      shuffledPictures.slice(0, 2).map((item) => Uint8Array.from(item)),
+    ])
+  ).toString('hex')}`
+  const privateHex = `0x${Buffer.from(
+    rlpEncode([
+      shuffledPictures.slice(2).map((item) => Uint8Array.from(item)),
+      orders,
+    ])
+  ).toString('hex')}`
+
+  return {publicHex, privateHex}
+}
 
 function isDraftFlip(flip) {
   return DRAFT_FLIP_TYPES.includes(String(flip?.type || '').toLowerCase())
@@ -354,7 +415,66 @@ function createFlipGenerationRuntime({
     })
   }
 
-  return createFlipGenerationScheduler({
+  function pendingDrafts(current) {
+    return flips
+      .getFlips()
+      .filter(
+        (flip) =>
+          String(flip.id || '').startsWith('scheduled-') &&
+          String(flip.type || '').toLowerCase() === 'draft' &&
+          Number(flip.epoch) === Number(current.epoch)
+      )
+  }
+
+  async function publishDraft(draft) {
+    const images = (draft.protectedImages || draft.images || []).slice(0, 4)
+    if (images.length !== 4) {
+      throw new Error('Scheduled draft needs four panels')
+    }
+    const originalOrder = Array.isArray(draft.originalOrder)
+      ? draft.originalOrder
+      : [0, 1, 2, 3]
+    const shuffledOrder = pickPanelShuffle(originalOrder)
+    const payload = buildFlipSubmitPayload(
+      images.map(panelBytes),
+      shuffledOrder
+    )
+    const submitted = await readRpc('flip_submit', {
+      publicHex: payload.publicHex,
+      privateHex: payload.privateHex,
+      pairId: Number(draft.keywordPairId),
+    })
+    flips.updateDraft({
+      id: draft.id,
+      type: 'published',
+      hash: String((submitted && submitted.hash) || ''),
+      txHash: String((submitted && submitted.txHash) || ''),
+      order: shuffledOrder,
+      orderPermutations: shuffledOrder,
+      modifiedAt: new Date(now()).toISOString(),
+    })
+    return submitted
+  }
+
+  // Publishes one prepared draft per call so the ordinary 30s tick shuffles and
+  // submits scheduled flips without a separate timer.
+  async function publishPending() {
+    const current = await snapshot()
+    if (!current.enabled || !current.ready || current.period !== 'None') {
+      return 'skipped'
+    }
+    const [draft] = pendingDrafts(current)
+    if (!draft) return 'idle'
+    try {
+      await publishDraft(draft)
+      return 'published'
+    } catch (error) {
+      onFailure('publish_failed', error)
+      return 'publish_failed'
+    }
+  }
+
+  const scheduler = createFlipGenerationScheduler({
     snapshot,
     generate,
     now,
@@ -366,6 +486,8 @@ function createFlipGenerationRuntime({
         ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
         : {},
   })
+
+  return {...scheduler, publishPending}
 }
 
 module.exports = {

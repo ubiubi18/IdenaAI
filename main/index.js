@@ -2200,10 +2200,19 @@ async function bootstrapApp() {
     onFailure: (status) =>
       logger.warn('Post-session flip generation stopped', {status}),
   })
-  const runScheduledFlips = () => {
-    flipGeneration.tick().catch(() => {
+  const runScheduledFlips = async () => {
+    // Publish prepared drafts first so a finished generation run does not leave
+    // the scheduled flips unpublished.
+    try {
+      await flipGeneration.publishPending()
+    } catch {
+      logger.warn('Post-session flip publishing unavailable')
+    }
+    try {
+      await flipGeneration.tick()
+    } catch {
       logger.warn('Post-session flip generation snapshot unavailable')
-    })
+    }
   }
   flipGenerationTimer = setInterval(runScheduledFlips, 30000)
   flipGenerationTimer.unref()
