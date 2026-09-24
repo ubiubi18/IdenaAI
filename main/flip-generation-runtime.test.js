@@ -50,6 +50,7 @@ describe('scheduled generation runtime', () => {
           height: 90,
         },
         bcn_keyWord: {Name: 'synthetic word', Desc: 'fixture'},
+        flip_submit: {hash: 'bafkrei-fixture', txHash: `0x${'c'.repeat(64)}`},
       }[method],
     }))
     bridge = {
@@ -77,7 +78,14 @@ describe('scheduled generation runtime', () => {
       getSettings: () => ({aiSolver: settings}),
       rpc,
       bridge,
-      flips: {getFlips: () => drafts, addDraft: (draft) => drafts.push(draft)},
+      flips: {
+        getFlips: () => drafts,
+        addDraft: (draft) => drafts.push(draft),
+        updateDraft: (draft) => {
+          const index = drafts.findIndex((item) => item.id === draft.id)
+          drafts[index] = {...drafts[index], ...draft}
+        },
+      },
       profilePath: directory,
       nativeImage: {createFromDataURL: () => fakeImage},
       now: () => time,
@@ -260,5 +268,80 @@ describe('scheduled generation runtime', () => {
     expect(selectMissingPairs(identity, [], end).map(({id}) => id)).toEqual([
       0, 1, 2,
     ])
+  })
+
+  it('shuffles and submits a prepared draft through the node', async () => {
+    drafts.push({
+      id: 'scheduled-fixture-0',
+      type: 'draft',
+      epoch: 42,
+      keywordPairId: 0,
+      originalOrder: [0, 1, 2, 3],
+      order: [0, 1, 2, 3],
+      orderPermutations: [0, 1, 2, 3],
+      images: Array.from({length: 4}, () => 'data:image/png;base64,AA=='),
+      protectedImages: Array.from(
+        {length: 4},
+        () => 'data:image/png;base64,AA=='
+      ),
+    })
+
+    const runtime = createFlipGenerationRuntime(options)
+    const result = await runtime.publishPending()
+
+    expect(result).toBe('published')
+    expect(rpc).toHaveBeenCalledWith({
+      method: 'flip_submit',
+      params: [
+        expect.objectContaining({
+          pairId: 0,
+          publicHex: expect.stringMatching(/^0x[0-9a-f]+$/),
+          privateHex: expect.stringMatching(/^0x[0-9a-f]+$/),
+        }),
+      ],
+    })
+    expect(drafts[0]).toMatchObject({
+      type: 'published',
+      hash: 'bafkrei-fixture',
+      txHash: `0x${'c'.repeat(64)}`,
+    })
+    expect(drafts[0].order).not.toEqual([0, 1, 2, 3])
+    expect(drafts[0].orderPermutations).toEqual(drafts[0].order)
+  })
+
+  it('ignores drafts of other epochs and identities that cannot validate', async () => {
+    drafts.push({
+      id: 'scheduled-old-0',
+      type: 'draft',
+      epoch: 41,
+      keywordPairId: 0,
+      images: Array.from({length: 4}, () => 'data:image/png;base64,AA=='),
+      protectedImages: Array.from(
+        {length: 4},
+        () => 'data:image/png;base64,AA=='
+      ),
+    })
+
+    expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
+      'idle'
+    )
+
+    rpc.mockImplementation(async ({method}) => ({
+      result: {
+        bcn_syncing: {syncing: false, currentBlock: 100, highestBlock: 100},
+        dna_epoch: {epoch: 42, startBlock: 90, currentPeriod: 'None'},
+        dna_getCoinbaseAddr: 'synthetic-identity',
+        dna_identity: {
+          state: 'Suspended',
+          requiredFlips: 0,
+          flips: [],
+          flipKeyWordPairs: [],
+        },
+      }[method],
+    }))
+
+    expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
+      'skipped'
+    )
   })
 })
