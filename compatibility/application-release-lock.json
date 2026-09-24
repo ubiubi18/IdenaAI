@@ -9,7 +9,7 @@
     ".node-version": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
     ".nvmrc": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
     "compatibility/stack-lock.json": "6f025a8ecf131d132ab3be4b913f6da5890caa42b86b04c1a410f6260ee8d1a9",
-    "main/ai-providers/bridge.js": "07ed5b0e17951f81f0ffcc72b883c8f2d71e5c8e87ed95ce21e0f87730764142",
+    "main/ai-providers/bridge.js": "d00572685b58e294c125a4930337be7de14b71f22ed35f20f298f3e25e6e4e53",
     "main/ai-providers/url-policy.js": "1ad2148fd47186952f51dc3c5d0ba6792b0f7ae305234b5b3be9dda0ec3e4035",
     "main/application-release-policy.js": "df27d3e1b23d8206f15cc57a1678c2b91fccda602be474298ce66dd9be0a9d9e",
     "main/idena-node.js": "a576c501757a1e33debfa2e925b47ed9bb4ee39d5fe005337895061016ea4881",
