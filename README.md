@@ -1,5 +1,9 @@
 # IdenaAI
 
+## Research disclaimer
+
+This is experimental research software. I cannot guarantee its security, correctness, or fitness for any purpose. Use it at your own risk, take responsibility for your decisions, independently verify changes, and stay vigilant.
+
 **An experimental Idena desktop app for AI-assisted flip creation, solving, and validation research.**
 
 IdenaAI is a community fork of [idena-desktop](https://github.com/idena-network/idena-desktop).
