@@ -82,7 +82,7 @@ describe('node build evidence', () => {
       const target = path.join(dir, 'nested', 'idena-go')
       copyNewExecutable(source, target)
       expect(fs.readFileSync(target)).toEqual(fs.readFileSync(source))
-      expect(fs.statSync(target).mode & 0o777).toBe(0o755)
+      expect(fs.statSync(target).mode % 0o1000).toBe(0o755)
       expect(() => copyNewExecutable(source, target)).toThrow()
     } finally {
       fs.rmSync(dir, {recursive: true, force: true})
