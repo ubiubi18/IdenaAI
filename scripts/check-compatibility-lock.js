@@ -122,7 +122,7 @@ function requirePinSet(lock, name, expectedNames) {
 function verifyLockIdentity(lock) {
   if (
     lock.schema !== 1 ||
-    lock.releaseId !== 'idena-mainnet-legacy-compat-2026.09.20-rc9' ||
+    lock.releaseId !== 'idena-mainnet-legacy-compat-2026.09.24-rc10' ||
     !['candidate', 'approved', 'retired'].includes(lock.status)
   ) {
     throw new Error('Unexpected compatibility lock identity')
