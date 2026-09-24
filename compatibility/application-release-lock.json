@@ -12,7 +12,7 @@
     "main/ai-providers/bridge.js": "07ed5b0e17951f81f0ffcc72b883c8f2d71e5c8e87ed95ce21e0f87730764142",
     "main/ai-providers/url-policy.js": "1ad2148fd47186952f51dc3c5d0ba6792b0f7ae305234b5b3be9dda0ec3e4035",
     "main/application-release-policy.js": "9e16ac8275d2b6bddbc16b9a23e91cca5838cdfb41667495b3a5a3bbb94dfe5e",
-    "main/idena-node.js": "d5f2b6e9c8cc3295bfce68a10454a49a7edd2526f00cf56e187f45c80eda7265",
+    "main/idena-node.js": "a576c501757a1e33debfa2e925b47ed9bb4ee39d5fe005337895061016ea4881",
     "main/index.js": "e7857c4f088526f98d994fbffe5637c7709db0ad6ca7a372262201faf6d10353",
     "main/node-artifact-policy.js": "fdb3fe87f484a917e8fb14c17afa60dfb9cf678cf05dba7d45db6c009d0e1cf8",
     "main/utils/fetch-client.js": "09db5ae64b17b9e882078c873deb708ab10313aecf965d2cacfb33d379764071",
