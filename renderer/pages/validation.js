@@ -175,9 +175,9 @@ const VALIDATION_AI_TOAST_ID = 'validation-ai-status-toast'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.6-sol',
+  model: 'gpt-6-sol',
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.6-sol',
+  shortSessionOpenAiFastModel: 'gpt-6-sol',
   mode: 'manual',
   autoReportEnabled: false,
   autoReportDelayMinutes: AUTO_REPORT_DEFAULT_DELAY_MINUTES,

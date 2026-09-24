@@ -1399,7 +1399,10 @@ function buildValidationDevnetSolverProviderPayload(
     ...payload,
     mode: solverMode,
     provider,
-    model: normalizeValidationDevnetSolverModel(payload.model),
+    model: normalizeValidationDevnetSolverModel(
+      payload.model,
+      provider === 'openai' ? 'gpt-6-sol' : 'gpt-5.6-sol'
+    ),
     maxRetries: Math.max(0, Number.parseInt(payload.maxRetries, 10) || 1),
     maxOutputTokens: Math.max(
       0,

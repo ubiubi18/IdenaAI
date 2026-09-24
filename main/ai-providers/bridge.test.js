@@ -110,7 +110,7 @@ function makeStrictStoryResponse(stories, providerMeta = null) {
 
 describe('createAiProviderBridge', () => {
   it.each([
-    [undefined, 'gpt-5.6-sol'],
+    [undefined, 'gpt-6-sol'],
     ['gpt-6-astra', 'gpt-6-astra'],
   ])('solves with %s using %s', async (model, expectedModel) => {
     const invokeProvider = jest.fn().mockResolvedValue({
@@ -136,6 +136,9 @@ describe('createAiProviderBridge', () => {
     expect(invokeProvider.mock.calls[0][0].model).toBe(expectedModel)
     expect(result.model).toBe(expectedModel)
     expect(result.results[0].error).toBeNull()
+    if (!model) {
+      expect(result.results[0].costs.actualUsd).toBeCloseTo(0.0004, 10)
+    }
   })
 
   it('marks remaining flips as deadline_exceeded once budget is passed', async () => {
@@ -716,16 +719,16 @@ describe('createAiProviderBridge', () => {
     })
 
     expect(invokeProvider).toHaveBeenCalledTimes(2)
-    expect(invokeProvider.mock.calls[0][0].model).toBe('gpt-5.6-sol')
+    expect(invokeProvider.mock.calls[0][0].model).toBe('gpt-6-sol')
     expect(result.summary).toMatchObject({
       totalFlips: 2,
       approved: 1,
       reported: 1,
     })
-    expect(result.results[0].costs.estimatedUsd).toBeCloseTo(0.00096, 10)
-    expect(result.results[0].costs.actualUsd).toBeCloseTo(0.00096, 10)
-    expect(result.summary.costs.estimatedUsd).toBeCloseTo(0.00192, 10)
-    expect(result.summary.costs.actualUsd).toBeCloseTo(0.00192, 10)
+    expect(result.results[0].costs.estimatedUsd).toBeCloseTo(0.00048, 10)
+    expect(result.results[0].costs.actualUsd).toBeCloseTo(0.00048, 10)
+    expect(result.summary.costs.estimatedUsd).toBeCloseTo(0.00096, 10)
+    expect(result.summary.costs.actualUsd).toBeCloseTo(0.00096, 10)
     expect(result.results[0]).toMatchObject({
       hash: 'flip-report-1',
       decision: 'report',

@@ -34,7 +34,7 @@ const CHANGE_LANGUAGE = 'CHANGE_LANGUAGE'
 const DEFAULT_AI_SOLVER_SETTINGS = {
   enabled: false,
   provider: 'openai',
-  model: 'gpt-5.6-sol',
+  model: 'gpt-6-sol',
   flipBuilderStoryProvider: 'openai',
   flipBuilderStoryModel: 'gpt-6-astra',
   flipBuilderImageProvider: 'openai',
@@ -44,7 +44,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
   flipBuilderGenerationMode: 'fast',
   postSessionFlipGenerationEnabled: false,
   shortSessionOpenAiFastEnabled: false,
-  shortSessionOpenAiFastModel: 'gpt-5.6-sol',
+  shortSessionOpenAiFastModel: 'gpt-6-sol',
   memoryBudgetGiB: 32,
   systemReserveGiB: 6,
   localAiMemoryReference: resolveManagedLocalRuntimeMemoryReference(
@@ -107,6 +107,7 @@ const DEFAULT_AI_SOLVER_SETTINGS = {
 
 const OPENAI_SHORT_SESSION_FAST_MODELS = [
   'gpt-6-astra',
+  'gpt-6-sol',
   'gpt-5.6-sol',
   'gpt-5.5',
   'gpt-5.5-mini',

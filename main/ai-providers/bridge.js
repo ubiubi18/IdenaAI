@@ -112,6 +112,8 @@ const FLIP_IMAGE_ACCESSIBILITY_REQUIREMENTS = [
 const OPENAI_TEXT_PRICING_USD_PER_MTOK = {
   // GPT-6 Astra standard pricing checked on 2026-09-04.
   'gpt-6-astra': {input: 10, output: 50},
+  // GPT-6 Sol standard pricing checked on 2026-09-24.
+  'gpt-6-sol': {input: 2, output: 10},
   // GPT-5.6 Sol checked on 2026-08-30; earlier OpenAI entries on 2026-05-14.
   'gpt-5.6-sol': {input: 4, output: 20},
   'gpt-5.5': {input: 5, output: 30},

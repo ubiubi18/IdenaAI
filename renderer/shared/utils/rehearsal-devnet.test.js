@@ -10,7 +10,19 @@ describe('rehearsal devnet payloads', () => {
   it('defaults rehearsal solving to Sol', () => {
     expect(buildRehearsalSolverLanePayload()).toMatchObject({
       provider: 'openai',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6-sol',
+    })
+  })
+
+  it('preserves a configured DeepSeek rehearsal model', () => {
+    expect(
+      buildRehearsalSolverLanePayload({
+        provider: 'deepseek',
+        model: 'deepseek-flash',
+      })
+    ).toMatchObject({
+      provider: 'deepseek',
+      model: 'deepseek-flash',
     })
   })
 
