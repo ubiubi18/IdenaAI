@@ -133,6 +133,22 @@ describe('validation devnet helpers', () => {
     })
   })
 
+  it('defaults OpenAI rehearsal solving to GPT-6 Sol and keeps DeepSeek selections', () => {
+    expect(buildValidationDevnetSolverProviderPayload()).toMatchObject({
+      provider: 'openai',
+      model: 'gpt-6-sol',
+    })
+    expect(
+      buildValidationDevnetSolverProviderPayload({
+        provider: 'deepseek',
+        model: 'deepseek-flash',
+      })
+    ).toMatchObject({
+      provider: 'deepseek',
+      model: 'deepseek-flash',
+    })
+  })
+
   it('serializes genesis big-int balances as raw JSON numbers', () => {
     const plan = buildValidationDevnetPlan({
       baseDir: '/tmp/idena-validation-devnet',

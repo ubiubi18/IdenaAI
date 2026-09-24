@@ -82,7 +82,7 @@ describe('solver-orchestrator planning', () => {
 
     expect(plan.candidateFlips).toHaveLength(7)
     expect(plan.provider).toBe('openai')
-    expect(plan.model).toBe('gpt-5.6-sol')
+    expect(plan.model).toBe('gpt-6-sol')
     expect(plan.candidateFlips.some((flip) => flip.hash === 'short-2')).toBe(
       false
     )
@@ -101,7 +101,7 @@ describe('solver-orchestrator planning', () => {
     ],
   ])('uses Sol for default %s solving with %j', (sessionType, aiSolver) => {
     const plan = planValidationAiSolve({sessionType, aiSolver})
-    expect(plan.model).toBe('gpt-5.6-sol')
+    expect(plan.model).toBe('gpt-6-sol')
   })
 
   it.each(['short', 'long'])(
@@ -114,6 +114,19 @@ describe('solver-orchestrator planning', () => {
       expect(plan.model).toBe('gpt-6-astra')
     }
   )
+
+  it('preserves the DeepSeek model without OpenAI fast mode', () => {
+    const plan = planValidationAiSolve({
+      sessionType: 'short',
+      aiSolver: {
+        provider: 'deepseek',
+        model: 'deepseek-flash',
+        shortSessionOpenAiFastEnabled: true,
+      },
+    })
+    expect(plan.model).toBe('deepseek-flash')
+    expect(plan.promptOptions).toBeNull()
+  })
 
   it('keeps probability ensemble enabled for long-session plans by default', () => {
     const plan = planValidationAiSolve({

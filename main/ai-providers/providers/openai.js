@@ -333,16 +333,21 @@ function normalizeModelPayload(payload, providerConfig = {}) {
       delete deepseekPayload.temperature
     return deepseekPayload
   }
-  if (!/^gpt-6-astra(?:-|$)/u.test(String(payload.model || ''))) return payload
+  const model = String(payload.model || '')
+  const isGpt6Astra = /^gpt-6-astra(?:-|$)/u.test(model)
+  const isGpt6Sol = /^gpt-6-sol(?:-|$)/u.test(model)
+  if (!isGpt6Astra && !isGpt6Sol) return payload
 
   const normalized = {...payload}
-  for (const parameter of [
-    'temperature',
-    'top_p',
-    'top_logprobs',
-    'logprobs',
-  ]) {
-    delete normalized[parameter]
+  if (isGpt6Astra || normalized.reasoning_effort !== 'none') {
+    for (const parameter of [
+      'temperature',
+      'top_p',
+      'top_logprobs',
+      'logprobs',
+    ]) {
+      delete normalized[parameter]
+    }
   }
   if (normalized.max_tokens !== undefined) {
     if (normalized.max_completion_tokens === undefined) {
@@ -351,8 +356,10 @@ function normalizeModelPayload(payload, providerConfig = {}) {
     delete normalized.max_tokens
   }
   if (
-    !normalized.reasoning_effort ||
-    ['none', 'minimal'].includes(normalized.reasoning_effort)
+    (isGpt6Astra &&
+      (!normalized.reasoning_effort ||
+        ['none', 'minimal'].includes(normalized.reasoning_effort))) ||
+    (isGpt6Sol && normalized.reasoning_effort === 'minimal')
   ) {
     normalized.reasoning_effort = 'low'
   }
@@ -831,7 +838,9 @@ async function testOpenAiFastMode({
             content: 'Reply with the single lowercase word ok.',
           },
         ],
-        max_completion_tokens: model === 'gpt-6-astra' ? 256 : 16,
+        max_completion_tokens: /^gpt-6-(?:astra|sol)(?:-|$)/u.test(model)
+          ? 256
+          : 16,
         service_tier: serviceTier,
         reasoning_effort: reasoningEffort,
       },
