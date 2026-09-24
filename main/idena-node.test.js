@@ -6,6 +6,7 @@ const {
     getBundledNodeFileCandidates,
     getConfiguredBootstrapNodes,
     getNodeAcquisitionPolicy,
+    isWaitingForInitialSync,
     isPeerHintRetryable,
     isRpcMethodUnavailableError,
     getNodeReleaseRepos,
@@ -170,6 +171,47 @@ describe('idena node peer hints', () => {
     expect(getConfiguredBootstrapNodes(previousConfig)).not.toContain(
       '/ip4/9.9.9.9/tcp/40405/ipfs/QmStaleGeneratedPeer'
     )
+  })
+
+  it('prefers refreshed mainnet peers before historical bootstrap fallbacks', () => {
+    const bootnodes = getConfiguredBootstrapNodes({})
+    const refreshedPeer =
+      '/ip4/49.12.192.149/tcp/40405/ipfs/QmNqkSwad5HTShxVzFcYLQkRCRjrs9ZhQykqrRTQcdR7xp'
+    const historicalPeer =
+      '/ip4/135.181.40.10/tcp/40405/ipfs/QmNYWtiwM1UfeCmHfWSdefrMuQdg6nycY5yS64HYqWCUhD'
+
+    expect(bootnodes).toContain(refreshedPeer)
+    expect(bootnodes.indexOf(refreshedPeer)).toBeLessThan(
+      bootnodes.indexOf(historicalPeer)
+    )
+    expect(new Set(bootnodes).size).toBe(bootnodes.length)
+  })
+
+  it('retries peer hints when peers exist but initial sync remains at genesis', () => {
+    expect(
+      isWaitingForInitialSync({
+        syncing: false,
+        currentBlock: 4871137,
+        highestBlock: 4871137,
+        genesisBlock: 4871137,
+      })
+    ).toBe(true)
+    expect(
+      isWaitingForInitialSync({
+        syncing: false,
+        currentBlock: 4871138,
+        highestBlock: 4871138,
+        genesisBlock: 4871137,
+      })
+    ).toBe(false)
+    expect(
+      isWaitingForInitialSync({
+        syncing: true,
+        currentBlock: 4871137,
+        highestBlock: 11348095,
+        genesisBlock: 4871137,
+      })
+    ).toBe(false)
   })
 
   it('backs off failed hints exponentially', () => {
