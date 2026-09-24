@@ -12,8 +12,8 @@ buildGoModule rec {
   src = fetchFromGitHub {
     owner = "ubiubi18";
     repo = "idena-go";
-    rev = "a5f43a9f68b10b6f45dc3877d4c6309b9ee9bc3d";
-    hash = "sha256-UUWyP0LcTRHEVEaZDIZ+LaJCULU9P6KwzEEgDapN3mc=";
+    rev = "2b3f6bd04600443c3cc0905a7d5744caff840982";
+    hash = "sha256-VE644A/wYKo45KkHbN6J77KEx1H7q8IV2/NOILxgpDw=";
   };
 
   vendorHash = "sha256-GsirT/3P59r6sBi4B/6KAmk/x2PkG4yu98DtLfyEEOg=";
