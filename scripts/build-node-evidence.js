@@ -23,6 +23,7 @@ function readOptionValue(argv, index, option) {
 
 function parseArgs(argv) {
   const options = {
+    binaryOutput: '',
     builderId: '',
     report: path.join(
       ROOT,
@@ -36,6 +37,9 @@ function parseArgs(argv) {
     const arg = argv[index]
     if (arg === '--builder-id') {
       options.builderId = readOptionValue(argv, index, arg)
+      index += 1
+    } else if (arg === '--binary-output') {
+      options.binaryOutput = path.resolve(readOptionValue(argv, index, arg))
       index += 1
     } else if (arg === '--report') {
       options.report = path.resolve(readOptionValue(argv, index, arg))
@@ -184,6 +188,12 @@ function writeNewJson(filePath, value) {
   }
 }
 
+function copyNewExecutable(sourcePath, targetPath) {
+  fs.mkdirSync(path.dirname(targetPath), {recursive: true})
+  fs.copyFileSync(sourcePath, targetPath, fs.constants.COPYFILE_EXCL)
+  fs.chmodSync(targetPath, 0o755)
+}
+
 function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv)
   const manifest = readManifest()
@@ -245,11 +255,25 @@ function main(argv = process.argv.slice(2)) {
       platform: process.platform,
       provenance: reportProvenance(),
     })
+    if (options.binaryOutput) {
+      copyNewExecutable(binaryPath, options.binaryOutput)
+      if (
+        sha256File(options.binaryOutput) !== report.results.binarySha256 ||
+        fs.statSync(options.binaryOutput).size !== report.results.binarySize
+      ) {
+        throw new Error('Preserved node binary does not match its build report')
+      }
+    }
     writeNewJson(options.report, report)
     console.log(
       `[build-node-evidence] ${options.builderId}: ${report.results.binarySha256}`
     )
     console.log(`[build-node-evidence] Report: ${options.report}`)
+    if (options.binaryOutput) {
+      console.log(
+        `[build-node-evidence] Binary: ${options.binaryOutput}`
+      )
+    }
   } finally {
     fs.rmSync(tempRoot, {recursive: true, force: true})
   }
@@ -266,6 +290,7 @@ if (require.main === module) {
 
 module.exports = {
   compatibilityPins,
+  copyNewExecutable,
   createReport,
   parseArgs,
   reportProvenance,
