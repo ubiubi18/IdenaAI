@@ -5,6 +5,7 @@ const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
 const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * IDNA_SCALE
+const SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT = 5n * IDNA_SCALE
 const SOCIAL_MAX_ARGUMENT_BYTES = 1024 * 1024
 const SOCIAL_MAX_TEXT_BYTES = 256 * 1024
 const SOCIAL_MAX_CIPHERTEXT_BYTES = SOCIAL_MAX_TEXT_BYTES + 256
@@ -115,7 +116,8 @@ function validateMethodArgument(method, argument, amountAtoms) {
     return amountAtoms === SOCIAL_MESSAGE_CALL_AMOUNT &&
       hasOnlyKeys(argument, new Set(['message', 'messageHash', 'encrypted'])) &&
       Array.isArray(argument.message) &&
-      argument.message.length === 2 &&
+      argument.message.length >= 2 &&
+      argument.message.length <= 16 &&
       argument.message.every((value) =>
         isBoundedBase64(value, SOCIAL_MAX_CIPHERTEXT_BYTES)
       ) &&
@@ -157,14 +159,22 @@ function validateSocialContractCall(call) {
   const maxFeeAtoms = decimalToAtoms(call.maxFee)
   const argument = parseContractArgument(call)
 
-  if (
-    amountAtoms === null ||
-    maxFeeAtoms === null ||
-    maxFeeAtoms > SOCIAL_MAX_FEE ||
-    !argument
-  ) {
+  if (amountAtoms === null || maxFeeAtoms === null || !argument) {
     return 'invalid_social_contract_call'
   }
+
+  let maxFeeLimit = SOCIAL_MAX_FEE
+  if (call.method === 'sendMessage') {
+    const ciphertextCount = Array.isArray(argument.message)
+      ? argument.message.length
+      : 0
+    if (ciphertextCount < 2 || ciphertextCount > 16) {
+      return 'invalid_social_contract_call'
+    }
+    maxFeeLimit =
+      global.BigInt(ciphertextCount) * SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT
+  }
+  if (maxFeeAtoms > maxFeeLimit) return 'invalid_social_contract_call'
 
   return validateMethodArgument(call.method, argument, amountAtoms)
 }

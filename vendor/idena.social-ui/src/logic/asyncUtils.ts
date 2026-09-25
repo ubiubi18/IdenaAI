@@ -1397,6 +1397,36 @@ export const copyMessageTx = async (
     }
 };
 
+export const prepareRpcMessageCall = async (
+    postersAddress: string,
+    contractAddress: string,
+    sendMessageMethod: string,
+    inputMessage: string[],
+    inputMessageHash: string,
+    rpcClient: RpcClient,
+) => {
+    const {txAmount, args} = getSendMessageTransactionPayload(sendMessageMethod, inputMessage, inputMessageHash);
+    const call = {
+        from: postersAddress, contract: contractAddress, method: sendMessageMethod,
+        amount: txAmount.toNumber(), args, maxFee: '10',
+    };
+    const response = await rpcClient('contract_estimateCall', [call], true);
+    if (response?.error || response?.result?.success !== true) {
+        throw new Error(response?.error?.message || response?.result?.error || 'The node could not validate the message transaction.');
+    }
+    const {gasCost, txFee} = response.result;
+    if (gasCost == null || txFee == null) throw new Error('The node did not return a message fee estimate.');
+    const cost = new Decimal(gasCost);
+    const fee = new Decimal(txFee);
+    if (!cost.isFinite() || cost.isNegative() || !fee.isFinite() || fee.isNegative()) {
+        throw new Error('The node returned an invalid message fee estimate.');
+    }
+    const maxFee = cost.add(fee).mul('1.2');
+    const feeLimit = inputMessage.length * 5;
+    if (maxFee.greaterThan(feeLimit)) throw new Error(`The message exceeds the desktop fee limit of ${feeLimit} IDNA.`);
+    return {...call, maxFee: maxFee.toFixed()};
+};
+
 export const submitMessage = async (
     postersAddress: string,
     contractAddress: string,
@@ -1407,10 +1437,18 @@ export const submitMessage = async (
     rpcClient: RpcClient,
     callbackUrl: string,
 ) => {
+    if (makePostsWith === 'rpc') {
+        const call = await prepareRpcMessageCall(postersAddress, contractAddress, sendMessageMethod, inputMessage, inputMessageHash, rpcClient);
+        const response = await rpcClient('contract_call', [call]);
+        if (response?.error || typeof response?.result !== 'string' || !/^0x[0-9a-f]{64}$/i.test(response.result)) {
+            throw new Error(response?.error?.message || 'The node did not accept the message transaction.');
+        }
+        return response.result as string;
+    }
     const { txAmount, args, payload } = getSendMessageTransactionPayload(sendMessageMethod, inputMessage, inputMessageHash);
     const inputMessageLength = JSON.stringify(inputMessage).length + inputMessageHash.length;
 
-    const response = await makeCallTransaction(
+    await makeCallTransaction(
         postersAddress,
         contractAddress,
         sendMessageMethod,
@@ -1423,12 +1461,6 @@ export const submitMessage = async (
         inputMessageLength,
     );
 
-    if (makePostsWith === 'rpc') {
-        if (response?.error || typeof response?.result !== 'string' || !/^0x[0-9a-f]{64}$/i.test(response.result)) {
-            throw new Error(response?.error?.message || 'The node did not accept the message transaction.');
-        }
-        return response.result as string;
-    }
 };
 
 type CallContractArg = {

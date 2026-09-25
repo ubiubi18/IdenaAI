@@ -38,6 +38,19 @@ function makeCall(overrides = {}) {
   }
 }
 
+function makeMessageCall(ciphertextCount) {
+  return makeCall({
+    method: 'sendMessage',
+    argument: {
+      message: Array.from({length: ciphertextCount}, (_, index) =>
+        Buffer.from(`ciphertext ${index}`).toString('base64')
+      ),
+      messageHash: '11'.repeat(32),
+      encrypted: true,
+    },
+  })
+}
+
 describe('social contract-call policy', () => {
   it('accepts only the pinned contract and expected method payloads', () => {
     expect(validateSocialContractCall(makeCall())).toBeNull()
@@ -74,6 +87,70 @@ describe('social contract-call policy', () => {
         makeCall({method: 'makePost', amount: '0.00002'})
       )
     ).toBe('invalid_social_contract_call')
+  })
+
+  it('accepts 2 through 16 ciphertexts for direct and group messages', () => {
+    for (const count of [2, 3, 6, 16]) {
+      expect(validateSocialContractCall(makeMessageCall(count))).toBeNull()
+    }
+  })
+
+  it('rejects message ciphertext counts outside the supported range', () => {
+    for (const count of [0, 1, 17]) {
+      expect(validateSocialContractCall(makeMessageCall(count))).toBe(
+        'invalid_social_contract_call'
+      )
+    }
+  })
+
+  it('limits DM fees to 5 IDNA per ciphertext while posts and tips stay at 10', () => {
+    for (const [count, limit] of [
+      [2, 10],
+      [6, 30],
+      [16, 80],
+    ]) {
+      const call = makeMessageCall(count)
+      expect(
+        validateSocialContractCall({...call, maxFee: String(limit)})
+      ).toBeNull()
+      expect(
+        validateSocialContractCall({
+          ...call,
+          maxFee: `${limit}.000000000000000001`,
+        })
+      ).toBe('invalid_social_contract_call')
+    }
+
+    for (const method of ['makePost', 'sendTip']) {
+      expect(
+        validateSocialContractCall({
+          ...makeCall({method}),
+          maxFee: '10.000000000000000001',
+        })
+      ).toBe('invalid_social_contract_call')
+    }
+  })
+
+  it('keeps ciphertext, hash, and argument limits for group messages', () => {
+    const groupArgument = JSON.parse(makeMessageCall(3).args[0].value)
+    const invalidArguments = [
+      {
+        ...groupArgument,
+        message: [...groupArgument.message.slice(0, 2), 'not-base64'],
+      },
+      {...groupArgument, messageHash: 'not-a-hash'},
+      {...groupArgument, encrypted: false},
+      {
+        ...groupArgument,
+        message: Array(16).fill(Buffer.alloc(64 * 1024).toString('base64')),
+      },
+    ]
+
+    for (const argument of invalidArguments) {
+      expect(
+        validateSocialContractCall(makeCall({method: 'sendMessage', argument}))
+      ).toBe('invalid_social_contract_call')
+    }
   })
 
   it('rejects value and argument substitution', () => {

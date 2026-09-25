@@ -12,6 +12,7 @@ const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
 const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * SOCIAL_IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * SOCIAL_IDNA_SCALE
+const SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT = 5n * SOCIAL_IDNA_SCALE
 
 export const SOCIAL_CONTRACT_ADDRESS =
   '0x840e092e31e9656fF15E541505039ed77585338E'
@@ -40,6 +41,7 @@ const SOCIAL_ALLOWED_RPC_METHODS = new Set([
   'bcn_transactions',
   'bcn_txReceipt',
   'contract_call',
+  'contract_estimateCall',
   'dna_epoch',
   'dna_getBalance',
   'dna_getCoinbaseAddr',
@@ -161,9 +163,28 @@ function validateSocialContractCall(call) {
 
   const amount = decimalToAtoms(call.amount)
   const maxFee = decimalToAtoms(call.maxFee)
-  if (amount === null || maxFee === null || maxFee > SOCIAL_MAX_FEE) {
+  if (amount === null || maxFee === null) {
     return 'invalid_social_contract_call'
   }
+
+  let maxFeeLimit = SOCIAL_MAX_FEE
+  if (call.method === 'sendMessage') {
+    let argument
+    try {
+      argument = JSON.parse(call.args[0].value)
+    } catch {
+      return 'invalid_social_contract_call'
+    }
+    const ciphertextCount = Array.isArray(argument?.message)
+      ? argument.message.length
+      : 0
+    if (ciphertextCount < 2 || ciphertextCount > 16) {
+      return 'invalid_social_contract_call'
+    }
+    maxFeeLimit =
+      BigInt(ciphertextCount) * SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT
+  }
+  if (maxFee > maxFeeLimit) return 'invalid_social_contract_call'
 
   if (call.method === 'sendTip') {
     return amount > 0n && amount <= SOCIAL_MAX_TIP_AMOUNT
@@ -271,6 +292,12 @@ export function validateSocialRpcRequest(requestId, method, params) {
       return params.length === 1
         ? validateSocialContractCall(params[0])
         : 'invalid_rpc_params'
+
+    case 'contract_estimateCall':
+      if (params.length !== 1) return 'invalid_rpc_params'
+      return params[0]?.method === 'sendMessage'
+        ? validateSocialContractCall(params[0])
+        : 'invalid_social_contract_call'
 
     default:
       return 'unsupported_rpc_method'
