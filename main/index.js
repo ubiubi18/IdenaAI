@@ -233,6 +233,7 @@ const SOCIAL_ALLOWED_RPC_METHODS = new Set([
   'bcn_transaction',
   'bcn_txReceipt',
   'contract_call',
+  'contract_estimateCall',
   'dna_epoch',
   'dna_getBalance',
   'dna_getCoinbaseAddr',
@@ -508,6 +509,11 @@ function validateSocialRpcRequest(payload = {}) {
         ? null
         : 'invalid_rpc_params'
 
+    case 'contract_estimateCall':
+      return params.length === 1 && params[0]?.method === 'sendMessage'
+        ? validateSocialContractCall(params[0])
+        : 'invalid_social_contract_call'
+
     case 'contract_call':
       return params.length === 1
         ? validateSocialContractCall(params[0])
@@ -673,7 +679,7 @@ async function performSocialRpc(payload = {}) {
     return {error: {message: validationError}}
   }
 
-  if (payload.method !== 'contract_call') {
+  if (!['contract_call', 'contract_estimateCall'].includes(payload.method)) {
     return performNodeRpc(payload)
   }
 

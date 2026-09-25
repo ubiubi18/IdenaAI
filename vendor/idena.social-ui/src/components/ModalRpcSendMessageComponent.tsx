@@ -33,7 +33,7 @@ function ModalRpcSendMessageComponent(props: ModalRpcSendMessageComponentProps) 
                 storeMediaIpfs={storeMediaIpfs}
                 setStoreMediaIpfs={setStoreMediaIpfs}
                 localSubmitHandler={localSubmitMessageHandler}
-                submitText={'Send!'}
+                submitText={'Review fee'}
             />
         </div>
     </>);
