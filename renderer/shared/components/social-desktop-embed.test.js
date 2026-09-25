@@ -165,7 +165,7 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
     ).toBe('invalid_social_contract_call')
   })
 
-  it('passes the vendored DM amount while preserving exact call amounts', () => {
+  it('allows DM fee estimates while preserving the pinned contract and exact amounts', () => {
     const messageCall = {
       from: '0x0000000000000000000000000000000000000001',
       contract: SOCIAL_CONTRACT_ADDRESS,
@@ -191,6 +191,83 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
     expect(
       validateSocialRpcRequest('dm-1', 'contract_call', [messageCall])
     ).toBeNull()
+    expect(
+      validateSocialRpcRequest('dm-estimate', 'contract_estimateCall', [
+        {...messageCall, maxFee: '10'},
+      ])
+    ).toBeNull()
+    expect(
+      validateSocialRpcRequest('post-estimate', 'contract_estimateCall', [
+        {...messageCall, method: 'makePost', amount: '0.00001'},
+      ])
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialRpcRequest(
+        'other-contract-estimate',
+        'contract_estimateCall',
+        [
+          {
+            ...messageCall,
+            contract: '0x0000000000000000000000000000000000000002',
+          },
+        ]
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialRpcRequest(
+        'wrong-amount-estimate',
+        'contract_estimateCall',
+        [{...messageCall, amount: '0.00001'}]
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialRpcRequest('excess-fee-estimate', 'contract_estimateCall', [
+        {...messageCall, maxFee: '10.000000000000000001'},
+      ])
+    ).toBe('invalid_social_contract_call')
+    const messageArgument = JSON.parse(messageCall.args[0].value)
+    const callWithCount = (count, maxFee) => ({
+      ...messageCall,
+      maxFee,
+      args: [
+        {
+          ...messageCall.args[0],
+          value: JSON.stringify({
+            ...messageArgument,
+            message: Array(count).fill('YQ=='),
+          }),
+        },
+      ],
+    })
+    for (const [count, limit] of [
+      [2, 10],
+      [6, 30],
+      [16, 80],
+    ]) {
+      for (const rpcMethod of ['contract_call', 'contract_estimateCall']) {
+        expect(
+          validateSocialRpcRequest(`fee-${rpcMethod}-${count}`, rpcMethod, [
+            callWithCount(count, String(limit)),
+          ])
+        ).toBeNull()
+        expect(
+          validateSocialRpcRequest(
+            `excess-fee-${rpcMethod}-${count}`,
+            rpcMethod,
+            [callWithCount(count, `${limit}.000000000000000001`)]
+          )
+        ).toBe('invalid_social_contract_call')
+      }
+    }
+    for (const count of [0, 1, 17]) {
+      expect(
+        validateSocialRpcRequest(
+          `invalid-count-${count}`,
+          'contract_estimateCall',
+          [callWithCount(count, '10')]
+        )
+      ).toBe('invalid_social_contract_call')
+    }
     expect(
       validateSocialRpcRequest('dm-2', 'contract_call', [
         {...messageCall, amount: '0.00001'},

@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import Modal from 'react-modal';
+import {sendPendingMessage, stageMessageFile, type PreparedMessage} from './logic/pendingMessages';
 import { hexToUint8Array } from 'idena-sdk-js-lite';
 import { keccak256, sha3_256 } from 'js-sha3';
 import { encrypt } from 'eciesjs';
@@ -238,6 +239,7 @@ function App() {
     const [submittingLike, setSubmittingLike] = useState<string>('');
     const [submittingTip, setSubmittingTip] = useState<string>('');
     const [submittingMessage, setSubmittingMessage] = useState<string>('');
+    const messageSendInFlightRef = useRef(false);
     const [inputPostDisabled, setInputPostDisabled] = useState<boolean>(false);
     const browserStateHistoryRef = useRef<Record<string, BrowserStateHistorySettings>>({});
     const postMediaAttachmentsRef = useRef<Record<string, PostMediaAttachment | undefined>>({});
@@ -255,6 +257,19 @@ function App() {
 
     // modals
     const [modalOpen, setModalOpen] = useState<string>('');
+    const [messageFeeQuote, setMessageFeeQuote] = useState<{maxFee: string, remainingUploads: number} | null>(null);
+    const messageFeeResolveRef = useRef<((accepted: boolean) => void) | null>(null);
+    const finishMessageFeeConfirmation = (accepted: boolean) => {
+        messageFeeResolveRef.current?.(accepted);
+        messageFeeResolveRef.current = null;
+        setMessageFeeQuote(null);
+        setModalOpen('');
+    };
+    const confirmMessageFee = (maxFee: string, remainingUploads: number) => new Promise<boolean>(resolve => {
+        messageFeeResolveRef.current = resolve;
+        setMessageFeeQuote({maxFee, remainingUploads});
+        setModalOpen('messageFee');
+    });
     const modalLikePostsRef = useRef<Array<Post | Message>>([]);
     const modalTipsRef = useRef<Tip[]>([]);
     const modalSendTipRef = useRef<Post>(undefined);
@@ -1243,7 +1258,9 @@ function App() {
                     const conversationKey = newMessage.conversationKey;
                     const conversation = isRecurseForward ? [ newMessage.messageId, ...(conversationsRef.current[conversationKey] ?? []) ] : [ ...(conversationsRef.current[conversationKey] ?? []), newMessage!.messageId ];
                     conversationsRef.current = { ...conversationsRef.current, [conversationKey]: conversation };
-                    conversationKeys.push(conversationKey);
+                    if (conversation.some(id => messagesRef.current[id] && !messagesRef.current[id].isLike)) {
+                        conversationKeys.push(conversationKey);
+                    }
 
                     const allParticipants = [newMessage.sender, ...newMessage.participants];
                     for (let index = 0; index < allParticipants.length; index++) {
@@ -1262,7 +1279,7 @@ function App() {
                 }
 
                 setLatestConversationActivity((currentValue) => {
-                    let newLatestConversationActivity = currentValue;
+                    let newLatestConversationActivity = [...currentValue];
                     if (isRecurseForward) {
                         for (let index = 0; index < conversationKeys.length; index++) {
                             const conversationKey = conversationKeys[index];
@@ -1290,16 +1307,15 @@ function App() {
 
     useEffect(() => {
         let intervalSubmittingPost: NodeJS.Timeout;
-        if (submittingPost || submittingLike || submittingTip || submittingMessage) {
+        if (submittingPost || submittingLike || submittingTip) {
             intervalSubmittingPost = setTimeout(() => {
                 setSubmittingPost('');
                 setSubmittingLike('');
                 setSubmittingTip('');
-                setSubmittingMessage('');
             }, SUBMITTING_POST_INTERVAL);
         }
         return () => clearInterval(intervalSubmittingPost);
-    }, [submittingPost, submittingLike, submittingTip, submittingMessage]);
+    }, [submittingPost, submittingLike, submittingTip]);
 
     useEffect(() => {
         setInputPostDisabled(!!submittingPost || !!submittingLike || !!submittingTip || !!submittingMessage || (inputSendingTxs === 'rpc' && viewOnlyNode) || postersAddressInvalid);
@@ -1639,109 +1655,91 @@ function App() {
     };
 
     const submitMessageHandler = async (location: string, recipients: string[], replyToMessageId?: string, storeTextIpfs?: boolean, storeMediaIpfs?: boolean) => {
+        if (messageSendInFlightRef.current) return;
         if (!nodeAvailable) {
-            alert('Node unavailable, cannot message!');
+            showFlashNotice('error', 'Node unavailable, cannot message.');
             return;
         }
-
         if (messageSettingsInvalid) {
-            alert('Messaging encryption is unavailable. Open Settings for details.');
+            showFlashNotice('error', 'Messaging encryption is unavailable. Open Settings for details.');
             return;
         }
-
         const messageTextareaElement = document.getElementById(`message-input-${location}`) as HTMLTextAreaElement;
         const postMediaAttachment = postMediaAttachmentsRef.current[`message-${location}`];
-
-        let { inputText, media, mediaType } = getTextAndMediaForPost(messageTextareaElement, postMediaAttachment);
-
-        if (!inputText && !postMediaAttachment) {
-            alert('No text or media provided!');
+        const originalText = messageTextareaElement.value;
+        const initial = getTextAndMediaForPost(messageTextareaElement, postMediaAttachment);
+        if (!initial.inputText && !postMediaAttachment) {
+            showFlashNotice('error', 'No text or media provided.');
             return;
         }
-
-        let textPassword = '';
-        let mediaPassword = '';
-
-        if (inputSendingTxs === 'rpc' && storeTextIpfs && inputText) {
-
-            const textBytes = str2bytes(inputText);
-
-            const rawSecretKey = crypto.getRandomValues(new Uint8Array(32));
-
-            // @ts-ignore: Uint8Array.toBase64 not recognized yet
-            textPassword = rawSecretKey.toBase64();
-
-            const combined = await encryptAESGCM(textBytes, rawSecretKey);
-
-            const cidAddress = await storeFileToIpfs(rpcClientRef.current!, combined, postersAddressRef.current);
-
-            if (!cidAddress) {
-                alert('Something went wrong. Probably you have insufficient iDNA.');
-                return;
-            }
-
-            inputText = cidAddress!;
-        }
-
-        if (inputSendingTxs === 'rpc' && postMediaAttachment && !postMediaAttachment.ipfsUrl) {
-            if (storeMediaIpfs) {
-                if (postMediaAttachment.file.size > MAX_POST_MEDIA_BYTES) {
-                    alert('1MB is the maximum size. This image is too large.');
-                    return;
-                }
-
-                const fileBytes = new Uint8Array(await postMediaAttachment.file.arrayBuffer());
-
-                const rawSecretKey = crypto.getRandomValues(new Uint8Array(32));
-
-                // @ts-ignore: Uint8Array.toBase64 not recognized yet
-                mediaPassword = rawSecretKey.toBase64();
-
-                const combined = await encryptAESGCM(fileBytes, rawSecretKey);
-
-                const cidAddress = await storeFileToIpfs(rpcClientRef.current!, combined, postersAddressRef.current);
-
-                if (!cidAddress) {
-                    alert('Something went wrong. Probably you have insufficient iDNA.');
-                    return;
-                }
-
-                media = [cidAddress!];
-                mediaType = [postMediaAttachment.file.type];
-            } else {
-                if (postMediaAttachment.file.size > MAX_POST_MEDIA_BYTES_WEBAPP) {
-                    alert('5KB is the maximum size when storing on the blockchain. Store image on IPFS instead.');
-                    return;
-                }
-            }
-        }
-
-        if (postMediaAttachment?.ipfsUrl) {
-            media = [postMediaAttachment.ipfsUrl];
-            mediaType = [postMediaAttachment.file.type];
-        }
-
-        // [participants, channelId, message, textPassword (AES-GCM encryption), replyToMessageId, media, mediaType, mediaPassword (AES-GCM encryption), tags]
-        const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), ...recipients], '', inputText, textPassword, replyToMessageId ?? '', media, mediaType, mediaPassword, []]);
-        const rawMessageHash = keccak256(rawMessage);
-
-        let message: string[];
-        try {
-            message = await encryptMessageForRecipients(rawMessage, recipients);
-        } catch (error) {
-            alert(`Unable to encrypt message: ${error instanceof Error ? error.message : 'unknown error'}`);
+        if (recipients.length < 1 || recipients.length > 15 || recipients.some(recipient => !postersRef.current[recipient.toLowerCase()]?.pubkey)) {
+            showFlashNotice('error', 'Recipient public keys are unavailable. No storage transaction was submitted.');
             return;
         }
-
+        const key = 'idena.social.pending-dm.v1.' + keccak256(JSON.stringify([
+            postersAddress.toLowerCase(), contractAddressCurrent.toLowerCase(), sendMessageMethod,
+            recipients.map(recipient => recipient.toLowerCase()), replyToMessageId || '',
+            initial.inputText, initial.media, initial.mediaType, postMediaAttachment?.ipfsUrl || '',
+            !!storeTextIpfs, !!storeMediaIpfs,
+        ]));
+        messageSendInFlightRef.current = true;
         setSubmittingMessage(location);
-
         try {
-            await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
-            messageTextareaElement.value = '';
-            postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`message-${location}`]: undefined };
+            const prepare = async (): Promise<PreparedMessage> => {
+                let {inputText, media, mediaType} = initial;
+                let textPassword = '';
+                let mediaPassword = '';
+                const uploads: PreparedMessage['uploads'] = [];
+                if (inputSendingTxs === 'rpc' && storeTextIpfs && inputText) {
+                    const rawSecretKey = crypto.getRandomValues(new Uint8Array(32));
+                    // @ts-ignore: Uint8Array.toBase64 not recognized yet
+                    textPassword = rawSecretKey.toBase64();
+                    const combined = await encryptAESGCM(str2bytes(inputText), rawSecretKey);
+                    const cid = await stageMessageFile(rpcClientRef.current!, combined);
+                    uploads.push({cid});
+                    inputText = `ipfs://${cid}`;
+                }
+                if (inputSendingTxs === 'rpc' && postMediaAttachment && !postMediaAttachment.ipfsUrl) {
+                    if (storeMediaIpfs) {
+                        if (postMediaAttachment.file.size > MAX_POST_MEDIA_BYTES) throw new Error('1MB is the maximum image size.');
+                        const rawSecretKey = crypto.getRandomValues(new Uint8Array(32));
+                        // @ts-ignore: Uint8Array.toBase64 not recognized yet
+                        mediaPassword = rawSecretKey.toBase64();
+                        const combined = await encryptAESGCM(new Uint8Array(await postMediaAttachment.file.arrayBuffer()), rawSecretKey);
+                        const cid = await stageMessageFile(rpcClientRef.current!, combined);
+                        uploads.push({cid});
+                        media = [`ipfs://${cid}`];
+                        mediaType = [postMediaAttachment.file.type];
+                    } else if (postMediaAttachment.file.size > MAX_POST_MEDIA_BYTES_WEBAPP) {
+                        throw new Error('5KB is the maximum image size on the blockchain. Store the image on IPFS instead.');
+                    }
+                }
+                if (postMediaAttachment?.ipfsUrl) {
+                    media = [postMediaAttachment.ipfsUrl];
+                    mediaType = [postMediaAttachment.file.type];
+                }
+                const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), ...recipients], '', inputText, textPassword, replyToMessageId || '', media, mediaType, mediaPassword, []]);
+                return {message: await encryptMessageForRecipients(rawMessage, recipients), messageHash: keccak256(rawMessage), uploads};
+            };
+            if (inputSendingTxs === 'rpc') {
+                await sendPendingMessage({key, storage: window.localStorage, from: postersAddress, contract: contractAddressCurrent, method: sendMessageMethod, rpcClient: rpcClientRef.current!, prepare, confirmFee: confirmMessageFee});
+            } else {
+                const prepared = await prepare();
+                await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, prepared.message, prepared.messageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+            }
+            if (messageTextareaElement.value === originalText) messageTextareaElement.value = '';
+            if (postMediaAttachmentsRef.current[`message-${location}`] === postMediaAttachment) {
+                postMediaAttachmentsRef.current = {...postMediaAttachmentsRef.current, [`message-${location}`]: undefined};
+            }
+            if (inputSendingTxs === 'rpc') {
+                // A saved success hash still prevents duplication if cleanup fails.
+                try { window.localStorage.removeItem(key); } catch { /* Keep the receipt. */ }
+            }
         } catch (error) {
+            showFlashNotice('error', `Message submission stopped: ${error instanceof Error ? error.message : 'unknown error'}`);
+        } finally {
             setSubmittingMessage('');
-            showFlashNotice('error', `Message was not sent: ${error instanceof Error ? error.message : 'unknown error'}`);
+            messageSendInFlightRef.current = false;
         }
     };
 
@@ -2304,9 +2302,17 @@ function App() {
             <div onClick={(e) => e.stopPropagation()}>
                 <Modal
                     isOpen={!!modalOpen} 
-                    onRequestClose={() => setModalOpen('')}
+                    onRequestClose={() => finishMessageFeeConfirmation(false)}
                     style={customModalStyles}
                 >
+                    {modalOpen === 'messageFee' && messageFeeQuote && (
+                        <div className="w-full sm:w-[500px] px-3 text-center">
+                            <p className="mb-2">Confirm message fee</p>
+                            <p>Maximum message fee: {messageFeeQuote.maxFee} IDNA</p>
+                            {messageFeeQuote.remainingUploads > 0 && <p className="mt-2">Plus storage fees for {messageFeeQuote.remainingUploads} encrypted {messageFeeQuote.remainingUploads === 1 ? 'file' : 'files'}.</p>}
+                            <button className="my-3 px-3 py-1 bg-white/10 hover:bg-white/20 cursor-pointer" onClick={() => finishMessageFeeConfirmation(true)}>Send message</button>
+                        </div>
+                    )}
                     {modalOpen === 'likes' && <ModalLikesTipsComponent heading={'Likes'} modalItemsRef={modalLikePostsRef} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'tips' && <ModalLikesTipsComponent heading={'Tips'} modalItemsRef={modalTipsRef} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'sendTip' && <ModalSendTipComponent modalSendTipRef={modalSendTipRef} idenaWalletBalance={idenaWalletBalance} submitSendTipHandler={submitSendTipHandler} closeModal={() => setModalOpen('')} />}
@@ -2315,7 +2321,7 @@ function App() {
                     {modalOpen === 'rpcSendMessage' && <ModalRpcSendMessageComponent modalRpcSendMessageRef={modalRpcSendMessageRef} submitMessageHandler={submitMessageHandler} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'expandImage' && <ModalExpandImageComponent modalExpandImageRef={modalExpandImageRef} />}
                     {modalOpen === 'submitPubKey' && <ModalSubmitPubKeyComponent modalSubmitPubkeyRef={modalSubmitPubKeyRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
-                    <div className="text-center"><button className="h-7 w-15 my-1 px-2 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => setModalOpen('')}>Close</button></div>
+                    <div className="text-center"><button className="h-7 w-15 my-1 px-2 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => finishMessageFeeConfirmation(false)}>Close</button></div>
                 </Modal>
             </div>
         </main>
