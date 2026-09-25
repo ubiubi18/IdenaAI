@@ -1677,6 +1677,7 @@ function App() {
 
             if (!cidAddress) {
                 alert('Something went wrong. Probably you have insufficient iDNA.');
+                return;
             }
 
             inputText = cidAddress!;
@@ -1702,6 +1703,7 @@ function App() {
 
                 if (!cidAddress) {
                     alert('Something went wrong. Probably you have insufficient iDNA.');
+                    return;
                 }
 
                 media = [cidAddress!];
@@ -1731,12 +1733,16 @@ function App() {
             return;
         }
 
-        messageTextareaElement.value = '';
-        postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`message-${location}`]: undefined };
-
         setSubmittingMessage(location);
 
-        await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        try {
+            await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+            messageTextareaElement.value = '';
+            postMediaAttachmentsRef.current = { ...postMediaAttachmentsRef.current, [`message-${location}`]: undefined };
+        } catch (error) {
+            setSubmittingMessage('');
+            showFlashNotice('error', `Message was not sent: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
     };
 
     const submitMessageLikeHandler = async (emoji: string, _location: string, recipients: string[], replyToMessageId: string) => {
@@ -1766,7 +1772,12 @@ function App() {
 
         setSubmittingLike(replyToMessageId);
 
-        await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        try {
+            await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        } catch (error) {
+            setSubmittingLike('');
+            showFlashNotice('error', `Message reaction was not sent: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
     };
 
     const handleOpenLikesModal = (e: MouseEventLocal, likeItems: Array<Post | Message>) => {

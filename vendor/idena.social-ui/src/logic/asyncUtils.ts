@@ -1410,7 +1410,7 @@ export const submitMessage = async (
     const { txAmount, args, payload } = getSendMessageTransactionPayload(sendMessageMethod, inputMessage, inputMessageHash);
     const inputMessageLength = JSON.stringify(inputMessage).length + inputMessageHash.length;
 
-    await makeCallTransaction(
+    const response = await makeCallTransaction(
         postersAddress,
         contractAddress,
         sendMessageMethod,
@@ -1422,6 +1422,13 @@ export const submitMessage = async (
         payload,
         inputMessageLength,
     );
+
+    if (makePostsWith === 'rpc') {
+        if (response?.error || typeof response?.result !== 'string' || !/^0x[0-9a-f]{64}$/i.test(response.result)) {
+            throw new Error(response?.error?.message || 'The node did not accept the message transaction.');
+        }
+        return response.result as string;
+    }
 };
 
 type CallContractArg = {
@@ -1452,7 +1459,7 @@ export const makeCallTransaction = async (
     const { maxFeeDecimal, maxFeeDna } = calculateMaxFee(maxFeeResult, inputPostLength);
 
     if (makePostsWith === 'rpc') {
-        await rpcClient('contract_call', [
+        return await rpcClient('contract_call', [
             {
                 from,
                 contract: to,
