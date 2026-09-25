@@ -164,4 +164,42 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
       ])
     ).toBe('invalid_social_contract_call')
   })
+
+  it('passes the vendored DM amount while preserving exact call amounts', () => {
+    const messageCall = {
+      from: '0x0000000000000000000000000000000000000001',
+      contract: SOCIAL_CONTRACT_ADDRESS,
+      method: 'sendMessage',
+      amount: '0.00002',
+      args: [
+        {
+          format: 'string',
+          index: 0,
+          value: JSON.stringify({
+            message: [
+              Buffer.from('sender ciphertext').toString('base64'),
+              Buffer.from('recipient ciphertext').toString('base64'),
+            ],
+            messageHash: '11'.repeat(32),
+            encrypted: true,
+          }),
+        },
+      ],
+      maxFee: '0.1',
+    }
+
+    expect(
+      validateSocialRpcRequest('dm-1', 'contract_call', [messageCall])
+    ).toBeNull()
+    expect(
+      validateSocialRpcRequest('dm-2', 'contract_call', [
+        {...messageCall, amount: '0.00001'},
+      ])
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialRpcRequest('dm-3', 'contract_call', [
+        {...messageCall, amount: '0.00003'},
+      ])
+    ).toBe('invalid_social_contract_call')
+  })
 })
