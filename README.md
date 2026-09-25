@@ -4,6 +4,10 @@
 
 This is experimental research software. I cannot guarantee its security, correctness, or fitness for any purpose. Use it at your own risk, take responsibility for your decisions, independently verify changes, and stay vigilant.
 
+**Developer-reported research results.** Since adopting **OpenAI GPT-6 Astra Ultra**, I have observed a **100% success rate** operating IdenaAI in my tests; some Astra-proposed flip stories have also earned stars. I experimentally run **two to three Idena identities**, currently costing about **$3–$5 per identity per session**. **Qwen 3.6 scored 94% on 50 flips**; **DeepSeek V4.1 Flash scored 75%**, with one failed and one narrowly successful session. Tests span offline **Rehearsal** runs and real conditions on Idena's experimental mainnet. These are limited observations from different tests, not a controlled comparison or a guarantee.
+
+For benchmark data, see the [FLIP-Challenge dataset on Hugging Face](https://huggingface.co/datasets/aplesner-eth/FLIP-Challenge). This open-source research explores a fascinating boundary between humans and machines as synthetic and human input become harder to distinguish. Cost is another relevant benchmark: at several dollars per identity per session, I expect multi-identity attacks to be uneconomical in most scenarios, although cost alone is no security guarantee.
+
 **An experimental Idena desktop app for AI-assisted flip creation, solving, and validation research.**
 
 IdenaAI is a community fork of [idena-desktop](https://github.com/idena-network/idena-desktop).
