@@ -2,6 +2,7 @@ const SOCIAL_CONTRACT_ADDRESS = '0x840e092e31e9656ff15e541505039ed77585338e'
 const SOCIAL_CONTRACT_METHODS = new Set(['makePost', 'sendMessage', 'sendTip'])
 const IDNA_SCALE = 10n ** 18n
 const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
+const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * IDNA_SCALE
 const SOCIAL_MAX_ARGUMENT_BYTES = 1024 * 1024
@@ -111,7 +112,7 @@ function validateMethodArgument(method, argument, amountAtoms) {
   }
 
   if (method === 'sendMessage') {
-    return amountAtoms === SOCIAL_BASE_CALL_AMOUNT &&
+    return amountAtoms === SOCIAL_MESSAGE_CALL_AMOUNT &&
       hasOnlyKeys(argument, new Set(['message', 'messageHash', 'encrypted'])) &&
       Array.isArray(argument.message) &&
       argument.message.length === 2 &&

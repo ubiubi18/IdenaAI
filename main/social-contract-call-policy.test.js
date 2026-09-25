@@ -20,7 +20,13 @@ function makeCall(overrides = {}) {
     }
   }
   const argument = overrides.argument || defaultArgument
-  const amount = overrides.amount || (method === 'sendTip' ? '2.5' : '0.00001')
+  const amount =
+    overrides.amount ||
+    {
+      makePost: '0.00001',
+      sendMessage: '0.00002',
+      sendTip: '2.5',
+    }[method]
 
   return {
     from: '0x0000000000000000000000000000000000000001',
@@ -44,6 +50,29 @@ describe('social contract-call policy', () => {
         ...makeCall(),
         contract: '0x0000000000000000000000000000000000000002',
       })
+    ).toBe('invalid_social_contract_call')
+  })
+
+  it('accepts the exact DM amount without widening other calls', () => {
+    expect(
+      validateSocialContractCall(
+        makeCall({method: 'sendMessage', amount: '0.00002'})
+      )
+    ).toBeNull()
+    expect(
+      validateSocialContractCall(
+        makeCall({method: 'sendMessage', amount: '0.00001'})
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialContractCall(
+        makeCall({method: 'sendMessage', amount: '0.00003'})
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialContractCall(
+        makeCall({method: 'makePost', amount: '0.00002'})
+      )
     ).toBe('invalid_social_contract_call')
   })
 

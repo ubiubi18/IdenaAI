@@ -9,6 +9,7 @@ const SOCIAL_CRYPTO_MAX_CIPHERTEXTS = 16
 const SOCIAL_CONTRACT_METHODS = new Set(['makePost', 'sendMessage', 'sendTip'])
 const SOCIAL_IDNA_SCALE = 10n ** 18n
 const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
+const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * SOCIAL_IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * SOCIAL_IDNA_SCALE
 
@@ -170,7 +171,10 @@ function validateSocialContractCall(call) {
       : 'invalid_social_contract_call'
   }
 
-  return amount === SOCIAL_BASE_CALL_AMOUNT
+  return amount ===
+    (call.method === 'sendMessage'
+      ? SOCIAL_MESSAGE_CALL_AMOUNT
+      : SOCIAL_BASE_CALL_AMOUNT)
     ? null
     : 'invalid_social_contract_call'
 }
