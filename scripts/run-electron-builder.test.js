@@ -3,6 +3,7 @@ const os = require('os')
 const path = require('path')
 const {
   candidateBuildArgs,
+  nonPublishingBuildArgs,
   copyStagedOutput,
   hasExplicitOutputDirectory,
   requiresApprovedRelease,
@@ -117,5 +118,24 @@ describe('electron builder output staging', () => {
     } finally {
       fs.rmSync(fixtureRoot, {recursive: true, force: true})
     }
+  })
+})
+
+describe('publishing reviewed bytes only', () => {
+  it('disables implicit tag publishing', () => {
+    expect(nonPublishingBuildArgs(['--mac'])).toEqual([
+      '--mac',
+      '--publish',
+      'never',
+    ])
+  })
+  it.each([
+    ['--publish', 'always'],
+    ['--publish=onTag'],
+    ['-p', 'onTagOrDraft'],
+  ])('rejects direct publishing: %s', (...argv) => {
+    expect(() => nonPublishingBuildArgs(argv)).toThrow(
+      /reviewed candidate artifacts/u
+    )
   })
 })

@@ -20,6 +20,7 @@ const CHECK_BUNDLED_NODE = path.join(
   __dirname,
   'check-bundled-node-artifact.js'
 )
+const PREPARE_NODE_APPROVAL = path.join(__dirname, 'prepare-node-approval.js')
 const MIN_NODE_BINARY_SIZE = 1024 * 1024
 const WINDOWS_BUNDLED_NODE = path.join(
   ROOT,
@@ -177,6 +178,28 @@ function requiresApprovedRelease(argv) {
   return !argv.includes('--dir')
 }
 
+function nonPublishingBuildArgs(argv) {
+  const args = []
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === '--publish' || arg === '-p') {
+      if (argv[index + 1] !== 'never')
+        throw new Error(
+          'Publish reviewed candidate artifacts through the release workflow'
+        )
+      index += 1
+    } else if (arg.startsWith('--publish=') || arg.startsWith('-p=')) {
+      if (arg.slice(arg.indexOf('=') + 1) !== 'never')
+        throw new Error(
+          'Publish reviewed candidate artifacts through the release workflow'
+        )
+    } else {
+      args.push(arg)
+    }
+  }
+  return [...args, '--publish', 'never']
+}
+
 function candidateBuildArgs(
   argv,
   platform = process.platform,
@@ -256,12 +279,12 @@ function copyStagedOutput(stagedOutput, destination) {
 function runElectronBuilder(argv = process.argv.slice(2)) {
   let candidateArgs
   try {
-    candidateArgs = candidateBuildArgs(argv)
+    candidateArgs = candidateBuildArgs(argv) || nonPublishingBuildArgs(argv)
   } catch (error) {
     console.error(`[electron-builder-wrapper] ${error.message}`)
     return 1
   }
-  const isCandidate = candidateArgs !== null
+  const isCandidate = argv.includes('--candidate')
   const args = candidateArgs || argv.slice()
 
   let lockChecks = []
@@ -316,6 +339,20 @@ function runElectronBuilder(argv = process.argv.slice(2)) {
 
     if (prepareResult.status !== 0) {
       return prepareResult.status || 1
+    }
+
+    const approvalResult = spawnSync(
+      process.execPath,
+      [PREPARE_NODE_APPROVAL],
+      {
+        cwd: ROOT,
+        env: process.env,
+        stdio: 'inherit',
+      }
+    )
+    if (approvalResult.error || approvalResult.status !== 0) {
+      console.error('Preparing bundled node approval failed')
+      return approvalResult.status || 1
     }
 
     if (!isCandidate && requiresApprovedRelease(args)) {
@@ -388,6 +425,7 @@ if (require.main === module) process.exit(runElectronBuilder())
 
 module.exports = {
   candidateBuildArgs,
+  nonPublishingBuildArgs,
   copyStagedOutput,
   hasExplicitOutputDirectory,
   requiresApprovedRelease,
