@@ -11,6 +11,8 @@ const {
 } = require('../main/application-release-policy')
 const {sha256File, targetName} = require('../main/node-artifact-policy')
 
+const {compareBuildReports} = require('./check-node-build-evidence')
+
 const ROOT = path.resolve(__dirname, '..')
 const RELEASE_PLATFORMS = [
   'linux-x64',
@@ -20,7 +22,7 @@ const RELEASE_PLATFORMS = [
   'macos-arm64',
 ]
 
-function approvedNodeDigest(report, target) {
+function approvedNodeDigest(report, target, stack) {
   const artifacts = report.releaseArtifacts
   if (
     !Array.isArray(artifacts) ||
@@ -37,10 +39,20 @@ function approvedNodeDigest(report, target) {
       'Independent rebuild evidence must pin all five release platforms'
     )
   }
-  const platform = target
-    .replace(/^darwin-/u, 'macos-')
-    .replace(/^win32-/u, 'windows-')
-  return artifacts.find((artifact) => artifact.platform === platform)?.sha256
+  // Standalone releases use different ldflags/VCS settings. Desktop nodes
+  // require independent reports from the desktop build profile itself.
+  const reports = report.results?.applicationNodeBuilds
+  if (!Array.isArray(reports)) {
+    throw new Error(
+      'Independent rebuild evidence lacks desktop node build reports'
+    )
+  }
+  return compareBuildReports(
+    reports.filter(
+      (item) => `${item.results?.platform}-${item.results?.arch}` === target
+    ),
+    stack
+  )
 }
 
 async function prepareNodeApproval({
@@ -90,7 +102,7 @@ async function prepareNodeApproval({
     const report = readCanonicalJson(root, descriptor.evidence)
     if (
       sha256(canonicalJson(report)) !== descriptor.sha256 ||
-      approvedNodeDigest(report, target) !== nodeArtifact.sha256
+      approvedNodeDigest(report, target, stack) !== nodeArtifact.sha256
     ) {
       throw new Error(
         'Bundled node does not match approved independent rebuild evidence'

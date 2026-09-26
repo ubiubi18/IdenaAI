@@ -30,6 +30,7 @@ const REQUIRED_PROTECTED_FILES = Object.freeze([
   'scripts/check-candidate-run.js',
   'scripts/check-compatibility-lock.js',
   'scripts/check-promotion-evidence.js',
+  'scripts/check-node-build-evidence.js',
   'scripts/check-bundled-node-artifact.js',
   'scripts/check-release-version.js',
   'scripts/dependency-footprint-baseline.json',
