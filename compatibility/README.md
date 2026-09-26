@@ -57,3 +57,21 @@ Do not approve from automated CI alone. The remaining live checks require:
 If any component, toolchain, invariant, or fixture changes, create a new release
 candidate and rerun every gate. Roll back by restoring the last reviewed
 candidate lock; never reuse evidence from another pin set.
+
+## Application artifacts
+
+Run the manual `Application candidate artifacts` workflow to build unpublished
+native installers. The bundle contains a small `node/approval.json` record and
+the compatibility lock. This record stays `candidate` until the complete stack
+is approved and its independent rebuild evidence pins the exact node digest
+for all five release platforms (`releaseArtifacts` with `platform` and `sha256`).
+The application rejects candidate records before executing the bundled node.
+
+Keep the application release lock and application verifier evidence outside
+installer bytes. After two independent verifications per application target,
+record the exact candidate run ID and source commit in `candidateSource`, along
+with the reviewed artifact hashes and evidence. Protected source inputs must
+still match. The release workflow verifies the successful manual build's
+provenance, downloads its immutable artifacts, checks their manifests, approval
+records, sizes and digests, and publishes the checked bytes without rebuilding.
+Direct publishing through the Electron Builder wrapper is disabled.

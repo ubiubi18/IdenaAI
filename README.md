@@ -267,7 +267,7 @@ identity key. Legacy messages may require the social app's manual session creden
 
 ## Source and release status
 
-`main` contains ongoing development; the package version is currently `0.1.0`.
+`main` contains ongoing development; the package version is currently `0.1.0-rc7`.
 The [published v0.1.0 release](https://github.com/ubiubi18/IdenaAI/releases/tag/v0.1.0)
 contains older, unsigned and unnotarized developer artifacts for Linux, macOS,
 and Windows. Those binaries do not represent all changes now on `main`.
@@ -279,7 +279,10 @@ provenance. The current release workflow rejects reuse of a published tag.
 
 Both the [compatibility lock](compatibility/stack-lock.json) and
 [application release lock](compatibility/application-release-lock.json) remain
-`candidate`. Installer creation and tagged releases require approved evidence.
+`candidate`. The manual application-candidate workflow builds unpublished installers
+for review. Tagged releases require approved evidence and promote those exact
+verified files without rebuilding them. Bundled-node execution remains blocked
+until compatibility approval is complete.
 Automated checks alone do not establish live-chain compatibility; see the
 [compatibility evidence requirements](compatibility/README.md).
 

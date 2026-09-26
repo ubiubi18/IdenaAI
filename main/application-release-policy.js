@@ -27,10 +27,14 @@ const REQUIRED_PROTECTED_FILES = Object.freeze([
   'scripts/build-node-from-sources.js',
   'scripts/check-application-release-artifacts.js',
   'scripts/check-application-release-lock.js',
+  'scripts/check-candidate-run.js',
+  'scripts/check-compatibility-lock.js',
+  'scripts/check-promotion-evidence.js',
   'scripts/check-bundled-node-artifact.js',
   'scripts/check-release-version.js',
   'scripts/dependency-footprint-baseline.json',
   'scripts/prepare-bundled-node.js',
+  'scripts/prepare-node-approval.js',
   'scripts/run-electron-builder.js',
   'scripts/source-manifest.json',
   'vendor/idena.social-contract/package.json',
@@ -245,6 +249,18 @@ function verifyApplicationReleaseLock(
     throw new Error('Application release is not independently approved')
   }
   if (lock.status !== 'approved') return
+
+  if (
+    !lock.candidateSource ||
+    typeof lock.candidateSource.runId !== 'string' ||
+    typeof lock.candidateSource.commit !== 'string' ||
+    !/^[1-9][0-9]*$/u.test(lock.candidateSource.runId || '') ||
+    !/^[0-9a-f]{40}$/u.test(lock.candidateSource.commit || '')
+  ) {
+    throw new Error(
+      'Approved application release lacks an immutable candidate source'
+    )
+  }
 
   lock.nodeArtifacts.forEach((artifact) => validateArtifact(artifact, 'node'))
   lock.desktopArtifacts.forEach((artifact) =>

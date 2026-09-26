@@ -38,6 +38,7 @@ function candidateLock(root) {
 
 function approveLock(root, lock) {
   lock.status = 'approved'
+  lock.candidateSource = {runId: '12345', commit: 'a'.repeat(40)}
   lock.nodeArtifacts = REQUIRED_TARGETS.map((target) => ({
     target,
     path: target === 'win32-x64' ? 'node/idena-go.exe' : 'node/idena-go',
@@ -110,6 +111,14 @@ describe('application release lock', () => {
     expect(() => verifyApplicationReleaseLock(lock, root)).toThrow(
       /protected files do not match/u
     )
+  })
+
+  it('rejects approval without an immutable candidate source', () => {
+    const lock = approveLock(root, candidateLock(root))
+    lock.candidateSource = null
+    expect(() =>
+      verifyApplicationReleaseLock(lock, root, {requireApproved: true})
+    ).toThrow(/immutable candidate source/u)
   })
 
   it('accepts approval only with complete artifacts and two verifiers per target', () => {

@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -24,6 +25,8 @@ jobs:
     outputs:
       tag: ${{ steps.refs.outputs.tag }}
       commit: ${{ steps.refs.outputs.commit }}
+      candidate_run_id: ${{ steps.candidate.outputs.run_id }}
+      candidate_commit: ${{ steps.candidate.outputs.commit }}
     steps:
       - name: Check out release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -94,62 +97,20 @@ jobs:
       - name: Require independently approved application release
         run: node scripts/check-application-release-lock.js --require-approved
 
-      - name: Setup Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.12'
-          cache: pip
-
-      - name: Audit optional Python dependencies
+      - name: Resolve approved candidate source
+        id: candidate
         run: |
-          python -m pip install --disable-pip-version-check pip-audit==2.10.1
-          python -m pip_audit --requirement requirements.txt --progress-spinner off
-
-  release:
-    needs: release-preflight
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            target: darwin-arm64
-            artifact_name: release-macos
-            electron_builder_args: --mac --publish never
-          - os: ubuntu-24.04
-            target: linux-x64
-            artifact_name: release-linux
-            electron_builder_args: --linux --publish never
-          - os: windows-2022
-            target: win32-x64
-            artifact_name: release-windows
-            electron_builder_args: --win --publish never
-    steps:
-      - name: Preserve protected source bytes
-        run: git config --global core.autocrlf false
-
-      - name: Check out
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          persist-credentials: false
-          ref: ${{ needs.release-preflight.outputs.commit }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24.18.0
-          cache: npm
+          node <<'NODE'
+          const fs = require('fs')
+          const {candidateSource} = require('./compatibility/application-release-lock.json')
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+            `run_id=${candidateSource.runId}\ncommit=${candidateSource.commit}\n`)
+          NODE
 
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: 1.26.8
-
-      - name: Verify native target
-        env:
-          EXPECTED_TARGET: ${{ matrix.target }}
-        run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) throw new Error("Unexpected release runner")'
-        shell: bash
 
       - name: Install dependencies
         run: npm ci
@@ -177,19 +138,67 @@ jobs:
           npm run lint --prefix vendor/idena.social-ui
           npm test --prefix vendor/idena.social-ui
 
-      - name: Build renderer
-        run: npm run build
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          cache: pip
 
-      - name: Build release artifacts
-        env:
-          ELECTRON_BUILDER_ARGS: ${{ matrix.electron_builder_args }}
+      - name: Audit optional Python dependencies
         run: |
-          read -r -a electron_builder_args <<< "${ELECTRON_BUILDER_ARGS}"
-          node scripts/run-electron-builder.js "${electron_builder_args[@]}"
+          python -m pip install --disable-pip-version-check pip-audit==2.10.1
+          python -m pip_audit --requirement requirements.txt --progress-spinner off
+
+  release:
+    needs: release-preflight
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            artifact_name: release-macos
+          - target: linux-x64
+            artifact_name: release-linux
+          - target: win32-x64
+            artifact_name: release-windows
+    steps:
+      - name: Check out approved release source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-preflight.outputs.commit }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+
+      - name: Verify approved candidate workflow run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_RUN_ID: ${{ needs.release-preflight.outputs.candidate_run_id }}
+          CANDIDATE_COMMIT: ${{ needs.release-preflight.outputs.candidate_commit }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" |
+            node scripts/check-candidate-run.js "${CANDIDATE_RUN_ID}" "${CANDIDATE_COMMIT}" "${GITHUB_REPOSITORY}"
         shell: bash
 
+      - name: Download approved candidate artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ needs.release-preflight.outputs.candidate_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          name: candidate-${{ matrix.target }}-${{ needs.release-preflight.outputs.candidate_commit }}
+          path: build/candidate-input
+
       - name: Verify and stage approved release artifacts
-        run: node scripts/check-application-release-artifacts.js
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: node scripts/check-application-release-artifacts.js --target "${RELEASE_TARGET}" --artifact-root build/candidate-input
+        shell: bash
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -212,6 +221,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: release-assets
+          pattern: release-*
           merge-multiple: true
 
       - name: Verify and publish release
