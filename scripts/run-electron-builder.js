@@ -341,18 +341,20 @@ function runElectronBuilder(argv = process.argv.slice(2)) {
       return prepareResult.status || 1
     }
 
-    const approvalResult = spawnSync(
-      process.execPath,
-      [PREPARE_NODE_APPROVAL],
-      {
-        cwd: ROOT,
-        env: process.env,
-        stdio: 'inherit',
+    if (isCandidate || requiresApprovedRelease(args)) {
+      const approvalResult = spawnSync(
+        process.execPath,
+        [PREPARE_NODE_APPROVAL],
+        {
+          cwd: ROOT,
+          env: process.env,
+          stdio: 'inherit',
+        }
+      )
+      if (approvalResult.error || approvalResult.status !== 0) {
+        console.error('Preparing bundled node approval failed')
+        return approvalResult.status || 1
       }
-    )
-    if (approvalResult.error || approvalResult.status !== 0) {
-      console.error('Preparing bundled node approval failed')
-      return approvalResult.status || 1
     }
 
     if (!isCandidate && requiresApprovedRelease(args)) {
