@@ -94,6 +94,8 @@ jobs:
           const {execFileSync} = require('child_process')
           const {uploadableDesktopPaths} = require('./scripts/check-application-release-artifacts')
 
+          const {protectedFilesRoot} = require('./main/application-release-policy')
+          const nodeApproval = require('./build/node/current/approval.json')
           const applicationLock = require('./compatibility/application-release-lock.json')
           const compatibilityLock = require('./compatibility/stack-lock.json')
           const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim()
@@ -136,6 +138,8 @@ jobs:
           const manifest = {
             schema: 1,
             sourceCommit,
+            protectedFilesRoot: protectedFilesRoot(applicationLock.protectedFiles),
+            nodeApprovalStatus: nodeApproval.status,
             applicationReleaseId: applicationLock.releaseId,
             compatibilityReleaseId: compatibilityLock.releaseId,
             target: process.env.CANDIDATE_TARGET,
@@ -146,7 +150,7 @@ jobs:
           fs.mkdirSync('build/candidate', {recursive: true})
           const manifestFile = 'build/candidate/manifest.json'
           fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`)
-          const hashes = [nodeSourceArtifact, ...desktopArtifacts, describe(manifestFile)]
+          const hashes = [nodeSourceArtifact, describe('build/node/current/approval.json'), ...desktopArtifacts, describe(manifestFile)]
             .map(({path: file, sha256}) => `${sha256}  ${file}`)
           fs.writeFileSync('build/candidate/SHA256SUMS', `${hashes.join('\n')}\n`)
           NODE
@@ -170,6 +174,7 @@ jobs:
             !dist/builder-effective-config.yaml
             build/node/current/idena-go
             build/node/current/idena-go.exe
+            build/node/current/approval.json
             build/candidate/manifest.json
             build/candidate/SHA256SUMS
           if-no-files-found: error
