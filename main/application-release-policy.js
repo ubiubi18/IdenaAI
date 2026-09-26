@@ -213,7 +213,7 @@ function verifyApplicationReleaseLock(
     !SAFE_ID_PATTERN.test(lock.releaseId || '') ||
     !['candidate', 'approved', 'retired'].includes(lock.status) ||
     lock.compatibilityReleaseId !==
-      'idena-mainnet-legacy-compat-2026.09.24-rc13' ||
+      'idena-mainnet-legacy-compat-2026.09.25-rc16' ||
     lock.consensusChangesAllowed !== false
   ) {
     throw new Error('Invalid application release lock identity')
