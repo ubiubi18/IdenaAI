@@ -12,6 +12,10 @@ const CHECK_APPLICATION_RELEASE = path.join(
   __dirname,
   'check-application-release-lock.js'
 )
+const CHECK_COMPATIBILITY_LOCK = path.join(
+  __dirname,
+  'check-compatibility-lock.js'
+)
 const CHECK_BUNDLED_NODE = path.join(
   __dirname,
   'check-bundled-node-artifact.js'
@@ -40,6 +44,11 @@ const ARCH_FLAGS = new Set([
   '--universal',
 ])
 const UNSAFE_SHELL_PATH = /[\0\r\n"'`$;&|<>]/u
+const CANDIDATE_TARGET_FLAGS = new Map([
+  ['darwin-arm64', ['--mac', '--arm64']],
+  ['linux-x64', ['--linux', '--x64']],
+  ['win32-x64', ['--win', '--x64']],
+])
 
 function detectMacMachineArch() {
   try {
@@ -168,6 +177,53 @@ function requiresApprovedRelease(argv) {
   return !argv.includes('--dir')
 }
 
+function candidateBuildArgs(
+  argv,
+  platform = process.platform,
+  arch = process.arch
+) {
+  if (!argv.includes('--candidate')) return null
+  if (argv.filter((arg) => arg === '--candidate').length !== 1) {
+    throw new Error('Pass --candidate exactly once')
+  }
+
+  const expectedFlags = CANDIDATE_TARGET_FLAGS.get(`${platform}-${arch}`)
+  if (!expectedFlags) {
+    throw new Error(`Unsupported native candidate target: ${platform}-${arch}`)
+  }
+
+  const seenFlags = new Set()
+  let publishSeen = false
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg !== '--candidate') {
+      if (arg === '--publish' || arg === '-p') {
+        if (publishSeen || argv[index + 1] !== 'never') {
+          throw new Error('Candidate publishing must be never')
+        }
+        publishSeen = true
+        index += 1
+      } else if (arg.startsWith('--publish=') || arg.startsWith('-p=')) {
+        if (publishSeen || arg.slice(arg.indexOf('=') + 1) !== 'never') {
+          throw new Error('Candidate publishing must be never')
+        }
+        publishSeen = true
+      } else if (expectedFlags.includes(arg) && !seenFlags.has(arg)) {
+        seenFlags.add(arg)
+      } else {
+        throw new Error(`Unsupported candidate build argument: ${arg}`)
+      }
+    }
+  }
+
+  if (seenFlags.size !== expectedFlags.length) {
+    throw new Error(
+      `Candidate build requires native target flags: ${expectedFlags.join(' ')}`
+    )
+  }
+  return [...expectedFlags, '--publish', 'never']
+}
+
 function shouldStageBuilderOutput(
   argv,
   root = ROOT,
@@ -198,21 +254,42 @@ function copyStagedOutput(stagedOutput, destination) {
 }
 
 function runElectronBuilder(argv = process.argv.slice(2)) {
-  const args = argv.slice()
+  let candidateArgs
+  try {
+    candidateArgs = candidateBuildArgs(argv)
+  } catch (error) {
+    console.error(`[electron-builder-wrapper] ${error.message}`)
+    return 1
+  }
+  const isCandidate = candidateArgs !== null
+  const args = candidateArgs || argv.slice()
 
-  if (requiresApprovedRelease(args)) {
-    const approvalResult = spawnSync(
-      process.execPath,
-      [CHECK_APPLICATION_RELEASE, '--require-approved'],
-      {cwd: ROOT, env: process.env, stdio: 'inherit'}
-    )
-    if (approvalResult.error) {
-      console.error(
-        `checking application release approval failed: ${approvalResult.error.message}`
-      )
+  let lockChecks = []
+  if (isCandidate) {
+    lockChecks = [
+      [CHECK_COMPATIBILITY_LOCK, [], 'compatibility lock'],
+      [CHECK_APPLICATION_RELEASE, [], 'application release lock'],
+    ]
+  } else if (requiresApprovedRelease(args)) {
+    lockChecks = [
+      [
+        CHECK_APPLICATION_RELEASE,
+        ['--require-approved'],
+        'application release approval',
+      ],
+    ]
+  }
+  for (const [script, checkArgs, label] of lockChecks) {
+    const result = spawnSync(process.execPath, [script, ...checkArgs], {
+      cwd: ROOT,
+      env: process.env,
+      stdio: 'inherit',
+    })
+    if (result.error) {
+      console.error(`checking ${label} failed: ${result.error.message}`)
       return 1
     }
-    if (approvalResult.status !== 0) return approvalResult.status || 1
+    if (result.status !== 0) return result.status || 1
   }
 
   if (shouldAppendMacArch(args)) {
@@ -241,7 +318,7 @@ function runElectronBuilder(argv = process.argv.slice(2)) {
       return prepareResult.status || 1
     }
 
-    if (requiresApprovedRelease(args)) {
+    if (!isCandidate && requiresApprovedRelease(args)) {
       const artifactResult = spawnSync(process.execPath, [CHECK_BUNDLED_NODE], {
         cwd: ROOT,
         env: process.env,
@@ -310,6 +387,7 @@ function runElectronBuilder(argv = process.argv.slice(2)) {
 if (require.main === module) process.exit(runElectronBuilder())
 
 module.exports = {
+  candidateBuildArgs,
   copyStagedOutput,
   hasExplicitOutputDirectory,
   requiresApprovedRelease,

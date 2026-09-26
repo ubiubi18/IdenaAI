@@ -1,0 +1,162 @@
+name: Application candidate artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-artifacts:
+    name: Candidate artifacts (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            platform_arg: --mac
+            arch_arg: --arm64
+            node_name: idena-go
+            installer_extensions: .dmg,.zip
+          - runner: ubuntu-24.04
+            target: linux-x64
+            platform_arg: --linux
+            arch_arg: --x64
+            node_name: idena-go
+            installer_extensions: .deb
+          - runner: windows-2022
+            target: win32-x64
+            platform_arg: --win
+            arch_arg: --x64
+            node_name: idena-go.exe
+            installer_extensions: .exe
+    steps:
+      - name: Preserve protected source bytes
+        run: git config --global core.autocrlf false
+
+      - name: Check out candidate source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.18.0
+          cache: npm
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.8
+
+      - name: Verify native target
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) throw new Error("Unexpected candidate runner")'
+        shell: bash
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify source mirror clone
+        run: npm run setup:sources -- --target-root .tmp/source-mirror-check
+
+      - name: Prepare source mirrors
+        run: npm run setup:sources
+
+      - name: Run release check
+        run: npm run release:check
+
+      - name: Build renderer
+        run: npm run build
+
+      - name: Build unpublished candidate installers
+        env:
+          PLATFORM_ARG: ${{ matrix.platform_arg }}
+          ARCH_ARG: ${{ matrix.arch_arg }}
+        run: node scripts/run-electron-builder.js --candidate "${PLATFORM_ARG}" "${ARCH_ARG}"
+        shell: bash
+
+      - name: Hash installers and bundled node
+        env:
+          CANDIDATE_TARGET: ${{ matrix.target }}
+          INSTALLER_EXTENSIONS: ${{ matrix.installer_extensions }}
+          NODE_NAME: ${{ matrix.node_name }}
+        run: |
+          node <<'NODE'
+          const crypto = require('crypto')
+          const fs = require('fs')
+          const path = require('path')
+          const {execFileSync} = require('child_process')
+
+          const applicationLock = require('./compatibility/application-release-lock.json')
+          const compatibilityLock = require('./compatibility/stack-lock.json')
+          const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim()
+          if (sourceCommit !== process.env.GITHUB_SHA ||
+              applicationLock.compatibilityReleaseId !== compatibilityLock.releaseId) {
+            throw new Error('Candidate source or compatibility identity changed')
+          }
+
+          const extensions = process.env.INSTALLER_EXTENSIONS.split(',')
+          const installers = fs.readdirSync('dist')
+            .filter((name) => extensions.some((extension) => name.endsWith(extension)))
+            .sort()
+            .map((name) => path.posix.join('dist', name))
+          for (const extension of extensions) {
+            if (!installers.some((file) => file.endsWith(extension))) {
+              throw new Error(`Missing candidate installer: ${extension}`)
+            }
+          }
+
+          const nodeFile = path.posix.join('build/node/current', process.env.NODE_NAME)
+          const describe = (file) => {
+            const metadata = fs.lstatSync(file)
+            if (!metadata.isFile() || metadata.size === 0) {
+              throw new Error(`Invalid candidate artifact: ${file}`)
+            }
+            return {
+              path: file,
+              sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),
+              size: metadata.size,
+            }
+          }
+          const nodeArtifact = describe(nodeFile)
+          const desktopArtifacts = installers.map(describe)
+          const manifest = {
+            schema: 1,
+            sourceCommit,
+            applicationReleaseId: applicationLock.releaseId,
+            compatibilityReleaseId: compatibilityLock.releaseId,
+            target: process.env.CANDIDATE_TARGET,
+            nodeArtifact,
+            desktopArtifacts,
+          }
+          fs.mkdirSync('build/candidate', {recursive: true})
+          const manifestFile = 'build/candidate/manifest.json'
+          fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`)
+          const hashes = [nodeArtifact, ...desktopArtifacts, describe(manifestFile)]
+            .map(({path: file, sha256}) => `${sha256}  ${file}`)
+          fs.writeFileSync('build/candidate/SHA256SUMS', `${hashes.join('\n')}\n`)
+          NODE
+        shell: bash
+
+      - name: Upload candidate artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.deb
+            dist/*.exe
+            build/node/current/idena-go
+            build/node/current/idena-go.exe
+            build/candidate/manifest.json
+            build/candidate/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

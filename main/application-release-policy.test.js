@@ -101,9 +101,12 @@ describe('application release lock', () => {
     ).toThrow(/not independently approved/u)
   })
 
-  it('rejects protected dependency or build input drift', () => {
+  it.each([
+    'package-lock.json',
+    '.github/workflows/application-candidate-artifacts.yml',
+  ])('rejects protected build input drift in %s', (relativePath) => {
     const lock = candidateLock(root)
-    fs.appendFileSync(path.join(root, 'package-lock.json'), 'tampered\n')
+    fs.appendFileSync(path.join(root, relativePath), 'tampered\n')
     expect(() => verifyApplicationReleaseLock(lock, root)).toThrow(
       /protected files do not match/u
     )
