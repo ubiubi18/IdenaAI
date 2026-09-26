@@ -92,6 +92,7 @@ jobs:
           const fs = require('fs')
           const path = require('path')
           const {execFileSync} = require('child_process')
+          const {uploadableDesktopPaths} = require('./scripts/check-application-release-artifacts')
 
           const applicationLock = require('./compatibility/application-release-lock.json')
           const compatibilityLock = require('./compatibility/stack-lock.json')
@@ -102,12 +103,9 @@ jobs:
           }
 
           const extensions = process.env.INSTALLER_EXTENSIONS.split(',')
-          const installers = fs.readdirSync('dist')
-            .filter((name) => extensions.some((extension) => name.endsWith(extension)))
-            .sort()
-            .map((name) => path.posix.join('dist', name))
+          const desktopFiles = uploadableDesktopPaths(process.cwd())
           for (const extension of extensions) {
-            if (!installers.some((file) => file.endsWith(extension))) {
+            if (!desktopFiles.some((file) => file.endsWith(extension))) {
               throw new Error(`Missing candidate installer: ${extension}`)
             }
           }
@@ -124,21 +122,31 @@ jobs:
               size: metadata.size,
             }
           }
-          const nodeArtifact = describe(nodeFile)
-          const desktopArtifacts = installers.map(describe)
+          const nodeSourceArtifact = describe(nodeFile)
+          const nodeArtifact = {
+            target: process.env.CANDIDATE_TARGET,
+            path: path.posix.join('node', process.env.NODE_NAME),
+            sha256: nodeSourceArtifact.sha256,
+            size: nodeSourceArtifact.size,
+          }
+          const desktopArtifacts = desktopFiles.map((file) => ({
+            target: process.env.CANDIDATE_TARGET,
+            ...describe(file),
+          }))
           const manifest = {
             schema: 1,
             sourceCommit,
             applicationReleaseId: applicationLock.releaseId,
             compatibilityReleaseId: compatibilityLock.releaseId,
             target: process.env.CANDIDATE_TARGET,
+            nodeSourcePath: nodeFile,
             nodeArtifact,
             desktopArtifacts,
           }
           fs.mkdirSync('build/candidate', {recursive: true})
           const manifestFile = 'build/candidate/manifest.json'
           fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`)
-          const hashes = [nodeArtifact, ...desktopArtifacts, describe(manifestFile)]
+          const hashes = [nodeSourceArtifact, ...desktopArtifacts, describe(manifestFile)]
             .map(({path: file, sha256}) => `${sha256}  ${file}`)
           fs.writeFileSync('build/candidate/SHA256SUMS', `${hashes.join('\n')}\n`)
           NODE
@@ -153,6 +161,13 @@ jobs:
             dist/*.zip
             dist/*.deb
             dist/*.exe
+            dist/*.AppImage
+            dist/*.blockmap
+            dist/*.yml
+            dist/*.yaml
+            !dist/builder-debug.yml
+            !dist/builder-effective-config.yml
+            !dist/builder-effective-config.yaml
             build/node/current/idena-go
             build/node/current/idena-go.exe
             build/candidate/manifest.json
