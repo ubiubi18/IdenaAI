@@ -65,6 +65,10 @@ native installers. The bundle contains a small `node/approval.json` record and
 the compatibility lock. This record stays `candidate` until the complete stack
 is approved and its independent rebuild evidence pins the exact node digest
 for all five release platforms (`releaseArtifacts` with `platform` and `sha256`).
+The same gate report must include `results.applicationNodeBuilds`: at least two
+matching reports from `scripts/build-node-evidence.js` for each desktop target.
+Those reports must match the built desktop node; standalone release digests
+use different Go build flags and cannot substitute for desktop build evidence.
 The application rejects candidate records before executing the bundled node.
 
 Keep the application release lock and application verifier evidence outside
