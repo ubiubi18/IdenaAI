@@ -2,6 +2,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const {
+  candidateBuildArgs,
   copyStagedOutput,
   hasExplicitOutputDirectory,
   requiresApprovedRelease,
@@ -12,6 +13,57 @@ describe('electron builder output staging', () => {
   it('blocks distributable installers until application release approval', () => {
     expect(requiresApprovedRelease(['--mac', '--publish', 'never'])).toBe(true)
     expect(requiresApprovedRelease(['--dir', '--mac'])).toBe(false)
+    expect(candidateBuildArgs(['--mac', '--publish', 'never'])).toBeNull()
+  })
+
+  it.each([
+    ['darwin', 'arm64', '--mac', '--arm64'],
+    ['linux', 'x64', '--linux', '--x64'],
+    ['win32', 'x64', '--win', '--x64'],
+  ])(
+    'restricts %s/%s candidate packaging to unpublished native artifacts',
+    (platform, arch, platformFlag, archFlag) => {
+      expect(
+        candidateBuildArgs(
+          ['--candidate', platformFlag, archFlag],
+          platform,
+          arch
+        )
+      ).toEqual([platformFlag, archFlag, '--publish', 'never'])
+      expect(
+        candidateBuildArgs(
+          ['--candidate', platformFlag, archFlag, '-p=never'],
+          platform,
+          arch
+        )
+      ).toEqual([platformFlag, archFlag, '--publish', 'never'])
+    }
+  )
+
+  it.each([
+    ['--publish', 'always'],
+    ['--publish=onTag'],
+    ['-p', 'always'],
+    ['-p=onTag'],
+    ['--publish', 'never', '--publish=always'],
+    ['--dir'],
+    ['--config.directories.output=/tmp/other'],
+    ['--linux'],
+    ['--candidate'],
+  ])('rejects unsafe candidate arguments: %j', (...extraArgs) => {
+    expect(() =>
+      candidateBuildArgs(
+        ['--candidate', '--mac', '--arm64', ...extraArgs],
+        'darwin',
+        'arm64'
+      )
+    ).toThrow()
+  })
+
+  it('rejects cross-architecture candidate packages', () => {
+    expect(() =>
+      candidateBuildArgs(['--candidate', '--mac', '--arm64'], 'darwin', 'x64')
+    ).toThrow(/Unsupported native candidate target/u)
   })
 
   it('stages macOS output when the checkout path is shell-unsafe', () => {

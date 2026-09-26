@@ -10,6 +10,7 @@ const REQUIRED_TARGETS = Object.freeze([
   'win32-x64',
 ])
 const REQUIRED_PROTECTED_FILES = Object.freeze([
+  '.github/workflows/application-candidate-artifacts.yml',
   '.github/workflows/release.yml',
   '.node-version',
   '.nvmrc',
