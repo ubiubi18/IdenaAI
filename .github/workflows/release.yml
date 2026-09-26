@@ -83,6 +83,11 @@ jobs:
         with:
           node-version: 24.18.0
 
+      - name: Require checked-in release version
+        env:
+          RELEASE_TAG: ${{ steps.refs.outputs.tag }}
+        run: node scripts/check-release-version.js
+
       - name: Require approved compatibility stack
         run: node scripts/check-compatibility-lock.js --require-approved
 
@@ -107,16 +112,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-15
+            target: darwin-arm64
             artifact_name: release-macos
             electron_builder_args: --mac --publish never
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
+            target: linux-x64
             artifact_name: release-linux
             electron_builder_args: --linux --publish never
           - os: windows-2022
+            target: win32-x64
             artifact_name: release-windows
             electron_builder_args: --win --publish never
     steps:
+      - name: Preserve protected source bytes
+        run: git config --global core.autocrlf false
+
       - name: Check out
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -133,6 +144,12 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: 1.26.8
+
+      - name: Verify native target
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) throw new Error("Unexpected release runner")'
+        shell: bash
 
       - name: Install dependencies
         run: npm ci
@@ -160,12 +177,6 @@ jobs:
           npm run lint --prefix vendor/idena.social-ui
           npm test --prefix vendor/idena.social-ui
 
-      - name: Bump version
-        env:
-          RELEASE_TAG: ${{ needs.release-preflight.outputs.tag }}
-        run: npm --no-git-tag-version version --allow-same-version "${RELEASE_TAG}"
-        shell: bash
-
       - name: Build renderer
         run: npm run build
 
@@ -177,22 +188,14 @@ jobs:
           node scripts/run-electron-builder.js "${electron_builder_args[@]}"
         shell: bash
 
+      - name: Verify and stage approved release artifacts
+        run: node scripts/check-application-release-artifacts.js
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact_name }}
-          path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/*.deb
-            dist/*.exe
-            dist/*.AppImage
-            dist/*.blockmap
-            dist/*.yml
-            dist/*.yaml
-            !dist/builder-debug.yml
-            !dist/builder-effective-config.yml
-            !dist/builder-effective-config.yaml
+          path: build/release-verified/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
