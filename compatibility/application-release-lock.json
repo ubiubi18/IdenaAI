@@ -31,7 +31,7 @@
     "scripts/dependency-footprint-baseline.json": "5c63912d8aa49bf23c64de00e3e957aa0f56eae60276c4777f752d02b8c1be05",
     "scripts/prepare-bundled-node.js": "280f09ee088fad5984806a32d71421f0f247a6ccaa18d91bf0cf6d773cfc7460",
     "scripts/prepare-node-approval.js": "bc0160fb26b78e2e26548785d5c505935efef969933d8893dfe6fa243071639f",
-    "scripts/run-electron-builder.js": "58ce1b32f5a524f3fec3714852180ef08faabe9e1fc5017ee7c09607dcbb6f5f",
+    "scripts/run-electron-builder.js": "e9cf52e33c13776a33b679ff802a726bdfe1b91ab873ba4cd15cfe2854e581c6",
     "scripts/source-manifest.json": "4c2876a293a449b8c8a735e5a243923e0a10b9ef576b1e9125767d1831cfc2da",
     "vendor/idena.social-contract/package.json": "85115a1a8471fd9c4f828f557351c2dee7cc1d7e3c39f157c8e33041b8b31fe3",
     "vendor/idena.social-contract/test-contract-runner/go.mod": "c0b3ef714cf395269e1e17779091667914eb5eec8d45c82e94e509e50f541959",
