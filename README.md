@@ -8,9 +8,9 @@ This is experimental research software. I cannot guarantee its security, correct
 
 For benchmark data, see the [FLIP-Challenge dataset on Hugging Face](https://huggingface.co/datasets/aplesner-eth/FLIP-Challenge). This open-source research explores a fascinating boundary between humans and machines as synthetic and human input become harder to distinguish. Cost is another relevant benchmark: at several dollars per identity per session, I expect multi-identity attacks to be uneconomical in most scenarios, although cost alone is no security guarantee.
 
-**An AI harness for human-captcha puzzles: connect a local model or a hosted API
-provider, then create, solve, and benchmark the picture puzzles Idena uses to
-check that a real person is present.**
+**An AI harness for human-captcha puzzles. Connect a local model (or API
+provider) to create, solve, and benchmark picture puzzles of proof-of-personhood
+captchas.**
 
 IdenaAI is a community fork of [idena-desktop](https://github.com/idena-network/idena-desktop).
 It brings the Idena node, hosted and local AI tools, repeatable flip benchmarks,
