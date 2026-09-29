@@ -1,6 +1,4 @@
-const {randomInt} = require('crypto')
-
-const MIN_DELAY_MS = 30 * 60 * 1000
+const MIN_DELAY_MS = 0
 const MAX_DELAY_MS = 4 * 60 * 60 * 1000
 
 // All state belongs to the app profile. A durable claim precedes each paid run;
@@ -11,7 +9,7 @@ function createFlipGenerationScheduler({
   save,
   generate,
   now = Date.now,
-  chooseDelay = () => randomInt(MIN_DELAY_MS, MAX_DELAY_MS + 1),
+  chooseDelay = () => MIN_DELAY_MS,
   onFailure = () => {},
 }) {
   let busy = false

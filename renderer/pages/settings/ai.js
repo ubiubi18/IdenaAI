@@ -5675,7 +5675,7 @@ export default function AiSettingsPage() {
                     </Checkbox>
                     <Text color="muted" fontSize="sm">
                       {t(
-                        'Starts once after a random 30-minute to 4-hour delay. Uses your configured providers and daily budget. Review and publish the drafts in Flips.'
+                        'Starts after session consensus using fresh node keywords, your configured providers, and your daily budget.'
                       )}
                     </Text>
                     <Stack isInline spacing={2}>
