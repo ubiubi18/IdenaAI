@@ -41,20 +41,32 @@ describe('post-session flip generation', () => {
       onFailure: failure,
     })
   }
-  it.each([MIN_DELAY_MS, MAX_DELAY_MS])(
-    'starts at the saved deadline, including boundary %s',
-    async (delay) => {
-      chooseDelay.mockReturnValue(delay)
-      await runner().tick()
-      time = end + delay - 1
-      expect(await runner().tick()).toBe('waiting')
-      expect(generate).not.toHaveBeenCalled()
-      time += 1
-      await runner().tick()
-      expect(generate).toHaveBeenCalledTimes(1)
-      expect(chooseDelay).toHaveBeenCalledTimes(1)
-    }
-  )
+  it('starts on the first eligible tick by default', async () => {
+    const service = createFlipGenerationScheduler({
+      snapshot: async () => current,
+      load: () => state,
+      save: (value) => {
+        state = JSON.parse(JSON.stringify(value))
+      },
+      generate,
+      now: () => time,
+    })
+    expect(await service.tick()).toBe('scheduled')
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(state.dueAt).toBe(end)
+    expect(state.expiresAt).toBe(end + MAX_DELAY_MS)
+  })
+  it('honors an already scheduled deadline at the four-hour boundary', async () => {
+    chooseDelay.mockReturnValue(MAX_DELAY_MS)
+    await runner().tick()
+    time = end + MAX_DELAY_MS - 1
+    expect(await runner().tick()).toBe('waiting')
+    expect(generate).not.toHaveBeenCalled()
+    time += 1
+    await runner().tick()
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(chooseDelay).toHaveBeenCalledTimes(1)
+  })
   it.each(['ShortSession', 'LongSession', 'AfterLongSession', 'FlipLottery'])(
     'does not start during %s',
     async (period) => {
@@ -80,17 +92,19 @@ describe('post-session flip generation', () => {
     expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0, 1])
   })
   it('honors a manual draft created while waiting', async () => {
+    chooseDelay.mockReturnValue(MAX_DELAY_MS)
     await runner().tick()
     current.missingPairs = []
-    time += MIN_DELAY_MS
+    time += MAX_DELAY_MS
     expect(await runner().tick()).toBe('completed')
     expect(generate).not.toHaveBeenCalled()
   })
   it('stops an interrupted paid request instead of automatically repeating it', async () => {
+    chooseDelay.mockReturnValue(MAX_DELAY_MS)
     await runner().tick()
     state.status = 'running'
     state.activePair = 0
-    time += MIN_DELAY_MS
+    time += MAX_DELAY_MS
     expect(await runner().tick()).toBe('interrupted')
     await runner().tick()
     expect(generate).not.toHaveBeenCalled()
@@ -123,12 +137,14 @@ describe('post-session flip generation', () => {
     await first
     expect(generate).toHaveBeenCalledTimes(1)
   })
-  it('schedules a new epoch independently and honors disablement', async () => {
-    await runner().tick()
+  it('starts a new epoch after the prior one completed and honors disablement', async () => {
+    current.missingPairs = []
+    expect(await runner().tick()).toBe('completed')
     current = {
       ...current,
       sessionId: 'next-synthetic-session',
       epoch: 43,
+      missingPairs: [{id: 0}],
       enabled: false,
     }
     await runner().tick()
@@ -136,6 +152,7 @@ describe('post-session flip generation', () => {
     current.enabled = true
     await runner().tick()
     expect(state.epoch).toBe(43)
+    expect(generate).toHaveBeenCalledTimes(1)
     expect(chooseDelay).toHaveBeenCalledTimes(2)
   })
 })
