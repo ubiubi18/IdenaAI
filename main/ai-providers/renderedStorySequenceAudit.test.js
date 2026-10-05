@@ -18,6 +18,7 @@ const SHUFFLES = [
 function passingChecks() {
   return {
     keyword_clarity: {passed: true, notes: ''},
+    keyword_causal_role: {passed: true, notes: ''},
     story_alignment: {passed: true, notes: ''},
     character_scene_continuity: {passed: true, notes: ''},
     causal_progression: {passed: true, notes: ''},
@@ -48,6 +49,13 @@ describe('rendered story sequence audit', () => {
     expect(prompt).toContain('Candidate 1: 3 -> 1 -> 4 -> 2')
     expect(prompt).toContain('safe_shuffle_candidate')
     expect(prompt).toContain('common_sense_simplicity')
+    expect(prompt).toContain('keyword_causal_role')
+    expect(prompt).toContain('mentally remove each keyword in turn')
+    expect(prompt).toContain('movement direction across images')
+    expect(prompt).toContain(
+      'Written plans do not excuse an unexplained visual reset'
+    )
+    expect(prompt).toContain('its images still form a plausible alternative')
     expect(prompt).toContain(
       'understandable at a glance to a typical 12-year-old'
     )
@@ -137,6 +145,56 @@ describe('rendered story sequence audit', () => {
     expect(result.failureReasons).toContain('sequence_audit_incomplete')
   })
 
+  it('requires a separate causal role for both keywords', () => {
+    const checks = passingChecks()
+    checks.keyword_causal_role = {
+      passed: false,
+      notes: 'The palace is only scenery; removing it changes no action.',
+    }
+
+    const result = parseRenderedStorySequenceAudit(
+      JSON.stringify({
+        verdict: 'accept',
+        passed: true,
+        score: 94,
+        failure_reasons: [],
+        repair_panel_indices: [],
+        repair_guidance_by_panel: [],
+        should_replan_story: false,
+        safe_shuffle_candidate: 1,
+        checks,
+      }),
+      {shuffleCandidates: SHUFFLES}
+    )
+
+    expect(result.passed).toBe(false)
+    expect(result.failureReasons).toContain('keyword_causal_role')
+  })
+
+  it('fails closed when the causal-role check is missing', () => {
+    const checks = passingChecks()
+    delete checks.keyword_causal_role
+
+    const result = parseRenderedStorySequenceAudit(
+      JSON.stringify({
+        verdict: 'accept',
+        passed: true,
+        score: 94,
+        failure_reasons: [],
+        repair_panel_indices: [],
+        repair_guidance_by_panel: [],
+        should_replan_story: false,
+        safe_shuffle_candidate: 1,
+        checks,
+      }),
+      {shuffleCandidates: SHUFFLES}
+    )
+
+    expect(result.complete).toBe(false)
+    expect(result.passed).toBe(false)
+    expect(result.failureReasons).toContain('sequence_audit_incomplete')
+  })
+
   it('fails closed when shuffle evidence or accept-state fields are inconsistent', () => {
     const checks = passingChecks()
     delete checks.shuffled_order.forms_meaningful_story
@@ -222,5 +280,28 @@ describe('rendered story sequence audit', () => {
     expect(result.failureReasons).toEqual(
       expect.arrayContaining(['shuffled_story_ambiguity', 'no_safe_shuffle'])
     )
+  })
+
+  it('rejects a selected offered order marked plausible despite an accept claim', () => {
+    const checks = passingChecks()
+    checks.shuffled_order.forms_meaningful_story = true
+
+    const result = parseRenderedStorySequenceAudit(
+      JSON.stringify({
+        verdict: 'accept',
+        passed: true,
+        score: 94,
+        failure_reasons: [],
+        repair_panel_indices: [],
+        repair_guidance_by_panel: [],
+        should_replan_story: false,
+        safe_shuffle_candidate: 1,
+        checks,
+      }),
+      {shuffleCandidates: SHUFFLES}
+    )
+
+    expect(result.passed).toBe(false)
+    expect(result.failureReasons).toContain('shuffled_story_ambiguity')
   })
 })
