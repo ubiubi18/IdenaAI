@@ -4,6 +4,11 @@ const path = require('path')
 const {encode: rlpEncode} = require('rlp')
 const {createFlipGenerationScheduler} = require('./flip-generation-scheduler')
 const {DEFAULT_STORY_MODELS} = require('./ai-providers/constants')
+const {
+  buildAuditedShuffleCandidates,
+  evaluateAutoPublishRender,
+  selectAuditedStoryCandidate,
+} = require('../renderer/shared/utils/flip-auto-publish')
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
 // The renderer stores flip types in lower case; see renderer/shared/types.js.
@@ -22,15 +27,31 @@ function permutations(values) {
 }
 
 const PANEL_ORDERS = permutations([0, 1, 2, 3])
+const AUDITED_SHUFFLE_CANDIDATES = buildAuditedShuffleCandidates()
 
-// Mirrors the renderer guard: a submitted flip must not keep the original
-// panel order.
-function pickPanelShuffle(originalOrder = [0, 1, 2, 3]) {
-  const original = originalOrder.map(Number)
-  const candidates = PANEL_ORDERS.filter(
-    (order) => !order.every((value, index) => value === original[index])
+function auditDigest(draft, images, shuffleOrder) {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify({
+        epoch: draft.epoch,
+        keywordPairId: draft.keywordPairId,
+        images,
+        originalOrder: draft.originalOrder,
+        shuffleOrder,
+      })
+    )
+    .digest('hex')
+}
+
+function isAuditedShuffle(order) {
+  return (
+    Array.isArray(order) &&
+    order.length === 4 &&
+    AUDITED_SHUFFLE_CANDIDATES.some((candidate) =>
+      candidate.every((value, index) => value === order[index])
+    )
   )
-  return candidates[crypto.randomInt(candidates.length)]
 }
 
 function panelBytes(dataUrl) {
@@ -168,6 +189,40 @@ function normalizePanelImages(response, nativeImage) {
       height,
     })
   }
+  function fitWholeFrame(image, width, height) {
+    const size = image.getSize()
+    if (!(size.width > 0) || !(size.height > 0))
+      throw new Error('Generated image has invalid dimensions')
+    const scale = Math.min(width / size.width, height / size.height)
+    const scaled = image.resize({
+      width: Math.max(1, Math.round(size.width * scale)),
+      height: Math.max(1, Math.round(size.height * scale)),
+      quality: 'best',
+    })
+    const next = scaled.getSize()
+    if (
+      !(next.width > 0) ||
+      !(next.height > 0) ||
+      next.width > width ||
+      next.height > height
+    )
+      throw new Error('Unable to fit generated image')
+    const source = scaled.toBitmap()
+    if (source.length !== next.width * next.height * 4)
+      throw new Error('Unable to read generated image pixels')
+    const padded = Buffer.alloc(width * height * 4, 255)
+    const offsetX = Math.floor((width - next.width) / 2)
+    const offsetY = Math.floor((height - next.height) / 2)
+    for (let row = 0; row < next.height; row += 1) {
+      source.copy(
+        padded,
+        ((offsetY + row) * width + offsetX) * 4,
+        row * next.width * 4,
+        (row + 1) * next.width * 4
+      )
+    }
+    return nativeImage.createFromBitmap(padded, {width, height})
+  }
   const images =
     panels.length === 4
       ? panels.map(decode)
@@ -182,7 +237,12 @@ function normalizePanelImages(response, nativeImage) {
             })
           )
         })()
-  return images.map((image) => fit(image, 240, 180).toDataURL())
+  return images.map((image) =>
+    (panels.length === 4
+      ? fitWholeFrame(image, 240, 180)
+      : fit(image, 240, 180)
+    ).toDataURL()
+  )
 }
 
 function createFlipGenerationRuntime({
@@ -330,7 +390,6 @@ function createFlipGenerationRuntime({
       settings.flipBuilderStoryModel || DEFAULT_STORY_MODELS[provider]
     const imageProvider = settings.flipBuilderImageProvider || 'openai'
     const imageModel = settings.flipBuilderImageModel || 'gpt-image-2'
-    const fast = settings.flipBuilderGenerationMode !== 'strict'
     function providerConfig(selectedProvider) {
       return selectedProvider === 'openai-compatible'
         ? {
@@ -345,24 +404,27 @@ function createFlipGenerationRuntime({
       model,
       providerConfig: providerConfig(provider),
       keywords,
-      storyOptionCount: 1,
-      fastStoryMode: fast,
+      storyOptionCount: 2,
+      fastStoryMode: false,
       disableLocalFallback: true,
       includeNoise: false,
       requestTimeoutMs: 90000,
       maxRetries: 1,
     })
     recordCost(story, 'story', provider, model)
-    const selected = story?.stories?.[0]
-    if (
-      !story.ok ||
-      !selected ||
-      selected.isStoryboardStarter ||
-      selected.isWeakStoryDraft ||
-      selected.panels?.length !== 4
-    ) {
-      throw new Error('Generation did not produce a usable story')
-    }
+    const auditedStory = selectAuditedStoryCandidate({
+      options: (Array.isArray(story?.stories) ? story.stories : []).map(
+        (option) => ({
+          ...(option && typeof option === 'object' ? option : {}),
+          qualityScore: option?.qualityReport?.score,
+          qualityFailures: option?.qualityReport?.failures,
+        })
+      ),
+      keywords,
+    })
+    if (story?.ok !== true || !auditedStory.passed)
+      throw new Error('Generation did not produce an audited story')
+    const selected = auditedStory.option
     await stillNeeded(pair, current)
     const rendered = await bridge.generateFlipPanels({
       ...budgetPayload(settings),
@@ -378,28 +440,34 @@ function createFlipGenerationRuntime({
       imageQuality: settings.flipBuilderImageQuality || 'low',
       imageSize: settings.flipBuilderImageSize || '1024x1024',
       keywords,
-      storyPanels: selected.panels,
+      storyPanels: auditedStory.panels,
       storyOptions: story.stories,
       selectedStoryId: selected.id,
       senseSelection: selected.senseSelection,
-      fastBuild: fast,
-      panelRenderMode: fast ? 'sheet_fast' : 'panels',
-      textAuditEnabled: !fast,
-      validatorEnabled: !fast,
+      fastBuild: false,
+      panelRenderMode: 'panels',
+      textAuditEnabled: true,
+      validatorEnabled: true,
       renderFeedbackEnabled: true,
+      renderFeedbackMaxRepairs: 1,
+      renderFeedbackMaxSwitches: 0,
+      sequenceAuditEnabled: true,
+      sequenceAuditShuffleCandidates: buildAuditedShuffleCandidates(),
       includeNoise: false,
       regenerateIndices: [0, 1, 2, 3],
       requestTimeoutMs: 90000,
       maxRetries: 1,
     })
     recordCost(rendered, 'images', imageProvider, imageModel)
-    if (!rendered.ok)
-      throw new Error('Generation did not produce usable images')
+    const auditedRender = evaluateAutoPublishRender({response: rendered})
+    if (!auditedRender.passed || !isAuditedShuffle(auditedRender.shuffleOrder))
+      throw new Error('Generation did not produce audited images and shuffle')
     const images = normalizePanelImages(rendered, nativeImage)
     await stillNeeded(pair, current)
     const draftId = `scheduled-${current.sessionId}-${pair.id}`
-    if (flips.getFlips().some((draft) => draft.id === draftId)) return
-    flips.addDraft({
+    if (flips.getFlips().some((existingDraft) => existingDraft.id === draftId))
+      return
+    const draft = {
       id: draftId,
       type: 'draft',
       createdAt: new Date(now()).toISOString(),
@@ -412,7 +480,13 @@ function createFlipGenerationRuntime({
       order: [0, 1, 2, 3],
       orderPermutations: [0, 1, 2, 3],
       adversarialImageId: -1,
-    })
+    }
+    draft.autoPublishAudit = {
+      version: 1,
+      shuffleOrder: auditedRender.shuffleOrder,
+      imageDigest: auditDigest(draft, images, auditedRender.shuffleOrder),
+    }
+    flips.addDraft(draft)
   }
 
   function pendingDrafts(current) {
@@ -427,14 +501,23 @@ function createFlipGenerationRuntime({
   }
 
   async function publishDraft(draft) {
-    const images = (draft.protectedImages || draft.images || []).slice(0, 4)
-    if (images.length !== 4) {
-      throw new Error('Scheduled draft needs four panels')
+    const images = draft.protectedImages
+    const shuffledOrder = draft.autoPublishAudit?.shuffleOrder
+    if (
+      !Array.isArray(images) ||
+      images.length !== 4 ||
+      !Array.isArray(draft.images) ||
+      draft.images.length !== 4 ||
+      images.some((image, index) => image !== draft.images[index]) ||
+      !Array.isArray(draft.originalOrder) ||
+      !draft.originalOrder.every((value, index) => value === index) ||
+      !isAuditedShuffle(shuffledOrder) ||
+      draft.autoPublishAudit?.version !== 1 ||
+      draft.autoPublishAudit.imageDigest !==
+        auditDigest(draft, images, shuffledOrder)
+    ) {
+      throw new Error('Scheduled draft has no matching image and shuffle audit')
     }
-    const originalOrder = Array.isArray(draft.originalOrder)
-      ? draft.originalOrder
-      : [0, 1, 2, 3]
-    const shuffledOrder = pickPanelShuffle(originalOrder)
     const payload = buildFlipSubmitPayload(
       images.map(panelBytes),
       shuffledOrder
@@ -456,8 +539,7 @@ function createFlipGenerationRuntime({
     return submitted
   }
 
-  // Publishes one prepared draft per call so the ordinary 30s tick shuffles and
-  // submits scheduled flips without a separate timer.
+  // Publishes one audited draft per call on the ordinary 30s tick.
   async function publishPending() {
     const current = await snapshot()
     if (!current.enabled || !current.ready || current.period !== 'None') {

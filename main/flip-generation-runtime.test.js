@@ -4,9 +4,71 @@ const os = require('os')
 const path = require('path')
 const {
   createFlipGenerationRuntime,
+  normalizePanelImages,
   remainingDailyBudget,
   selectMissingPairs,
 } = require('./flip-generation-runtime')
+
+function passingStory(overrides = {}) {
+  return {
+    id: 'story',
+    panels: [
+      'A baker puts a bell beside a basket.',
+      'The baker lifts the basket and bumps the bell.',
+      'The bell falls from the counter.',
+      'The baker catches the bell inside the basket.',
+    ],
+    complianceReport: Object.fromEntries(
+      [
+        'keyword_relevance',
+        'no_text_needed',
+        'no_order_labels',
+        'no_inappropriate_content',
+        'single_story_only',
+        'no_waking_up_template',
+        'no_thumbs_up_down',
+        'no_enumeration_logic',
+        'no_screen_or_page_keyword_cheat',
+        'causal_clarity',
+        'consensus_clarity',
+        'age_12_clarity',
+        'everyday_knowledge_only',
+        'large_visual_cues',
+        'simple_action_chain',
+        'obvious_final_outcome',
+      ].map((key) => [key, 'pass'])
+    ),
+    qualityReport: {score: 91, failures: []},
+    ...overrides,
+  }
+}
+
+function passingRender(overrides = {}) {
+  return {
+    ok: true,
+    panels: Array.from({length: 4}, () => ({
+      imageDataUrl: 'data:image/png;base64,AA==',
+    })),
+    validatorAuditByPanel: Array.from({length: 4}, () => ({
+      invoked: true,
+      passed: true,
+      ocr_text_check: {status: 'pass', passed: true},
+      keyword_visibility_check: {status: 'pass', passed: true},
+      alignment_check: {status: 'pass', passed: true},
+      policy_risk_check: {status: 'pass', passed: true},
+    })),
+    sequenceAudit: {
+      invoked: true,
+      complete: true,
+      passed: true,
+      verdict: 'accept',
+      safeShuffleOrder: [2, 0, 3, 1],
+    },
+    renderFeedback: {verdict: 'accept_rendered_story'},
+    costs: {actualUsd: 0.4},
+    ...overrides,
+  }
+}
 
 describe('scheduled generation runtime', () => {
   const end = 1800000000000
@@ -33,7 +95,7 @@ describe('scheduled generation runtime', () => {
       postSessionFlipGenerationEnabled: true,
       providerDailyBudgetUsd: 1,
     }
-    rpc = jest.fn(async ({method}) => ({
+    rpc = jest.fn(async ({method, params}) => ({
       result: {
         bcn_syncing: {syncing: false, currentBlock: 100, highestBlock: 100},
         dna_epoch: {epoch: 42, startBlock: 90, currentPeriod: 'None'},
@@ -49,29 +111,27 @@ describe('scheduled generation runtime', () => {
           timestamp: end / 1000,
           height: 90,
         },
-        bcn_keyWord: {Name: 'synthetic word', Desc: 'fixture'},
+        bcn_keyWord: {
+          Name: params[0] % 2 === 0 ? 'bell' : 'basket',
+          Desc: 'fixture',
+        },
         flip_submit: {hash: 'bafkrei-fixture', txHash: `0x${'c'.repeat(64)}`},
       }[method],
     }))
     bridge = {
       generateStoryOptions: jest.fn().mockResolvedValue({
         ok: true,
-        stories: [{id: 'story', panels: ['a', 'b', 'c', 'd']}],
+        stories: [passingStory()],
         costs: {actualUsd: 0.3},
       }),
-      generateFlipPanels: jest.fn().mockResolvedValue({
-        ok: true,
-        panels: Array.from({length: 4}, () => ({
-          imageDataUrl: 'data:image/png;base64,AA==',
-        })),
-        costs: {actualUsd: 0.4},
-      }),
+      generateFlipPanels: jest.fn().mockResolvedValue(passingRender()),
     }
     const fakeImage = {
       isEmpty: () => false,
       getSize: () => ({width: 240, height: 180}),
       resize: () => fakeImage,
       crop: () => fakeImage,
+      toBitmap: () => Buffer.alloc(240 * 180 * 4, 255),
       toDataURL: () => 'data:image/png;base64,AA==',
     }
     options = {
@@ -87,7 +147,10 @@ describe('scheduled generation runtime', () => {
         },
       },
       profilePath: directory,
-      nativeImage: {createFromDataURL: () => fakeImage},
+      nativeImage: {
+        createFromDataURL: () => fakeImage,
+        createFromBitmap: () => fakeImage,
+      },
       now: () => time,
       chooseDelay: () => 1800000,
       prepareDb: () => ({
@@ -119,6 +182,11 @@ describe('scheduled generation runtime', () => {
         imageProvider: 'openai',
         validatorModel: 'deepseek-flash',
         sequenceAuditModel: 'deepseek-flash',
+        fastBuild: false,
+        panelRenderMode: 'panels',
+        validatorEnabled: true,
+        sequenceAuditEnabled: true,
+        sequenceAuditShuffleCandidates: expect.arrayContaining([[2, 0, 3, 1]]),
       })
     )
     expect(drafts).toHaveLength(1)
@@ -133,6 +201,11 @@ describe('scheduled generation runtime', () => {
       order: [0, 1, 2, 3],
     })
     expect(drafts[0].images).toHaveLength(4)
+    expect(drafts[0].autoPublishAudit).toMatchObject({
+      version: 1,
+      shuffleOrder: [2, 0, 3, 1],
+      imageDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+    })
     expect(
       bridge.generateFlipPanels.mock.calls[0][0].providerDailyBudgetRemainingUsd
     ).toBeCloseTo(0.7)
@@ -148,6 +221,68 @@ describe('scheduled generation runtime', () => {
         .mode.toString(8)
         .slice(-3)
     ).toBe('600')
+  })
+  it('chooses an audited story and rejects a weak first option', async () => {
+    bridge.generateStoryOptions.mockResolvedValue({
+      ok: true,
+      stories: [
+        passingStory({id: 'weak', qualityReport: {score: 60, failures: []}}),
+        passingStory({id: 'clear'}),
+      ],
+      costs: {actualUsd: 0.3},
+    })
+
+    await createFlipGenerationRuntime(options).tick()
+
+    expect(bridge.generateStoryOptions).toHaveBeenCalledWith(
+      expect.objectContaining({storyOptionCount: 2, fastStoryMode: false})
+    )
+    expect(bridge.generateFlipPanels).toHaveBeenCalledWith(
+      expect.objectContaining({selectedStoryId: 'clear'})
+    )
+    expect(drafts).toHaveLength(1)
+  })
+
+  it('stops before images when no story passes the existing quality gate', async () => {
+    bridge.generateStoryOptions.mockResolvedValue({
+      ok: true,
+      stories: [passingStory({qualityReport: {score: 40, failures: []}})],
+      costs: {actualUsd: 0.3},
+    })
+
+    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(bridge.generateFlipPanels).not.toHaveBeenCalled()
+    expect(drafts).toHaveLength(0)
+  })
+
+  it('stops before saving a draft when the rendered sequence is rejected', async () => {
+    bridge.generateFlipPanels.mockResolvedValue(
+      passingRender({
+        sequenceAudit: {
+          invoked: true,
+          complete: true,
+          passed: false,
+          verdict: 'replan',
+          safeShuffleOrder: null,
+        },
+      })
+    )
+
+    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(drafts).toHaveLength(0)
+    expect(
+      rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
+    ).toBe(false)
+  })
+  it('does not accept a composite sheet as four audited panels', async () => {
+    bridge.generateFlipPanels.mockResolvedValue(
+      passingRender({
+        panels: [{imageDataUrl: 'data:image/png;base64,AA=='}],
+      })
+    )
+
+    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(drafts).toHaveLength(0)
   })
   it('blocks generation when the existing daily ledger is exhausted', async () => {
     db['ai-provider-daily-budget-ledger'] = {
@@ -177,7 +312,7 @@ describe('scheduled generation runtime', () => {
       })
       return {
         ok: true,
-        stories: [{id: 'story', panels: ['a', 'b', 'c', 'd']}],
+        stories: [passingStory()],
         costs: {actualUsd: 0.3},
       }
     })
@@ -270,23 +405,9 @@ describe('scheduled generation runtime', () => {
     ])
   })
 
-  it('shuffles and submits a prepared draft through the node', async () => {
-    drafts.push({
-      id: 'scheduled-fixture-0',
-      type: 'draft',
-      epoch: 42,
-      keywordPairId: 0,
-      originalOrder: [0, 1, 2, 3],
-      order: [0, 1, 2, 3],
-      orderPermutations: [0, 1, 2, 3],
-      images: Array.from({length: 4}, () => 'data:image/png;base64,AA=='),
-      protectedImages: Array.from(
-        {length: 4},
-        () => 'data:image/png;base64,AA=='
-      ),
-    })
-
+  it('submits only the audited shuffle for a generated draft', async () => {
     const runtime = createFlipGenerationRuntime(options)
+    await runtime.tick()
     const result = await runtime.publishPending()
 
     expect(result).toBe('published')
@@ -305,9 +426,51 @@ describe('scheduled generation runtime', () => {
       hash: 'bafkrei-fixture',
       txHash: `0x${'c'.repeat(64)}`,
     })
-    expect(drafts[0].order).not.toEqual([0, 1, 2, 3])
+    expect(drafts[0].order).toEqual([2, 0, 3, 1])
     expect(drafts[0].orderPermutations).toEqual(drafts[0].order)
   })
+
+  it('does not publish an older scheduled draft without audit evidence', async () => {
+    drafts.push({
+      id: 'scheduled-legacy-0',
+      type: 'draft',
+      epoch: 42,
+      keywordPairId: 0,
+      originalOrder: [0, 1, 2, 3],
+      images: Array.from({length: 4}, () => 'data:image/png;base64,AA=='),
+      protectedImages: Array.from(
+        {length: 4},
+        () => 'data:image/png;base64,AA=='
+      ),
+    })
+
+    expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
+      'publish_failed'
+    )
+    expect(
+      rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
+    ).toBe(false)
+  })
+
+  it.each(['image', 'shuffle', 'original order'])(
+    'does not publish when the audited %s changes in the saved draft',
+    async (changed) => {
+      const runtime = createFlipGenerationRuntime(options)
+      await runtime.tick()
+      if (changed === 'image') {
+        drafts[0].protectedImages[0] = 'data:image/png;base64,AQ=='
+      } else if (changed === 'shuffle') {
+        drafts[0].autoPublishAudit.shuffleOrder = [3, 1, 0, 2]
+      } else {
+        drafts[0].originalOrder = [1, 0, 2, 3]
+      }
+
+      expect(await runtime.publishPending()).toBe('publish_failed')
+      expect(
+        rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
+      ).toBe(false)
+    }
+  )
 
   it('ignores drafts of other epochs and identities that cannot validate', async () => {
     drafts.push({
@@ -343,5 +506,63 @@ describe('scheduled generation runtime', () => {
     expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
       'skipped'
     )
+  })
+})
+
+describe('scheduled panel normalization', () => {
+  it('keeps the edges of each audited panel inside a padded 240x180 image', () => {
+    const edge = [20, 40, 60, 255]
+    const pixels = Buffer.alloc(180 * 180 * 4, 255)
+    edge.forEach((byte, index) => {
+      pixels[index] = byte
+      pixels[(180 * 180 - 1) * 4 + index] = byte
+    })
+    const crop = jest.fn(() => {
+      throw new Error('Audited panels must not be cropped')
+    })
+    const scaled = {
+      getSize: () => ({width: 180, height: 180}),
+      toBitmap: () => pixels,
+    }
+    const image = {
+      isEmpty: () => false,
+      getSize: () => ({width: 1024, height: 1024}),
+      resize: jest.fn(() => scaled),
+      crop,
+    }
+    const bitmaps = []
+    const nativeImage = {
+      createFromDataURL: () => image,
+      createFromBitmap: (bitmap, size) => {
+        bitmaps.push({bitmap, size})
+        return {toDataURL: () => 'data:image/png;base64,AA=='}
+      },
+    }
+
+    const result = normalizePanelImages(
+      {
+        panels: Array.from({length: 4}, () => ({
+          imageDataUrl: 'data:image/png;base64,AA==',
+        })),
+      },
+      nativeImage
+    )
+    const pixelAt = (x, y) =>
+      Array.from(
+        bitmaps[0].bitmap.subarray((y * 240 + x) * 4, (y * 240 + x + 1) * 4)
+      )
+
+    expect(result).toHaveLength(4)
+    expect(bitmaps[0].size).toEqual({width: 240, height: 180})
+    expect(image.resize).toHaveBeenCalledWith({
+      width: 180,
+      height: 180,
+      quality: 'best',
+    })
+    expect(pixelAt(29, 0)).toEqual([255, 255, 255, 255])
+    expect(pixelAt(30, 0)).toEqual(edge)
+    expect(pixelAt(209, 179)).toEqual(edge)
+    expect(pixelAt(210, 179)).toEqual([255, 255, 255, 255])
+    expect(crop).not.toHaveBeenCalled()
   })
 })
