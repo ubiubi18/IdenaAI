@@ -3010,6 +3010,12 @@ describe('createAiProviderBridge', () => {
     )
     expect(callPayload.promptText).toContain('obvious_final_outcome')
     expect(callPayload.promptText).toContain(
+      'removing either must change the visible trigger or outcome'
+    )
+    expect(callPayload.promptText).toContain(
+      'Show repairs, erasures, reversals, and changes of direction in the images'
+    )
+    expect(callPayload.promptText).toContain(
       'Think like a storyboard collaborator who is explaining one ordinary action visually.'
     )
     expect(callPayload.promptText).toContain(
@@ -6544,6 +6550,7 @@ describe('createAiProviderBridge', () => {
     }
     const passingChecks = () => ({
       keyword_clarity: {passed: true},
+      keyword_causal_role: {passed: true},
       story_alignment: {passed: true},
       character_scene_continuity: {passed: true},
       causal_progression: {passed: true},
