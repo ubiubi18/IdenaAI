@@ -1,0 +1,11 @@
+[Unit]
+Description=Bounded application log retention for %i
+ConditionPathExists=/etc/idena-ai-logrotate/%i.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate --state /var/lib/logrotate/idena-ai-%i.status /etc/idena-ai-logrotate/%i.conf
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes
