@@ -6358,8 +6358,9 @@ describe('createAiProviderBridge', () => {
       requestTimeoutMs: 15000,
       fastBuild: true,
       textAuditEnabled: false,
-      maxRetries: 0,
+      maxRetries: 2,
       panelRenderMode: 'sheet_fast',
+      singleImageAttempt: true,
       keywords: ['shock', 'ghost'],
       storyPanels: [
         'A calm person enters a hallway with a cup.',
@@ -6397,6 +6398,33 @@ describe('createAiProviderBridge', () => {
       model: 'gpt-image-2',
       quality: 'low',
     })
+  })
+
+  it('does not retry or fall back to four panels after a supervised sheet failure', async () => {
+    const httpClient = {
+      post: jest.fn().mockRejectedValue(new Error('request timed out')),
+      get: jest.fn(),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.generateFlipPanels({
+        provider: 'openai',
+        fastBuild: true,
+        panelRenderMode: 'sheet_fast',
+        singleImageAttempt: true,
+        maxRetries: 2,
+        keywords: ['sock', 'phone'],
+        storyPanels: [
+          'A person notices a hole in a sock.',
+          'They open a repair guide on a phone.',
+          'They sew the sock.',
+          'They wear the mended sock.',
+        ],
+      })
+    ).rejects.toThrow('no fallback images were requested')
+    expect(httpClient.post).toHaveBeenCalledTimes(1)
   })
 
   it('splits one sheet into four fully audited panels and charges one image', async () => {
