@@ -1,11 +1,47 @@
 const MIN_DELAY_MS = 0
 const MAX_DELAY_MS = 4 * 60 * 60 * 1000
-const MAX_PAIR_ATTEMPTS = 2
 const MAX_PAID_ATTEMPTS_PER_SESSION = 10
 const QUALITY_FAILURES = ['story_rejected', 'render_rejected']
+const AUDIT_REASON_CODES = new Set([
+  'story_requires_four_complete_panels',
+  'story_panels_are_not_distinct',
+  'storyboard_starter',
+  'weak_story_draft',
+  'local_fallback_story',
+  'story_compliance_failed',
+  'story_risk_flags',
+  'story_quality_score_missing',
+  'story_quality_score_below_75',
+  'story_quality_failures',
+  'missing_exact_keyword',
+  'story_requires_two_keywords',
+  'no_compliant_story_candidate',
+  'panel_generation_failed',
+  'render_requires_four_panels',
+  'post_audit_noise_not_allowed',
+  'sequence_audit_not_invoked',
+  'sequence_audit_incomplete',
+  'sequence_audit_rejected',
+  'audited_shuffle_missing',
+  'render_feedback_rejected',
+  'panel_audit_incomplete',
+  'rendered_sequence_audit',
+  'character_scene_continuity',
+  'keyword_causal_role',
+])
 const MIN_PROVIDER_RETRY_MS = 15 * 60 * 1000
 const MAX_PROVIDER_RETRY_MS = 60 * 60 * 1000
 const PAID_ATTEMPT_SPACING_MS = 5 * 60 * 1000
+
+function safeAuditReasons(reasons) {
+  return [
+    ...new Set(
+      (Array.isArray(reasons) ? reasons : [])
+        .map((reason) => String(reason || '').split(':')[0])
+        .filter((reason) => AUDIT_REASON_CODES.has(reason))
+    ),
+  ].slice(0, 8)
+}
 
 // All state belongs to the app profile. A durable claim precedes each paid run;
 // an interrupted request requires review instead of silently buying it again.
@@ -63,10 +99,20 @@ function createFlipGenerationScheduler({
         }
         save(state)
       } else if (!Number.isFinite(state.spendStartedAt)) {
-        // Existing in-flight sessions begin a fresh guarded spend window when
-        // this safeguard is deployed; their paid-attempt history remains intact.
-        state.spendStartedAt = time
-        state.paidAttemptsInSpendWindow = 0
+        // Preserve known attempts when migrating an existing in-flight session.
+        // Resetting this counter can buy more requests than the session limit.
+        state.spendStartedAt = current.sessionEndedAt
+        const knownAttempts = Object.values(state.pairAttempts || {}).reduce(
+          (sum, attempts) =>
+            sum + (Number.isInteger(attempts) && attempts > 0 ? attempts : 0),
+          (state.completedPairs || []).length
+        )
+        state.paidAttemptsInSpendWindow = Math.max(
+          Number.isInteger(state.paidAttemptsInSpendWindow)
+            ? state.paidAttemptsInSpendWindow
+            : 0,
+          knownAttempts
+        )
         save(state)
       }
       if (state.status === 'running') {
@@ -129,13 +175,11 @@ function createFlipGenerationScheduler({
       } catch (error) {
         if (QUALITY_FAILURES.includes(error.code)) {
           state.pairAttempts[pair.id] = (state.pairAttempts[pair.id] || 0) + 1
-          if (state.pairAttempts[pair.id] >= MAX_PAIR_ATTEMPTS) {
-            state.rejectedPairs.push(pair.id)
-          }
           state.lastFailure = error.code
+          state.lastAuditReasons = safeAuditReasons(error.auditReasons)
           state.activePair = null
-          state.status = 'scheduled'
-          state.dueAt = now() + PAID_ATTEMPT_SPACING_MS
+          // A failed quality gate needs review before buying another image.
+          state.status = 'quality_blocked'
           onFailure(error.code)
         } else if (error.code === 'budget_exhausted') {
           state.lastFailure = 'budget_exhausted'
