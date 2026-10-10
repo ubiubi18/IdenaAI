@@ -9635,9 +9635,21 @@ Flip hash: ${hash}
       !Array.isArray(payload.repairGuidanceByPanel)
         ? payload.repairGuidanceByPanel
         : {}
+    const reasoningPanelAudit =
+      sheetAuditedMode &&
+      isOpenAiCompatibleProvider(provider) &&
+      ['gpt-6-astra', 'gpt-5.6-sol'].includes(validatorModel.toLowerCase())
+    let panelAuditTimeoutFloorMs = 12 * 1000
+    let panelAuditMaxOutputTokens = 80
+    if (sheetAuditedMode) {
+      panelAuditTimeoutFloorMs = reasoningPanelAudit
+        ? REASONING_STORY_TIMEOUT_FLOOR_MS
+        : 45 * 1000
+      panelAuditMaxOutputTokens = reasoningPanelAudit ? 2400 : 1200
+    }
     const textAuditRequestTimeoutMs = Math.max(
       Number(payload.textAuditRequestTimeoutMs) || 0,
-      12 * 1000
+      panelAuditTimeoutFloorMs
     )
     const sequenceAuditRequestTimeoutMs = Math.max(
       Number(payload.sequenceAuditRequestTimeoutMs) || 0,
@@ -9663,7 +9675,7 @@ Flip hash: ${hash}
     const textAuditProfile = sanitizeBenchmarkProfile({
       benchmarkProfile: 'custom',
       requestTimeoutMs: textAuditRequestTimeoutMs,
-      maxOutputTokens: 80,
+      maxOutputTokens: panelAuditMaxOutputTokens,
       temperature: 0,
       maxRetries: 0,
       maxConcurrency: 1,
@@ -9716,10 +9728,35 @@ Flip hash: ${hash}
                   promptPhase: 'rendered_panel_validator',
                 },
               })
+              const normalizedAudit = normalizeProviderResponse(providerResult)
               validatorAuditUsage = addTokenUsage(
                 validatorAuditUsage,
-                normalizeProviderResponse(providerResult).tokenUsage
+                normalizedAudit.tokenUsage
               )
+              if (sheetAuditedMode) {
+                const parsedAudit = extractJsonBlock(normalizedAudit.rawText)
+                const requiredLayers = [
+                  ['ocr_text_check', 'ocrTextCheck'],
+                  ['keyword_visibility_check', 'keywordVisibilityCheck'],
+                  ['alignment_check', 'alignmentCheck'],
+                  ['policy_risk_check', 'policyRiskCheck'],
+                ]
+                if (
+                  !parsedAudit ||
+                  typeof parsedAudit !== 'object' ||
+                  requiredLayers.some(([key, alias]) => {
+                    const layer = parsedAudit[key] || parsedAudit[alias]
+                    return (
+                      !layer ||
+                      typeof layer !== 'object' ||
+                      Array.isArray(layer) ||
+                      typeof layer.passed !== 'boolean'
+                    )
+                  })
+                ) {
+                  throw new Error('rendered_panel_validator_incomplete')
+                }
+              }
               return providerResult
             }
           : null,
@@ -9741,6 +9778,7 @@ Flip hash: ${hash}
       textAuditModel,
       textAuditMaxRetries,
       textAuditRequestTimeoutMs: textAuditProfile.requestTimeoutMs,
+      validatorAuditMaxOutputTokens: textAuditProfile.maxOutputTokens,
       validatorEnabled,
       validatorModel: validatorEnabled ? validatorModel : '',
       validatorMaxRetries,
@@ -10182,13 +10220,36 @@ Flip hash: ${hash}
           },
         })
         const {summary} = validatorResult
+        const layerStatuses = Object.fromEntries(
+          [
+            'ocr_text_check',
+            'keyword_visibility_check',
+            'alignment_check',
+            'policy_risk_check',
+          ].map((layer) => [
+            layer,
+            String(validatorResult[layer] && validatorResult[layer].status),
+          ])
+        )
+        const complete =
+          Boolean(summary.invoked) &&
+          Object.values(layerStatuses).every((status) =>
+            ['pass', 'fail'].includes(status)
+          )
         validatorAuditByPanel[panelIndex] = {
           ...validatorResult,
           invoked: Boolean(summary.invoked),
-          passed: Boolean(summary.passed),
-          failureReasons: Array.isArray(summary.failureReasons)
-            ? summary.failureReasons.slice(0, 8)
-            : [],
+          complete,
+          passed:
+            complete &&
+            Boolean(summary.passed) &&
+            Object.values(layerStatuses).every((status) => status === 'pass'),
+          failureReasons: (Array.isArray(summary.failureReasons)
+            ? summary.failureReasons
+            : []
+          )
+            .concat(complete ? [] : ['audit_incomplete'])
+            .slice(0, 8),
           shouldRetryPanel: Boolean(summary.shouldRetryPanel),
           shouldReplan: Boolean(summary.shouldReplan),
           panelRepairReason: String(summary.panelRepairReason || '').trim(),
@@ -10218,7 +10279,9 @@ Flip hash: ${hash}
           panel: panelIndex + 1,
           attempt: 1,
           invoked: validatorAuditByPanel[panelIndex].invoked,
+          complete: validatorAuditByPanel[panelIndex].complete,
           passed: validatorAuditByPanel[panelIndex].passed,
+          layerStatuses,
           failureReasons: validatorAuditByPanel[panelIndex].failureReasons,
           panelRepairReason:
             validatorAuditByPanel[panelIndex].panelRepairReason,
