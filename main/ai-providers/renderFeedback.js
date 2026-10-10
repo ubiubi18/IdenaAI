@@ -404,7 +404,7 @@ function buildRenderedStoryRepairGuidance(report, context = {}) {
       item.visibilityFailPanels.includes(panelIndex)
     ) {
       lines.push(
-        `Story-level repair: make "${keywordA}" and "${keywordB}" more unmistakable and visually recognizable in this panel.`
+        `Story-level repair: make the keyword object, action, or visible consequence required by this panel's planned stage unmistakable. Keep "${keywordA}" and "${keywordB}" clear and causally necessary across the full story; do not replay a completed action in the settled aftermath.`
       )
     }
     if (
