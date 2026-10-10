@@ -13,6 +13,7 @@ const {
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
 const MAX_POST_SESSION_PROVIDER_SPEND_USD = 3
+const POST_SESSION_SPEND_CAP_ENV = 'IDENAAI_POST_SESSION_SPEND_CAP_USD'
 // The renderer stores flip types in lower case; see renderer/shared/types.js.
 const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
 // Higher identity states publish one or two flips beyond the epoch minimum
@@ -129,6 +130,16 @@ function remainingDailyBudget(settings, state, now = Date.now()) {
   // Unattended generation always has a finite cap, even if manual calls have
   // explicitly disabled the guardrail. It never raises the configured limit.
   return Math.max(0, (Number.isFinite(limit) && limit > 0 ? limit : 15) - spent)
+}
+
+function postSessionSpendCapUsd() {
+  const override = process.env[POST_SESSION_SPEND_CAP_ENV]
+  if (!override) return MAX_POST_SESSION_PROVIDER_SPEND_USD
+  const amount = Number(override)
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 5) {
+    throw new Error('Invalid post-session spend cap configuration')
+  }
+  return amount
 }
 
 function selectMissingPairs(
@@ -374,7 +385,7 @@ function createFlipGenerationRuntime({
         prepareDb('validationResults').getState(),
         now()
       ),
-      MAX_POST_SESSION_PROVIDER_SPEND_USD - spentSinceStart
+      postSessionSpendCapUsd() - spentSinceStart
     )
     if (!Number.isFinite(state.spendStartedAt))
       throw failure('budget_exhausted')
