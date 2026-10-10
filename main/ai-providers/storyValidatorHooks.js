@@ -112,7 +112,7 @@ function buildRenderedPanelAuditPrompt(context = {}) {
       String(context.panelStory || '').trim() || '-'
     }`,
     storyPanels ? `Full 4-panel story plan:\n${storyPanels}` : '',
-    `Keywords that should be visibly recognizable in this panel: ${
+    `Keywords that must be recognizable and causally necessary across the full story: ${
       keywordList.join(', ') || '-'
     }`,
     `Current panel prompt intent: ${
@@ -122,8 +122,9 @@ function buildRenderedPanelAuditPrompt(context = {}) {
     '- fail if any readable letters, words, numbers, labels, logos, watermarks, UI text, or signs are visible',
     '- ignore texture that is clearly not readable text',
     'Keyword visibility rules:',
-    '- judge whether each keyword is visibly present enough to be recognizable',
-    '- if a keyword is weakly implied but not clearly visible, mark visible=false',
+    '- report visible=true or visible=false for each keyword based only on what is actually recognizable in this image, never on the written plan or neighboring images',
+    '- set keyword_visibility_check.passed=true only if every keyword object or action required by this planned panel is clear here; fail if a required cue is missing or too subtle, even if it appears elsewhere',
+    '- do not demand a future action in the setup or replay a completed action in the settled aftermath; require a clear visible consequence of that action in the aftermath',
     'Alignment rules:',
     '- compare the rendered panel to the planned panel description',
     '- fail if the scene is ambiguous, missing the main event, or visually off-plan',
