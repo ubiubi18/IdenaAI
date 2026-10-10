@@ -185,7 +185,7 @@ describe('scheduled generation runtime', () => {
         validatorModel: 'deepseek-flash',
         sequenceAuditModel: 'deepseek-flash',
         fastBuild: false,
-        panelRenderMode: 'panels',
+        panelRenderMode: 'sheet_audited',
         validatorEnabled: true,
         sequenceAuditEnabled: true,
         sequenceAuditShuffleCandidates: expect.arrayContaining([[2, 0, 3, 1]]),
