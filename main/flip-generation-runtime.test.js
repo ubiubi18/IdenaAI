@@ -320,6 +320,20 @@ describe('scheduled generation runtime', () => {
     expect(bridge.generateStoryOptions).not.toHaveBeenCalled()
     expect(drafts).toHaveLength(0)
   })
+  it('limits unattended session spend even with a higher daily allowance', async () => {
+    settings.providerDailyBudgetUsd = 25
+    const service = createFlipGenerationRuntime(options)
+    expect(await service.tick()).toBe('scheduled')
+    expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(1)
+    db['ai-provider-daily-budget-ledger'].entries.unshift({
+      time: new Date(time + 1000).toISOString(),
+      source: 'post-session-flips',
+      actualUsd: 3,
+    })
+    time += 5 * 60 * 1000
+    expect(await service.tick()).toBe('waiting_budget')
+    expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(1)
+  })
   it('counts validation spending alongside generation and rolls over each local day', () => {
     const date = new Date(time).toISOString()
     db['scope-validation-ai-cost-ledger'] = {
@@ -563,6 +577,7 @@ describe('scheduled generation runtime', () => {
     settings.providerDailyBudgetUsd = 5
     const runtime = createFlipGenerationRuntime(options)
     await runtime.tick()
+    time += 5 * 60 * 1000
     await runtime.tick()
     drafts[0].autoPublishAudit.imageDigest = 'changed'
     expect(await runtime.publishPending()).toBe('publish_failed')

@@ -12,6 +12,7 @@ const {
 } = require('../renderer/shared/utils/flip-auto-publish')
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
+const MAX_POST_SESSION_PROVIDER_SPEND_USD = 3
 // The renderer stores flip types in lower case; see renderer/shared/types.js.
 const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
 // Higher identity states publish one or two flips beyond the epoch minimum
@@ -354,11 +355,29 @@ function createFlipGenerationRuntime({
   }
 
   function budgetPayload(settings) {
-    const remaining = remainingDailyBudget(
-      settings,
-      prepareDb('validationResults').getState(),
-      now()
+    const state = load()
+    const spentSinceStart = (
+      prepareDb('validationResults').get(LEDGER_KEY).value()?.entries || []
     )
+      .filter(
+        (entry) =>
+          entry.source === 'post-session-flips' &&
+          Date.parse(entry.time) >= state.spendStartedAt
+      )
+      .reduce((total, entry) => {
+        const cost = Number(entry.actualUsd ?? entry.estimatedUsd ?? 0)
+        return total + (Number.isFinite(cost) && cost > 0 ? cost : 0)
+      }, 0)
+    const remaining = Math.min(
+      remainingDailyBudget(
+        settings,
+        prepareDb('validationResults').getState(),
+        now()
+      ),
+      MAX_POST_SESSION_PROVIDER_SPEND_USD - spentSinceStart
+    )
+    if (!Number.isFinite(state.spendStartedAt))
+      throw failure('budget_exhausted')
     if (remaining <= 0) throw failure('budget_exhausted')
     return {
       providerDailyBudgetEnabled: true,
