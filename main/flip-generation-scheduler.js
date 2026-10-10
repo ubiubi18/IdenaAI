@@ -2,6 +2,8 @@ const MIN_DELAY_MS = 0
 const MAX_DELAY_MS = 4 * 60 * 60 * 1000
 const MAX_PAIR_ATTEMPTS = 2
 const QUALITY_FAILURES = ['story_rejected', 'render_rejected']
+const MIN_PROVIDER_RETRY_MS = 15 * 60 * 1000
+const MAX_PROVIDER_RETRY_MS = 60 * 60 * 1000
 
 // All state belongs to the app profile. A durable claim precedes each paid run;
 // an interrupted request requires review instead of silently buying it again.
@@ -66,6 +68,9 @@ function createFlipGenerationScheduler({
       if (state.status === 'waiting_budget' && time >= state.dueAt) {
         state.status = 'scheduled'
       }
+      if (state.status === 'waiting_provider' && time >= state.dueAt) {
+        state.status = 'scheduled'
+      }
       if (state.status !== 'scheduled') return state.status
       if (!state.startedAt && time > state.expiresAt) {
         state.status = 'missed_window'
@@ -120,6 +125,19 @@ function createFlipGenerationScheduler({
           state.activePair = null
           state.dueAt = time + 60 * 60 * 1000
           onFailure('budget_exhausted')
+        } else if (error.code === 'rate_limited') {
+          const retryAfterMs = Number(error.retryAfterMs)
+          const delay = Number.isFinite(retryAfterMs)
+            ? Math.min(
+                MAX_PROVIDER_RETRY_MS,
+                Math.max(MIN_PROVIDER_RETRY_MS, retryAfterMs)
+              )
+            : MIN_PROVIDER_RETRY_MS
+          state.lastFailure = 'rate_limited'
+          state.status = 'waiting_provider'
+          state.activePair = null
+          state.dueAt = time + delay
+          onFailure('rate_limited')
         } else {
           state.status = 'failed'
           state.lastFailure = 'generation_failed'

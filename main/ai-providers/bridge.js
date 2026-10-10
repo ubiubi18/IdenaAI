@@ -8269,6 +8269,8 @@ Flip hash: ${hash}
           outcome: STORY_PROVIDER_OUTCOMES.TRANSPORT_ERROR,
           detail,
           error,
+          httpStatus: getResponseStatus(error),
+          retryAfterMs: getRetryAfterMs(error),
           normalizedResponse: null,
           strictParse: null,
           providerMeta: {},
@@ -8860,6 +8862,17 @@ Flip hash: ${hash}
     })
 
     recordStoryAttemptOutcome(selectedAttempt)
+
+    if (
+      disableLocalFallback &&
+      selectedAttempt.outcome === STORY_PROVIDER_OUTCOMES.TRANSPORT_ERROR &&
+      selectedAttempt.httpStatus === 429
+    ) {
+      throw Object.assign(new Error('Story provider rate limited'), {
+        code: 'rate_limited',
+        retryAfterMs: selectedAttempt.retryAfterMs,
+      })
+    }
 
     if (selectedAttempt.outcome === STORY_PROVIDER_OUTCOMES.SCHEMA_INVALID) {
       selectedAttempt = await runStoryRetry({

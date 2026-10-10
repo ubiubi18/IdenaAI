@@ -148,6 +148,28 @@ describe('post-session flip generation', () => {
     expect(generate).toHaveBeenCalledTimes(2)
     expect(state.completedPairs).toEqual([0])
   })
+  it('waits after a provider rate limit without consuming a quality attempt', async () => {
+    generate.mockRejectedValueOnce(
+      Object.assign(new Error('private rate-limit detail'), {
+        code: 'rate_limited',
+        retryAfterMs: 30000,
+      })
+    )
+    const service = runner()
+    expect(await service.tick()).toBe('waiting_provider')
+    expect(state.dueAt).toBe(end + 15 * 60 * 1000)
+    expect(state.pairAttempts).toEqual({})
+    expect(state.rejectedPairs).toEqual([])
+    expect(state.activePair).toBeNull()
+    expect(JSON.stringify(state)).not.toContain('private')
+    expect(await service.tick()).toBe('waiting_provider')
+    expect(generate).toHaveBeenCalledTimes(1)
+
+    time = state.dueAt
+    expect(await service.tick()).toBe('scheduled')
+    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0, 0])
+    expect(state.completedPairs).toEqual([0])
+  })
   it('prevents overlapping timer callbacks from launching another request', async () => {
     let finish
     generate.mockImplementation(
