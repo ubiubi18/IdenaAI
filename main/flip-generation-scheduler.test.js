@@ -120,27 +120,49 @@ describe('post-session flip generation', () => {
     expect(generate).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(state)).not.toContain('confidential')
   })
-  it('tries other pairs after a completed quality rejection and bounds retries', async () => {
+  it('stops after one quality rejection and persists only fixed audit codes', async () => {
     current.missingCount = 2
     generate.mockRejectedValue(
-      Object.assign(new Error('private story'), {code: 'story_rejected'})
+      Object.assign(new Error('private story'), {
+        code: 'story_rejected',
+        auditReasons: [
+          'missing_exact_keyword:private keyword',
+          'story_quality_score_below_75',
+          'private story',
+        ],
+      })
     )
     const service = runner()
-    for (let index = 0; index < 4; index += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      expect(await service.tick()).toBe('scheduled')
-      if (index < 3) {
-        expect(await service.tick()).toBe('waiting')
-        time += 5 * 60 * 1000
-      }
-    }
-    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0, 1, 0, 1])
-    expect(state.rejectedPairs).toEqual([0, 1])
-    expect(await service.tick()).toBe('waiting')
+    expect(await service.tick()).toBe('quality_blocked')
     time += 5 * 60 * 1000
     expect(await service.tick()).toBe('quality_blocked')
-    expect(generate).toHaveBeenCalledTimes(4)
+    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0])
+    expect(state.pairAttempts).toEqual({0: 1})
+    expect(state.lastAuditReasons).toEqual([
+      'missing_exact_keyword',
+      'story_quality_score_below_75',
+    ])
     expect(JSON.stringify(state)).not.toContain('private story')
+    expect(JSON.stringify(state)).not.toContain('private keyword')
+  })
+  it('does not reset known attempts when migrating an older session', async () => {
+    current.missingPairs = [{id: 2}]
+    current.missingCount = 1
+    state = {
+      sessionId: current.sessionId,
+      epoch: current.epoch,
+      dueAt: end,
+      expiresAt: end + MAX_DELAY_MS,
+      status: 'scheduled',
+      completedPairs: [0],
+      pairAttempts: {1: 9},
+      rejectedPairs: [1],
+      activePair: null,
+    }
+    expect(await runner().tick()).toBe('attempts_exhausted')
+    expect(state.spendStartedAt).toBe(end)
+    expect(state.paidAttemptsInSpendWindow).toBe(10)
+    expect(generate).not.toHaveBeenCalled()
   })
   it('waits before checking an exhausted budget and resumes the started batch', async () => {
     generate.mockRejectedValueOnce(

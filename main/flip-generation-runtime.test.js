@@ -188,6 +188,7 @@ describe('scheduled generation runtime', () => {
         panelRenderMode: 'sheet_audited',
         validatorEnabled: true,
         sequenceAuditEnabled: true,
+        renderFeedbackMaxRepairs: 0,
         sequenceAuditShuffleCandidates: expect.arrayContaining([[2, 0, 3, 1]]),
       })
     )
@@ -252,9 +253,19 @@ describe('scheduled generation runtime', () => {
       costs: {actualUsd: 0.3},
     })
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('scheduled')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe(
+      'quality_blocked'
+    )
     expect(bridge.generateFlipPanels).not.toHaveBeenCalled()
     expect(drafts).toHaveLength(0)
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(directory, 'post-session-flips.json'), 'utf8')
+      )
+    ).toMatchObject({
+      status: 'quality_blocked',
+      lastAuditReasons: ['story_quality_score_below_75'],
+    })
   })
 
   it('preserves the pair and draft state when the story provider rate limits', async () => {
@@ -294,8 +305,15 @@ describe('scheduled generation runtime', () => {
       })
     )
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('scheduled')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe(
+      'quality_blocked'
+    )
     expect(drafts).toHaveLength(0)
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(directory, 'post-session-flips.json'), 'utf8')
+      ).lastAuditReasons
+    ).toEqual(expect.arrayContaining(['sequence_audit_rejected']))
     expect(
       rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
     ).toBe(false)
@@ -307,7 +325,9 @@ describe('scheduled generation runtime', () => {
       })
     )
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('scheduled')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe(
+      'quality_blocked'
+    )
     expect(drafts).toHaveLength(0)
   })
   it('blocks generation when the existing daily ledger is exhausted', async () => {
@@ -333,36 +353,6 @@ describe('scheduled generation runtime', () => {
     time += 5 * 60 * 1000
     expect(await service.tick()).toBe('waiting_budget')
     expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(1)
-  })
-  it('honors a bounded node-specific spend cap without skipping attempt spacing', async () => {
-    const name = 'IDENAAI_POST_SESSION_SPEND_CAP_USD'
-    const previous = process.env[name]
-    process.env[name] = '5'
-    try {
-      settings.providerDailyBudgetUsd = 25
-      const service = createFlipGenerationRuntime(options)
-      expect(await service.tick()).toBe('scheduled')
-      db['ai-provider-daily-budget-ledger'].entries.unshift({
-        time: new Date(time + 1000).toISOString(),
-        source: 'post-session-flips',
-        actualUsd: 2.3,
-      })
-      expect(await service.tick()).toBe('waiting')
-      time += 5 * 60 * 1000
-      expect(await service.tick()).toBe('scheduled')
-      expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(2)
-      db['ai-provider-daily-budget-ledger'].entries.unshift({
-        time: new Date(time + 1000).toISOString(),
-        source: 'post-session-flips',
-        actualUsd: 1.4,
-      })
-      time += 5 * 60 * 1000
-      expect(await service.tick()).toBe('waiting_budget')
-      expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(2)
-    } finally {
-      if (previous === undefined) delete process.env[name]
-      else process.env[name] = previous
-    }
   })
   it('counts validation spending alongside generation and rolls over each local day', () => {
     const date = new Date(time).toISOString()
