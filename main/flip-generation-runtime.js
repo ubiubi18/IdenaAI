@@ -13,7 +13,6 @@ const {
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
 const MAX_POST_SESSION_PROVIDER_SPEND_USD = 3
-const POST_SESSION_SPEND_CAP_ENV = 'IDENAAI_POST_SESSION_SPEND_CAP_USD'
 // The renderer stores flip types in lower case; see renderer/shared/types.js.
 const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
 // Higher identity states publish one or two flips beyond the epoch minimum
@@ -130,16 +129,6 @@ function remainingDailyBudget(settings, state, now = Date.now()) {
   // Unattended generation always has a finite cap, even if manual calls have
   // explicitly disabled the guardrail. It never raises the configured limit.
   return Math.max(0, (Number.isFinite(limit) && limit > 0 ? limit : 15) - spent)
-}
-
-function postSessionSpendCapUsd() {
-  const override = process.env[POST_SESSION_SPEND_CAP_ENV]
-  if (!override) return MAX_POST_SESSION_PROVIDER_SPEND_USD
-  const amount = Number(override)
-  if (!Number.isFinite(amount) || amount <= 0 || amount > 5) {
-    throw new Error('Invalid post-session spend cap configuration')
-  }
-  return amount
 }
 
 function selectMissingPairs(
@@ -289,8 +278,8 @@ function createFlipGenerationRuntime({
       : {}
   }
 
-  function failure(code) {
-    return Object.assign(new Error(code), {code})
+  function failure(code, auditReasons) {
+    return Object.assign(new Error(code), {code, auditReasons})
   }
 
   async function readRpc(method, ...params) {
@@ -385,7 +374,7 @@ function createFlipGenerationRuntime({
         prepareDb('validationResults').getState(),
         now()
       ),
-      postSessionSpendCapUsd() - spentSinceStart
+      MAX_POST_SESSION_PROVIDER_SPEND_USD - spentSinceStart
     )
     if (!Number.isFinite(state.spendStartedAt))
       throw failure('budget_exhausted')
@@ -480,7 +469,8 @@ function createFlipGenerationRuntime({
       keywords,
     })
     if (story?.ok !== true) throw failure('story_provider_failed')
-    if (!auditedStory.passed) throw failure('story_rejected')
+    if (!auditedStory.passed)
+      throw failure('story_rejected', auditedStory.reasons)
     const selected = auditedStory.option
     await stillNeeded(pair, current)
     const rendered = await bridge.generateFlipPanels({
@@ -506,7 +496,7 @@ function createFlipGenerationRuntime({
       textAuditEnabled: true,
       validatorEnabled: true,
       renderFeedbackEnabled: true,
-      renderFeedbackMaxRepairs: 1,
+      renderFeedbackMaxRepairs: 0,
       renderFeedbackMaxSwitches: 0,
       sequenceAuditEnabled: true,
       sequenceAuditShuffleCandidates: buildAuditedShuffleCandidates(),
@@ -519,7 +509,12 @@ function createFlipGenerationRuntime({
     const auditedRender = evaluateAutoPublishRender({response: rendered})
     if (rendered?.ok !== true) throw failure('image_provider_failed')
     if (!auditedRender.passed || !isAuditedShuffle(auditedRender.shuffleOrder))
-      throw failure('render_rejected')
+      throw failure('render_rejected', [
+        ...auditedRender.reasons,
+        ...(Array.isArray(rendered?.renderFeedback?.failureReasons)
+          ? rendered.renderFeedback.failureReasons
+          : []),
+      ])
     const images = normalizePanelImages(rendered, nativeImage)
     await stillNeeded(pair, current)
     const draftId = `scheduled-${current.sessionId}-${pair.id}`
