@@ -257,6 +257,30 @@ describe('scheduled generation runtime', () => {
     expect(drafts).toHaveLength(0)
   })
 
+  it('preserves the pair and draft state when the story provider rate limits', async () => {
+    bridge.generateStoryOptions.mockRejectedValueOnce(
+      Object.assign(new Error('private provider detail'), {
+        code: 'rate_limited',
+        retryAfterMs: 30000,
+      })
+    )
+
+    const service = createFlipGenerationRuntime(options)
+    expect(await service.tick()).toBe('waiting_provider')
+    expect(bridge.generateFlipPanels).not.toHaveBeenCalled()
+    expect(drafts).toHaveLength(0)
+    const state = JSON.parse(
+      fs.readFileSync(path.join(directory, 'post-session-flips.json'), 'utf8')
+    )
+    expect(state).toMatchObject({
+      status: 'waiting_provider',
+      pairAttempts: {},
+      rejectedPairs: [],
+      activePair: null,
+    })
+    expect(JSON.stringify(state)).not.toContain('private provider detail')
+  })
+
   it('stops before saving a draft when the rendered sequence is rejected', async () => {
     bridge.generateFlipPanels.mockResolvedValue(
       passingRender({

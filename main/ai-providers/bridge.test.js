@@ -5085,6 +5085,32 @@ describe('createAiProviderBridge', () => {
     expect(result.stories[0].rationale).not.toMatch(/local fallback/i)
   })
 
+  it('reports a rate limit for unattended stories without substituting a local fallback', async () => {
+    const logger = mockLogger()
+    const invokeProvider = jest.fn().mockRejectedValue(
+      Object.assign(new Error('rate limited'), {
+        response: {status: 429, headers: {'retry-after': '30'}},
+      })
+    )
+    const bridge = createAiProviderBridge(logger, {invokeProvider})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.generateStoryOptions({
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        storyOptionCount: 2,
+        disableLocalFallback: true,
+        keywords: ['storm', 'jump'],
+      })
+    ).rejects.toMatchObject({code: 'rate_limited', retryAfterMs: 30000})
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(logger.info).not.toHaveBeenCalledWith(
+      'AI story final fallback path',
+      expect.anything()
+    )
+  })
+
   it('uses locked senses in local fallback stories only when the provider is unreachable', async () => {
     const logger = mockLogger()
     const invokeProvider = jest.fn().mockRejectedValue(new Error('ENOTFOUND'))
