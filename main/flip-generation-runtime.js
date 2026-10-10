@@ -2,6 +2,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const {encode: rlpEncode} = require('rlp')
+const {CID} = require('multiformats/cid')
 const {createFlipGenerationScheduler} = require('./flip-generation-scheduler')
 const {DEFAULT_STORY_MODELS} = require('./ai-providers/constants')
 const {
@@ -129,7 +130,12 @@ function remainingDailyBudget(settings, state, now = Date.now()) {
   return Math.max(0, (Number.isFinite(limit) && limit > 0 ? limit : 15) - spent)
 }
 
-function selectMissingPairs(identity, drafts, sessionEndedAt) {
+function selectMissingPairs(
+  identity,
+  drafts,
+  sessionEndedAt,
+  rejectedPairs = []
+) {
   const pairs = identity.flipKeyWordPairs || []
   const currentDrafts = drafts.filter(
     (draft) =>
@@ -157,7 +163,12 @@ function selectMissingPairs(identity, drafts, sessionEndedAt) {
     pairs.length
   )
   return pairs
-    .filter((pair) => !pair.used && !occupied.has(String(pair.id)))
+    .filter(
+      (pair) =>
+        !pair.used &&
+        !occupied.has(String(pair.id)) &&
+        !rejectedPairs.includes(pair.id)
+    )
     .slice(0, Math.max(0, target - published - reservedDrafts))
 }
 
@@ -258,6 +269,17 @@ function createFlipGenerationRuntime({
   chooseDelay,
 }) {
   const statePath = path.join(profilePath, 'post-session-flips.json')
+  let publishing = false
+
+  function load() {
+    return fs.existsSync(statePath)
+      ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
+      : {}
+  }
+
+  function failure(code) {
+    return Object.assign(new Error(code), {code})
+  }
 
   async function readRpc(method, ...params) {
     const response = await rpc({method, params})
@@ -298,6 +320,8 @@ function createFlipGenerationRuntime({
       .createHash('sha256')
       .update(`${epochBlock.hash}:${address.toLowerCase()}`)
       .digest('hex')
+    const state = load()
+    const drafts = flips.getFlips()
     return {
       enabled: true,
       ready: true,
@@ -306,10 +330,13 @@ function createFlipGenerationRuntime({
       sessionId,
       sessionEndedAt,
       settings,
+      keywordPairs: identity.flipKeyWordPairs || [],
+      missingCount: selectMissingPairs(identity, drafts, sessionEndedAt).length,
       missingPairs: selectMissingPairs(
         identity,
-        flips.getFlips(),
-        sessionEndedAt
+        drafts,
+        sessionEndedAt,
+        state.sessionId === sessionId ? state.rejectedPairs || [] : []
       ),
     }
   }
@@ -332,7 +359,7 @@ function createFlipGenerationRuntime({
       prepareDb('validationResults').getState(),
       now()
     )
-    if (remaining <= 0) throw new Error('Local provider daily budget exhausted')
+    if (remaining <= 0) throw failure('budget_exhausted')
     return {
       providerDailyBudgetEnabled: true,
       providerDailyBudgetRemainingUsd: remaining,
@@ -422,8 +449,8 @@ function createFlipGenerationRuntime({
       ),
       keywords,
     })
-    if (story?.ok !== true || !auditedStory.passed)
-      throw new Error('Generation did not produce an audited story')
+    if (story?.ok !== true) throw failure('story_provider_failed')
+    if (!auditedStory.passed) throw failure('story_rejected')
     const selected = auditedStory.option
     await stillNeeded(pair, current)
     const rendered = await bridge.generateFlipPanels({
@@ -460,8 +487,9 @@ function createFlipGenerationRuntime({
     })
     recordCost(rendered, 'images', imageProvider, imageModel)
     const auditedRender = evaluateAutoPublishRender({response: rendered})
+    if (rendered?.ok !== true) throw failure('image_provider_failed')
     if (!auditedRender.passed || !isAuditedShuffle(auditedRender.shuffleOrder))
-      throw new Error('Generation did not produce audited images and shuffle')
+      throw failure('render_rejected')
     const images = normalizePanelImages(rendered, nativeImage)
     await stillNeeded(pair, current)
     const draftId = `scheduled-${current.sessionId}-${pair.id}`
@@ -494,9 +522,19 @@ function createFlipGenerationRuntime({
       .getFlips()
       .filter(
         (flip) =>
-          String(flip.id || '').startsWith('scheduled-') &&
+          flip.id === `scheduled-${current.sessionId}-${flip.keywordPairId}` &&
           String(flip.type || '').toLowerCase() === 'draft' &&
-          Number(flip.epoch) === Number(current.epoch)
+          Number(flip.epoch) === Number(current.epoch) &&
+          !flip.autoPublishSubmission &&
+          current.keywordPairs.some(
+            (pair) =>
+              pair.id === flip.keywordPairId &&
+              !pair.used &&
+              pair.words.length === flip.keywords?.words?.length &&
+              pair.words.every(
+                (word, index) => word === flip.keywords.words[index].id
+              )
+          )
       )
   }
 
@@ -522,11 +560,24 @@ function createFlipGenerationRuntime({
       images.map(panelBytes),
       shuffledOrder
     )
+    // Persist the claim before the RPC. An uncertain result must be reconciled,
+    // never retried automatically, including after an app restart.
+    flips.updateDraft({
+      id: draft.id,
+      autoPublishSubmission: {
+        status: 'submitting',
+        time: new Date(now()).toISOString(),
+      },
+    })
     const submitted = await readRpc('flip_submit', {
       publicHex: payload.publicHex,
       privateHex: payload.privateHex,
       pairId: Number(draft.keywordPairId),
     })
+    if (!/^0x[0-9a-f]{64}$/i.test(submitted?.txHash || '')) {
+      throw failure('submission_result_invalid')
+    }
+    CID.parse(submitted.hash)
     flips.updateDraft({
       id: draft.id,
       type: 'published',
@@ -535,24 +586,44 @@ function createFlipGenerationRuntime({
       order: shuffledOrder,
       orderPermutations: shuffledOrder,
       modifiedAt: new Date(now()).toISOString(),
+      autoPublishSubmission: {
+        status: 'submitted',
+        time: new Date(now()).toISOString(),
+      },
     })
     return submitted
   }
 
   // Publishes one audited draft per call on the ordinary 30s tick.
   async function publishPending() {
-    const current = await snapshot()
-    if (!current.enabled || !current.ready || current.period !== 'None') {
-      return 'skipped'
-    }
-    const [draft] = pendingDrafts(current)
-    if (!draft) return 'idle'
+    if (publishing) return 'busy'
+    publishing = true
     try {
-      await publishDraft(draft)
-      return 'published'
-    } catch (error) {
-      onFailure('publish_failed', error)
-      return 'publish_failed'
+      const current = await snapshot()
+      if (!current.enabled || !current.ready || current.period !== 'None') {
+        return 'skipped'
+      }
+      const [draft] = pendingDrafts(current)
+      if (!draft) return 'idle'
+      try {
+        await publishDraft(draft)
+        return 'published'
+      } catch (error) {
+        const claimed = flips
+          .getFlips()
+          .find((item) => item.id === draft.id)?.autoPublishSubmission
+        flips.updateDraft({
+          id: draft.id,
+          autoPublishSubmission: {
+            status: claimed ? 'unknown' : 'audit_failed',
+            time: new Date(now()).toISOString(),
+          },
+        })
+        onFailure(claimed ? 'submission_unknown' : 'publish_audit_failed')
+        return 'publish_failed'
+      }
+    } finally {
+      publishing = false
     }
   }
 
@@ -563,10 +634,7 @@ function createFlipGenerationRuntime({
     chooseDelay,
     onFailure,
     save,
-    load: () =>
-      fs.existsSync(statePath)
-        ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
-        : {},
+    load,
   })
 
   return {...scheduler, publishPending}

@@ -119,6 +119,35 @@ describe('post-session flip generation', () => {
     expect(generate).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(state)).not.toContain('confidential')
   })
+  it('tries other pairs after a completed quality rejection and bounds retries', async () => {
+    current.missingCount = 2
+    generate.mockRejectedValue(
+      Object.assign(new Error('private story'), {code: 'story_rejected'})
+    )
+    const service = runner()
+    for (let index = 0; index < 4; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      expect(await service.tick()).toBe('scheduled')
+    }
+    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0, 1, 0, 1])
+    expect(state.rejectedPairs).toEqual([0, 1])
+    expect(await service.tick()).toBe('quality_blocked')
+    expect(generate).toHaveBeenCalledTimes(4)
+    expect(JSON.stringify(state)).not.toContain('private story')
+  })
+  it('waits before checking an exhausted budget and resumes the started batch', async () => {
+    generate.mockRejectedValueOnce(
+      Object.assign(new Error('budget'), {code: 'budget_exhausted'})
+    )
+    const service = runner()
+    expect(await service.tick()).toBe('waiting_budget')
+    expect(await service.tick()).toBe('waiting_budget')
+    expect(generate).toHaveBeenCalledTimes(1)
+    time += 86400000
+    expect(await service.tick()).toBe('scheduled')
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(state.completedPairs).toEqual([0])
+  })
   it('prevents overlapping timer callbacks from launching another request', async () => {
     let finish
     generate.mockImplementation(
