@@ -186,6 +186,8 @@ describe('scheduled generation runtime', () => {
         sequenceAuditModel: 'deepseek-flash',
         fastBuild: false,
         panelRenderMode: 'sheet_audited',
+        singleImageAttempt: true,
+        maxRetries: 0,
         validatorEnabled: true,
         sequenceAuditEnabled: true,
         renderFeedbackMaxRepairs: 0,
@@ -202,7 +204,15 @@ describe('scheduled generation runtime', () => {
       keywordPairId: 0,
       epoch: 42,
       order: [0, 1, 2, 3],
+      requiresManualReview: true,
     })
+    expect(bridge.generateStoryOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        singleStoryRequest: true,
+        usePythonFlipPipeline: false,
+        maxRetries: 0,
+      })
+    )
     expect(drafts[0].images).toHaveLength(4)
     expect(drafts[0].autoPublishAudit).toMatchObject({
       version: 1,
@@ -218,6 +228,9 @@ describe('scheduled generation runtime', () => {
         /submit|send|export/i.test(payload.method)
       )
     ).toBe(false)
+    expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
+      'idle'
+    )
     expect(
       fs
         .statSync(path.join(directory, 'post-session-flips.json'))
@@ -340,18 +353,20 @@ describe('scheduled generation runtime', () => {
     expect(bridge.generateStoryOptions).not.toHaveBeenCalled()
     expect(drafts).toHaveLength(0)
   })
-  it('limits unattended session spend even with a higher daily allowance', async () => {
+  it('caps the single unattended draft attempt below a higher daily allowance', async () => {
     settings.providerDailyBudgetUsd = 25
     const service = createFlipGenerationRuntime(options)
-    expect(await service.tick()).toBe('scheduled')
+    expect(await service.tick()).toBe('review_required')
     expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(1)
-    db['ai-provider-daily-budget-ledger'].entries.unshift({
-      time: new Date(time + 1000).toISOString(),
-      source: 'post-session-flips',
-      actualUsd: 3,
-    })
+    expect(
+      bridge.generateStoryOptions.mock.calls[0][0]
+        .providerDailyBudgetRemainingUsd
+    ).toBe(1.5)
+    expect(
+      bridge.generateFlipPanels.mock.calls[0][0].providerDailyBudgetRemainingUsd
+    ).toBeCloseTo(1.2)
     time += 5 * 60 * 1000
-    expect(await service.tick()).toBe('waiting_budget')
+    expect(await service.tick()).toBe('review_required')
     expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(1)
   })
   it('counts validation spending alongside generation and rolls over each local day', () => {
@@ -470,6 +485,7 @@ describe('scheduled generation runtime', () => {
   it('submits only the audited shuffle for a generated draft', async () => {
     const runtime = createFlipGenerationRuntime(options)
     await runtime.tick()
+    drafts[0].requiresManualReview = false
     const result = await runtime.publishPending()
 
     expect(result).toBe('published')
@@ -519,6 +535,7 @@ describe('scheduled generation runtime', () => {
     async (changed) => {
       const runtime = createFlipGenerationRuntime(options)
       await runtime.tick()
+      drafts[0].requiresManualReview = false
       if (changed === 'image') {
         drafts[0].protectedImages[0] = 'data:image/png;base64,AQ=='
       } else if (changed === 'shuffle') {
@@ -548,6 +565,7 @@ describe('scheduled generation runtime', () => {
   it('does not publish a same-epoch draft from another session or changed keyword assignment', async () => {
     const runtime = createFlipGenerationRuntime(options)
     await runtime.tick()
+    drafts[0].requiresManualReview = false
     const {id} = drafts[0]
     drafts[0].id = 'scheduled-other-session-0'
     expect(await runtime.publishPending()).toBe('idle')
@@ -562,6 +580,7 @@ describe('scheduled generation runtime', () => {
   it('durably claims a submission before RPC and prevents overlapping or restarted retries', async () => {
     const runtime = createFlipGenerationRuntime(options)
     await runtime.tick()
+    drafts[0].requiresManualReview = false
     const read = rpc.getMockImplementation()
     let rejectSubmit
     rpc.mockImplementation(async (payload) => {
@@ -593,17 +612,16 @@ describe('scheduled generation runtime', () => {
     ).toHaveLength(1)
   })
 
-  it('quarantines an invalid audit and allows a later valid draft to publish', async () => {
-    settings.providerDailyBudgetUsd = 5
+  it('quarantines an invalid audit before submission', async () => {
     const runtime = createFlipGenerationRuntime(options)
     await runtime.tick()
-    time += 5 * 60 * 1000
-    await runtime.tick()
+    drafts[0].requiresManualReview = false
     drafts[0].autoPublishAudit.imageDigest = 'changed'
     expect(await runtime.publishPending()).toBe('publish_failed')
-    expect(await runtime.publishPending()).toBe('published')
     expect(drafts[0].autoPublishSubmission.status).toBe('audit_failed')
-    expect(drafts[1].type).toBe('published')
+    expect(
+      rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
+    ).toBe(false)
   })
 
   it.each([{hash: TEST_CID}, {hash: 'invalid', txHash: `0x${'c'.repeat(64)}`}])(
@@ -611,6 +629,7 @@ describe('scheduled generation runtime', () => {
     async (result) => {
       const runtime = createFlipGenerationRuntime(options)
       await runtime.tick()
+      drafts[0].requiresManualReview = false
       const read = rpc.getMockImplementation()
       rpc.mockImplementation((payload) =>
         payload.method === 'flip_submit'

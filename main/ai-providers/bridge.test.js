@@ -3745,6 +3745,29 @@ describe('createAiProviderBridge', () => {
     )
   })
 
+  it('makes only one provider story request for a capped draft attempt', async () => {
+    const invokeProvider = jest.fn().mockResolvedValue({
+      rawText: '{}',
+      usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+    })
+    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await bridge.generateStoryOptions({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      keywords: ['magazine', 'hoola hoop'],
+      storyOptionCount: 2,
+      singleStoryRequest: true,
+      usePythonFlipPipeline: false,
+      disableLocalFallback: true,
+      maxRetries: 0,
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
+    expect(invokeProvider.mock.calls[0][0].profile.maxRetries).toBe(0)
+  })
+
   it('uses scaffold rewrite rescue before emergency fallback when rescue drafts stay meta', async () => {
     const invokeProvider = jest.fn().mockImplementation(async (payload) => {
       const phase =
@@ -6451,7 +6474,7 @@ describe('createAiProviderBridge', () => {
           'They wear the mended sock.',
         ],
       })
-    ).rejects.toThrow('requires a full fast-sheet build')
+    ).rejects.toThrow('requires a full sheet build')
     expect(httpClient.post).not.toHaveBeenCalled()
   })
 
@@ -6477,6 +6500,7 @@ describe('createAiProviderBridge', () => {
 
     const result = await bridge.generateFlipPanels({
       ...SHEET_AUDITED_PAYLOAD,
+      singleImageAttempt: true,
       validatorEnabled: false,
       sequenceAuditEnabled: false,
       renderFeedbackEnabled: false,
@@ -6521,6 +6545,25 @@ describe('createAiProviderBridge', () => {
     expect(httpClient.post).toHaveBeenCalledTimes(1)
     expect(result.costs.estimatedImageUsd).toBeCloseTo(0.005, 10)
     expect(result.tokenUsage.totalTokens).toBe(42)
+  })
+
+  it('makes no fallback image request after a capped audited-sheet failure', async () => {
+    const httpClient = {
+      post: jest.fn().mockRejectedValue(new Error('request timed out')),
+    }
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient,
+      splitStoryboardSheet: jest.fn(),
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.generateFlipPanels({
+        ...SHEET_AUDITED_PAYLOAD,
+        singleImageAttempt: true,
+      })
+    ).rejects.toThrow()
+    expect(httpClient.post).toHaveBeenCalledTimes(1)
   })
 
   it('gives reasoning-model panel audits enough time and output for all four provider-assisted layers', async () => {

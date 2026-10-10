@@ -51,9 +51,9 @@ describe('post-session flip generation', () => {
       generate,
       now: () => time,
     })
-    expect(await service.tick()).toBe('scheduled')
+    expect(await service.tick()).toBe('review_required')
     expect(generate).toHaveBeenCalledTimes(1)
-    expect(state.dueAt).toBe(end + 5 * 60 * 1000)
+    expect(state.paidAttemptsInSpendWindow).toBe(1)
     expect(state.expiresAt).toBe(end + MAX_DELAY_MS)
   })
   it('honors an already scheduled deadline at the four-hour boundary', async () => {
@@ -82,15 +82,12 @@ describe('post-session flip generation', () => {
     expect(await runner().tick()).toBe('missed_window')
     expect(generate).not.toHaveBeenCalled()
   })
-  it('finishes a started batch after four hours without generating a pair twice', async () => {
+  it('stops after one reviewable draft even when more pairs are missing', async () => {
     time += MAX_DELAY_MS
-    await runner().tick()
+    expect(await runner().tick()).toBe('review_required')
     time += 5 * 60 * 1000
-    await runner().tick()
-    time += 5 * 60 * 1000
-    expect(await runner().tick()).toBe('completed')
-    await runner().tick()
-    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0, 1])
+    expect(await runner().tick()).toBe('review_required')
+    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0])
   })
   it('honors a manual draft created while waiting', async () => {
     chooseDelay.mockReturnValue(MAX_DELAY_MS)
@@ -164,7 +161,7 @@ describe('post-session flip generation', () => {
     expect(state.paidAttemptsInSpendWindow).toBe(10)
     expect(generate).not.toHaveBeenCalled()
   })
-  it('waits before checking an exhausted budget and resumes the started batch', async () => {
+  it('does not retry after the one attempt hits its budget', async () => {
     generate.mockRejectedValueOnce(
       Object.assign(new Error('budget'), {code: 'budget_exhausted'})
     )
@@ -173,34 +170,29 @@ describe('post-session flip generation', () => {
     expect(await service.tick()).toBe('waiting_budget')
     expect(generate).toHaveBeenCalledTimes(1)
     time += 86400000
-    expect(await service.tick()).toBe('scheduled')
-    expect(generate).toHaveBeenCalledTimes(2)
-    expect(state.completedPairs).toEqual([0])
-  })
-  it('paces paid attempts after a successful generation', async () => {
-    const service = runner()
-    expect(await service.tick()).toBe('scheduled')
-    expect(state.dueAt).toBe(end + 5 * 60 * 1000)
-    expect(await service.tick()).toBe('waiting')
+    expect(await service.tick()).toBe('attempts_exhausted')
     expect(generate).toHaveBeenCalledTimes(1)
-    time = state.dueAt
-    expect(await service.tick()).toBe('scheduled')
-    expect(generate).toHaveBeenCalledTimes(2)
+    expect(state.completedPairs).toEqual([])
   })
-  it('stops after ten new paid attempts across the session', async () => {
+  it('does not launch a second paid attempt after a successful draft', async () => {
+    const service = runner()
+    expect(await service.tick()).toBe('review_required')
+    expect(generate).toHaveBeenCalledTimes(1)
+    time += 86400000
+    expect(await service.tick()).toBe('review_required')
+    expect(generate).toHaveBeenCalledTimes(1)
+  })
+  it('stops after one new paid attempt across the session', async () => {
     current.missingPairs = Array.from({length: 11}, (_, id) => ({id}))
     current.missingCount = 11
     const service = runner()
-    for (let index = 0; index < 10; index += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      expect(await service.tick()).toBe('scheduled')
-      time += 5 * 60 * 1000
-    }
-    expect(await service.tick()).toBe('attempts_exhausted')
-    expect(generate).toHaveBeenCalledTimes(10)
-    expect(state.paidAttemptsInSpendWindow).toBe(10)
+    expect(await service.tick()).toBe('review_required')
+    time += 5 * 60 * 1000
+    expect(await service.tick()).toBe('review_required')
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(state.paidAttemptsInSpendWindow).toBe(1)
   })
-  it('waits after a provider rate limit without consuming a quality attempt', async () => {
+  it('does not retry after a provider rate limit', async () => {
     generate.mockRejectedValueOnce(
       Object.assign(new Error('private rate-limit detail'), {
         code: 'rate_limited',
@@ -218,9 +210,9 @@ describe('post-session flip generation', () => {
     expect(generate).toHaveBeenCalledTimes(1)
 
     time = state.dueAt
-    expect(await service.tick()).toBe('scheduled')
-    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0, 0])
-    expect(state.completedPairs).toEqual([0])
+    expect(await service.tick()).toBe('attempts_exhausted')
+    expect(generate.mock.calls.map(([pair]) => pair.id)).toEqual([0])
+    expect(state.completedPairs).toEqual([])
   })
   it('prevents overlapping timer callbacks from launching another request', async () => {
     let finish

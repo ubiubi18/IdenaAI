@@ -1,6 +1,6 @@
 const MIN_DELAY_MS = 0
 const MAX_DELAY_MS = 4 * 60 * 60 * 1000
-const MAX_PAID_ATTEMPTS_PER_SESSION = 10
+const MAX_PAID_ATTEMPTS_PER_SESSION = 1
 const QUALITY_FAILURES = ['story_rejected', 'render_rejected']
 const AUDIT_REASON_CODES = new Set([
   'story_requires_four_complete_panels',
@@ -31,7 +31,6 @@ const AUDIT_REASON_CODES = new Set([
 ])
 const MIN_PROVIDER_RETRY_MS = 15 * 60 * 1000
 const MAX_PROVIDER_RETRY_MS = 60 * 60 * 1000
-const PAID_ATTEMPT_SPACING_MS = 5 * 60 * 1000
 
 function safeAuditReasons(reasons) {
   return [
@@ -170,8 +169,7 @@ function createFlipGenerationScheduler({
         await generate(pair, current)
         state.completedPairs.push(pair.id)
         state.activePair = null
-        state.status = 'scheduled'
-        state.dueAt = now() + PAID_ATTEMPT_SPACING_MS
+        state.status = 'review_required'
       } catch (error) {
         if (QUALITY_FAILURES.includes(error.code)) {
           state.pairAttempts[pair.id] = (state.pairAttempts[pair.id] || 0) + 1

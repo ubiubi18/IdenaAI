@@ -7728,7 +7728,7 @@ Flip hash: ${hash}
       temperature: hasCustomTemperature
         ? Number(payload.temperature)
         : defaultTemperature,
-      maxRetries: payload.maxRetries || 2,
+      maxRetries: payload.maxRetries ?? 2,
       maxConcurrency: 1,
       deadlineMs: Math.max(
         Math.max(
@@ -8174,6 +8174,14 @@ Flip hash: ${hash}
     const apiKey = getApiKey(provider, providerConfig)
     let combinedUsage = createEmptyTokenUsage()
     const attemptHistory = []
+    let storyRequests = 0
+    async function invokeStoryProvider(request) {
+      if (payload.singleStoryRequest && storyRequests >= 1) {
+        throw new Error('Single story request limit reached')
+      }
+      storyRequests += 1
+      return invokeProvider(request)
+    }
 
     async function invokeStructuredStoryAttempt({
       promptText: attemptPromptText,
@@ -8190,7 +8198,7 @@ Flip hash: ${hash}
         requireCompliance
       )
       try {
-        const providerResponse = await invokeProvider({
+        const providerResponse = await invokeStoryProvider({
           provider,
           model,
           flip: {
@@ -8469,7 +8477,7 @@ Flip hash: ${hash}
       })
 
       try {
-        const providerResponse = await invokeProvider({
+        const providerResponse = await invokeStoryProvider({
           provider,
           model,
           flip: {
@@ -8576,7 +8584,7 @@ Flip hash: ${hash}
       })
 
       try {
-        const providerResponse = await invokeProvider({
+        const providerResponse = await invokeStoryProvider({
           provider,
           model,
           flip: {
@@ -8677,7 +8685,7 @@ Flip hash: ${hash}
       })
 
       try {
-        const providerResponse = await invokeProvider({
+        const providerResponse = await invokeStoryProvider({
           provider,
           model,
           flip: {
@@ -9815,9 +9823,9 @@ Flip hash: ${hash}
       renderFeedbackIteration === 0 &&
       !sequenceAuditEnabled
     const singleImageAttempt = payload.singleImageAttempt === true
-    if (singleImageAttempt && !canUseSheetFastMode) {
+    if (singleImageAttempt && !canUseSheetFastMode && !sheetAuditedMode) {
       throw new Error(
-        'Single storyboard image request requires a full fast-sheet build; no images were requested.'
+        'Single storyboard image request requires a full sheet build; no images were requested.'
       )
     }
     let auditedSheet = null
@@ -10154,7 +10162,7 @@ Flip hash: ${hash}
       }
     }
 
-    if (singleImageAttempt) {
+    if (singleImageAttempt && !auditedSheet) {
       throw new Error(
         'Single storyboard image request returned no usable image; no fallback images were requested.'
       )
