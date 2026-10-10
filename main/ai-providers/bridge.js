@@ -10735,7 +10735,9 @@ Flip hash: ${hash}
       sequenceAudit,
       keywords: [keywordA, keywordB],
       hasAlternativeOption:
-        fullStoryBuild && alternativeStoryOptions.length > 0,
+        !sheetAuditedMode &&
+        fullStoryBuild &&
+        alternativeStoryOptions.length > 0,
     })
     const sheetAuditIncomplete =
       sheetAuditedMode &&
@@ -10823,6 +10825,11 @@ Flip hash: ${hash}
       sheetAuditedMode &&
       !sheetAuditIncomplete &&
       renderFeedbackReport.verdict === 'repair_selected_panels' &&
+      !sequenceAudit.shouldReplan &&
+      Array.isArray(sequenceAudit.failureReasons) &&
+      !sequenceAudit.failureReasons.includes('keyword_causal_role') &&
+      renderFeedbackReport.repairPanelIndices.length > 0 &&
+      renderFeedbackReport.repairPanelIndices.length <= 2 &&
       renderFeedbackIteration < renderFeedbackMaxRepairs &&
       (providerDailyBudgetRemainingUsd === null ||
         baseResult.costs.estimatedUsd * 2 < providerDailyBudgetRemainingUsd)
