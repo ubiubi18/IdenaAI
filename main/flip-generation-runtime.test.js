@@ -9,6 +9,8 @@ const {
   selectMissingPairs,
 } = require('./flip-generation-runtime')
 
+const TEST_CID = 'bafkreiabaeaqcaibaeaqcaibaeaqcaibaeaqcaibaeaqcaibaeaqcaibae'
+
 function passingStory(overrides = {}) {
   return {
     id: 'story',
@@ -115,7 +117,7 @@ describe('scheduled generation runtime', () => {
           Name: params[0] % 2 === 0 ? 'bell' : 'basket',
           Desc: 'fixture',
         },
-        flip_submit: {hash: 'bafkrei-fixture', txHash: `0x${'c'.repeat(64)}`},
+        flip_submit: {hash: TEST_CID, txHash: `0x${'c'.repeat(64)}`},
       }[method],
     }))
     bridge = {
@@ -250,7 +252,7 @@ describe('scheduled generation runtime', () => {
       costs: {actualUsd: 0.3},
     })
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe('scheduled')
     expect(bridge.generateFlipPanels).not.toHaveBeenCalled()
     expect(drafts).toHaveLength(0)
   })
@@ -268,7 +270,7 @@ describe('scheduled generation runtime', () => {
       })
     )
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe('scheduled')
     expect(drafts).toHaveLength(0)
     expect(
       rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
@@ -281,14 +283,16 @@ describe('scheduled generation runtime', () => {
       })
     )
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe('scheduled')
     expect(drafts).toHaveLength(0)
   })
   it('blocks generation when the existing daily ledger is exhausted', async () => {
     db['ai-provider-daily-budget-ledger'] = {
       entries: [{time: new Date(time).toISOString(), actualUsd: 1}],
     }
-    expect(await createFlipGenerationRuntime(options).tick()).toBe('failed')
+    expect(await createFlipGenerationRuntime(options).tick()).toBe(
+      'waiting_budget'
+    )
     expect(bridge.generateStoryOptions).not.toHaveBeenCalled()
     expect(drafts).toHaveLength(0)
   })
@@ -423,7 +427,7 @@ describe('scheduled generation runtime', () => {
     })
     expect(drafts[0]).toMatchObject({
       type: 'published',
-      hash: 'bafkrei-fixture',
+      hash: TEST_CID,
       txHash: `0x${'c'.repeat(64)}`,
     })
     expect(drafts[0].order).toEqual([2, 0, 3, 1])
@@ -445,7 +449,7 @@ describe('scheduled generation runtime', () => {
     })
 
     expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
-      'publish_failed'
+      'idle'
     )
     expect(
       rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
@@ -469,6 +473,95 @@ describe('scheduled generation runtime', () => {
       expect(
         rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
       ).toBe(false)
+    }
+  )
+
+  it('uses spare node pairs after exhausting quality attempts without reducing the target', () => {
+    expect(
+      selectMissingPairs(
+        {state: 'Newbie', requiredFlips: 2, flips: [], flipKeyWordPairs: pairs},
+        [],
+        end,
+        [0]
+      ).map(({id}) => id)
+    ).toEqual([1, 2])
+  })
+
+  it('does not publish a same-epoch draft from another session or changed keyword assignment', async () => {
+    const runtime = createFlipGenerationRuntime(options)
+    await runtime.tick()
+    const {id} = drafts[0]
+    drafts[0].id = 'scheduled-other-session-0'
+    expect(await runtime.publishPending()).toBe('idle')
+    drafts[0].id = id
+    drafts[0].keywords.words[0].id = 999
+    expect(await runtime.publishPending()).toBe('idle')
+    expect(
+      rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
+    ).toBe(false)
+  })
+
+  it('durably claims a submission before RPC and prevents overlapping or restarted retries', async () => {
+    const runtime = createFlipGenerationRuntime(options)
+    await runtime.tick()
+    const read = rpc.getMockImplementation()
+    let rejectSubmit
+    rpc.mockImplementation(async (payload) => {
+      if (payload.method !== 'flip_submit') return read(payload)
+      expect(drafts[0].autoPublishSubmission.status).toBe('submitting')
+      return new Promise((resolve, reject) => {
+        rejectSubmit = reject
+      })
+    })
+    const pending = runtime.publishPending()
+    while (!rejectSubmit) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => {
+        setImmediate(resolve)
+      })
+    }
+    expect(await runtime.publishPending()).toBe('busy')
+    expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
+      'idle'
+    )
+    rejectSubmit(new Error('response lost after submission'))
+    expect(await pending).toBe('publish_failed')
+    expect(drafts[0].autoPublishSubmission.status).toBe('unknown')
+    expect(await createFlipGenerationRuntime(options).publishPending()).toBe(
+      'idle'
+    )
+    expect(
+      rpc.mock.calls.filter(([payload]) => payload.method === 'flip_submit')
+    ).toHaveLength(1)
+  })
+
+  it('quarantines an invalid audit and allows a later valid draft to publish', async () => {
+    settings.providerDailyBudgetUsd = 5
+    const runtime = createFlipGenerationRuntime(options)
+    await runtime.tick()
+    await runtime.tick()
+    drafts[0].autoPublishAudit.imageDigest = 'changed'
+    expect(await runtime.publishPending()).toBe('publish_failed')
+    expect(await runtime.publishPending()).toBe('published')
+    expect(drafts[0].autoPublishSubmission.status).toBe('audit_failed')
+    expect(drafts[1].type).toBe('published')
+  })
+
+  it.each([{hash: TEST_CID}, {hash: 'invalid', txHash: `0x${'c'.repeat(64)}`}])(
+    'retains an incomplete submission result for reconciliation',
+    async (result) => {
+      const runtime = createFlipGenerationRuntime(options)
+      await runtime.tick()
+      const read = rpc.getMockImplementation()
+      rpc.mockImplementation((payload) =>
+        payload.method === 'flip_submit'
+          ? Promise.resolve({result})
+          : read(payload)
+      )
+      expect(await runtime.publishPending()).toBe('publish_failed')
+      expect(drafts[0].type).toBe('draft')
+      expect(drafts[0].autoPublishSubmission.status).toBe('unknown')
+      expect(await runtime.publishPending()).toBe('idle')
     }
   )
 

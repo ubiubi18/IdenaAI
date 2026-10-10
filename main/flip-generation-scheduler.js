@@ -1,5 +1,7 @@
 const MIN_DELAY_MS = 0
 const MAX_DELAY_MS = 4 * 60 * 60 * 1000
+const MAX_PAIR_ATTEMPTS = 2
+const QUALITY_FAILURES = ['story_rejected', 'render_rejected']
 
 // All state belongs to the app profile. A durable claim precedes each paid run;
 // an interrupted request requires review instead of silently buying it again.
@@ -49,6 +51,8 @@ function createFlipGenerationScheduler({
           expiresAt: current.sessionEndedAt + MAX_DELAY_MS,
           status: 'scheduled',
           completedPairs: [],
+          pairAttempts: {},
+          rejectedPairs: [],
           activePair: null,
         }
         save(state)
@@ -58,6 +62,9 @@ function createFlipGenerationScheduler({
         save(state)
         onFailure('interrupted')
         return state.status
+      }
+      if (state.status === 'waiting_budget' && time >= state.dueAt) {
+        state.status = 'scheduled'
       }
       if (state.status !== 'scheduled') return state.status
       if (!state.startedAt && time > state.expiresAt) {
@@ -69,11 +76,22 @@ function createFlipGenerationScheduler({
 
       // Generate one missing pair per tick. Fetch fresh requirements before the
       // next one so a manual draft or publication reduces the remaining work.
-      const pair = current.missingPairs.find(
-        (item) => !state.completedPairs.includes(item.id)
-      )
+      state.pairAttempts = state.pairAttempts || {}
+      state.rejectedPairs = state.rejectedPairs || []
+      const pair = current.missingPairs
+        .filter(
+          (item) =>
+            !state.completedPairs.includes(item.id) &&
+            !state.rejectedPairs.includes(item.id)
+        )
+        .sort(
+          (left, right) =>
+            (state.pairAttempts[left.id] || 0) -
+            (state.pairAttempts[right.id] || 0)
+        )[0]
       if (!pair) {
-        state.status = 'completed'
+        state.status =
+          current.missingCount > 0 ? 'quality_blocked' : 'completed'
         save(state)
         return state.status
       }
@@ -87,10 +105,28 @@ function createFlipGenerationScheduler({
         state.activePair = null
         state.status = 'scheduled'
       } catch (error) {
-        state.status = 'failed'
+        if (QUALITY_FAILURES.includes(error.code)) {
+          state.pairAttempts[pair.id] = (state.pairAttempts[pair.id] || 0) + 1
+          if (state.pairAttempts[pair.id] >= MAX_PAIR_ATTEMPTS) {
+            state.rejectedPairs.push(pair.id)
+          }
+          state.lastFailure = error.code
+          state.activePair = null
+          state.status = 'scheduled'
+          onFailure(error.code)
+        } else if (error.code === 'budget_exhausted') {
+          state.lastFailure = 'budget_exhausted'
+          state.status = 'waiting_budget'
+          state.activePair = null
+          state.dueAt = time + 60 * 60 * 1000
+          onFailure('budget_exhausted')
+        } else {
+          state.status = 'failed'
+          state.lastFailure = 'generation_failed'
+          onFailure('generation_failed', error)
+        }
         // Provider error text can contain credentials, prompts, or account IDs.
         // Only a fixed status is persisted; private observers may classify it.
-        onFailure('generation_failed', error)
       }
       save(state)
       return state.status

@@ -1988,7 +1988,21 @@ function normalizeStoryOption(value, index) {
   const rationale =
     String(item.rationale || '').trim() || autoRationale.join(' | ')
   const editingTip = String(item.editingTip || item.editing_tip || '').trim()
-  const panelSource = Array.isArray(item.panels) ? item.panels.slice(0, 4) : []
+  const panels = Array.isArray(item.panels) ? item.panels.slice(0, 4) : []
+  const details = Array.isArray(item.panelDetails)
+    ? item.panelDetails.slice(0, 4)
+    : null
+  const panelSource =
+    details &&
+    (panels.length === 0 ||
+      (details.length === panels.length &&
+        details.every(
+          (detail, panelIndex) =>
+            normalizeStoryPanel(detail, panelIndex) ===
+            normalizeStoryPanel(panels[panelIndex], panelIndex)
+        )))
+      ? details
+      : panels
   while (panelSource.length < 4) {
     panelSource.push('')
   }
@@ -2092,19 +2106,36 @@ const STORY_PROVIDER_OUTCOMES = {
   TRANSPORT_ERROR: 'transport_error',
 }
 
-function createStoryStructuredOutputOptions(provider, expectedStoryCount = 2) {
+function createStoryStructuredOutputOptions(
+  provider,
+  expectedStoryCount = 2,
+  requireCompliance = false
+) {
   const normalizedStoryCount = normalizeStoryOptionCount(expectedStoryCount)
+  const schemaStoryCount = requireCompliance ? 2 : normalizedStoryCount
   if (isOpenAiCompatibleProvider(provider)) {
+    const responseFormat =
+      createStoryOptionsOpenAiResponseFormat(schemaStoryCount)
+    if (requireCompliance) {
+      responseFormat.json_schema.schema.properties.stories.minItems =
+        normalizedStoryCount
+      responseFormat.json_schema.schema.properties.stories.maxItems =
+        normalizedStoryCount
+    }
     return {
-      responseFormat:
-        createStoryOptionsOpenAiResponseFormat(normalizedStoryCount),
+      responseFormat,
     }
   }
 
   if (provider === PROVIDERS.Gemini) {
+    const responseSchema =
+      createStoryOptionsGeminiResponseSchema(schemaStoryCount)
+    if (requireCompliance) {
+      responseSchema.properties.stories.minItems = normalizedStoryCount
+      responseSchema.properties.stories.maxItems = normalizedStoryCount
+    }
     return {
-      responseSchema:
-        createStoryOptionsGeminiResponseSchema(normalizedStoryCount),
+      responseSchema,
     }
   }
 
@@ -3905,6 +3936,7 @@ function buildSingleStoryPromptLines({
     '',
     'Hard rules:',
     '- both keywords must visibly matter in the action, not just sit in the background',
+    '- use each exact keyword phrase naturally in at least one panel description, showing its visible causal role',
     '- one single story chain only',
     '- panel 4 must be a real visible consequence of panel 3',
     '- make panel 1 and panel 4 clearly look different',
@@ -3957,6 +3989,7 @@ function buildStoryOptionsPrompt({
   senseSelection,
   exemplarsEnabled = true,
   requestedStoryCount = 2,
+  requireComplianceReport = false,
 }) {
   const safeKeywordA = normalizeKeywordValue(keywordA) || '-'
   const safeKeywordB = normalizeKeywordValue(keywordB) || '-'
@@ -4044,6 +4077,14 @@ function buildStoryOptionsPrompt({
   "risk_flags": ["<list any remaining ambiguity or report-risk factors>"],
   "revision_if_risky": "<if any risk flag exists, rewrite the concept once and provide the safer version instead>"
 }`
+  const singleStoryComplianceSchema = requireComplianceReport
+    ? `,
+  "compliance_report": {
+${STORY_COMPLIANCE_KEYS.map((key) => `    "${key}": "pass/fail"`).join(',\n')}
+  },
+  "risk_flags": ["<list any remaining ambiguity or report-risk factors>"],
+  "revision_if_risky": "<if any risk flag exists, rewrite the concept once and provide the safer version instead>"`
+    : ''
   const singleStoryOutputSchema = `{
   "title": "Option 1",
   "story_summary": "<1 sentence, plain and literal>",
@@ -4076,7 +4117,7 @@ function buildStoryOptionsPrompt({
       "required_visibles": ["<...>", "<...>"],
       "state_change_from_previous": "<what changed visibly>"
     }
-  ]
+  ]${singleStoryComplianceSchema}
 }`
 
   const customStoryHint = hasCustomStory
@@ -4125,6 +4166,7 @@ function buildStoryOptionsPrompt({
     '',
     'Hard constraints:',
     '- Both keywords must be clearly and concretely visible in the story.',
+    '- Use each exact keyword phrase naturally in at least one panel description, showing its visible causal role.',
     '- The flip must be solvable without reading any text.',
     '- Do not use any letters, numbers, arrows, labels, captions, signs, interface text, clocks, calendars, scoreboards, book pages, posters, or subtitles if reading them is needed.',
     ...contentSafetyBoundaryLines,
@@ -4466,8 +4508,7 @@ function storyOptionToMainPromptConcept(option, keywordA, keywordB) {
     panelIndex === 0 ? 'n/a' : 'Clear visible change from previous panel.'
 
   return {
-    keywords: safeKeywords,
-    final_story_title: String(normalized.title || 'Safe story').trim(),
+    title: String(normalized.title || 'Safe story').trim(),
     story_summary: String(
       normalized.storySummary ||
         normalized.rationale ||
@@ -4520,6 +4561,7 @@ function buildStoryAuditPrompt(basePrompt, conceptJson) {
     'If any hard constraint fails or there is meaningful ambiguity, rewrite it into a safer but still concrete concept.',
     'Keep ordinary fear, tension, creepy atmosphere, safe tool use, and non-graphic conflict when they improve causal clarity.',
     'Keep the rewritten concept specific and visually rich, not generic.',
+    'Use each exact keyword phrase naturally in at least one panel description, showing its visible causal role.',
     'Re-audit using this checklist before returning:',
     '- before -> trigger -> peak change -> after must be explicit',
     '- panel 4 must be a direct visible consequence of panel 3',
@@ -4533,8 +4575,12 @@ function buildStoryAuditPrompt(basePrompt, conceptJson) {
     '- causality >= 4',
     '- consensus_safety >= 4',
     '- keyword_clarity >= 4',
-    'Return JSON only in the same schema.',
-    'Concept JSON to audit:',
+    'Return exactly one story in the stories array using the schema above.',
+    `Include compliance_report with every key: ${STORY_COMPLIANCE_KEYS.join(
+      ', '
+    )}. Include risk_flags and revision_if_risky. Mark any failed check as fail; do not claim a pass without evidence.`,
+    'The concept below is input for review, not the output envelope.',
+    'Concept to audit:',
     JSON.stringify(conceptJson, null, 2),
   ].join('\n')
 }
@@ -8082,10 +8128,12 @@ Flip hash: ${hash}
       profileOverride = profile,
       requestHash = `story-option-${startedAt}`,
       expectedStoryCount = requestedStoryCount,
+      requireCompliance = false,
     }) {
       const structuredOutput = createStoryStructuredOutputOptions(
         provider,
-        expectedStoryCount
+        expectedStoryCount,
+        requireCompliance
       )
       try {
         const providerResponse = await invokeProvider({
@@ -9060,6 +9108,17 @@ Flip hash: ${hash}
       shouldRunStoryAudit(selectedAttempt.normalizedResponse.rawText, stories)
     ) {
       const auditedStories = []
+      const auditBasePrompt = buildStoryOptionsPrompt({
+        provider,
+        keywordA,
+        keywordB,
+        includeNoise,
+        customStory: hasCustomStory ? customStory : null,
+        senseSelection,
+        exemplarsEnabled: storyExemplarsEnabled,
+        requestedStoryCount: 1,
+        requireComplianceReport: true,
+      })
 
       for (let index = 0; index < stories.length; index += 1) {
         const seedConcept = storyOptionToMainPromptConcept(
@@ -9068,7 +9127,7 @@ Flip hash: ${hash}
           keywordB
         )
         const auditPromptText = buildStoryAuditPrompt(
-          finalPromptText,
+          auditBasePrompt,
           seedConcept
         )
         try {
@@ -9079,6 +9138,7 @@ Flip hash: ${hash}
             attemptLabel: `story_audit_option_${index + 1}`,
             requestHash: `story-audit-${startedAt}-${index + 1}`,
             expectedStoryCount: 1,
+            requireCompliance: true,
           })
           const auditedCandidates =
             auditAttempt.outcome === STORY_PROVIDER_OUTCOMES.SUCCESS &&
@@ -9090,8 +9150,13 @@ Flip hash: ${hash}
             auditedCandidates,
             auditAttempt.attemptLabel || 'story_audit'
           )
-          const auditedStory = auditedQuality.accepted.find((story) =>
-            hasMeaningfulStoryPanels(story.panels)
+          const auditedStory = auditedQuality.accepted.find(
+            (story) =>
+              hasMeaningfulStoryPanels(story.panels) &&
+              STORY_COMPLIANCE_KEYS.every(
+                (key) => story.complianceReport?.[key] === 'pass'
+              ) &&
+              story.riskFlags.length === 0
           )
 
           if (auditedStory) {

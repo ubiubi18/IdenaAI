@@ -2935,6 +2935,10 @@ describe('createAiProviderBridge', () => {
               },
             ],
           }),
+        ])
+      )
+      .mockResolvedValueOnce(
+        makeStrictStoryResponse([
           makeStrictStoryOption({
             title: 'Bench recovery',
             storySummary:
@@ -2980,7 +2984,7 @@ describe('createAiProviderBridge', () => {
       hasCustomStory: false,
     })
 
-    expect(invokeProvider).toHaveBeenCalledTimes(4)
+    expect(invokeProvider).toHaveBeenCalledTimes(3)
     const callPayload = invokeProvider.mock.calls[0][0]
     const auditPayload = invokeProvider.mock.calls.find(
       ([payload]) =>
@@ -2995,6 +2999,30 @@ describe('createAiProviderBridge', () => {
       promptPhase: 'story_audit',
       structuredOutput: expect.any(Object),
     })
+    expect(auditPayload.promptText).toContain(
+      'Generate exactly 1 editable 4-panel flip storyboard as strict JSON only.'
+    )
+    expect(auditPayload.promptText).not.toContain(
+      'Output exactly 2 final concepts'
+    )
+    expect(auditPayload.promptText).toContain(
+      'Use each exact keyword phrase naturally in at least one panel description'
+    )
+    expect(auditPayload.promptText).toContain('"compliance_report": {')
+    expect(callPayload.promptText).toContain(
+      'Use each exact keyword phrase naturally in at least one panel description'
+    )
+    expect(
+      auditPayload.promptOptions.structuredOutput.responseFormat.json_schema
+        .schema.properties.stories.items.required
+    ).toEqual([
+      'title',
+      'story_summary',
+      'panels',
+      'compliance_report',
+      'risk_flags',
+      'revision_if_risky',
+    ])
     expect(callPayload.promptText).toContain(
       'Idena flip storyline planner and compliance checker'
     )
@@ -3057,10 +3085,68 @@ describe('createAiProviderBridge', () => {
     )
     expect(result.stories[0].riskFlags).toEqual([])
     expect(result.tokenUsage).toMatchObject({
-      promptTokens: 80,
-      completionTokens: 60,
-      totalTokens: 140,
+      promptTokens: 120,
+      completionTokens: 90,
+      totalTokens: 210,
     })
+  })
+
+  it('keeps the compliant first-pass story when a one-story audit omits compliance evidence', async () => {
+    const initialStory = makeStrictStoryOption({
+      title: 'Bell in basket',
+      storySummary:
+        'A baker bumps a brass bell, catches it inside a basket, and sets the basket safely on the counter.',
+      panels: [
+        {
+          description:
+            'A baker places a brass bell beside an empty basket on a wooden counter.',
+          required_visibles: ['baker', 'brass bell', 'basket'],
+          state_change_from_previous: 'n/a',
+        },
+        {
+          description:
+            'The baker lifts the basket and bumps the brass bell toward the counter edge.',
+          required_visibles: ['baker', 'basket', 'moving bell'],
+          state_change_from_previous:
+            'The bell has moved toward the counter edge beside the lifted basket.',
+        },
+        {
+          description:
+            'The brass bell falls from the counter and the baker catches it in the basket.',
+          required_visibles: ['falling bell', 'baker', 'basket'],
+          state_change_from_previous:
+            'The bell has fallen from the counter and is now inside the basket.',
+        },
+        {
+          description:
+            'The baker sets the basket with the brass bell safely inside on the counter.',
+          required_visibles: ['baker', 'basket', 'brass bell'],
+          state_change_from_previous:
+            'The bell remains inside the basket on the counter.',
+        },
+      ],
+    })
+    const auditStory = {...initialStory, title: 'Missing audit evidence'}
+    delete auditStory.compliance_report
+    const invokeProvider = jest
+      .fn()
+      .mockResolvedValueOnce(makeStrictStoryResponse([initialStory]))
+      .mockResolvedValueOnce(makeStrictStoryResponse([auditStory]))
+    const bridge = createAiProviderBridge(mockLogger(), {invokeProvider})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.generateStoryOptions({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      storyOptionCount: 1,
+      keywords: ['bell', 'basket'],
+      includeNoise: false,
+    })
+
+    expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(result.stories[0].title).toBe('Bell in basket')
+    expect(result.stories[0].complianceReport).toEqual(makeComplianceReport())
+    expect(result.metrics.audit_fail).toBe(1)
   })
 
   it('builds keyword-based fallback story options only when the provider is unreachable', async () => {
@@ -3235,6 +3321,11 @@ describe('createAiProviderBridge', () => {
     expect(result.stories[0].title).toBe('Porch giant curl')
     expect(result.stories[0].panels[0].toLowerCase()).toContain('curl')
     expect(result.stories[0].panels[1].toLowerCase()).toContain('giant')
+    expect(result.stories[0].panelDetails[1]).toMatchObject({
+      requiredVisibles: ['giant', 'bent porch rail', 'hose curl'],
+      stateChangeFromPrevious:
+        'The giant is now pulling on the rail and the rail has bent.',
+    })
     expect(result.metrics.fallback_used).toBe(false)
   })
 
@@ -3608,10 +3699,25 @@ describe('createAiProviderBridge', () => {
       storySummary:
         'A readable but generic draft that should be rewritten more specifically.',
       panels: [
-        'A person handles a magazine near a hoola hoop in a room.',
-        'The person bumps the hoola hoop and something changes in the room.',
-        'The person reacts while the magazine and hoola hoop shift position.',
-        'The person sees the final result in the same room.',
+        {
+          description:
+            'A person handles a magazine near a hoola hoop in a room.',
+          state_change_from_previous: 'n/a',
+        },
+        {
+          description:
+            'The person bumps the hoola hoop and something changes in the room.',
+          state_change_from_previous: 'Visible change from previous panel.',
+        },
+        {
+          description:
+            'The person reacts while the magazine and hoola hoop shift position.',
+          state_change_from_previous: 'Visible change from previous panel.',
+        },
+        {
+          description: 'The person sees the final result in the same room.',
+          state_change_from_previous: 'Visible change from previous panel.',
+        },
       ],
     })
 
@@ -3707,9 +3813,9 @@ describe('createAiProviderBridge', () => {
         return {
           rawText: [
             'At a school gym doorway, a student carries a milk carton past a disappointed pilot costume hanging on a rack.',
-            'The carton clips the costume sleeve and knocks the disappointed pilot cap into the doorway.',
-            'The cap snags the milk straw, spraying a white arc across the gym floor while the student grabs the swaying rack.',
-            'The disappointed pilot costume hangs crooked in the doorway while the milk carton drips beside the fallen cap on the floor.',
+            'The carton clips the costume sleeve and knocks the disappointed pilot cap off the rack; the cap falls into the doorway.',
+            'The fallen cap snags the milk straw, and milk spills across the gym floor while the student grabs the swaying rack.',
+            'Spilled milk remains on the gym floor beside the fallen cap while the disappointed pilot costume hangs crooked in the doorway.',
           ].join('\n'),
           usage: {
             promptTokens: 26,
@@ -5676,7 +5782,7 @@ describe('createAiProviderBridge', () => {
       hasCustomStory: false,
     })
 
-    expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(invokeProvider).toHaveBeenCalledTimes(1)
     const callPayload = invokeProvider.mock.calls[0][0]
     expect(callPayload.promptText).not.toContain('human seed premise')
     expect(callPayload.promptText).not.toContain(
