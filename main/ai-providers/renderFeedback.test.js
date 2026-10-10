@@ -8,6 +8,24 @@ function makePanel(imageDataUrl) {
 }
 
 describe('render feedback loop', () => {
+  test('repairs the keyword cue required by the planned stage', () => {
+    const guidance = buildRenderedStoryRepairGuidance(
+      {
+        repairPanelIndices: [3],
+        visibilityFailPanels: [3],
+      },
+      {keywordA: 'helicopter', keywordB: 'throwing away'}
+    )[3]
+
+    expect(guidance).toContain(
+      "keyword object, action, or visible consequence required by this panel's planned stage"
+    )
+    expect(guidance).toContain('across the full story')
+    expect(guidance).toContain(
+      'do not replay a completed action in the settled aftermath'
+    )
+  })
+
   test('repairs a single weak panel when only one rendered panel is misaligned', () => {
     const result = evaluateRenderedStoryFeedback({
       storyPanels: [

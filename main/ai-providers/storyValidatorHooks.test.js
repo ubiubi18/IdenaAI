@@ -129,6 +129,61 @@ describe('storyValidatorHooks', () => {
     expect(result.summary.panelRepairReason).toBe('keyword_visibility')
   })
 
+  it('keeps completed-action visibility honest while respecting the planned panel stage', () => {
+    const context = {
+      panelIndex: 3,
+      panelStory: 'The helicopter remains in the bin after being thrown away.',
+      keywords: ['helicopter', 'throwing away'],
+    }
+    const audit = {
+      ocr_text_check: {passed: true, detected_text: []},
+      keyword_visibility_check: {
+        passed: true,
+        keywords: [
+          {keyword: 'helicopter', visible: true, confidence: 0.9},
+          {keyword: 'throwing away', visible: false, confidence: 0.9},
+        ],
+      },
+      alignment_check: {passed: true, aligned: true},
+      policy_risk_check: {passed: true, risk_level: 'low'},
+    }
+
+    const completedAction = parseRenderedPanelAudit(
+      JSON.stringify(audit),
+      context
+    )
+    expect(completedAction.keywordVisibilityCheck).toMatchObject({
+      status: 'pass',
+      passed: true,
+      keywords: [
+        {keyword: 'helicopter', visible: true},
+        {keyword: 'throwing away', visible: false},
+      ],
+    })
+
+    const missingRequiredCue = parseRenderedPanelAudit(
+      JSON.stringify({
+        ...audit,
+        keyword_visibility_check: {
+          passed: false,
+          keywords: [
+            {keyword: 'helicopter', visible: false, confidence: 0.1},
+            {keyword: 'throwing away', visible: false, confidence: 0.9},
+          ],
+        },
+      }),
+      context
+    )
+    expect(missingRequiredCue.keywordVisibilityCheck).toMatchObject({
+      status: 'fail',
+      passed: false,
+      keywords: [
+        {keyword: 'helicopter', visible: false},
+        {keyword: 'throwing away', visible: false},
+      ],
+    })
+  })
+
   it('flags panel-story alignment failures with mismatch reasons', async () => {
     const result = await runRenderedPanelValidatorHooks({
       hooks: {
@@ -233,7 +288,16 @@ describe('storyValidatorHooks', () => {
     expect(prompt).toContain('3. panel-story alignment')
     expect(prompt).toContain('4. policy risk')
     expect(prompt).toContain(
-      'Keywords that should be visibly recognizable in this panel: shock, ghost'
+      'Keywords that must be recognizable and causally necessary across the full story: shock, ghost'
+    )
+    expect(prompt).toContain(
+      'based only on what is actually recognizable in this image'
+    )
+    expect(prompt).toContain(
+      'keyword object or action required by this planned panel'
+    )
+    expect(prompt).toContain(
+      'do not demand a future action in the setup or replay a completed action in the settled aftermath'
     )
     expect(prompt).toContain(
       'allow non-graphic tension, fear, suspense, eerie scenes, and safe tool use'
