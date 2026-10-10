@@ -472,7 +472,7 @@ function createFlipGenerationRuntime({
       selectedStoryId: selected.id,
       senseSelection: selected.senseSelection,
       fastBuild: false,
-      panelRenderMode: 'panels',
+      panelRenderMode: 'sheet_audited',
       textAuditEnabled: true,
       validatorEnabled: true,
       renderFeedbackEnabled: true,
