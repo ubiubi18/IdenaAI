@@ -178,6 +178,21 @@ function makePassingSheetValidatorHooks(overrides = {}) {
   }
 }
 
+function makePassingProviderPanelAudit() {
+  return {
+    ocr_text_check: {passed: true, detected_text: []},
+    keyword_visibility_check: {
+      passed: true,
+      keywords: [
+        {keyword: 'present', visible: true, confidence: 0.9},
+        {keyword: 'clown', visible: true, confidence: 0.9},
+      ],
+    },
+    alignment_check: {passed: true, aligned: true},
+    policy_risk_check: {passed: true, risk_level: 'low'},
+  }
+}
+
 const SHEET_AUDITED_STORY = [
   'A person receives a closed present.',
   'The person starts opening the present while it remains closed.',
@@ -6411,6 +6426,134 @@ describe('createAiProviderBridge', () => {
     expect(result.costs.estimatedImageUsd).toBeCloseTo(0.005, 10)
     expect(result.tokenUsage.totalTokens).toBe(42)
   })
+
+  it('gives reasoning-model panel audits enough time and output for all four provider-assisted layers', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue(makeSheetImageResponse()),
+    }
+    const invokeProvider = jest
+      .fn()
+      .mockImplementation(({profile, promptOptions}) => {
+        let rawText = JSON.stringify(makePassingSheetSequenceAudit())
+        if (promptOptions.promptPhase === 'rendered_panel_validator') {
+          const profileIsAdequate =
+            profile.requestTimeoutMs >= 90 * 1000 &&
+            profile.maxOutputTokens >= 2400
+          rawText = profileIsAdequate
+            ? JSON.stringify(makePassingProviderPanelAudit())
+            : ''
+        }
+        return Promise.resolve({
+          rawText,
+          usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+        })
+      })
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient,
+      splitStoryboardSheet: jest.fn().mockResolvedValue(makeSheetPanelImages()),
+      invokeProvider,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.generateFlipPanels({
+      ...SHEET_AUDITED_PAYLOAD,
+      validatorModel: 'gpt-6-astra',
+      sequenceAuditModel: 'gpt-6-astra',
+    })
+
+    const panelAuditCalls = invokeProvider.mock.calls
+      .map(([request]) => request)
+      .filter(
+        (request) =>
+          request.promptOptions.promptPhase === 'rendered_panel_validator'
+      )
+    expect(panelAuditCalls).toHaveLength(4)
+    expect(
+      panelAuditCalls.every(
+        (request) =>
+          request.model === 'gpt-6-astra' &&
+          request.profile.requestTimeoutMs >= 90 * 1000 &&
+          request.profile.deadlineMs > request.profile.requestTimeoutMs &&
+          request.profile.maxOutputTokens >= 2400 &&
+          request.profile.maxRetries === 0
+      )
+    ).toBe(true)
+    expect(result.validatorAuditActionCount).toBe(4)
+    expect(result.validatorAuditByPanel).toHaveLength(4)
+    expect(
+      result.validatorAuditByPanel.every(
+        (audit) => audit.invoked && audit.complete && audit.passed
+      )
+    ).toBe(true)
+    expect(result.sequenceAudit).toMatchObject({complete: true, passed: true})
+    expect(result.renderFeedback.verdict).toBe('accept_rendered_story')
+    expect(httpClient.post).toHaveBeenCalledTimes(1)
+    expect(result.costs.estimatedImageUsd).toBeCloseTo(0.005, 10)
+    expect(result.tokenUsage.totalTokens).toBe(162)
+  })
+
+  it.each(['', '{}'])(
+    'reports incomplete provider-assisted sheet audits honestly for %j',
+    async (panelAuditText) => {
+      const logger = mockLogger()
+      const httpClient = {
+        post: jest.fn().mockResolvedValue(makeSheetImageResponse()),
+      }
+      const invokeProvider = jest.fn().mockImplementation(({promptOptions}) =>
+        Promise.resolve({
+          rawText:
+            promptOptions.promptPhase === 'rendered_panel_validator'
+              ? panelAuditText
+              : JSON.stringify(makePassingSheetSequenceAudit()),
+          usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+        })
+      )
+      const bridge = createAiProviderBridge(logger, {
+        httpClient,
+        splitStoryboardSheet: jest
+          .fn()
+          .mockResolvedValue(makeSheetPanelImages()),
+        invokeProvider,
+      })
+      bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+      const result = await bridge.generateFlipPanels({
+        ...SHEET_AUDITED_PAYLOAD,
+        validatorModel: 'gpt-6-astra',
+      })
+
+      expect(result.validatorAuditByPanel).toHaveLength(4)
+      expect(
+        result.validatorAuditByPanel.every(
+          (audit) =>
+            audit.invoked &&
+            !audit.complete &&
+            !audit.passed &&
+            audit.ocr_text_check.status === 'error' &&
+            audit.failureReasons.includes('audit_incomplete')
+        )
+      ).toBe(true)
+      const panelLogs = logger.info.mock.calls
+        .filter(([message]) => message === 'AI rendered panel validator result')
+        .map(([, details]) => details)
+      expect(panelLogs).toHaveLength(4)
+      expect(
+        panelLogs.every(
+          (details) =>
+            details.complete === false &&
+            details.passed === false &&
+            details.layerStatuses.ocr_text_check === 'error'
+        )
+      ).toBe(true)
+      expect(result.sequenceAudit.passed).toBe(true)
+      expect(result.renderFeedback.verdict).toBe('replan_story')
+      expect(result.renderFeedback.report.failureReasons).toContain(
+        'sheet_audit_incomplete'
+      )
+      expect(httpClient.post).toHaveBeenCalledTimes(1)
+      expect(result.tokenUsage.totalTokens).toBe(162)
+    }
+  )
 
   it('fails closed when an audited sheet cannot be split into four images', async () => {
     const httpClient = {
