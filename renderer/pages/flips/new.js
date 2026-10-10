@@ -3493,6 +3493,7 @@ export default function NewFlipPage() {
           ...providerBudgetRunPayload,
           fastBuild: isFastMode,
           panelRenderMode: isFastMode ? 'sheet_fast' : 'panels',
+          singleImageAttempt: isFastMode,
           provider: auditProvider,
           providerConfig: auditProviderConfig,
           model: reasoningModel,
