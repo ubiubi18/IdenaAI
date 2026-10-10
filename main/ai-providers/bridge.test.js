@@ -205,6 +205,20 @@ const SHEET_AUDITED_SHUFFLES = [
   [3, 1, 0, 2],
 ]
 
+const SHEET_AUDITED_OPTIONS = [
+  {id: 'option-1', title: 'Present opens', panels: SHEET_AUDITED_STORY},
+  {
+    id: 'option-2',
+    title: 'Clown delivers a present',
+    panels: [
+      'A clown carries a wrapped present into a room.',
+      'The clown puts the present on a table.',
+      'The wrapping tears and colored paper spills out.',
+      'The clown gathers the paper beside the open present.',
+    ],
+  },
+]
+
 const SHEET_AUDITED_PAYLOAD = {
   provider: 'openai',
   model: 'gpt-4o-mini',
@@ -6684,6 +6698,145 @@ describe('createAiProviderBridge', () => {
     expect(result.costs.estimatedImageUsd).toBeCloseTo(0.01, 10)
     expect(result.tokenUsage.totalTokens).toBe(84)
   })
+
+  it('repairs two continuity panels as one fully re-audited sheet despite an alternative story', async () => {
+    const httpClient = {
+      post: jest.fn().mockResolvedValue(makeSheetImageResponse()),
+    }
+    const firstChecks = makePassingSheetSequenceAudit().checks
+    firstChecks.character_scene_continuity = {passed: false}
+    const invokeProvider = jest
+      .fn()
+      .mockResolvedValueOnce({
+        rawText: JSON.stringify(
+          makePassingSheetSequenceAudit({
+            verdict: 'repair',
+            passed: false,
+            score: 80,
+            failure_reasons: ['character_scene_continuity'],
+            repair_panel_indices: [2, 3],
+            repair_guidance_by_panel: [
+              {panel: 2, instruction: 'Keep the same present design.'},
+              {panel: 3, instruction: 'Keep the same present design.'},
+            ],
+            checks: firstChecks,
+          })
+        ),
+        usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+      })
+      .mockResolvedValueOnce({
+        rawText: JSON.stringify(makePassingSheetSequenceAudit()),
+        usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+      })
+    const splitStoryboardSheet = jest
+      .fn()
+      .mockResolvedValueOnce(makeSheetPanelImages(1))
+      .mockResolvedValueOnce(makeSheetPanelImages(2))
+    const storyValidatorHooks = makePassingSheetValidatorHooks()
+    const bridge = createAiProviderBridge(mockLogger(), {
+      httpClient,
+      splitStoryboardSheet,
+      storyValidatorHooks,
+      invokeProvider,
+    })
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    const result = await bridge.generateFlipPanels({
+      ...SHEET_AUDITED_PAYLOAD,
+      storyOptions: SHEET_AUDITED_OPTIONS,
+      selectedStoryId: 'option-1',
+      renderFeedbackMaxRepairs: 1,
+    })
+
+    expect(result.selectedStory.id).toBe('option-1')
+    expect(result.renderFeedback.history[0]).toMatchObject({
+      verdict: 'repair_selected_panels',
+      repairPanelIndices: [1, 2],
+    })
+    expect(result.panels.map((panel) => panel.imageDataUrl)).toEqual(
+      makeSheetPanelImages(2)
+    )
+    expect(result.panels[0].panelPrompt).toContain(
+      'Redraw all four quadrants together while correcting:'
+    )
+    expect(result.renderFeedback.verdict).toBe('accept_rendered_story')
+    expect(result.sequenceAudit).toMatchObject({complete: true, passed: true})
+    expect(result.validatorAuditByPanel.every((audit) => audit.passed)).toBe(
+      true
+    )
+    Object.values(storyValidatorHooks).forEach((hook) => {
+      expect(hook).toHaveBeenCalledTimes(8)
+    })
+    expect(invokeProvider).toHaveBeenCalledTimes(2)
+    expect(httpClient.post).toHaveBeenCalledTimes(2)
+    expect(splitStoryboardSheet).toHaveBeenCalledTimes(2)
+    expect(result.generatedPanelCount).toBe(8)
+    expect(result.costs.estimatedImageUsd).toBeCloseTo(0.01, 10)
+  })
+
+  it.each([
+    ['semantic sequence replan', 'replan', true, 'character_scene_continuity'],
+    ['keyword causal failure', 'repair', false, 'keyword_causal_role'],
+  ])(
+    'does not redraw a sheet for %s',
+    async (_, verdict, shouldReplan, failedCheck) => {
+      const httpClient = {
+        post: jest.fn().mockResolvedValue(makeSheetImageResponse()),
+      }
+      const {checks} = makePassingSheetSequenceAudit()
+      checks[failedCheck] = {passed: false}
+      const repairPanelIndices = shouldReplan ? [] : [2, 3]
+      const invokeProvider = jest.fn().mockResolvedValue({
+        rawText: JSON.stringify(
+          makePassingSheetSequenceAudit({
+            verdict,
+            passed: false,
+            score: 80,
+            failure_reasons: [failedCheck],
+            repair_panel_indices: repairPanelIndices,
+            repair_guidance_by_panel: shouldReplan
+              ? []
+              : [
+                  {panel: 2, instruction: 'Keep the keyword causal.'},
+                  {panel: 3, instruction: 'Keep the keyword causal.'},
+                ],
+            should_replan_story: shouldReplan,
+            checks,
+          })
+        ),
+        usage: {promptTokens: 20, completionTokens: 10, totalTokens: 30},
+      })
+      const splitStoryboardSheet = jest
+        .fn()
+        .mockResolvedValue(makeSheetPanelImages())
+      const bridge = createAiProviderBridge(mockLogger(), {
+        httpClient,
+        splitStoryboardSheet,
+        storyValidatorHooks: makePassingSheetValidatorHooks(),
+        invokeProvider,
+      })
+      bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+      const result = await bridge.generateFlipPanels({
+        ...SHEET_AUDITED_PAYLOAD,
+        storyOptions: SHEET_AUDITED_OPTIONS,
+        selectedStoryId: 'option-1',
+        renderFeedbackMaxRepairs: 1,
+      })
+
+      expect(result.selectedStory.id).toBe('option-1')
+      expect(result.sequenceAudit).toMatchObject({
+        complete: true,
+        shouldReplan,
+        failureReasons: expect.arrayContaining([failedCheck]),
+      })
+      expect(result.renderFeedback.verdict).not.toBe('accept_rendered_story')
+      expect(httpClient.post).toHaveBeenCalledTimes(1)
+      expect(splitStoryboardSheet).toHaveBeenCalledTimes(1)
+      expect(invokeProvider).toHaveBeenCalledTimes(1)
+      expect(result.costs.estimatedImageUsd).toBeCloseTo(0.005, 10)
+    }
+  )
 
   it('adds a stable human character continuity anchor to every panel prompt', async () => {
     const httpClient = {
