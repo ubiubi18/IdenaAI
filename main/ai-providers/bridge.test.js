@@ -6427,6 +6427,34 @@ describe('createAiProviderBridge', () => {
     expect(httpClient.post).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects a supervised build when the one-sheet path is unavailable', async () => {
+    const httpClient = {post: jest.fn(), get: jest.fn()}
+    const bridge = createAiProviderBridge(mockLogger(), {httpClient})
+    bridge.setProviderKey({provider: 'openai', apiKey: 'sk-test'})
+
+    await expect(
+      bridge.generateFlipPanels({
+        provider: 'openai',
+        fastBuild: true,
+        panelRenderMode: 'sheet_fast',
+        singleImageAttempt: true,
+        regenerateIndices: [0],
+        existingPanels: Array.from(
+          {length: 4},
+          () => 'data:image/png;base64,AAA='
+        ),
+        keywords: ['sock', 'phone'],
+        storyPanels: [
+          'A person notices a hole in a sock.',
+          'They open a repair guide on a phone.',
+          'They sew the sock.',
+          'They wear the mended sock.',
+        ],
+      })
+    ).rejects.toThrow('requires a full fast-sheet build')
+    expect(httpClient.post).not.toHaveBeenCalled()
+  })
+
   it('splits one sheet into four fully audited panels and charges one image', async () => {
     const httpClient = {
       post: jest.fn().mockResolvedValue(makeSheetImageResponse()),

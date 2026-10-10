@@ -9814,8 +9814,12 @@ Flip hash: ${hash}
       regenerateIndices.length === 4 &&
       renderFeedbackIteration === 0 &&
       !sequenceAuditEnabled
-    const singleImageAttempt =
-      canUseSheetFastMode && payload.singleImageAttempt === true
+    const singleImageAttempt = payload.singleImageAttempt === true
+    if (singleImageAttempt && !canUseSheetFastMode) {
+      throw new Error(
+        'Single storyboard image request requires a full fast-sheet build; no images were requested.'
+      )
+    }
     let auditedSheet = null
     const sheetPanelMetadata = storyPanels
       .slice(0, 4)
