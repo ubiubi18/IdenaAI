@@ -1,9 +1,11 @@
 const MIN_DELAY_MS = 0
 const MAX_DELAY_MS = 4 * 60 * 60 * 1000
 const MAX_PAIR_ATTEMPTS = 2
+const MAX_PAID_ATTEMPTS_PER_SESSION = 10
 const QUALITY_FAILURES = ['story_rejected', 'render_rejected']
 const MIN_PROVIDER_RETRY_MS = 15 * 60 * 1000
 const MAX_PROVIDER_RETRY_MS = 60 * 60 * 1000
+const PAID_ATTEMPT_SPACING_MS = 5 * 60 * 1000
 
 // All state belongs to the app profile. A durable claim precedes each paid run;
 // an interrupted request requires review instead of silently buying it again.
@@ -52,11 +54,19 @@ function createFlipGenerationScheduler({
           dueAt: current.sessionEndedAt + delay,
           expiresAt: current.sessionEndedAt + MAX_DELAY_MS,
           status: 'scheduled',
+          spendStartedAt: time,
+          paidAttemptsInSpendWindow: 0,
           completedPairs: [],
           pairAttempts: {},
           rejectedPairs: [],
           activePair: null,
         }
+        save(state)
+      } else if (!Number.isFinite(state.spendStartedAt)) {
+        // Existing in-flight sessions begin a fresh guarded spend window when
+        // this safeguard is deployed; their paid-attempt history remains intact.
+        state.spendStartedAt = time
+        state.paidAttemptsInSpendWindow = 0
         save(state)
       }
       if (state.status === 'running') {
@@ -100,15 +110,22 @@ function createFlipGenerationScheduler({
         save(state)
         return state.status
       }
+      if (state.paidAttemptsInSpendWindow >= MAX_PAID_ATTEMPTS_PER_SESSION) {
+        state.status = 'attempts_exhausted'
+        save(state)
+        return state.status
+      }
       state.status = 'running'
       state.startedAt = state.startedAt || time
       state.activePair = pair.id
+      state.paidAttemptsInSpendWindow += 1
       save(state)
       try {
         await generate(pair, current)
         state.completedPairs.push(pair.id)
         state.activePair = null
         state.status = 'scheduled'
+        state.dueAt = now() + PAID_ATTEMPT_SPACING_MS
       } catch (error) {
         if (QUALITY_FAILURES.includes(error.code)) {
           state.pairAttempts[pair.id] = (state.pairAttempts[pair.id] || 0) + 1
@@ -118,6 +135,7 @@ function createFlipGenerationScheduler({
           state.lastFailure = error.code
           state.activePair = null
           state.status = 'scheduled'
+          state.dueAt = now() + PAID_ATTEMPT_SPACING_MS
           onFailure(error.code)
         } else if (error.code === 'budget_exhausted') {
           state.lastFailure = 'budget_exhausted'
