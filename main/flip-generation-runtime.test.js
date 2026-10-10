@@ -334,6 +334,36 @@ describe('scheduled generation runtime', () => {
     expect(await service.tick()).toBe('waiting_budget')
     expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(1)
   })
+  it('honors a bounded node-specific spend cap without skipping attempt spacing', async () => {
+    const name = 'IDENAAI_POST_SESSION_SPEND_CAP_USD'
+    const previous = process.env[name]
+    process.env[name] = '5'
+    try {
+      settings.providerDailyBudgetUsd = 25
+      const service = createFlipGenerationRuntime(options)
+      expect(await service.tick()).toBe('scheduled')
+      db['ai-provider-daily-budget-ledger'].entries.unshift({
+        time: new Date(time + 1000).toISOString(),
+        source: 'post-session-flips',
+        actualUsd: 2.3,
+      })
+      expect(await service.tick()).toBe('waiting')
+      time += 5 * 60 * 1000
+      expect(await service.tick()).toBe('scheduled')
+      expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(2)
+      db['ai-provider-daily-budget-ledger'].entries.unshift({
+        time: new Date(time + 1000).toISOString(),
+        source: 'post-session-flips',
+        actualUsd: 1.4,
+      })
+      time += 5 * 60 * 1000
+      expect(await service.tick()).toBe('waiting_budget')
+      expect(bridge.generateStoryOptions).toHaveBeenCalledTimes(2)
+    } finally {
+      if (previous === undefined) delete process.env[name]
+      else process.env[name] = previous
+    }
+  })
   it('counts validation spending alongside generation and rolls over each local day', () => {
     const date = new Date(time).toISOString()
     db['scope-validation-ai-cost-ledger'] = {
