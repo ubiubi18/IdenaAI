@@ -12,7 +12,7 @@ const {
 } = require('../renderer/shared/utils/flip-auto-publish')
 
 const LEDGER_KEY = 'ai-provider-daily-budget-ledger'
-const MAX_POST_SESSION_PROVIDER_SPEND_USD = 3
+const MAX_POST_SESSION_PROVIDER_SPEND_USD = 1.5
 // The renderer stores flip types in lower case; see renderer/shared/types.js.
 const DRAFT_FLIP_TYPES = ['draft', 'publishing', 'published']
 // Higher identity states publish one or two flips beyond the epoch minimum
@@ -452,10 +452,12 @@ function createFlipGenerationRuntime({
       keywords,
       storyOptionCount: 2,
       fastStoryMode: false,
+      singleStoryRequest: true,
+      usePythonFlipPipeline: false,
       disableLocalFallback: true,
       includeNoise: false,
       requestTimeoutMs: 90000,
-      maxRetries: 1,
+      maxRetries: 0,
     })
     recordCost(story, 'story', provider, model)
     const auditedStory = selectAuditedStoryCandidate({
@@ -493,6 +495,7 @@ function createFlipGenerationRuntime({
       senseSelection: selected.senseSelection,
       fastBuild: false,
       panelRenderMode: 'sheet_audited',
+      singleImageAttempt: true,
       textAuditEnabled: true,
       validatorEnabled: true,
       renderFeedbackEnabled: true,
@@ -503,7 +506,7 @@ function createFlipGenerationRuntime({
       includeNoise: false,
       regenerateIndices: [0, 1, 2, 3],
       requestTimeoutMs: 90000,
-      maxRetries: 1,
+      maxRetries: 0,
     })
     recordCost(rendered, 'images', imageProvider, imageModel)
     const auditedRender = evaluateAutoPublishRender({response: rendered})
@@ -533,6 +536,7 @@ function createFlipGenerationRuntime({
       order: [0, 1, 2, 3],
       orderPermutations: [0, 1, 2, 3],
       adversarialImageId: -1,
+      requiresManualReview: true,
     }
     draft.autoPublishAudit = {
       version: 1,
@@ -550,6 +554,7 @@ function createFlipGenerationRuntime({
           flip.id === `scheduled-${current.sessionId}-${flip.keywordPairId}` &&
           String(flip.type || '').toLowerCase() === 'draft' &&
           Number(flip.epoch) === Number(current.epoch) &&
+          !flip.requiresManualReview &&
           !flip.autoPublishSubmission &&
           current.keywordPairs.some(
             (pair) =>
