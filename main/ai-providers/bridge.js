@@ -9814,6 +9814,8 @@ Flip hash: ${hash}
       regenerateIndices.length === 4 &&
       renderFeedbackIteration === 0 &&
       !sequenceAuditEnabled
+    const singleImageAttempt =
+      canUseSheetFastMode && payload.singleImageAttempt === true
     let auditedSheet = null
     const sheetPanelMetadata = storyPanels
       .slice(0, 4)
@@ -9853,18 +9855,19 @@ Flip hash: ${hash}
           )}`
         : sheetPromptBase
       const sheetImageSize = resolveSheetImageSize(imageSize)
-      const timeoutCandidates = sheetAuditedMode
-        ? [profile.requestTimeoutMs]
-        : buildImageTimeoutCandidates(
-            fastBuild
-              ? Math.min(profile.requestTimeoutMs, 75 * 1000)
-              : profile.requestTimeoutMs
-          )
+      const timeoutCandidates =
+        sheetAuditedMode || singleImageAttempt
+          ? [profile.requestTimeoutMs]
+          : buildImageTimeoutCandidates(
+              fastBuild
+                ? Math.min(profile.requestTimeoutMs, 75 * 1000)
+                : profile.requestTimeoutMs
+            )
       const imageProfileCandidates = buildImageProfileCandidates({
         provider: imageProvider,
         imageModel,
         imageSize: sheetImageSize,
-      })
+      }).slice(0, singleImageAttempt ? 1 : undefined)
       let sheetResponse = null
       let sheetImageModel = imageModel
       let sheetImageSizeUsed = sheetImageSize
@@ -9905,7 +9908,7 @@ Flip hash: ${hash}
               }
               // eslint-disable-next-line no-await-in-loop
               sheetResponse = await withRetries(
-                sheetAuditedMode ? 0 : profile.maxRetries,
+                sheetAuditedMode || singleImageAttempt ? 0 : profile.maxRetries,
                 () =>
                   runImageProvider({
                     provider: imageProvider,
@@ -10132,6 +10135,11 @@ Flip hash: ${hash}
         }
       } catch (error) {
         if (sheetAuditedMode) throw error
+        if (singleImageAttempt) {
+          throw new Error(
+            'Single storyboard image request failed; no fallback images were requested.'
+          )
+        }
         logger.info('AI storyboard sheet mode fallback', {
           provider,
           model,
@@ -10140,6 +10148,12 @@ Flip hash: ${hash}
             .slice(0, 240),
         })
       }
+    }
+
+    if (singleImageAttempt) {
+      throw new Error(
+        'Single storyboard image request returned no usable image; no fallback images were requested.'
+      )
     }
 
     if (sheetAuditedMode && !auditedSheet) {
