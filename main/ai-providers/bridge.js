@@ -5128,6 +5128,60 @@ function resolveSheetImageSize(requestedImageSize) {
   return '1536x1024'
 }
 
+function isNonemptyImageDataUrl(value) {
+  const match =
+    /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(
+      String(value || '').trim()
+    )
+  return Boolean(match && Buffer.from(match[1], 'base64').length > 0)
+}
+
+function resolveStoryboardSheetSplitter(injectedSplitter) {
+  if (typeof injectedSplitter === 'function') return injectedSplitter
+
+  let nativeImage = null
+  try {
+    // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+    const electron = require('electron')
+    nativeImage = electron && electron.nativeImage
+  } catch (error) {
+    // The bridge can also run outside Electron; audited sheets require a splitter.
+  }
+  if (!nativeImage || typeof nativeImage.createFromDataURL !== 'function') {
+    throw new Error('Audited storyboard sheet splitter is unavailable')
+  }
+
+  return (imageDataUrl) => {
+    const sheet = nativeImage.createFromDataURL(imageDataUrl)
+    if (!sheet || sheet.isEmpty()) {
+      throw new Error('Audited storyboard sheet image could not be decoded')
+    }
+    const {width, height} = sheet.getSize()
+    if (
+      width < 1024 ||
+      height < 1024 ||
+      width % 2 !== 0 ||
+      height % 2 !== 0 ||
+      width < height ||
+      width > height * 1.6
+    ) {
+      throw new Error('Audited storyboard sheet has invalid 2x2 dimensions')
+    }
+    return [0, 1, 2, 3].map((index) => {
+      const panel = sheet.crop({
+        x: (index % 2) * (width / 2),
+        y: Math.floor(index / 2) * (height / 2),
+        width: width / 2,
+        height: height / 2,
+      })
+      if (!panel || panel.isEmpty()) {
+        throw new Error('Audited storyboard sheet has an empty quadrant')
+      }
+      return panel.toDataURL()
+    })
+  }
+}
+
 function hashScore(value) {
   const text = String(value || '')
   let score = 17
@@ -9479,24 +9533,32 @@ Flip hash: ${hash}
     const panelRenderMode = (
       requestedPanelRenderMode || (fastBuild ? 'sheet_fast' : 'panels')
     ).toLowerCase()
+    const sheetAuditedMode = panelRenderMode === 'sheet_audited'
+    if (sheetAuditedMode && regenerateIndices.length !== 4) {
+      throw new Error('Audited storyboard sheet requires all four panels')
+    }
+    const splitStoryboardSheet = sheetAuditedMode
+      ? resolveStoryboardSheetSplitter(dependencies.splitStoryboardSheet)
+      : null
 
     const imageRequestTimeoutMs = Math.max(
       Number(payload.requestTimeoutMs) || 0,
       fastBuild ? 45 * 1000 : MIN_IMAGE_REQUEST_TIMEOUT_MS
     )
     const textAuditEnabled =
-      typeof payload.textAuditEnabled === 'boolean'
+      sheetAuditedMode ||
+      (typeof payload.textAuditEnabled === 'boolean'
         ? payload.textAuditEnabled
-        : !fastBuild
+        : !fastBuild)
     const validatorEnabled =
-      typeof payload.validatorEnabled === 'boolean'
+      sheetAuditedMode ||
+      (typeof payload.validatorEnabled === 'boolean'
         ? payload.validatorEnabled
-        : textAuditEnabled
+        : textAuditEnabled)
     const renderFeedbackEnabled =
-      typeof payload.renderFeedbackEnabled === 'boolean'
-        ? payload.renderFeedbackEnabled
-        : true
-    const sequenceAuditEnabled = payload.sequenceAuditEnabled === true
+      sheetAuditedMode || payload.renderFeedbackEnabled !== false
+    const sequenceAuditEnabled =
+      sheetAuditedMode || payload.sequenceAuditEnabled === true
     const textAuditModel = String(payload.textAuditModel || model).trim()
     const validatorModel = String(
       payload.validatorModel || textAuditModel
@@ -9507,20 +9569,29 @@ Flip hash: ${hash}
     const sequenceAuditShuffleCandidates = normalizeShuffleCandidates(
       payload.sequenceAuditShuffleCandidates
     )
-    const textAuditMaxRetries = Math.max(
-      0,
-      Math.min(
-        3,
-        Number.parseInt(payload.textAuditMaxRetries, 10) || (fastBuild ? 0 : 2)
-      )
-    )
-    const validatorMaxRetries = Math.max(
-      0,
-      Math.min(
-        3,
-        Number.parseInt(payload.validatorMaxRetries, 10) || textAuditMaxRetries
-      )
-    )
+    if (sheetAuditedMode && sequenceAuditShuffleCandidates.length === 0) {
+      throw new Error('Audited storyboard sheet requires shuffle candidates')
+    }
+    const textAuditMaxRetries = sheetAuditedMode
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            3,
+            Number.parseInt(payload.textAuditMaxRetries, 10) ||
+              (fastBuild ? 0 : 2)
+          )
+        )
+    const validatorMaxRetries = sheetAuditedMode
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            3,
+            Number.parseInt(payload.validatorMaxRetries, 10) ||
+              textAuditMaxRetries
+          )
+        )
     const renderFeedbackIteration = Math.max(
       0,
       Number.parseInt(payload.renderFeedbackIteration, 10) || 0
@@ -9692,6 +9763,7 @@ Flip hash: ${hash}
       regenerateIndices.length === 4 &&
       renderFeedbackIteration === 0 &&
       !sequenceAuditEnabled
+    let auditedSheet = null
     const sheetPanelMetadata = storyPanels
       .slice(0, 4)
       .map((panelStory, index) => ({
@@ -9700,22 +9772,43 @@ Flip hash: ${hash}
         generated: true,
       }))
 
-    if (canUseSheetFastMode) {
-      const sheetPrompt = buildStoryboardSheetPrompt({
+    if (canUseSheetFastMode || sheetAuditedMode) {
+      const sheetPromptBase = buildStoryboardSheetPrompt({
         storyPanels,
         keywordA,
         keywordB,
-        visualStyle,
+        visualStyle:
+          sheetAuditedMode && !String(payload.visualStyle || '').trim()
+            ? 'Unified four-panel cartoon storyboard, flat bright colors, clean line art, consistent character and environment across all quadrants.'
+            : visualStyle,
         includeNoise,
         noisePanelIndex,
         senseSelection,
       })
+      const sheetRepairLines = sheetAuditedMode
+        ? Object.entries(repairGuidanceByPanel)
+            .map(([index, guidance]) =>
+              Number(index) >= 0 &&
+              Number(index) < 4 &&
+              String(guidance || '').trim()
+                ? `- Panel ${Number(index) + 1}: ${String(guidance).trim()}`
+                : ''
+            )
+            .filter(Boolean)
+        : []
+      const sheetPrompt = sheetRepairLines.length
+        ? `${sheetPromptBase}\nRedraw all four quadrants together while correcting:\n${sheetRepairLines.join(
+            '\n'
+          )}`
+        : sheetPromptBase
       const sheetImageSize = resolveSheetImageSize(imageSize)
-      const timeoutCandidates = buildImageTimeoutCandidates(
-        fastBuild
-          ? Math.min(profile.requestTimeoutMs, 75 * 1000)
-          : profile.requestTimeoutMs
-      )
+      const timeoutCandidates = sheetAuditedMode
+        ? [profile.requestTimeoutMs]
+        : buildImageTimeoutCandidates(
+            fastBuild
+              ? Math.min(profile.requestTimeoutMs, 75 * 1000)
+              : profile.requestTimeoutMs
+          )
       const imageProfileCandidates = buildImageProfileCandidates({
         provider: imageProvider,
         imageModel,
@@ -9760,21 +9853,23 @@ Flip hash: ${hash}
                 )
               }
               // eslint-disable-next-line no-await-in-loop
-              sheetResponse = await withRetries(profile.maxRetries, () =>
-                runImageProvider({
-                  provider: imageProvider,
-                  imageModel: profileCandidate.imageModel,
-                  prompt: sheetPrompt,
-                  profile: imageProfile,
-                  apiKey: imageApiKey,
-                  providerConfig: resolveProviderConfig(
-                    imageProvider,
-                    imageProviderConfig
-                  ),
-                  size: profileCandidate.imageSize,
-                  quality: imageQuality,
-                  style: imageStyle,
-                })
+              sheetResponse = await withRetries(
+                sheetAuditedMode ? 0 : profile.maxRetries,
+                () =>
+                  runImageProvider({
+                    provider: imageProvider,
+                    imageModel: profileCandidate.imageModel,
+                    prompt: sheetPrompt,
+                    profile: imageProfile,
+                    apiKey: imageApiKey,
+                    providerConfig: resolveProviderConfig(
+                      imageProvider,
+                      imageProviderConfig
+                    ),
+                    size: profileCandidate.imageSize,
+                    quality: imageQuality,
+                    style: imageStyle,
+                  })
               )
               if (sheetResponse) {
                 sheetImageModel = profileCandidate.imageModel
@@ -9791,6 +9886,7 @@ Flip hash: ${hash}
               }
             } catch (error) {
               if (isTimeoutError(error)) {
+                if (sheetAuditedMode) throw error
                 timeoutFailure = error
                 logger.info('AI storyboard sheet timeout, escalating timeout', {
                   provider,
@@ -9817,7 +9913,10 @@ Flip hash: ${hash}
           )
         }
 
-        if (sheetResponse && String(sheetResponse.imageDataUrl || '').trim()) {
+        if (
+          sheetResponse &&
+          (sheetAuditedMode || String(sheetResponse.imageDataUrl || '').trim())
+        ) {
           const sheetUsage = addTokenUsage(
             createEmptyTokenUsage(),
             sheetResponse.usage || createEmptyTokenUsage()
@@ -9846,84 +9945,142 @@ Flip hash: ${hash}
             imageSize: sheetImageSizeUsed,
           })
 
-          return {
-            ok: true,
-            provider,
-            imageProvider,
-            model,
-            imageModel,
-            imageSize: sheetImageSizeUsed,
-            latencyMs: now() - startedAt,
-            includeNoise,
-            noisePanelIndex: includeNoise ? noisePanelIndex : null,
-            generatedPanelCount: 1,
-            textAuditEnabled: false,
-            textAuditModel: '',
-            textAuditMaxRetries: 0,
-            validatorEnabled: false,
-            validatorModel: '',
-            validatorMaxRetries: 0,
-            panelRenderModeUsed: 'sheet_fast',
-            selectedStory: {
-              id: activeStory.id,
-              title: activeStory.title,
-              panels: storyPanels.slice(0, 4),
-              senseSelection,
-            },
-            textOverlayRetryCount: 0,
-            senseSelection,
-            textAuditByPanel: Array.from({length: 4}, () =>
-              createEmptyPanelTextAuditResult()
-            ),
-            validatorAuditByPanel: Array.from({length: 4}, () =>
-              createEmptyRenderedPanelAuditResult()
-            ),
-            validatorMetrics: {
-              validator_invoked: 0,
-              ocr_fail: 0,
-              visibility_fail: 0,
-              alignment_fail: 0,
-              policy_fail: 0,
-              validator_retry_count: 0,
-              panel_repair_reason: [],
-            },
-            panels: [
-              {
-                index: 0,
-                imageDataUrl: String(sheetResponse.imageDataUrl || '').trim(),
-                imageModelUsed: sheetImageModel,
-                imageSizeUsed: sheetImageSizeUsed,
-                panelPrompt: sheetPrompt,
-                panelStory: storyPanels.join(' | '),
-                generated: true,
-                isCompositeSheet: true,
-              },
-            ],
-            panelMetadataByIndex: sheetPanelMetadata.map((item, index) => ({
-              ...item,
-              panelPrompt: sheetPrompt,
+          if (sheetAuditedMode) {
+            const imageDataUrl = String(sheetResponse.imageDataUrl || '').trim()
+            let splitPanels = null
+            try {
+              if (!isNonemptyImageDataUrl(imageDataUrl)) {
+                throw new Error('Audited storyboard sheet image is invalid')
+              }
+              splitPanels = await splitStoryboardSheet(imageDataUrl)
+              if (
+                !Array.isArray(splitPanels) ||
+                splitPanels.length !== 4 ||
+                splitPanels.some((panel) => !isNonemptyImageDataUrl(panel))
+              ) {
+                throw new Error(
+                  'Audited storyboard sheet did not split into four valid panels'
+                )
+              }
+            } catch (error) {
+              const failureReason = String(
+                (error && error.message) || error || 'sheet_split_failed'
+              ).trim()
+              logger.info('AI audited storyboard sheet split failed', {
+                provider,
+                imageModel: sheetImageModel,
+                failureReason: failureReason.slice(0, 240),
+              })
+              return {
+                ok: false,
+                provider,
+                imageProvider,
+                model,
+                imageModel,
+                panelRenderModeUsed: 'sheet_audited',
+                generatedPanelCount: 0,
+                aiActionCount: 1,
+                panels: [],
+                failureReason,
+                tokenUsage: normalizeTokenUsage(sheetUsage),
+                costs: {
+                  estimatedUsd: sheetEstimatedUsd,
+                  actualUsd: sheetEstimatedUsd,
+                  estimatedTextUsd: sheetEstimatedTextCostUsd,
+                  estimatedImageUsd: sheetEstimatedImageCostUsd,
+                },
+              }
+            }
+            auditedSheet = {
+              panels: splitPanels.map((panel) => String(panel).trim()),
+              prompt: sheetPrompt,
+              usage: sheetUsage,
+              imageCostUsd: sheetEstimatedImageCostUsd,
               imageModelUsed: sheetImageModel,
               imageSizeUsed: sheetImageSizeUsed,
-              generated: true,
-              index,
-            })),
-            imageFallbackUsed:
-              String(sheetImageModel || '').trim() !==
-                String(imageModel || '').trim() ||
-              String(sheetImageSizeUsed || '').trim() !==
-                String(sheetImageSize || '').trim(),
-            tokenUsage: normalizeTokenUsage(sheetUsage),
-            costs: {
-              estimatedUsd: sheetEstimatedUsd,
-              actualUsd: sheetEstimatedUsd,
-              estimatedTextUsd: sheetEstimatedTextCostUsd,
-              estimatedImageUsd: Number.isFinite(sheetEstimatedImageCostUsd)
-                ? sheetEstimatedImageCostUsd
-                : null,
-            },
+              requestedImageSize: sheetImageSize,
+            }
+          } else {
+            return {
+              ok: true,
+              provider,
+              imageProvider,
+              model,
+              imageModel,
+              imageSize: sheetImageSizeUsed,
+              latencyMs: now() - startedAt,
+              includeNoise,
+              noisePanelIndex: includeNoise ? noisePanelIndex : null,
+              generatedPanelCount: 1,
+              textAuditEnabled: false,
+              textAuditModel: '',
+              textAuditMaxRetries: 0,
+              validatorEnabled: false,
+              validatorModel: '',
+              validatorMaxRetries: 0,
+              panelRenderModeUsed: 'sheet_fast',
+              selectedStory: {
+                id: activeStory.id,
+                title: activeStory.title,
+                panels: storyPanels.slice(0, 4),
+                senseSelection,
+              },
+              textOverlayRetryCount: 0,
+              senseSelection,
+              textAuditByPanel: Array.from({length: 4}, () =>
+                createEmptyPanelTextAuditResult()
+              ),
+              validatorAuditByPanel: Array.from({length: 4}, () =>
+                createEmptyRenderedPanelAuditResult()
+              ),
+              validatorMetrics: {
+                validator_invoked: 0,
+                ocr_fail: 0,
+                visibility_fail: 0,
+                alignment_fail: 0,
+                policy_fail: 0,
+                validator_retry_count: 0,
+                panel_repair_reason: [],
+              },
+              panels: [
+                {
+                  index: 0,
+                  imageDataUrl: String(sheetResponse.imageDataUrl || '').trim(),
+                  imageModelUsed: sheetImageModel,
+                  imageSizeUsed: sheetImageSizeUsed,
+                  panelPrompt: sheetPrompt,
+                  panelStory: storyPanels.join(' | '),
+                  generated: true,
+                  isCompositeSheet: true,
+                },
+              ],
+              panelMetadataByIndex: sheetPanelMetadata.map((item, index) => ({
+                ...item,
+                panelPrompt: sheetPrompt,
+                imageModelUsed: sheetImageModel,
+                imageSizeUsed: sheetImageSizeUsed,
+                generated: true,
+                index,
+              })),
+              imageFallbackUsed:
+                String(sheetImageModel || '').trim() !==
+                  String(imageModel || '').trim() ||
+                String(sheetImageSizeUsed || '').trim() !==
+                  String(sheetImageSize || '').trim(),
+              tokenUsage: normalizeTokenUsage(sheetUsage),
+              costs: {
+                estimatedUsd: sheetEstimatedUsd,
+                actualUsd: sheetEstimatedUsd,
+                estimatedTextUsd: sheetEstimatedTextCostUsd,
+                estimatedImageUsd: Number.isFinite(sheetEstimatedImageCostUsd)
+                  ? sheetEstimatedImageCostUsd
+                  : null,
+              },
+            }
           }
         }
       } catch (error) {
+        if (sheetAuditedMode) throw error
         logger.info('AI storyboard sheet mode fallback', {
           provider,
           model,
@@ -9934,10 +10091,20 @@ Flip hash: ${hash}
       }
     }
 
-    const nextPanels = existingPanels.slice(0, 4)
+    if (sheetAuditedMode && !auditedSheet) {
+      throw new Error('Audited storyboard sheet generation returned no image')
+    }
+
+    const nextPanels = auditedSheet
+      ? auditedSheet.panels.slice(0, 4)
+      : existingPanels.slice(0, 4)
     const promptByPanel = Array.from({length: 4}, () => '')
-    const panelImageModelUsed = Array.from({length: 4}, () => imageModel)
-    const panelImageSizeUsed = Array.from({length: 4}, () => imageSize)
+    const panelImageModelUsed = Array.from({length: 4}, () =>
+      auditedSheet ? auditedSheet.imageModelUsed : imageModel
+    )
+    const panelImageSizeUsed = Array.from({length: 4}, () =>
+      auditedSheet ? auditedSheet.imageSizeUsed : imageSize
+    )
     const existingTextAuditByPanel = Array.isArray(
       payload.existingTextAuditByPanel
     )
@@ -9969,9 +10136,9 @@ Flip hash: ${hash}
       validator_retry_count: 0,
       panel_repair_reason: [],
     }
-    let usage = createEmptyTokenUsage()
-    let generatedCount = 0
-    let estimatedImageCostUsd = 0
+    let usage = auditedSheet ? auditedSheet.usage : createEmptyTokenUsage()
+    let generatedCount = auditedSheet ? 4 : 0
+    let estimatedImageCostUsd = auditedSheet ? auditedSheet.imageCostUsd : 0
     let textOverlayRetryCount = 0
     let renderFeedbackMetrics = createEmptyRenderedStoryMetrics()
 
@@ -9994,6 +10161,72 @@ Flip hash: ${hash}
       const panelPromptBase = storyRepairGuidance
         ? `${panelPromptBaseRaw}\n${storyRepairGuidance}`
         : panelPromptBaseRaw
+
+      if (auditedSheet) {
+        promptByPanel[panelIndex] = auditedSheet.prompt
+        // eslint-disable-next-line no-await-in-loop
+        const validatorResult = await runRenderedPanelValidatorHooks({
+          hooks: renderedPanelValidatorHooks,
+          context: {
+            auditCacheKey: `rendered-sheet-panel-${startedAt}-${renderFeedbackIteration}-${panelIndex}`,
+            panelIndex,
+            attempt: 0,
+            panelStory: storyPanels[panelIndex],
+            storyPanels,
+            keywordA,
+            keywordB,
+            keywords: [keywordA, keywordB],
+            panelPrompt: auditedSheet.prompt,
+            panelImageDataUrl: nextPanels[panelIndex],
+            senseSelection,
+          },
+        })
+        const {summary} = validatorResult
+        validatorAuditByPanel[panelIndex] = {
+          ...validatorResult,
+          invoked: Boolean(summary.invoked),
+          passed: Boolean(summary.passed),
+          failureReasons: Array.isArray(summary.failureReasons)
+            ? summary.failureReasons.slice(0, 8)
+            : [],
+          shouldRetryPanel: Boolean(summary.shouldRetryPanel),
+          shouldReplan: Boolean(summary.shouldReplan),
+          panelRepairReason: String(summary.panelRepairReason || '').trim(),
+        }
+        textAuditByPanel[panelIndex] = buildLegacyTextAuditFromValidator({
+          validatorResult: validatorAuditByPanel[panelIndex],
+          checked: Boolean(summary.invoked),
+          attempts: 1,
+          retriesUsed: 0,
+          reason: validatorAuditByPanel[panelIndex].panelRepairReason,
+        })
+        if (summary.invoked) validatorMetrics.validator_invoked += 1
+        if (summary.failureReasons.includes('ocr_fail')) {
+          validatorMetrics.ocr_fail += 1
+        }
+        if (summary.failureReasons.includes('visibility_fail')) {
+          validatorMetrics.visibility_fail += 1
+        }
+        if (summary.failureReasons.includes('alignment_fail')) {
+          validatorMetrics.alignment_fail += 1
+        }
+        if (summary.failureReasons.includes('policy_fail')) {
+          validatorMetrics.policy_fail += 1
+        }
+        logger.info('AI rendered panel validator result', {
+          provider,
+          panel: panelIndex + 1,
+          attempt: 1,
+          invoked: validatorAuditByPanel[panelIndex].invoked,
+          passed: validatorAuditByPanel[panelIndex].passed,
+          failureReasons: validatorAuditByPanel[panelIndex].failureReasons,
+          panelRepairReason:
+            validatorAuditByPanel[panelIndex].panelRepairReason,
+          shouldReplan: validatorAuditByPanel[panelIndex].shouldReplan,
+        })
+        // eslint-disable-next-line no-continue
+        continue
+      }
 
       if (shouldGenerate) {
         const panelProviderConfig = resolveProviderConfig(
@@ -10372,8 +10605,8 @@ Flip hash: ${hash}
       imageProvider,
       model,
       imageModel,
-      imageSize,
-      panelRenderModeUsed: 'panels',
+      imageSize: auditedSheet ? auditedSheet.imageSizeUsed : imageSize,
+      panelRenderModeUsed: sheetAuditedMode ? 'sheet_audited' : 'panels',
       latencyMs: now() - startedAt,
       includeNoise,
       noisePanelIndex: includeNoise ? noisePanelIndex : null,
@@ -10407,13 +10640,15 @@ Flip hash: ${hash}
         imageSizeUsed: panelImageSizeUsed[index] || imageSize,
         panelPrompt: promptByPanel[index] || '',
         panelStory: storyPanels[index] || '',
-        generated: regenerateIndices.includes(index),
+        generated: sheetAuditedMode || regenerateIndices.includes(index),
       })),
       imageFallbackUsed: panelImageModelUsed.some(
         (usedModel, index) =>
           String(usedModel || '').trim() !== String(imageModel || '').trim() ||
           String(panelImageSizeUsed[index] || '').trim() !==
-            String(imageSize || '').trim()
+            String(
+              auditedSheet ? auditedSheet.requestedImageSize : imageSize
+            ).trim()
       ),
       tokenUsage: normalizeTokenUsage(usage),
       costs: {
@@ -10429,7 +10664,7 @@ Flip hash: ${hash}
     }
 
     const fullStoryBuild = regenerateIndices.length === 4
-    const renderFeedbackReport = evaluateRenderedStoryFeedback({
+    let renderFeedbackReport = evaluateRenderedStoryFeedback({
       storyPanels,
       renderedPanels: baseResult.panels,
       textAuditByPanel,
@@ -10439,6 +10674,58 @@ Flip hash: ${hash}
       hasAlternativeOption:
         fullStoryBuild && alternativeStoryOptions.length > 0,
     })
+    const sheetAuditIncomplete =
+      sheetAuditedMode &&
+      (validatorAuditByPanel.some(
+        (audit) =>
+          !audit.invoked ||
+          [
+            'ocr_text_check',
+            'keyword_visibility_check',
+            'alignment_check',
+            'policy_risk_check',
+          ].some(
+            (layer) =>
+              !['pass', 'fail'].includes(
+                String(audit[layer] && audit[layer].status)
+              )
+          )
+      ) ||
+        !sequenceAudit.invoked ||
+        !sequenceAudit.complete)
+    const sheetShuffleMissing =
+      sheetAuditedMode &&
+      (!Array.isArray(sequenceAudit.safeShuffleOrder) ||
+        sequenceAudit.safeShuffleOrder.length !== 4)
+    const sheetValidatorFailed =
+      sheetAuditedMode && validatorAuditByPanel.some((audit) => !audit.passed)
+    const sheetValidatorRequiresReplan =
+      sheetAuditedMode &&
+      validatorAuditByPanel.some((audit) => audit.shouldReplan)
+    if (
+      sheetAuditIncomplete ||
+      sheetValidatorRequiresReplan ||
+      (sheetAuditedMode &&
+        (sheetValidatorFailed ||
+          !sequenceAudit.passed ||
+          sheetShuffleMissing) &&
+        renderFeedbackReport.verdict === 'accept_rendered_story')
+    ) {
+      renderFeedbackReport = {
+        ...renderFeedbackReport,
+        verdict: 'replan_story',
+        score: Math.min(renderFeedbackReport.score, 59),
+        failureReasons: Array.from(
+          new Set(
+            renderFeedbackReport.failureReasons.concat(
+              sheetAuditIncomplete
+                ? 'sheet_audit_incomplete'
+                : 'sheet_audit_failed'
+            )
+          )
+        ),
+      }
+    }
     renderFeedbackMetrics = recordRenderedStoryMetrics(
       renderFeedbackMetrics,
       renderFeedbackReport
@@ -10470,6 +10757,59 @@ Flip hash: ${hash}
     })
 
     if (
+      sheetAuditedMode &&
+      !sheetAuditIncomplete &&
+      renderFeedbackReport.verdict === 'repair_selected_panels' &&
+      renderFeedbackIteration < renderFeedbackMaxRepairs &&
+      (providerDailyBudgetRemainingUsd === null ||
+        baseResult.costs.estimatedUsd * 2 < providerDailyBudgetRemainingUsd)
+    ) {
+      try {
+        const repairedResult = await generateFlipPanels({
+          ...payload,
+          storyPanels,
+          senseSelection,
+          existingPanels: [],
+          regenerateIndices: [0, 1, 2, 3],
+          repairGuidanceByPanel: buildRenderedStoryRepairGuidance(
+            renderFeedbackReport,
+            {keywordA, keywordB}
+          ),
+          providerDailyBudgetRemainingUsd:
+            providerDailyBudgetRemainingUsd === null
+              ? undefined
+              : Math.max(
+                  0,
+                  providerDailyBudgetRemainingUsd -
+                    baseResult.costs.estimatedUsd
+                ),
+          renderFeedbackIteration: renderFeedbackIteration + 1,
+          renderFeedbackHistory: nextRenderHistory,
+        })
+        const accountedRepairedResult = mergePanelGenerationAccounting(
+          baseResult,
+          repairedResult,
+          now() - startedAt
+        )
+        accountedRepairedResult.renderFeedbackMetrics =
+          mergeRenderedStoryMetrics(
+            renderFeedbackMetrics,
+            repairedResult.renderFeedbackMetrics
+          )
+        return accountedRepairedResult
+      } catch (error) {
+        logger.info('AI audited storyboard sheet repair unavailable', {
+          provider,
+          model,
+          error: String((error && error.message) || error || '')
+            .trim()
+            .slice(0, 240),
+        })
+      }
+    }
+
+    if (
+      !sheetAuditedMode &&
       renderFeedbackEnabled &&
       renderFeedbackReport.verdict === 'repair_selected_panels' &&
       renderFeedbackReport.repairPanelIndices.length > 0 &&
@@ -10514,6 +10854,7 @@ Flip hash: ${hash}
     }
 
     if (
+      !sheetAuditedMode &&
       renderFeedbackEnabled &&
       fullStoryBuild &&
       renderFeedbackReport.verdict ===
