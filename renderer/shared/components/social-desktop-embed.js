@@ -154,6 +154,7 @@ export default function SocialDesktopEmbed({
   const iframeRef = React.useRef(null)
   const messagePortRef = React.useRef(null)
   const receiveRequestRef = React.useRef(null)
+  const savingVaultRef = React.useRef(false)
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -280,7 +281,11 @@ export default function SocialDesktopEmbed({
       const {payload} = nextPayload
       const {requestId: receiveRequestId} = payload || {}
       const receiveValidationError = validateSocialDirectCheckRequest(payload)
-      if (receiveValidationError || receiveRequestRef.current) {
+      if (
+        receiveValidationError ||
+        receiveRequestRef.current ||
+        savingVaultRef.current
+      ) {
         port.postMessage({
           type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
           payload: {
@@ -431,7 +436,7 @@ export default function SocialDesktopEmbed({
   }, [])
 
   const cancelVaultSave = React.useCallback(() => {
-    if (savingVault || !receiveRequestRef.current) return
+    if (savingVaultRef.current || !receiveRequestRef.current) return
     const {current: request} = receiveRequestRef
     receiveRequestRef.current = null
     try {
@@ -449,11 +454,11 @@ export default function SocialDesktopEmbed({
     setVaultPassphrase('')
     setVaultPassphraseRepeat('')
     setVaultInputError('')
-  }, [savingVault])
+  }, [])
 
   const saveVerifiedVault = React.useCallback(async () => {
     const request = receiveRequestRef.current
-    if (!request || savingVault) return
+    if (!request || savingVaultRef.current) return
     const codepoints = Array.from(vaultPassphrase)
     if (
       codepoints.length < 12 ||
@@ -468,6 +473,7 @@ export default function SocialDesktopEmbed({
       return
     }
     setVaultInputError('')
+    savingVaultRef.current = true
     setSavingVault(true)
     let response
     try {
@@ -483,12 +489,13 @@ export default function SocialDesktopEmbed({
     }
     setVaultPassphrase('')
     setVaultPassphraseRepeat('')
+    savingVaultRef.current = false
     setSavingVault(false)
+    const result = response?.result
+    if (result?.saved === true) setSavedVault(true)
     if (receiveRequestRef.current === request) {
       receiveRequestRef.current = null
       setReceiveRequest(null)
-      const result = response?.result
-      if (result?.saved === true) setSavedVault(true)
       try {
         request.port.postMessage({
           type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
@@ -518,7 +525,7 @@ export default function SocialDesktopEmbed({
         // The embedded view may already have closed its port.
       }
     }
-  }, [savingVault, vaultPassphrase, vaultPassphraseRepeat])
+  }, [vaultPassphrase, vaultPassphraseRepeat])
 
   const openSavedVaultFolder = React.useCallback(async () => {
     try {
