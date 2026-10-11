@@ -491,6 +491,19 @@ describe('trusted FoD direct receive', () => {
     expect(JSON.stringify(summary)).not.toContain(passphrase)
   })
 
+  it('accepts the indented signed receipt written by the Go client', async () => {
+    const prettyReceipt = receiptText()
+      .replace(/:/g, ': ')
+      .replace(/,/g, ',\n  ')
+      .replace('{', '{\n  ')
+      .replace('}', '\n}')
+    const receive = service({spawn: fakeSpawn({result: prettyReceipt}).spawn})
+
+    await expect(
+      receive({message: messageText(), passphrase})
+    ).resolves.toMatchObject({orderId: ORDER_ID, usableFlips: 3})
+  })
+
   it('rejects weak passphrases and extra payload fields before file selection', async () => {
     const child = fakeSpawn({result: receiptText()})
     const receive = service({spawn: child.spawn})

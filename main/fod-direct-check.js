@@ -48,7 +48,7 @@ const RECEIPT_PATTERN = new RegExp(
     '"ciphertext"\\s*:\\s*"[0-9a-f]{438}"\\s*,',
     '"usableFlips"\\s*:\\s*([1-9][0-9]{0,2})\\s*,',
     '"contentCheckSignature"\\s*:\\s*"[0-9a-f]{130}"\\s*\\}\\s*$',
-  ].join('')
+  ].join('\\s*')
 )
 
 class DirectCheckError extends Error {
