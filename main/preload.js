@@ -1855,6 +1855,7 @@ const bridge = {
   social: {
     rpc: (payload) => invokeCloneable('social.rpc', payload),
     crypto: (payload) => invokeCloneable('social.crypto', payload),
+    directCheck: (payload) => invokeCloneable('social.direct-check', payload),
   },
   rpc: {
     call: (payload) => invokeCloneable('rpc.call', payload),

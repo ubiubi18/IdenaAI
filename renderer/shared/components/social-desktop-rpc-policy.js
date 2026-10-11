@@ -338,3 +338,20 @@ export function validateSocialCryptoRequest(requestId, payload) {
 
   return 'unsupported_crypto_operation'
 }
+
+export function validateSocialDirectCheckRequest(payload) {
+  if (
+    !isPlainObject(payload) ||
+    Object.keys(payload).sort().join(',') !== 'message,requestId' ||
+    typeof payload.requestId !== 'string' ||
+    payload.requestId.length < 1 ||
+    payload.requestId.length > SOCIAL_RPC_MAX_REQUEST_ID_LENGTH ||
+    typeof payload.message !== 'string' ||
+    payload.message.length < 1 ||
+    payload.message.length > 2048 ||
+    !payload.message.startsWith('{"format":"fod.direct-delivery"')
+  ) {
+    return 'invalid_direct_check_request'
+  }
+  return null
+}
