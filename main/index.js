@@ -1,4 +1,5 @@
 const {join, resolve} = require('path')
+const nativeFs = require('fs')
 const os = require('os')
 const https = require('https')
 const {spawn} = require('child_process')
@@ -31,7 +32,10 @@ const {
   resolveIdenaSocialRoot,
 } = require('./idena-social-protocol')
 const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
-const {createFodDirectCheckService} = require('./fod-direct-check')
+const {
+  createFodDirectCheckService,
+  createFodDirectReceiveService,
+} = require('./fod-direct-check')
 const {
   validateExportKeyPayload,
   validateGenericRpcMethod,
@@ -809,9 +813,9 @@ const idenaSocialCryptoService = createIdenaSocialCryptoService({
   rpcCall: performSocialCryptoNodeRpc,
 })
 
-const fodDirectCheckService = createFodDirectCheckService({
+const fodDirectServiceOptions = {
   dialog,
-  fs: require('fs'),
+  fs: nativeFs,
   spawn,
   binaryPath: process.env.IDENAAI_FOD_DIRECT_CHECK_BIN || '',
   getNodeRpcConnection,
@@ -825,6 +829,15 @@ const fodDirectCheckService = createFodDirectCheckService({
     }
     return response.result
   },
+}
+
+const fodDirectCheckService = createFodDirectCheckService(
+  fodDirectServiceOptions
+)
+const fodDirectVaultRoot = join(app.getPath('userData'), 'fod-direct-vaults')
+const fodDirectReceiveService = createFodDirectReceiveService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
 })
 
 function normalizeLocalAiPayload(payload = {}) {
@@ -3571,6 +3584,63 @@ handleTrusted('social.direct-check', async (_event, payload) => {
     }
   } catch {
     return {error: {message: 'Could not verify locally.'}}
+  }
+})
+
+handleTrusted('social.direct-receive', async (_event, payload) => {
+  try {
+    const result = await fodDirectReceiveService(payload)
+    return {
+      result: {
+        orderId: result.orderId,
+        author: result.author,
+        epoch: result.epoch,
+        usableFlips: result.usableFlips,
+        saved: true,
+      },
+    }
+  } catch {
+    return {error: {message: 'Could not save verified keys locally.'}}
+  }
+})
+
+handleTrusted('social.open-direct-vault-folder', async () => {
+  try {
+    const coinbase = (await fodDirectServiceOptions.getActiveCoinbase())
+      .replace(/^0x/i, '')
+      .toLowerCase()
+    if (!/^[0-9a-f]{40}$/.test(coinbase) || /^0+$/.test(coinbase)) {
+      throw new Error('invalid_identity')
+    }
+    const root = await nativeFs.promises.realpath(fodDirectVaultRoot)
+    if (root !== fodDirectVaultRoot) throw new Error('invalid_vault_root')
+    const rootMetadata = await nativeFs.promises.lstat(root)
+    if (
+      !rootMetadata.isDirectory() ||
+      rootMetadata.isSymbolicLink() ||
+      (process.platform !== 'win32' && (rootMetadata.mode & 0o777) !== 0o700)
+    ) {
+      throw new Error('invalid_vault_root')
+    }
+    const scopedRoot = join(root, coinbase)
+    const metadata = await nativeFs.promises.lstat(scopedRoot)
+    if (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      (process.platform !== 'win32' && (metadata.mode & 0o777) !== 0o700) ||
+      (await nativeFs.promises.realpath(scopedRoot)) !== scopedRoot
+    ) {
+      throw new Error('invalid_vault_folder')
+    }
+    const currentCoinbase = (await fodDirectServiceOptions.getActiveCoinbase())
+      .replace(/^0x/i, '')
+      .toLowerCase()
+    if (currentCoinbase !== coinbase) throw new Error('identity_changed')
+    const error = await shell.openPath(scopedRoot)
+    if (error) throw new Error('vault_folder_unavailable')
+    return {result: {opened: true}}
+  } catch {
+    return {error: {message: 'Could not open the saved keys folder.'}}
   }
 })
 

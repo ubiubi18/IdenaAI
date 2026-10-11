@@ -5,7 +5,10 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const {PassThrough} = require('stream')
-const {createFodDirectCheckService} = require('./fod-direct-check')
+const {
+  createFodDirectCheckService,
+  createFodDirectReceiveService,
+} = require('./fod-direct-check')
 
 const CONTRACT = 'e86d31069194690b1a818f24912bafdacfb29f19'
 const CODE_HASH =
@@ -36,7 +39,34 @@ function resultText(orderId = ORDER_ID, author = AUTHOR) {
   return `{"format":"fod.direct-check","version":1,"contract":"${CONTRACT}","orderId":${orderId},"author":"${author}","epoch":230,"usableFlips":3}`
 }
 
-function fakeSpawn({result = resultText(), exitCode = 0, stderr = ''} = {}) {
+function receiptText(orderId = ORDER_ID, author = AUTHOR) {
+  const text = JSON.stringify({
+    format: 'fod.opened-direct-delivery',
+    version: 1,
+    contract: CONTRACT,
+    offerId: 'd'.repeat(64),
+    orderId: 1,
+    orderNonce: 1,
+    buyer: BUYER,
+    deliveryKey: `04${'e'.repeat(128)}`,
+    author,
+    epoch: 230,
+    inventoryCommitment: '1'.repeat(64),
+    keyCommitment: '2'.repeat(64),
+    ciphertext: CIPHERTEXT,
+    usableFlips: 3,
+    contentCheckSignature: '3'.repeat(130),
+  })
+  return text.replace('"orderId":1', `"orderId":${orderId}`)
+}
+
+function fakeSpawn({
+  result = resultText(),
+  exitCode = 0,
+  stderr = '',
+  vaultMode = 0o600,
+  resultMode = 0o600,
+} = {}) {
   const calls = []
   const spawn = jest.fn((binary, args, options) => {
     const child = new EventEmitter()
@@ -55,7 +85,12 @@ function fakeSpawn({result = resultText(), exitCode = 0, stderr = ''} = {}) {
       if (stderr) child.stderr.write(stderr)
       if (exitCode === 0) {
         const outPath = args[args.indexOf('-out') + 1]
-        fs.writeFileSync(outPath, result, {mode: 0o600})
+        if (args[0] === 'direct-receive') {
+          fs.writeFileSync(args[args.indexOf('-vault') + 1], 'age-encrypted', {
+            mode: vaultMode,
+          })
+        }
+        fs.writeFileSync(outPath, result, {mode: resultMode})
       }
       setImmediate(() => child.emit('close', exitCode))
     })
@@ -181,7 +216,10 @@ describe('trusted FoD direct check', () => {
 
   it('rejects a message for another buyer before file selection', async () => {
     const child = fakeSpawn()
-    const check = service({spawn: child.spawn, coinbase: async () => `0x${'f'.repeat(40)}`})
+    const check = service({
+      spawn: child.spawn,
+      coinbase: async () => `0x${'f'.repeat(40)}`,
+    })
     await expect(check({message: messageText()})).rejects.toThrow(
       'fod_direct_check_buyer_mismatch'
     )
@@ -246,7 +284,10 @@ describe('trusted FoD direct check', () => {
           .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]}),
       },
       rpc: () => ({
-        url: ++readsAfterSpawn > 4 ? 'https://other.example/rpc' : 'http://127.0.0.1:9009',
+        url:
+          ++readsAfterSpawn > 4
+            ? 'https://other.example/rpc'
+            : 'http://127.0.0.1:9009',
         key: 'RPC_SECRET',
       }),
     })
@@ -270,10 +311,11 @@ describe('trusted FoD direct check', () => {
       pickerStarted = resolve
     })
     const heldDialog = {
-      showOpenDialog: () => new Promise((resolve) => {
-        releasePicker = resolve
-        pickerStarted()
-      }),
+      showOpenDialog: () =>
+        new Promise((resolve) => {
+          releasePicker = resolve
+          pickerStarted()
+        }),
     }
     const check = service({selectedDialog: heldDialog, spawn: child.spawn})
     const first = check({message: messageText()})
@@ -320,5 +362,249 @@ describe('trusted FoD direct check', () => {
         .mockResolvedValueOnce({canceled: false, filePaths: [purchasePath]})
         .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]})
     }
+  })
+})
+
+describe('trusted FoD direct receive', () => {
+  let root
+  let vaultRoot
+  let purchasePath
+  let keyPath
+  let dialog
+
+  beforeEach(() => {
+    root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'idena-fod-receive-test-'))
+    )
+    vaultRoot = path.join(root, 'vaults')
+    purchasePath = path.join(root, 'purchase.json')
+    keyPath = path.join(root, 'delivery.key')
+    fs.writeFileSync(purchasePath, '{"retained":"secret"}', {mode: 0o600})
+    fs.writeFileSync(keyPath, '1'.repeat(64), {mode: 0o600})
+    dialog = {
+      showOpenDialog: jest
+        .fn()
+        .mockResolvedValueOnce({canceled: false, filePaths: [purchasePath]})
+        .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]}),
+    }
+  })
+
+  afterEach(() => {
+    fs.rmSync(root, {recursive: true, force: true})
+  })
+
+  function service({
+    spawn = fakeSpawn({result: receiptText()}).spawn,
+    rpc = () => ({url: 'http://127.0.0.1:9009', key: 'RPC_SECRET'}),
+    coinbase = async () => `0x${BUYER}`,
+    selectedDialog = dialog,
+    selectedVaultRoot = vaultRoot,
+  } = {}) {
+    return createFodDirectReceiveService({
+      dialog: selectedDialog,
+      getNodeRpcConnection: rpc,
+      getActiveCoinbase: coinbase,
+      spawn,
+      fs,
+      binaryPath: process.execPath,
+      vaultRoot: selectedVaultRoot,
+    })
+  }
+
+  const passphrase = 'correct horse battery staple'
+
+  it('saves owner-only outputs in a unique private directory with safe child args', async () => {
+    const child = fakeSpawn({result: receiptText()})
+    const receive = service({spawn: child.spawn})
+    const summary = await receive({message: messageText(), passphrase})
+    const [{args, options, body}] = child.calls
+    const purchaseCopy = args[args.indexOf('-purchase') + 1]
+    const keyCopy = args[args.indexOf('-delivery-key') + 1]
+    const rpcKeyFile = args[args.indexOf('-key-file') + 1]
+    const vaultPath = args[args.indexOf('-vault') + 1]
+    const receiptPath = args[args.indexOf('-out') + 1]
+
+    expect(args).toEqual([
+      'direct-receive',
+      '-network',
+      'idena',
+      '-contract',
+      `0x${CONTRACT}`,
+      '-code-hash',
+      CODE_HASH,
+      '-order',
+      ORDER_ID,
+      '-message',
+      '-',
+      '-purchase',
+      purchaseCopy,
+      '-delivery-key',
+      keyCopy,
+      '-vault',
+      vaultPath,
+      '-out',
+      receiptPath,
+      '-rpc',
+      'http://127.0.0.1:9009',
+      '-key-file',
+      rpcKeyFile,
+    ])
+    expect(options).toEqual(
+      expect.objectContaining({
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: expect.objectContaining({FOD_PASSPHRASE: passphrase}),
+      })
+    )
+    expect(args).not.toContain('-auto-confirm')
+    expect(args).not.toContain('-broadcast')
+    expect(args).not.toContain('-nodekey')
+    expect(args.join(' ')).not.toContain(passphrase)
+    expect(args.join(' ')).not.toContain('RPC_SECRET')
+    expect(Buffer.concat(body).toString('utf8')).toBe(messageText())
+    expect(path.dirname(vaultPath)).toBe(path.dirname(receiptPath))
+    expect(path.dirname(path.dirname(vaultPath))).toBe(
+      path.join(vaultRoot, BUYER)
+    )
+    expect(purchaseCopy).not.toBe(purchasePath)
+    expect(keyCopy).not.toBe(keyPath)
+    expect(fs.existsSync(path.dirname(purchaseCopy))).toBe(false)
+    for (const dir of [
+      vaultRoot,
+      path.join(vaultRoot, BUYER),
+      path.dirname(vaultPath),
+    ]) {
+      expect(fs.statSync(dir).mode & 0o777).toBe(0o700)
+    }
+    for (const file of [vaultPath, receiptPath]) {
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+    }
+    expect(summary).toEqual({
+      orderId: ORDER_ID,
+      author: `0x${AUTHOR}`,
+      epoch: 230,
+      usableFlips: 3,
+      vaultPath,
+    })
+    expect(JSON.stringify(summary)).not.toContain('RPC_SECRET')
+    expect(JSON.stringify(summary)).not.toContain(CIPHERTEXT)
+    expect(JSON.stringify(summary)).not.toContain(passphrase)
+  })
+
+  it('rejects weak passphrases and extra payload fields before file selection', async () => {
+    const child = fakeSpawn({result: receiptText()})
+    const receive = service({spawn: child.spawn})
+    for (const bad of [
+      '',
+      'short',
+      ' '.repeat(12),
+      'a'.repeat(513),
+      `long-enough\0bad`,
+    ]) {
+      await expect(
+        receive({message: messageText(), passphrase: bad})
+      ).rejects.toThrow('fod_direct_receive_invalid_passphrase')
+    }
+    await expect(
+      receive({message: messageText(), passphrase, broadcast: true})
+    ).rejects.toThrow('fod_direct_receive_invalid_message')
+    await expect(receive({message: messageText()})).rejects.toThrow(
+      'fod_direct_receive_invalid_message'
+    )
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+    expect(child.spawn).not.toHaveBeenCalled()
+  })
+
+  it('refuses the wrong buyer and removes saved outputs after identity changes', async () => {
+    const child = fakeSpawn({result: receiptText()})
+    await expect(
+      service({
+        spawn: child.spawn,
+        coinbase: async () => `0x${'f'.repeat(40)}`,
+      })({message: messageText(), passphrase})
+    ).rejects.toThrow('fod_direct_receive_buyer_mismatch')
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+    expect(child.spawn).not.toHaveBeenCalled()
+
+    let reads = 0
+    const changed = service({
+      spawn: child.spawn,
+      rpc: () => ({
+        url:
+          ++reads > 4 ? 'https://other.example/rpc' : 'http://127.0.0.1:9009',
+        key: 'RPC_SECRET',
+      }),
+    })
+    await expect(changed({message: messageText(), passphrase})).rejects.toThrow(
+      'fod_direct_receive_identity_changed'
+    )
+    expect(child.spawn).toHaveBeenCalledTimes(1)
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+  })
+
+  it('removes only the new output after child or receipt failure', async () => {
+    fs.mkdirSync(vaultRoot, {mode: 0o700})
+    fs.mkdirSync(path.join(vaultRoot, BUYER), {mode: 0o700})
+    const retained = path.join(vaultRoot, BUYER, 'existing-vault.age')
+    fs.writeFileSync(retained, 'keep', {mode: 0o600})
+    const child = fakeSpawn({result: receiptText(), exitCode: 1})
+    await expect(
+      service({spawn: child.spawn})({message: messageText(), passphrase})
+    ).rejects.toThrow('fod_direct_receive_failed')
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([
+      'existing-vault.age',
+    ])
+    expect(fs.readFileSync(retained, 'utf8')).toBe('keep')
+
+    dialog.showOpenDialog
+      .mockResolvedValueOnce({canceled: false, filePaths: [purchasePath]})
+      .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]})
+    const malformed = fakeSpawn({
+      result: receiptText().replace(/}$/, ',"privateKey":"secret"}'),
+    })
+    await expect(
+      service({spawn: malformed.spawn})({message: messageText(), passphrase})
+    ).rejects.toThrow('fod_direct_receive_failed')
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([
+      'existing-vault.age',
+    ])
+  })
+
+  it('rejects unsafe vault roots, selected files, and output permissions', async () => {
+    const child = fakeSpawn({result: receiptText()})
+    fs.mkdirSync(vaultRoot, {mode: 0o755})
+    await expect(
+      service({spawn: child.spawn})({message: messageText(), passphrase})
+    ).rejects.toThrow('fod_direct_receive_unavailable')
+    fs.rmSync(vaultRoot, {recursive: true})
+    fs.mkdirSync(path.join(root, 'target'), {mode: 0o700})
+    fs.symlinkSync(path.join(root, 'target'), vaultRoot)
+    await expect(
+      service({spawn: child.spawn})({message: messageText(), passphrase})
+    ).rejects.toThrow('fod_direct_receive_unavailable')
+    fs.rmSync(vaultRoot)
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+
+    fs.chmodSync(keyPath, 0o644)
+    await expect(
+      service({spawn: child.spawn})({message: messageText(), passphrase})
+    ).rejects.toThrow('fod_direct_receive_invalid_file')
+    expect(child.spawn).not.toHaveBeenCalled()
+
+    fs.chmodSync(keyPath, 0o600)
+    dialog.showOpenDialog
+      .mockResolvedValueOnce({canceled: false, filePaths: [purchasePath]})
+      .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]})
+    const publicReceipt = fakeSpawn({
+      result: receiptText(),
+      resultMode: 0o644,
+    })
+    await expect(
+      service({spawn: publicReceipt.spawn})({
+        message: messageText(),
+        passphrase,
+      })
+    ).rejects.toThrow('fod_direct_receive_failed')
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
   })
 })

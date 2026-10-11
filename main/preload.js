@@ -1856,6 +1856,10 @@ const bridge = {
     rpc: (payload) => invokeCloneable('social.rpc', payload),
     crypto: (payload) => invokeCloneable('social.crypto', payload),
     directCheck: (payload) => invokeCloneable('social.direct-check', payload),
+    directReceive: (payload) =>
+      invokeCloneable('social.direct-receive', payload),
+    openDirectVaultFolder: () =>
+      invokeCloneable('social.open-direct-vault-folder'),
   },
   rpc: {
     call: (payload) => invokeCloneable('rpc.call', payload),

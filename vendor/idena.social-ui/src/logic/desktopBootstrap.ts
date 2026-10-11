@@ -31,6 +31,11 @@ export type DesktopDirectCheckResponse = {
     error?: {message?: string};
 };
 
+export type DesktopDirectReceiveResponse = {
+    result?: {orderId: string; author: string; epoch: number; usableFlips: number; saved: true};
+    error?: {message?: string};
+};
+
 declare global {
     interface Window {
         __IDENA_SOCIAL_DESKTOP_BOOTSTRAP__?: DesktopBootstrap;
@@ -46,6 +51,8 @@ export const DESKTOP_CRYPTO_REQUEST_MESSAGE = 'IDENA_SOCIAL_CRYPTO_REQUEST';
 export const DESKTOP_CRYPTO_RESPONSE_MESSAGE = 'IDENA_SOCIAL_CRYPTO_RESPONSE';
 export const DESKTOP_DIRECT_CHECK_REQUEST_MESSAGE = 'IDENA_SOCIAL_DIRECT_CHECK_REQUEST';
 export const DESKTOP_DIRECT_CHECK_RESPONSE_MESSAGE = 'IDENA_SOCIAL_DIRECT_CHECK_RESPONSE';
+export const DESKTOP_DIRECT_RECEIVE_REQUEST_MESSAGE = 'IDENA_SOCIAL_DIRECT_RECEIVE_REQUEST';
+export const DESKTOP_DIRECT_RECEIVE_RESPONSE_MESSAGE = 'IDENA_SOCIAL_DIRECT_RECEIVE_RESPONSE';
 
 let desktopMessagePort: MessagePort | null = null;
 
@@ -148,6 +155,7 @@ export const installDesktopBootstrapListener = (
 let desktopRpcRequestId = 0;
 let desktopCryptoRequestId = 0;
 let desktopDirectCheckRequestId = 0;
+let desktopDirectReceiveRequestId = 0;
 
 export const createDesktopRpcClient = (
     setNodeAvailable: (next: boolean) => void,
@@ -309,5 +317,35 @@ export const createDesktopDirectCheckClient = (timeout = 600000) =>
             const timer = window.setTimeout(() => finish({error: {message: 'Local verification timed out.'}}), timeout);
             port.addEventListener('message', handleMessage);
             port.postMessage({type: DESKTOP_DIRECT_CHECK_REQUEST_MESSAGE, payload: {requestId, message}});
+        });
+    };
+
+export const createDesktopDirectReceiveClient = (timeout = 600000) =>
+    async (message: string): Promise<DesktopDirectReceiveResponse> => {
+        const port = desktopMessagePort;
+        if (typeof window === 'undefined' || !window.parent || window.parent === window || !port) {
+            return {error: {message: 'Local vault save is unavailable.'}};
+        }
+        const requestId = `desktop-direct-receive-${Date.now()}-${desktopDirectReceiveRequestId++}`;
+        return new Promise<DesktopDirectReceiveResponse>((resolve) => {
+            let finished = false;
+            const cleanup = () => {
+                port.removeEventListener('message', handleMessage);
+                window.clearTimeout(timer);
+            };
+            const finish = (response: DesktopDirectReceiveResponse) => {
+                if (finished) return;
+                finished = true;
+                cleanup();
+                resolve(response);
+            };
+            const handleMessage = (event: MessageEvent) => {
+                const payload = event?.data && typeof event.data === 'object' ? event.data : null;
+                if (payload?.type !== DESKTOP_DIRECT_RECEIVE_RESPONSE_MESSAGE || payload.payload?.requestId !== requestId) return;
+                finish(payload.payload.response || {});
+            };
+            const timer = window.setTimeout(() => finish({error: {message: 'Local vault save timed out.'}}), timeout);
+            port.addEventListener('message', handleMessage);
+            port.postMessage({type: DESKTOP_DIRECT_RECEIVE_REQUEST_MESSAGE, payload: {requestId, message}});
         });
     };
