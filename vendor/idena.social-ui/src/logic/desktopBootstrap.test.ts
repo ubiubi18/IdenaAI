@@ -2,6 +2,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
     createDesktopMessageCryptoClient,
     createDesktopDirectCheckClient,
+    createDesktopDirectReceiveClient,
     createDesktopRpcClient,
     DESKTOP_BOOTSTRAP_MESSAGE,
     DESKTOP_BOOTSTRAP_READY_MESSAGE,
@@ -10,6 +11,8 @@ import {
     DESKTOP_CRYPTO_RESPONSE_MESSAGE,
     DESKTOP_DIRECT_CHECK_REQUEST_MESSAGE,
     DESKTOP_DIRECT_CHECK_RESPONSE_MESSAGE,
+    DESKTOP_DIRECT_RECEIVE_REQUEST_MESSAGE,
+    DESKTOP_DIRECT_RECEIVE_RESPONSE_MESSAGE,
     DESKTOP_RPC_REQUEST_MESSAGE,
     DESKTOP_RPC_RESPONSE_MESSAGE,
     installDesktopBootstrapListener,
@@ -170,6 +173,30 @@ describe('desktop bootstrap channel', () => {
         }
         await expect(checkPromise).resolves.toEqual({
             result: {orderId: '1', author: 'a'.repeat(40), epoch: 230, usableFlips: 1},
+        });
+
+        const receivePromise = createDesktopDirectReceiveClient(100)(delivery);
+        const receiveRequest = port.postMessage.mock.calls.find(
+            ([message]) => message.type === DESKTOP_DIRECT_RECEIVE_REQUEST_MESSAGE,
+        )?.[0];
+        expect(receiveRequest.payload).toEqual({
+            requestId: expect.any(String),
+            message: delivery,
+        });
+        expect(JSON.stringify(receiveRequest)).not.toContain('passphrase');
+        for (const listener of [...portListeners]) {
+            listener({
+                data: {
+                    type: DESKTOP_DIRECT_RECEIVE_RESPONSE_MESSAGE,
+                    payload: {
+                        requestId: receiveRequest.payload.requestId,
+                        response: {result: {orderId: '1', author: 'a'.repeat(40), epoch: 230, usableFlips: 1, saved: true}},
+                    },
+                },
+            } as MessageEvent);
+        }
+        await expect(receivePromise).resolves.toEqual({
+            result: {orderId: '1', author: 'a'.repeat(40), epoch: 230, usableFlips: 1, saved: true},
         });
 
         dispose();

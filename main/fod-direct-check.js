@@ -13,6 +13,7 @@ const MAX_MESSAGE_BYTES = 2048
 const MAX_PURCHASE_BYTES = 16 * 1024 * 1024
 const MAX_DELIVERY_KEY_BYTES = 128
 const MAX_RESULT_BYTES = 4096
+const MAX_RECEIPT_BYTES = 8192
 const MAX_CHILD_OUTPUT_BYTES = 64 * 1024
 const CHILD_TIMEOUT_MS = 180000
 const MAX_UINT64 = (1n << 64n) - 1n
@@ -20,11 +21,35 @@ const MAX_UINT64 = (1n << 64n) - 1n
 // This is the compact JSON emitted by FoD's DirectDMEnvelope v2. Matching
 // the complete text rejects reordered, missing, repeated, and unknown fields,
 // while preserving the full unsigned 64-bit order ID as a decimal string.
-const MESSAGE_PATTERN = /^\{"format":"fod\.direct-delivery","version":2,"network":"idena","contract":"([0-9a-f]{40})","author":"([0-9a-f]{40})","offerId":"([0-9a-f]{64})","orderId":([1-9][0-9]{0,19}),"orderNonce":([1-9][0-9]{0,19}),"buyer":"([0-9a-f]{40})","deliveryKey":"(04[0-9a-f]{128})","ciphertext":"([0-9a-f]{438})"\}$/
+const MESSAGE_PATTERN =
+  /^\{"format":"fod\.direct-delivery","version":2,"network":"idena","contract":"([0-9a-f]{40})","author":"([0-9a-f]{40})","offerId":"([0-9a-f]{64})","orderId":([1-9][0-9]{0,19}),"orderNonce":([1-9][0-9]{0,19}),"buyer":"([0-9a-f]{40})","deliveryKey":"(04[0-9a-f]{128})","ciphertext":"([0-9a-f]{438})"\}$/
 
 // FoD writes this display-only struct with JSON indentation. A complete
 // match keeps orderId lossless and rejects any extra fields or private data.
-const RESULT_PATTERN = /^\s*\{\s*"format"\s*:\s*"fod\.direct-check"\s*,\s*"version"\s*:\s*1\s*,\s*"contract"\s*:\s*"([0-9a-f]{40})"\s*,\s*"orderId"\s*:\s*([1-9][0-9]{0,19})\s*,\s*"author"\s*:\s*"([0-9a-f]{40})"\s*,\s*"epoch"\s*:\s*(0|[1-9][0-9]{0,4})\s*,\s*"usableFlips"\s*:\s*([1-9][0-9]{0,2})\s*\}\s*$/
+const RESULT_PATTERN =
+  /^\s*\{\s*"format"\s*:\s*"fod\.direct-check"\s*,\s*"version"\s*:\s*1\s*,\s*"contract"\s*:\s*"([0-9a-f]{40})"\s*,\s*"orderId"\s*:\s*([1-9][0-9]{0,19})\s*,\s*"author"\s*:\s*"([0-9a-f]{40})"\s*,\s*"epoch"\s*:\s*(0|[1-9][0-9]{0,4})\s*,\s*"usableFlips"\s*:\s*([1-9][0-9]{0,2})\s*\}\s*$/
+
+// FoD's signed DirectOpenedDelivery is written in this struct order. A full
+// match preserves the uint64 order ID and excludes repeated or extra fields.
+const RECEIPT_PATTERN = new RegExp(
+  [
+    '^\\s*\\{\\s*"format"\\s*:\\s*"fod\\.opened-direct-delivery"\\s*,',
+    '"version"\\s*:\\s*1\\s*,',
+    '"contract"\\s*:\\s*"([0-9a-f]{40})"\\s*,',
+    '"offerId"\\s*:\\s*"[0-9a-f]{64}"\\s*,',
+    '"orderId"\\s*:\\s*([1-9][0-9]{0,19})\\s*,',
+    '"orderNonce"\\s*:\\s*[1-9][0-9]{0,19}\\s*,',
+    '"buyer"\\s*:\\s*"([0-9a-f]{40})"\\s*,',
+    '"deliveryKey"\\s*:\\s*"04[0-9a-f]{128}"\\s*,',
+    '"author"\\s*:\\s*"([0-9a-f]{40})"\\s*,',
+    '"epoch"\\s*:\\s*(0|[1-9][0-9]{0,4})\\s*,',
+    '"inventoryCommitment"\\s*:\\s*"[0-9a-f]{64}"\\s*,',
+    '"keyCommitment"\\s*:\\s*"[0-9a-f]{64}"\\s*,',
+    '"ciphertext"\\s*:\\s*"[0-9a-f]{438}"\\s*,',
+    '"usableFlips"\\s*:\\s*([1-9][0-9]{0,2})\\s*,',
+    '"contentCheckSignature"\\s*:\\s*"[0-9a-f]{130}"\\s*\\}\\s*$',
+  ].join('')
+)
 
 class DirectCheckError extends Error {
   constructor(code) {
@@ -38,7 +63,7 @@ function refuse(code) {
 }
 
 function isUint64(value) {
-  return BigInt(value) <= MAX_UINT64
+  return global.BigInt(value) <= MAX_UINT64
 }
 
 function parseMessage(payload) {
@@ -69,7 +94,48 @@ function parseMessage(payload) {
     refuse('fod_direct_check_invalid_message')
   }
 
-  return {contract: match[1], author: match[2], orderId: match[4], buyer: match[6]}
+  return {
+    contract: match[1],
+    author: match[2],
+    orderId: match[4],
+    buyer: match[6],
+  }
+}
+
+function parseReceivePayload(payload) {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    Array.isArray(payload) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(payload)) ||
+    Reflect.ownKeys(payload).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(payload, 'message') ||
+    !Object.prototype.hasOwnProperty.call(payload, 'passphrase')
+  ) {
+    refuse('fod_direct_receive_invalid_message')
+  }
+  const messageValue = Object.getOwnPropertyDescriptor(payload, 'message').value
+  const passphrase = Object.getOwnPropertyDescriptor(
+    payload,
+    'passphrase'
+  ).value
+  let message
+  try {
+    message = parseMessage({message: messageValue})
+  } catch {
+    refuse('fod_direct_receive_invalid_message')
+  }
+  if (
+    typeof passphrase !== 'string' ||
+    passphrase.includes('\0') ||
+    passphrase.trim().length === 0 ||
+    Buffer.byteLength(passphrase, 'utf8') > 4096 ||
+    [...passphrase].length < 12 ||
+    [...passphrase].length > 512
+  ) {
+    refuse('fod_direct_receive_invalid_passphrase')
+  }
+  return {message, messageText: messageValue, passphrase}
 }
 
 function normalizeCoinbase(value) {
@@ -121,6 +187,16 @@ function normalizeConnection(value) {
 
 function sameConnection(left, right) {
   return left.url === right.url && left.key === right.key
+}
+
+async function activeIdentity(getNodeRpcConnection, getActiveCoinbase) {
+  const connection = normalizeConnection(await getNodeRpcConnection())
+  const coinbase = normalizeCoinbase(await getActiveCoinbase())
+  const after = normalizeConnection(await getNodeRpcConnection())
+  if (!sameConnection(connection, after)) {
+    refuse('fod_direct_check_identity_changed')
+  }
+  return {connection, coinbase}
 }
 
 async function pickFile(dialog, title) {
@@ -238,12 +314,13 @@ async function checkBinary(fs, binaryPath) {
   }
 }
 
-function runCheck(spawn, binaryPath, args, message) {
+function runCheck(spawn, binaryPath, args, message, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(binaryPath, args, {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      ...(env ? {env} : {}),
     })
     let failed = false
     let stdoutBytes = 0
@@ -302,6 +379,93 @@ function parseResult(raw, message) {
   }
 }
 
+function parseReceipt(raw, message) {
+  if (raw.length > MAX_RECEIPT_BYTES) refuse('fod_direct_receive_failed')
+  const match = RECEIPT_PATTERN.exec(raw.toString('utf8'))
+  if (
+    !match ||
+    !isUint64(match[2]) ||
+    match[1] !== message.contract ||
+    match[2] !== message.orderId ||
+    match[3] !== message.buyer ||
+    match[4] !== message.author ||
+    Number(match[5]) > 65535 ||
+    Number(match[6]) > 32
+  ) {
+    refuse('fod_direct_receive_failed')
+  }
+  return {
+    orderId: match[2],
+    author: `0x${match[4]}`,
+    epoch: Number(match[5]),
+    usableFlips: Number(match[6]),
+  }
+}
+
+async function ensurePrivateVaultRoot(fs, vaultRoot) {
+  if (typeof vaultRoot !== 'string' || !path.isAbsolute(vaultRoot)) {
+    refuse('fod_direct_receive_unavailable')
+  }
+  const absolute = path.resolve(vaultRoot)
+  const parent = path.dirname(absolute)
+  if ((await fs.promises.realpath(parent)) !== parent) {
+    refuse('fod_direct_receive_unavailable')
+  }
+  try {
+    await fs.promises.mkdir(absolute, {mode: 0o700})
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error
+  }
+  const metadata = await fs.promises.lstat(absolute)
+  if (
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    (process.platform !== 'win32' && (metadata.mode & 0o777) !== 0o700) ||
+    (await fs.promises.realpath(absolute)) !== absolute
+  ) {
+    refuse('fod_direct_receive_unavailable')
+  }
+  return absolute
+}
+
+async function checkPrivateOutputFile(fs, filePath) {
+  const absolute = path.resolve(filePath)
+  const resolved = await fs.promises.realpath(filePath)
+  const before = await fs.promises.lstat(filePath)
+  if (
+    resolved !== absolute ||
+    !before.isFile() ||
+    before.isSymbolicLink() ||
+    before.nlink !== 1 ||
+    before.size < 1 ||
+    !fs.constants.O_NOFOLLOW ||
+    (process.platform !== 'win32' && (before.mode & 0o777) !== 0o600)
+  ) {
+    refuse('fod_direct_receive_failed')
+  }
+  const handle = await fs.promises.open(
+    filePath,
+    fs.constants.O_RDONLY |
+      fs.constants.O_NOFOLLOW |
+      (fs.constants.O_NONBLOCK || 0)
+  )
+  try {
+    const opened = await handle.stat()
+    if (
+      !opened.isFile() ||
+      opened.dev !== before.dev ||
+      opened.ino !== before.ino ||
+      opened.nlink !== 1 ||
+      opened.size !== before.size ||
+      (process.platform !== 'win32' && (opened.mode & 0o777) !== 0o600)
+    ) {
+      refuse('fod_direct_receive_failed')
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
 function createFodDirectCheckService({
   dialog,
   getNodeRpcConnection,
@@ -312,29 +476,25 @@ function createFodDirectCheckService({
 }) {
   let busy = false
 
-  async function activeIdentity() {
-    const connection = normalizeConnection(await getNodeRpcConnection())
-    const coinbase = normalizeCoinbase(await getActiveCoinbase())
-    const after = normalizeConnection(await getNodeRpcConnection())
-    if (!sameConnection(connection, after)) {
-      refuse('fod_direct_check_identity_changed')
-    }
-    return {connection, coinbase}
-  }
-
   return async function checkDirectDelivery(payload) {
     if (busy) refuse('fod_direct_check_busy')
     busy = true
     let tempDir
     try {
       const message = parseMessage(payload)
-      const initial = await activeIdentity()
+      const initial = await activeIdentity(
+        getNodeRpcConnection,
+        getActiveCoinbase
+      )
       if (initial.coinbase !== message.buyer) {
         refuse('fod_direct_check_buyer_mismatch')
       }
       await checkBinary(fs, binaryPath)
 
-      const purchasePath = await pickFile(dialog, 'Select retained FoD purchase')
+      const purchasePath = await pickFile(
+        dialog,
+        'Select retained FoD purchase'
+      )
       const keyPath = await pickFile(dialog, 'Select FoD delivery key')
       const purchase = await readPrivateSelectedFile(
         fs,
@@ -343,19 +503,19 @@ function createFodDirectCheckService({
       )
       let key
       try {
-        key = await readPrivateSelectedFile(
-          fs,
-          keyPath,
-          MAX_DELIVERY_KEY_BYTES
-        )
-        if (!/^(?:0x)?[0-9a-fA-F]{64}$/.test(key.data.toString('utf8').trim())) {
+        key = await readPrivateSelectedFile(fs, keyPath, MAX_DELIVERY_KEY_BYTES)
+        if (
+          !/^(?:0x)?[0-9a-fA-F]{64}$/.test(key.data.toString('utf8').trim())
+        ) {
           refuse('fod_direct_check_invalid_file')
         }
         if (purchase.dev === key.dev && purchase.ino === key.ino) {
           refuse('fod_direct_check_invalid_file')
         }
 
-        tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'fod-check-'))
+        tempDir = await fs.promises.mkdtemp(
+          path.join(os.tmpdir(), 'fod-check-')
+        )
         tempDir = await fs.promises.realpath(tempDir)
         await fs.promises.chmod(tempDir, 0o700)
         const purchaseCopy = path.join(tempDir, 'purchase.json')
@@ -396,7 +556,10 @@ function createFodDirectCheckService({
           args.push('-key-file', keyFile)
         }
 
-        const current = await activeIdentity()
+        const current = await activeIdentity(
+          getNodeRpcConnection,
+          getActiveCoinbase
+        )
         if (
           !sameConnection(initial.connection, current.connection) ||
           initial.coinbase !== current.coinbase
@@ -406,7 +569,10 @@ function createFodDirectCheckService({
         await checkBinary(fs, binaryPath)
         await runCheck(spawn, binaryPath, args, payload.message)
 
-        const finished = await activeIdentity()
+        const finished = await activeIdentity(
+          getNodeRpcConnection,
+          getActiveCoinbase
+        )
         if (
           !sameConnection(initial.connection, finished.connection) ||
           initial.coinbase !== finished.coinbase
@@ -433,9 +599,10 @@ function createFodDirectCheckService({
       throw new DirectCheckError('fod_direct_check_failed')
     } finally {
       try {
-        if (tempDir) await fs.promises.rm(tempDir, {recursive: true, force: true})
+        if (tempDir)
+          await fs.promises.rm(tempDir, {recursive: true, force: true})
       } catch {
-        throw new DirectCheckError('fod_direct_check_failed')
+        refuse('fod_direct_check_failed')
       } finally {
         busy = false
       }
@@ -443,4 +610,204 @@ function createFodDirectCheckService({
   }
 }
 
-module.exports = {createFodDirectCheckService}
+function createFodDirectReceiveService({
+  dialog,
+  getNodeRpcConnection,
+  getActiveCoinbase,
+  spawn = defaultSpawn,
+  fs = defaultFs,
+  binaryPath,
+  vaultRoot,
+}) {
+  let busy = false
+
+  return async function receiveDirectDelivery(payload) {
+    if (busy) refuse('fod_direct_receive_busy')
+    busy = true
+    let tempDir
+    let outputDir
+    let saved = false
+    try {
+      const {message, messageText, passphrase} = parseReceivePayload(payload)
+      const initial = await activeIdentity(
+        getNodeRpcConnection,
+        getActiveCoinbase
+      )
+      if (initial.coinbase !== message.buyer) {
+        refuse('fod_direct_receive_buyer_mismatch')
+      }
+      await checkBinary(fs, binaryPath)
+      const vaultParent = await ensurePrivateVaultRoot(fs, vaultRoot)
+      const privateRoot = await ensurePrivateVaultRoot(
+        fs,
+        path.join(vaultParent, initial.coinbase)
+      )
+
+      const purchasePath = await pickFile(
+        dialog,
+        'Select retained FoD purchase'
+      )
+      const keyPath = await pickFile(dialog, 'Select FoD delivery key')
+      const purchase = await readPrivateSelectedFile(
+        fs,
+        purchasePath,
+        MAX_PURCHASE_BYTES
+      )
+      let key
+      try {
+        key = await readPrivateSelectedFile(fs, keyPath, MAX_DELIVERY_KEY_BYTES)
+        if (
+          !/^(?:0x)?[0-9a-fA-F]{64}$/.test(key.data.toString('utf8').trim())
+        ) {
+          refuse('fod_direct_receive_invalid_file')
+        }
+        if (purchase.dev === key.dev && purchase.ino === key.ino) {
+          refuse('fod_direct_receive_invalid_file')
+        }
+
+        tempDir = await fs.promises.mkdtemp(
+          path.join(os.tmpdir(), 'fod-receive-')
+        )
+        tempDir = await fs.promises.realpath(tempDir)
+        await fs.promises.chmod(tempDir, 0o700)
+        const purchaseCopy = path.join(tempDir, 'purchase.json')
+        const keyCopy = path.join(tempDir, 'delivery.key')
+        await writePrivateFile(fs, purchaseCopy, purchase.data)
+        await writePrivateFile(fs, keyCopy, key.data)
+
+        outputDir = await fs.promises.mkdtemp(
+          path.join(privateRoot, 'fod-receive-')
+        )
+        await fs.promises.chmod(outputDir, 0o700)
+        const outputBefore = await fs.promises.lstat(outputDir)
+        if (
+          !outputBefore.isDirectory() ||
+          outputBefore.isSymbolicLink() ||
+          (process.platform !== 'win32' &&
+            (outputBefore.mode & 0o777) !== 0o700) ||
+          (await fs.promises.realpath(outputDir)) !== outputDir
+        ) {
+          refuse('fod_direct_receive_unavailable')
+        }
+        const vaultPath = path.join(outputDir, 'vault.age')
+        const receiptPath = path.join(outputDir, 'receipt.json')
+        const args = [
+          'direct-receive',
+          '-network',
+          'idena',
+          '-contract',
+          CONTRACT,
+          '-code-hash',
+          CODE_HASH,
+          '-order',
+          message.orderId,
+          '-message',
+          '-',
+          '-purchase',
+          purchaseCopy,
+          '-delivery-key',
+          keyCopy,
+          '-vault',
+          vaultPath,
+          '-out',
+          receiptPath,
+          '-rpc',
+          initial.connection.url,
+        ]
+        if (initial.connection.key) {
+          const keyFile = path.join(tempDir, 'rpc.key')
+          const keyBytes = Buffer.from(initial.connection.key, 'utf8')
+          try {
+            await writePrivateFile(fs, keyFile, keyBytes)
+          } finally {
+            keyBytes.fill(0)
+          }
+          args.push('-key-file', keyFile)
+        }
+
+        const current = await activeIdentity(
+          getNodeRpcConnection,
+          getActiveCoinbase
+        )
+        if (
+          !sameConnection(initial.connection, current.connection) ||
+          initial.coinbase !== current.coinbase
+        ) {
+          refuse('fod_direct_receive_identity_changed')
+        }
+        await checkBinary(fs, binaryPath)
+        await ensurePrivateVaultRoot(fs, vaultParent)
+        await ensurePrivateVaultRoot(fs, privateRoot)
+        await runCheck(spawn, binaryPath, args, messageText, {
+          FOD_PASSPHRASE: passphrase,
+        })
+
+        const finished = await activeIdentity(
+          getNodeRpcConnection,
+          getActiveCoinbase
+        )
+        if (
+          !sameConnection(initial.connection, finished.connection) ||
+          initial.coinbase !== finished.coinbase
+        ) {
+          refuse('fod_direct_receive_identity_changed')
+        }
+        const outputAfter = await fs.promises.lstat(outputDir)
+        if (
+          outputAfter.dev !== outputBefore.dev ||
+          outputAfter.ino !== outputBefore.ino ||
+          !outputAfter.isDirectory() ||
+          outputAfter.isSymbolicLink() ||
+          (process.platform !== 'win32' && (outputAfter.mode & 0o777) !== 0o700)
+        ) {
+          refuse('fod_direct_receive_failed')
+        }
+        await ensurePrivateVaultRoot(fs, vaultParent)
+        await ensurePrivateVaultRoot(fs, privateRoot)
+        await checkPrivateOutputFile(fs, vaultPath)
+        await checkPrivateOutputFile(fs, receiptPath)
+        const receipt = await readPrivateSelectedFile(
+          fs,
+          receiptPath,
+          MAX_RECEIPT_BYTES
+        )
+        try {
+          const summary = parseReceipt(receipt.data, message)
+          saved = true
+          return {...summary, vaultPath}
+        } finally {
+          receipt.data.fill(0)
+        }
+      } finally {
+        purchase.data.fill(0)
+        if (key) key.data.fill(0)
+      }
+    } catch (error) {
+      const code =
+        error instanceof DirectCheckError
+          ? error.message.replace(/^fod_direct_check_/, 'fod_direct_receive_')
+          : 'fod_direct_receive_failed'
+      throw new DirectCheckError(code)
+    } finally {
+      let cleanupFailed = false
+      try {
+        if (tempDir)
+          await fs.promises.rm(tempDir, {recursive: true, force: true})
+      } catch {
+        cleanupFailed = true
+      }
+      try {
+        if (outputDir && (!saved || cleanupFailed)) {
+          await fs.promises.rm(outputDir, {recursive: true, force: true})
+        }
+      } catch {
+        cleanupFailed = true
+      } finally {
+        busy = false
+      }
+      if (cleanupFailed) refuse('fod_direct_receive_failed')
+    }
+  }
+}
+
+module.exports = {createFodDirectCheckService, createFodDirectReceiveService}
