@@ -5,7 +5,16 @@ import {
   Button,
   Collapse,
   Flex,
+  FormControl,
+  FormLabel,
   HStack,
+  Input,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Stack,
   Text,
   Tooltip,
@@ -52,8 +61,14 @@ const SOCIAL_RPC_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_REQUEST'
 const SOCIAL_RPC_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_RESPONSE'
 const SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_REQUEST'
 const SOCIAL_CRYPTO_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_RESPONSE'
-const SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_DIRECT_CHECK_REQUEST'
-const SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_DIRECT_CHECK_RESPONSE'
+const SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_CHECK_REQUEST'
+const SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_CHECK_RESPONSE'
+const SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_RECEIVE_REQUEST'
+const SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_RECEIVE_RESPONSE'
 
 function formatBytesAsMib(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
@@ -129,8 +144,16 @@ export default function SocialDesktopEmbed({
   const [bootstrapReady, setBootstrapReady] = React.useState(false)
   const [historyMode, setHistoryMode] = React.useState('indexer-api')
   const [showTechnicalDetails, setShowTechnicalDetails] = React.useState(false)
+  const [receiveRequest, setReceiveRequest] = React.useState(null)
+  const [vaultPassphrase, setVaultPassphrase] = React.useState('')
+  const [vaultPassphraseRepeat, setVaultPassphraseRepeat] = React.useState('')
+  const [savingVault, setSavingVault] = React.useState(false)
+  const [vaultInputError, setVaultInputError] = React.useState('')
+  const [savedVault, setSavedVault] = React.useState(false)
+  const [vaultFolderError, setVaultFolderError] = React.useState('')
   const iframeRef = React.useRef(null)
   const messagePortRef = React.useRef(null)
+  const receiveRequestRef = React.useRef(null)
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -224,21 +247,23 @@ export default function SocialDesktopEmbed({
     if (
       nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE &&
       nextPayload?.type !== SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE &&
-      nextPayload?.type !== SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE
+      nextPayload?.type !== SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE &&
+      nextPayload?.type !== SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE
     ) {
       return
     }
 
     if (nextPayload.type === SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE) {
-      const payload = nextPayload.payload
-      const requestId = payload?.requestId
+      const {payload} = nextPayload
+      const {requestId: checkRequestId} = payload || {}
       let response
       if (validateSocialDirectCheckRequest(payload)) {
         response = {error: {message: 'Invalid flip delivery request.'}}
       } else {
         try {
           const check = window.idena?.social?.directCheck
-          if (typeof check !== 'function') throw new Error('Local verification is unavailable.')
+          if (typeof check !== 'function')
+            throw new Error('Local verification is unavailable.')
           response = await check({message: payload.message})
         } catch {
           response = {error: {message: 'Local verification is unavailable.'}}
@@ -246,8 +271,41 @@ export default function SocialDesktopEmbed({
       }
       port.postMessage({
         type: SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE,
-        payload: {requestId, response},
+        payload: {requestId: checkRequestId, response},
       })
+      return
+    }
+
+    if (nextPayload.type === SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE) {
+      const {payload} = nextPayload
+      const {requestId: receiveRequestId} = payload || {}
+      const receiveValidationError = validateSocialDirectCheckRequest(payload)
+      if (receiveValidationError || receiveRequestRef.current) {
+        port.postMessage({
+          type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+          payload: {
+            requestId: receiveRequestId,
+            response: {
+              error: {
+                message: receiveValidationError
+                  ? 'Invalid flip delivery request.'
+                  : 'A vault save is already open.',
+              },
+            },
+          },
+        })
+      } else {
+        const request = {
+          port,
+          requestId: receiveRequestId,
+          message: payload.message,
+        }
+        receiveRequestRef.current = request
+        setSavedVault(false)
+        setVaultFolderError('')
+        setReceiveRequest(request)
+        setVaultInputError('')
+      }
       return
     }
 
@@ -348,9 +406,127 @@ export default function SocialDesktopEmbed({
   }, [])
 
   const closeMessagePort = React.useCallback(() => {
+    if (receiveRequestRef.current) {
+      const request = receiveRequestRef.current
+      receiveRequestRef.current = null
+      try {
+        request.port.postMessage({
+          type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+          payload: {
+            requestId: request.requestId,
+            response: {error: {message: 'Vault save cancelled.'}},
+          },
+        })
+      } catch {
+        // The embedded view may already have closed its port.
+      }
+      setReceiveRequest(null)
+      setVaultPassphrase('')
+      setVaultPassphraseRepeat('')
+    }
     if (messagePortRef.current) {
       messagePortRef.current.close()
       messagePortRef.current = null
+    }
+  }, [])
+
+  const cancelVaultSave = React.useCallback(() => {
+    if (savingVault || !receiveRequestRef.current) return
+    const {current: request} = receiveRequestRef
+    receiveRequestRef.current = null
+    try {
+      request.port.postMessage({
+        type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+        payload: {
+          requestId: request.requestId,
+          response: {error: {message: 'Vault save cancelled.'}},
+        },
+      })
+    } catch {
+      // The embedded view may already have closed its port.
+    }
+    setReceiveRequest(null)
+    setVaultPassphrase('')
+    setVaultPassphraseRepeat('')
+    setVaultInputError('')
+  }, [savingVault])
+
+  const saveVerifiedVault = React.useCallback(async () => {
+    const request = receiveRequestRef.current
+    if (!request || savingVault) return
+    const codepoints = Array.from(vaultPassphrase)
+    if (
+      codepoints.length < 12 ||
+      codepoints.length > 512 ||
+      vaultPassphrase.includes('\0')
+    ) {
+      setVaultInputError('Use a passphrase between 12 and 512 characters.')
+      return
+    }
+    if (vaultPassphrase !== vaultPassphraseRepeat) {
+      setVaultInputError('Passphrases do not match.')
+      return
+    }
+    setVaultInputError('')
+    setSavingVault(true)
+    let response
+    try {
+      const receive = window.idena?.social?.directReceive
+      if (typeof receive !== 'function')
+        throw new Error('Local vault save is unavailable.')
+      response = await receive({
+        message: request.message,
+        passphrase: vaultPassphrase,
+      })
+    } catch {
+      response = {error: {message: 'Could not save verified keys locally.'}}
+    }
+    setVaultPassphrase('')
+    setVaultPassphraseRepeat('')
+    setSavingVault(false)
+    if (receiveRequestRef.current === request) {
+      receiveRequestRef.current = null
+      setReceiveRequest(null)
+      const result = response?.result
+      if (result?.saved === true) setSavedVault(true)
+      try {
+        request.port.postMessage({
+          type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+          payload: {
+            requestId: request.requestId,
+            response:
+              result?.saved === true
+                ? {
+                    result: {
+                      orderId: result.orderId,
+                      author: result.author,
+                      epoch: result.epoch,
+                      usableFlips: result.usableFlips,
+                      saved: true,
+                    },
+                  }
+                : {
+                    error: {
+                      message:
+                        response?.error?.message ||
+                        'Could not save verified keys locally.',
+                    },
+                  },
+          },
+        })
+      } catch {
+        // The embedded view may already have closed its port.
+      }
+    }
+  }, [savingVault, vaultPassphrase, vaultPassphraseRepeat])
+
+  const openSavedVaultFolder = React.useCallback(async () => {
+    try {
+      const result = await window.idena?.social?.openDirectVaultFolder?.()
+      if (result?.result?.opened !== true) throw new Error('open_failed')
+      setVaultFolderError('')
+    } catch {
+      setVaultFolderError('Could not open the saved keys folder.')
     }
   }, [])
 
@@ -620,6 +796,116 @@ export default function SocialDesktopEmbed({
           </Box>
         </Flex>
       </Page>
+      <Modal
+        isOpen={Boolean(receiveRequest || savedVault)}
+        onClose={savedVault ? () => setSavedVault(false) : cancelVaultSave}
+        isCentered
+        closeOnOverlayClick={!savingVault}
+        closeOnEsc={!savingVault}
+      >
+        <ModalOverlay />
+        <ModalContent>
+          {savedVault ? (
+            <>
+              <ModalHeader>Verified keys saved</ModalHeader>
+              <ModalBody>
+                <Text fontSize="sm" color="muted">
+                  The encrypted vault is in this identity’s app profile. Keep
+                  your passphrase to open it later.
+                </Text>
+                {vaultFolderError && (
+                  <Text color="red.500" fontSize="sm" role="alert">
+                    {vaultFolderError}
+                  </Text>
+                )}
+              </ModalBody>
+              <ModalFooter>
+                <Button
+                  variant="ghost"
+                  mr={3}
+                  onClick={() => setSavedVault(false)}
+                >
+                  Close
+                </Button>
+                <Button colorScheme="blue" onClick={openSavedVaultFolder}>
+                  Open keys folder
+                </Button>
+              </ModalFooter>
+            </>
+          ) : (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                saveVerifiedVault()
+              }}
+            >
+              <ModalHeader>Save verified flip keys</ModalHeader>
+              <ModalBody>
+                <Stack spacing={4}>
+                  <Text fontSize="sm" color="muted">
+                    The app will verify the original flips again and save an
+                    encrypted vault in this app profile. Keep this passphrase;
+                    it cannot be recovered.
+                  </Text>
+                  <FormControl>
+                    <FormLabel htmlFor="fod-vault-passphrase">
+                      Vault passphrase
+                    </FormLabel>
+                    <Input
+                      id="fod-vault-passphrase"
+                      type="password"
+                      autoComplete="off"
+                      value={vaultPassphrase}
+                      maxLength={512}
+                      onChange={(event) =>
+                        setVaultPassphrase(event.target.value)
+                      }
+                      autoFocus
+                    />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel htmlFor="fod-vault-passphrase-repeat">
+                      Repeat passphrase
+                    </FormLabel>
+                    <Input
+                      id="fod-vault-passphrase-repeat"
+                      type="password"
+                      autoComplete="off"
+                      value={vaultPassphraseRepeat}
+                      maxLength={512}
+                      onChange={(event) =>
+                        setVaultPassphraseRepeat(event.target.value)
+                      }
+                    />
+                  </FormControl>
+                  {vaultInputError && (
+                    <Text color="red.500" fontSize="sm" role="alert">
+                      {vaultInputError}
+                    </Text>
+                  )}
+                </Stack>
+              </ModalBody>
+              <ModalFooter>
+                <Button
+                  variant="ghost"
+                  mr={3}
+                  onClick={cancelVaultSave}
+                  isDisabled={savingVault}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  colorScheme="blue"
+                  type="submit"
+                  isLoading={savingVault}
+                >
+                  Save keys
+                </Button>
+              </ModalFooter>
+            </form>
+          )}
+        </ModalContent>
+      </Modal>
     </Layout>
   )
 }
