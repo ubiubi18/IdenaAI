@@ -20,6 +20,8 @@ export const SOCIAL_OFFICIAL_INDEXER_URL = 'https://api.idena.io'
 export const SOCIAL_EMBED_DOCUMENT_PATH = 'idena-social://app/index.html#/'
 export const SOCIAL_EMBED_ORIGIN = 'idena-social://app'
 export const SOCIAL_MESSAGE_CRYPTO_VERSION = 'host-v1'
+export const SOCIAL_DIRECT_V4_CONTRACT =
+  '3730be2217b0de1fdfe73098d37f3174dd9748cb'
 export const SOCIAL_MAX_IMAGE_BYTES = 1024 * 1024
 export const SOCIAL_IMAGE_FORMATS = [
   'PNG',
@@ -354,4 +356,26 @@ export function validateSocialDirectCheckRequest(payload) {
     return 'invalid_direct_check_request'
   }
   return null
+}
+
+const SOCIAL_DIRECT_V4_DELIVERY_PATTERN = new RegExp([
+  '^\\{"format":"fod\\.direct-delivery","version":2,"network":"idena",',
+  `"contract":"${SOCIAL_DIRECT_V4_CONTRACT}",`,
+  '"author":"[0-9a-f]{40}","offerId":"[0-9a-f]{64}",',
+  '"orderId":([1-9][0-9]{0,19}),"orderNonce":([1-9][0-9]{0,19}),',
+  '"buyer":"[0-9a-f]{40}","deliveryKey":"04[0-9a-f]{128}",',
+  '"ciphertext":"[0-9a-f]{438}"\\}$',
+].join(''))
+
+export function parseSocialV4DeliveryOrder(message) {
+  if (typeof message !== 'string' || message.length > 2048) return null
+  const match = SOCIAL_DIRECT_V4_DELIVERY_PATTERN.exec(message)
+  if (
+    !match ||
+    BigInt(match[1]) > 18446744073709551615n ||
+    BigInt(match[2]) > 18446744073709551615n
+  ) {
+    return null
+  }
+  return {orderId: match[1], contract: `0x${SOCIAL_DIRECT_V4_CONTRACT}`}
 }

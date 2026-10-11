@@ -9,7 +9,7 @@ import { useLocation, useNavigate } from "react-router";
 import { useReducer, useState } from "react";
 import OneOnOneConversationHeaderComponent from "./OneOnOneConversationHeaderComponent";
 import GroupConversationHeaderComponent from "./GroupConversationHeaderComponent";
-import { isDirectDeliveryAuthor, isDirectDeliveryBuyer, parseDirectDelivery } from "../logic/directDelivery";
+import { DIRECT_V4_CONTRACT, isDirectDeliveryAuthor, isDirectDeliveryBuyer, parseDirectDelivery } from "../logic/directDelivery";
 import { createDesktopDirectCheckClient, createDesktopDirectReceiveClient, isEmbeddedDesktopFrame, readDesktopBootstrap } from "../logic/desktopBootstrap";
 
 type ConversationComponentProps = {
@@ -288,7 +288,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                                             <div className="max-h-[9999px] pl-1 pr-2 pt-0.5 pb-1 text-[12px] text-wrap leading-5 overflow-hidden">
                                                 <p className="[word-break:break-word]">{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
                                                 {delivery && isDirectDeliveryBuyer(delivery, postersAddress) && isDirectDeliveryAuthor(delivery, message.sender) && <div className="mt-1 flex gap-3">
-                                                    {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-blue-400 hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Saving locally…'} onClick={(e) => {
+                                                    {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-blue-400 hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Waiting for local action…'} onClick={(e) => {
                                                         e.stopPropagation();
                                                         setDirectCheckStatus((current) => ({...current, [message.messageId]: 'Checking locally…'}));
                                                         void createDesktopDirectCheckClient()(delivery.text).then((response) => {
@@ -299,17 +299,20 @@ function ConversationComponent(props: ConversationComponentProps) {
                                                             setDirectCheckStatus((current) => ({...current, [message.messageId]: status}));
                                                         });
                                                     }}>Check flip keys</button>}
-                                                    {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-blue-400 hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Saving locally…'} onClick={(e) => {
+                                                    {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-blue-400 hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Waiting for local action…'} onClick={(e) => {
                                                         e.stopPropagation();
-                                                        setDirectCheckStatus((current) => ({...current, [message.messageId]: 'Saving locally…'}));
+                                                        setDirectCheckStatus((current) => ({...current, [message.messageId]: 'Waiting for local action…'}));
                                                         void createDesktopDirectReceiveClient()(delivery.text).then((response) => {
                                                             const count = response.result?.usableFlips;
-                                                            const status = response.result?.saved === true && typeof count === 'number' && Number.isInteger(count) && count > 0
-                                                                ? `Saved ${count} verified flip${count === 1 ? '' : 's'} in an encrypted vault.`
-                                                                : response.error?.message === 'Vault save cancelled.' ? 'Vault save cancelled.' : 'Could not save verified keys.';
+                                                            let status = 'Could not save verified keys.';
+                                                            if (response.result?.confirmationStatus === 'settled') status = 'Payment confirmed on-chain.';
+                                                            else if (response.result?.confirmationStatus === 'pending') status = 'Payment confirmation is pending.';
+                                                            else if (response.result?.saved === true && typeof count === 'number' && Number.isInteger(count) && count > 0) status = `Saved ${count} verified flip${count === 1 ? '' : 's'} in an encrypted vault.`;
+                                                            else if (response.error?.message === 'Vault save cancelled.') status = 'Vault save cancelled.';
+                                                            else if (response.error?.message === 'Could not confirm saved payment.') status = 'Could not confirm saved payment.';
                                                             setDirectCheckStatus((current) => ({...current, [message.messageId]: status}));
                                                         });
-                                                    }}>Save verified keys</button>}
+                                                    }}>{delivery.contract === DIRECT_V4_CONTRACT ? 'Save keys or confirm payment' : 'Save verified keys'}</button>}
                                                     <button type="button" className="text-blue-400 hover:underline cursor-pointer" onClick={(e) => {
                                                         e.stopPropagation();
                                                         void navigator.clipboard.writeText(delivery.text).catch(() => alert('Unable to copy flip delivery.'));

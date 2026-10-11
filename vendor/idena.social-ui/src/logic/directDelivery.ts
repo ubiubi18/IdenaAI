@@ -1,28 +1,31 @@
 export type DirectDelivery = {
     text: string,
+    contract: string,
+    orderId: string,
     author: string,
     buyer: string,
 };
 
 const UINT64_MAX = 18446744073709551615n;
+export const DIRECT_V4_CONTRACT = '3730be2217b0de1fdfe73098d37f3174dd9748cb';
 
 // Match the exact compact, ordered v2 JSON emitted by Flips on Demand.
 const deliveryPattern = new RegExp([
     '^\\{"format":"fod\\.direct-delivery","version":2,"network":"idena",',
-    '"contract":"[0-9a-f]{40}","author":"(?<author>[0-9a-f]{40})",',
+    '"contract":"(?<contract>[0-9a-f]{40})","author":"(?<author>[0-9a-f]{40})",',
     '"offerId":"[0-9a-f]{64}","orderId":(?<orderId>[1-9][0-9]*),',
     '"orderNonce":(?<orderNonce>[1-9][0-9]*),"buyer":"(?<buyer>[0-9a-f]{40})",',
-    '"deliveryKey":"[0-9a-f]{130}","ciphertext":"[0-9a-f]{438}"\\}$',
+    '"deliveryKey":"04[0-9a-f]{128}","ciphertext":"[0-9a-f]{438}"\\}$',
 ].join(''));
 
 export function parseDirectDelivery(text: string): DirectDelivery | null {
     if (text.length > 2048) return null;
 
     const groups = deliveryPattern.exec(text)?.groups;
-    if (!groups?.author || !groups.buyer || !groups.orderId || !groups.orderNonce) return null;
+    if (!groups?.contract || !groups.author || !groups.buyer || !groups.orderId || !groups.orderNonce) return null;
     if (BigInt(groups.orderId) > UINT64_MAX || BigInt(groups.orderNonce) > UINT64_MAX) return null;
 
-    return { text, author: groups.author, buyer: groups.buyer };
+    return { text, contract: groups.contract, orderId: groups.orderId, author: groups.author, buyer: groups.buyer };
 }
 
 function matchesAddress(address: string, bareAddress: string): boolean {

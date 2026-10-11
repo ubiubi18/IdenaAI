@@ -32,7 +32,9 @@ import {
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
+  SOCIAL_DIRECT_V4_CONTRACT,
   SOCIAL_OFFICIAL_INDEXER_URL,
+  parseSocialV4DeliveryOrder,
   validateSocialCryptoRequest,
   validateSocialDirectCheckRequest,
   validateSocialRpcRequest,
@@ -69,6 +71,8 @@ const SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE =
   'IDENA_SOCIAL_DIRECT_RECEIVE_REQUEST'
 const SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE =
   'IDENA_SOCIAL_DIRECT_RECEIVE_RESPONSE'
+const DIRECT_V3_CONTRACT = '6bc41502f4611d041a986cda580209d7f5a4e0d4'
+const DIRECT_V4_CONTRACT = SOCIAL_DIRECT_V4_CONTRACT
 
 function formatBytesAsMib(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
@@ -150,6 +154,7 @@ export default function SocialDesktopEmbed({
   const [savingVault, setSavingVault] = React.useState(false)
   const [vaultInputError, setVaultInputError] = React.useState('')
   const [savedVault, setSavedVault] = React.useState(false)
+  const [confirmation, setConfirmation] = React.useState(null)
   const [vaultFolderError, setVaultFolderError] = React.useState('')
   const iframeRef = React.useRef(null)
   const messagePortRef = React.useRef(null)
@@ -300,13 +305,24 @@ export default function SocialDesktopEmbed({
           },
         })
       } else {
+        let confirmableDelivery = false
+        try {
+          confirmableDelivery = [DIRECT_V3_CONTRACT, DIRECT_V4_CONTRACT].includes(
+            JSON.parse(payload.message).contract
+          )
+        } catch {
+          // The native verifier will reject malformed delivery messages.
+        }
         const request = {
           port,
           requestId: receiveRequestId,
           message: payload.message,
+          confirmableDelivery,
+          savedPayment: parseSocialV4DeliveryOrder(payload.message),
         }
         receiveRequestRef.current = request
         setSavedVault(false)
+        setConfirmation(null)
         setVaultFolderError('')
         setReceiveRequest(request)
         setVaultInputError('')
@@ -456,6 +472,63 @@ export default function SocialDesktopEmbed({
     setVaultInputError('')
   }, [])
 
+  const confirmSavedVault = React.useCallback(async ({orderId, contract}) => {
+    setConfirmation({orderId, contract, status: 'confirming'})
+    let status = 'failed'
+    try {
+      const confirm = window.idena?.social?.directConfirm
+      if (typeof confirm !== 'function')
+        throw new Error('Local payment confirmation is unavailable.')
+      const response = await confirm({orderId, contract})
+      if (
+        response?.result?.orderId === orderId &&
+        ['settled', 'pending'].includes(response.result.status)
+      ) {
+        status = response.result.status
+      }
+    } catch {
+      // The keys remain saved even when payment confirmation cannot complete.
+    }
+    setConfirmation((current) =>
+      current?.orderId === orderId && current?.contract === contract
+        ? {...current, status}
+        : current
+    )
+    return status
+  }, [])
+
+  const confirmExistingVault = React.useCallback(async () => {
+    const request = receiveRequestRef.current
+    if (!request?.savedPayment || savingVaultRef.current) return
+    savingVaultRef.current = true
+    setSavingVault(true)
+    const status = await confirmSavedVault(request.savedPayment)
+    savingVaultRef.current = false
+    setSavingVault(false)
+    if (receiveRequestRef.current !== request) return
+    receiveRequestRef.current = null
+    setReceiveRequest(null)
+    try {
+      request.port.postMessage({
+        type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+        payload: {
+          requestId: request.requestId,
+          response:
+            status === 'settled' || status === 'pending'
+              ? {
+                  result: {
+                    orderId: request.savedPayment.orderId,
+                    confirmationStatus: status,
+                  },
+                }
+              : {error: {message: 'Could not confirm saved payment.'}},
+        },
+      })
+    } catch {
+      // The embedded view may already have closed its port.
+    }
+  }, [confirmSavedVault])
+
   const saveVerifiedVault = React.useCallback(async () => {
     const request = receiveRequestRef.current
     if (!request || savingVaultRef.current) return
@@ -525,7 +598,10 @@ export default function SocialDesktopEmbed({
         // The embedded view may already have closed its port.
       }
     }
-  }, [vaultPassphrase, vaultPassphraseRepeat])
+    if (result?.saved === true && result.canConfirm === true) {
+      confirmSavedVault({orderId: result.orderId, contract: result.contract})
+    }
+  }, [confirmSavedVault, vaultPassphrase, vaultPassphraseRepeat])
 
   const openSavedVaultFolder = React.useCallback(async () => {
     try {
@@ -820,6 +896,36 @@ export default function SocialDesktopEmbed({
                   The encrypted vault is in this identity’s app profile. Keep
                   your passphrase to open it later.
                 </Text>
+                {confirmation && (
+                  <>
+                    <Text
+                      fontSize="sm"
+                      color={
+                        confirmation.status === 'settled' ? 'green.600' : 'muted'
+                      }
+                      mt={2}
+                      role="status"
+                    >
+                      {confirmation.status === 'settled'
+                        ? 'Payment confirmed on-chain.'
+                        : confirmation.status === 'confirming'
+                          ? 'Confirming payment on-chain…'
+                          : confirmation.status === 'pending'
+                            ? 'Payment confirmation is pending.'
+                            : 'Payment confirmation failed. Your keys are saved.'}
+                    </Text>
+                    {['pending', 'failed'].includes(confirmation.status) && (
+                      <Button
+                        variant="link"
+                        size="sm"
+                        mt={1}
+                        onClick={() => confirmSavedVault(confirmation)}
+                      >
+                        Retry confirmation
+                      </Button>
+                    )}
+                  </>
+                )}
                 {vaultFolderError && (
                   <Text color="red.500" fontSize="sm" role="alert">
                     {vaultFolderError}
@@ -846,13 +952,30 @@ export default function SocialDesktopEmbed({
                 saveVerifiedVault()
               }}
             >
-              <ModalHeader>Save verified flip keys</ModalHeader>
+              <ModalHeader>
+                {receiveRequest?.savedPayment
+                  ? 'Save keys or confirm payment'
+                  : 'Save verified flip keys'}
+              </ModalHeader>
               <ModalBody>
                 <Stack spacing={4}>
                   <Text fontSize="sm" color="muted">
-                    The app will verify the original flips again and save an
-                    encrypted vault in this app profile. Keep this passphrase;
-                    it cannot be recovered.
+                    {receiveRequest?.savedPayment ? (
+                      <>
+                        Order {receiveRequest.savedPayment.orderId}: save
+                        verified keys with a passphrase, or confirm payment for
+                        keys already saved. A new on-chain confirmation can cost
+                        up to 3 iDNA. Keep your passphrase.
+                      </>
+                    ) : (
+                        <>
+                          The app will verify the original flips again and save
+                          an encrypted vault in this app profile.
+                          {receiveRequest?.confirmableDelivery &&
+                            ' Saving valid keys also submits an on-chain payment confirmation, with a network fee capped at 3 iDNA.'}{' '}
+                          Keep this passphrase; it cannot be recovered.
+                        </>
+                      )}
                   </Text>
                   <FormControl>
                     <FormLabel htmlFor="fod-vault-passphrase">
@@ -901,12 +1024,25 @@ export default function SocialDesktopEmbed({
                 >
                   Cancel
                 </Button>
+                {receiveRequest?.savedPayment && (
+                  <Button
+                    variant="outline"
+                    mr={3}
+                    type="button"
+                    isLoading={savingVault}
+                    onClick={confirmExistingVault}
+                  >
+                    Confirm saved payment
+                  </Button>
+                )}
                 <Button
                   colorScheme="blue"
                   type="submit"
                   isLoading={savingVault}
                 >
-                  Save keys
+                  {receiveRequest?.confirmableDelivery
+                    ? 'Save keys and confirm payment'
+                    : 'Save verified keys'}
                 </Button>
               </ModalFooter>
             </form>
