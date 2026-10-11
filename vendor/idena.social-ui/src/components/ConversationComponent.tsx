@@ -285,10 +285,13 @@ function ConversationComponent(props: ConversationComponentProps) {
                                             </div>
                                             <div className="max-h-[9999px] pl-1 pr-2 pt-0.5 pb-1 text-[12px] text-wrap leading-5 overflow-hidden">
                                                 <p className="[word-break:break-word]">{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
-                                                {delivery && isDirectDeliveryBuyer(delivery, postersAddress) && isDirectDeliveryAuthor(delivery, message.sender) && <button type="button" className="mt-1 text-blue-400 hover:underline cursor-pointer" onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    void navigator.clipboard.writeText(delivery.text).catch(() => alert('Unable to copy flip delivery.'));
-                                                }}>Copy flip delivery</button>}
+                                                {delivery && isDirectDeliveryBuyer(delivery, postersAddress) && isDirectDeliveryAuthor(delivery, message.sender) && <div className="mt-1 flex gap-3">
+                                                    <button type="button" className="text-blue-400 hover:underline cursor-pointer" onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void navigator.clipboard.writeText(delivery.text).catch(() => alert('Unable to copy flip delivery.'));
+                                                    }}>Copy flip delivery</button>
+                                                    <a className="text-blue-400 hover:underline" href={`data:application/json;charset=utf-8,${encodeURIComponent(delivery.text)}`} download="flip-delivery.json" onClick={(e) => e.stopPropagation()}>Save flip delivery</a>
+                                                </div>}
                                             </div>
                                             {message.image && <div className="my-1 mx-1">
                                                 <img className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm hover:cursor-pointer" src={message.image} onClick={(e) => handleExpandImageModal(e, message.image!, message.cid)} />

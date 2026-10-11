@@ -145,8 +145,17 @@ describe('ConversationComponent route hydration', () => {
         };
         const posters = { [author]: { address: author, age: 2, pubkey: 'synthetic-key', stake: '1', state: 'Human' } };
 
-        expect(renderConversation({ missing: ['1'] }, { 1: message }, posters)).toContain('Copy flip delivery');
-        expect(renderConversation({ missing: ['1'] }, { 1: { ...message, message: envelope('b'.repeat(40)) } }, posters)).not.toContain('Copy flip delivery');
-        expect(renderConversation({ missing: ['1'] }, { 1: { ...message, sender: `0x${'e'.repeat(40)}` } }, posters)).not.toContain('Copy flip delivery');
+        const markup = renderConversation({ missing: ['1'] }, { 1: message }, posters);
+        expect(markup).toContain('Copy flip delivery');
+        expect(markup).toContain('Save flip delivery');
+        const savedUri = markup.match(/href="(data:application\/json;charset=utf-8,[^"]+)"/)?.[1];
+        expect(savedUri).toBeDefined();
+        expect(decodeURIComponent(savedUri!.split(',')[1])).toBe(message.message);
+        const otherBuyer = renderConversation({ missing: ['1'] }, { 1: { ...message, message: envelope('b'.repeat(40)) } }, posters);
+        const otherSender = renderConversation({ missing: ['1'] }, { 1: { ...message, sender: `0x${'e'.repeat(40)}` } }, posters);
+        expect(otherBuyer).not.toContain('Copy flip delivery');
+        expect(otherBuyer).not.toContain('Save flip delivery');
+        expect(otherSender).not.toContain('Copy flip delivery');
+        expect(otherSender).not.toContain('Save flip delivery');
     });
 });
