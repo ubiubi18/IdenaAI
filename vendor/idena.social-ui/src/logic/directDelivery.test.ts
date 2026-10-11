@@ -3,13 +3,15 @@ import { getDirectDeliverySendError, isDirectDeliveryAuthor, isDirectDeliveryBuy
 
 const author = 'a'.repeat(40);
 const buyer = 'b'.repeat(40);
-const text = `{"format":"fod.direct-delivery","version":2,"network":"idena","contract":"${'c'.repeat(40)}","author":"${author}","offerId":"${'d'.repeat(64)}","orderId":18446744073709551615,"orderNonce":1,"buyer":"${buyer}","deliveryKey":"${'e'.repeat(130)}","ciphertext":"${'f'.repeat(438)}"}`;
+const text = `{"format":"fod.direct-delivery","version":2,"network":"idena","contract":"${'c'.repeat(40)}","author":"${author}","offerId":"${'d'.repeat(64)}","orderId":18446744073709551615,"orderNonce":1,"buyer":"${buyer}","deliveryKey":"04${'e'.repeat(128)}","ciphertext":"${'f'.repeat(438)}"}`;
 
 describe('FoD direct delivery handoff', () => {
     it('keeps the canonical JSON bytes and compares account addresses case-insensitively', () => {
         const delivery = parseDirectDelivery(text);
 
         expect(delivery?.text).toBe(text);
+        expect(delivery?.contract).toBe('c'.repeat(40));
+        expect(delivery?.orderId).toBe('18446744073709551615');
         expect(new TextEncoder().encode(delivery!.text)).toEqual(new TextEncoder().encode(text));
         expect(isDirectDeliveryAuthor(delivery!, `0x${author.toUpperCase()}`)).toBe(true);
         expect(isDirectDeliveryBuyer(delivery!, `0x${buyer.toUpperCase()}`)).toBe(true);
@@ -30,6 +32,7 @@ describe('FoD direct delivery handoff', () => {
             text.replace('"orderNonce":1', '"orderNonce":0'),
             text.replace('"orderNonce":1', '"orderNonce":01'),
             text.replace('"ciphertext":"', '"ciphertext":"0x'),
+            text.replace('"deliveryKey":"04', '"deliveryKey":"00'),
             text.replace('"buyer":"', '"buyer":"B'),
             text + ' '.repeat(2049),
         ];
