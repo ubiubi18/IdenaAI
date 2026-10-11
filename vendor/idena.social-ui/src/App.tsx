@@ -162,6 +162,7 @@ function App() {
     const [nodeAvailable, setNodeAvailable] = useState<boolean>(true);
     const nodeAvailableRef = useRef(nodeAvailable);
     const rpcClientRef = useRef(undefined as undefined | RpcClient);
+    const rpcInitRef = useRef<{ generation: number, timer: ReturnType<typeof setTimeout> | null }>({ generation: 0, timer: null });
     const messageCryptoClientRef = useRef(undefined as undefined | ReturnType<typeof createDesktopMessageCryptoClient>);
     const decryptMessageWithDesktopHost = async (payload: {
         txHash: string;
@@ -418,19 +419,31 @@ function App() {
     };
 
     const setRpcClient = (idenaNodeUrl: string, idenaNodeApiKey: string, setNodeAvailable: React.Dispatch<React.SetStateAction<boolean>>) => {
-        rpcClientRef.current = isDesktopOnchainMode
+        const generation = ++rpcInitRef.current.generation;
+        if (rpcInitRef.current.timer) {
+            clearTimeout(rpcInitRef.current.timer);
+            rpcInitRef.current.timer = null;
+        }
+        const client = isDesktopOnchainMode
             ? createDesktopRpcClient(setNodeAvailable)
             : getRpcClient({ idenaNodeUrl, idenaNodeApiKey }, setNodeAvailable);
+        rpcClientRef.current = client;
+        let warnedSync = false;
 
-        (async function() {
-            const { result: syncingResult } = await rpcClientRef.current!('bcn_syncing', []);
+        const initialize = async () => {
+            const { result: syncingResult } = await client('bcn_syncing', []);
+            if (generation !== rpcInitRef.current.generation) return;
 
             if (!syncingResult) {
                 showFlashNotice('error', 'Your node has an issue. Please check the RPC URL or API key.');
                 return;
             }
             if (syncingResult.syncing) {
-                showFlashNotice('warning', 'Your node is still syncing. Please try again after syncing has completed.');
+                if (!warnedSync) {
+                    showFlashNotice('warning', 'Your node is still syncing. Messaging will become available after synchronization.');
+                    warnedSync = true;
+                }
+                rpcInitRef.current.timer = setTimeout(initialize, 3000);
                 return;
             }
 
@@ -439,7 +452,8 @@ function App() {
             if (!initialBlock) {
                 const { result: getLastBlockResult } = inputFindingPastPosts === 'indexer-api'
                     ? await getLastBlockWithIdenaIndexerApi(indexerApiUrl)
-                    : await rpcClientRef.current!('bcn_lastBlock', []);
+                    : await client('bcn_lastBlock', []);
+                if (generation !== rpcInitRef.current.generation) return;
                 const initialBlockTimestamp = inputFindingPastPosts === 'indexer-api'
                     ? getTimestampFromIndexerApi(getLastBlockResult?.timestamp)
                     : getLastBlockResult?.timestamp;
@@ -448,7 +462,8 @@ function App() {
                 setScanningPastBlocks(true);
             }
 
-            const { result: getCoinbaseAddrResult } = await rpcClientRef.current!('dna_getCoinbaseAddr', [], true);
+            const { result: getCoinbaseAddrResult } = await client('dna_getCoinbaseAddr', [], true);
+            if (generation !== rpcInitRef.current.generation) return;
 
             if (getCoinbaseAddrResult) {
                 setViewOnlyNode(false);
@@ -460,8 +475,14 @@ function App() {
                 setPostersAddress(getCoinbaseAddrResult || '');
             }
 
-        })();
+        };
+        void initialize();
     };
+
+    useEffect(() => () => {
+        ++rpcInitRef.current.generation;
+        if (rpcInitRef.current.timer) clearTimeout(rpcInitRef.current.timer);
+    }, []);
 
     useEffect(() => {
         if (inputNodeApplied) {
