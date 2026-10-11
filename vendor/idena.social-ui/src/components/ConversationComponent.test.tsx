@@ -127,4 +127,26 @@ describe('ConversationComponent route hydration', () => {
         expect(markup).not.toContain('reaction-only-transaction');
         expect(markup).toContain('cursor-pointer">1</a>');
     });
+
+    it('shows the flip delivery copy action only to the addressed buyer', () => {
+        const author = `0x${'a'.repeat(40)}`;
+        const currentBuyer = '0x0000000000000000000000000000000000000001';
+        const envelope = (buyer: string) => `{"format":"fod.direct-delivery","version":2,"network":"idena","contract":"${'c'.repeat(40)}","author":"${'a'.repeat(40)}","offerId":"${'d'.repeat(64)}","orderId":1,"orderNonce":1,"buyer":"${buyer}","deliveryKey":"${'e'.repeat(130)}","ciphertext":"${'f'.repeat(438)}"}`;
+        const message = {
+            timestamp: 1,
+            txHash: 'synthetic-transaction',
+            messageId: '1',
+            sender: author,
+            participants: [author, currentBuyer],
+            message: envelope(currentBuyer.slice(2)),
+            replyToMessageId: '',
+            sendersDetails_atTimeOfMessage: { stake: 1, state: 'Human', age: 2 },
+            isLike: false,
+        };
+        const posters = { [author]: { address: author, age: 2, pubkey: 'synthetic-key', stake: '1', state: 'Human' } };
+
+        expect(renderConversation({ missing: ['1'] }, { 1: message }, posters)).toContain('Copy flip delivery');
+        expect(renderConversation({ missing: ['1'] }, { 1: { ...message, message: envelope('b'.repeat(40)) } }, posters)).not.toContain('Copy flip delivery');
+        expect(renderConversation({ missing: ['1'] }, { 1: { ...message, sender: `0x${'e'.repeat(40)}` } }, posters)).not.toContain('Copy flip delivery');
+    });
 });

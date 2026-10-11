@@ -20,6 +20,7 @@ import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSo
 import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageComponent';
 import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
 import DesktopNavigation from './components/DesktopNavigation';
+import { getDirectDeliverySendError, parseDirectDelivery } from './logic/directDelivery';
 import ScanBlocksComponent from './components/ScanBlocksComponent';
 import ScrollToTopButtonComponent from './components/ScrollToTopButtonComponent';
 const socialBaseUrl = new URL('./', window.location.href);
@@ -1586,15 +1587,22 @@ function App() {
             return;
         }
 
+        const messageTextareaElement = document.getElementById(`message-input-${location}`) as HTMLTextAreaElement;
+        const postMediaAttachment = postMediaAttachmentsRef.current['message-' + location];
+        const originalText = messageTextareaElement.value;
+        const directDelivery = parseDirectDelivery(originalText);
+        const deliveryError = getDirectDeliverySendError(originalText, postersAddress, postersAddressRef.current, recipients, !!postMediaAttachment);
+        if (deliveryError) {
+            alert(deliveryError);
+            return;
+        }
+
         const copyTxTextElement = document.getElementById(`message-copytx-${location}`) as HTMLElement;
         const savedInnerText = copyTxTextElement!.innerText;
 
         if (copyTxHandlerEnabledRef.current) {
             copyTxHandlerEnabledRef.current = false;
             copyTxTextElement!.innerText = 'Copying';
-
-            const messageTextareaElement = document.getElementById(`message-input-${location}`) as HTMLTextAreaElement;
-            const postMediaAttachment = postMediaAttachmentsRef.current['message-' + location];
 
             const messageContent = getTextAndMediaForPost(messageTextareaElement, postMediaAttachment);
             const { inputText } = messageContent;
@@ -1627,6 +1635,16 @@ function App() {
                 copyTxTextElement!.innerText = savedInnerText;
                 copyTxHandlerEnabledRef.current = true;
                 return;
+            }
+
+            if (directDelivery) {
+                const currentError = getDirectDeliverySendError(messageTextareaElement.value, postersAddress, postersAddressRef.current, recipients, !!postMediaAttachmentsRef.current['message-' + location]);
+                if (messageTextareaElement.value !== originalText || currentError) {
+                    alert(currentError || 'Flip delivery draft changed while preparing the transaction.');
+                    copyTxTextElement!.innerText = savedInnerText;
+                    copyTxHandlerEnabledRef.current = true;
+                    return;
+                }
             }
 
             messageTextareaElement.value = '';
@@ -1672,6 +1690,24 @@ function App() {
             showFlashNotice('error', 'No text or media provided.');
             return;
         }
+        const deliveryError = getDirectDeliverySendError(initial.inputText, postersAddress, postersAddressRef.current, recipients, !!postMediaAttachment);
+        if (deliveryError) {
+            showFlashNotice('error', deliveryError);
+            return;
+        }
+        const directDelivery = parseDirectDelivery(initial.inputText);
+        const assertCurrentDirectDelivery = () => {
+            if (!directDelivery) return;
+            if (messageTextareaElement.value !== originalText) throw new Error('Flip delivery draft changed during submission.');
+            const currentError = getDirectDeliverySendError(
+                messageTextareaElement.value,
+                postersAddress,
+                postersAddressRef.current,
+                recipients,
+                !!postMediaAttachmentsRef.current[`message-${location}`],
+            );
+            if (currentError) throw new Error(currentError);
+        };
         if (recipients.length < 1 || recipients.length > 15 || recipients.some(recipient => !postersRef.current[recipient.toLowerCase()]?.pubkey)) {
             showFlashNotice('error', 'Recipient public keys are unavailable. No storage transaction was submitted.');
             return;
@@ -1686,6 +1722,7 @@ function App() {
         setSubmittingMessage(location);
         try {
             const prepare = async (): Promise<PreparedMessage> => {
+                assertCurrentDirectDelivery();
                 let {inputText, media, mediaType} = initial;
                 let textPassword = '';
                 let mediaPassword = '';
@@ -1719,12 +1756,24 @@ function App() {
                     mediaType = [postMediaAttachment.file.type];
                 }
                 const rawMessage = JSON.stringify([[postersAddress.toLowerCase(), ...recipients], '', inputText, textPassword, replyToMessageId || '', media, mediaType, mediaPassword, []]);
-                return {message: await encryptMessageForRecipients(rawMessage, recipients), messageHash: keccak256(rawMessage), uploads};
+                const prepared = {message: await encryptMessageForRecipients(rawMessage, recipients), messageHash: keccak256(rawMessage), uploads};
+                assertCurrentDirectDelivery();
+                return prepared;
             };
             if (inputSendingTxs === 'rpc') {
-                await sendPendingMessage({key, storage: window.localStorage, from: postersAddress, contract: contractAddressCurrent, method: sendMessageMethod, rpcClient: rpcClientRef.current!, prepare, confirmFee: confirmMessageFee});
+                await sendPendingMessage({
+                    key, storage: window.localStorage, from: postersAddress, contract: contractAddressCurrent,
+                    method: sendMessageMethod, rpcClient: rpcClientRef.current!, prepare,
+                    confirmFee: async (maxFee, remainingUploads) => {
+                        const approved = await confirmMessageFee(maxFee, remainingUploads);
+                        if (approved) assertCurrentDirectDelivery();
+                        return approved;
+                    },
+                    assertBeforeSubmission: assertCurrentDirectDelivery,
+                });
             } else {
                 const prepared = await prepare();
+                assertCurrentDirectDelivery();
                 await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, prepared.message, prepared.messageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
             }
             if (messageTextareaElement.value === originalText) messageTextareaElement.value = '';

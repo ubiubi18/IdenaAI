@@ -42,6 +42,28 @@ const defaultResponse = (method: string) => {
 };
 
 describe('pending desktop messages', () => {
+    it('rechecks the active delivery before the paid message call after fee approval', async () => {
+        let estimateCount = 0;
+        let correctIdentity = true;
+        const rpcClient = vi.fn(async (method: string) => {
+            if (method === 'contract_estimateCall') {
+                if (++estimateCount === 2) correctIdentity = false;
+                return estimate;
+            }
+            return defaultResponse(method);
+        });
+        const options = {
+            ...makeOptions('changed-identity', memoryStorage(), rpcClient, async () => prepared()),
+            assertBeforeSubmission: () => {
+                if (!correctIdentity) throw new Error('Flip delivery author does not match the active identity.');
+            },
+        };
+
+        await expect(sendPendingMessage(options)).rejects.toThrow('active identity');
+        expect(options.confirmFee).toHaveBeenCalledOnce();
+        expect(rpcClient.mock.calls.map(([method]) => method)).not.toContain('contract_call');
+    });
+
     it('requires fee approval before any paid transaction and retains the prepared upload on cancellation', async () => {
         const values = new Map<string, string>();
         const rpcClient = vi.fn(async (method: string) => defaultResponse(method));
