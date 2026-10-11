@@ -1,6 +1,7 @@
 const {join, resolve} = require('path')
 const os = require('os')
 const https = require('https')
+const {spawn} = require('child_process')
 const {
   BrowserWindow,
   app,
@@ -30,6 +31,7 @@ const {
   resolveIdenaSocialRoot,
 } = require('./idena-social-protocol')
 const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
+const {createFodDirectCheckService} = require('./fod-direct-check')
 const {
   validateExportKeyPayload,
   validateGenericRpcMethod,
@@ -805,6 +807,24 @@ async function performSocialCryptoNodeRpc(payload = {}) {
 
 const idenaSocialCryptoService = createIdenaSocialCryptoService({
   rpcCall: performSocialCryptoNodeRpc,
+})
+
+const fodDirectCheckService = createFodDirectCheckService({
+  dialog,
+  fs: require('fs'),
+  spawn,
+  binaryPath: process.env.IDENAAI_FOD_DIRECT_CHECK_BIN || '',
+  getNodeRpcConnection,
+  getActiveCoinbase: async () => {
+    const response = await sendNodeRpcRequest({
+      method: 'dna_getCoinbaseAddr',
+      params: [],
+    })
+    if (response?.error || typeof response?.result !== 'string') {
+      throw new Error('active_identity_unavailable')
+    }
+    return response.result
+  },
 })
 
 function normalizeLocalAiPayload(payload = {}) {
@@ -3537,6 +3557,22 @@ handleTrusted('social.rpc', async (_event, payload) =>
 handleTrusted('social.crypto', async (_event, payload) =>
   idenaSocialCryptoService(payload)
 )
+
+handleTrusted('social.direct-check', async (_event, payload) => {
+  try {
+    const result = await fodDirectCheckService(payload)
+    return {
+      result: {
+        orderId: result.orderId,
+        author: result.author,
+        epoch: result.epoch,
+        usableFlips: result.usableFlips,
+      },
+    }
+  } catch {
+    return {error: {message: 'Could not verify locally.'}}
+  }
+})
 
 handleTrusted('shell.openExternal.safe', async (_event, payload) =>
   openExternalSafely(payload && payload.url)

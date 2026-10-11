@@ -267,6 +267,14 @@ The desktop's main process handles private-key operations for the supported
 message path; the embedded page receives decrypted message text, not the private
 identity key. Legacy messages may require the social app's manual session credentials.
 
+For a received Flips on Demand delivery, **Check flip keys** verifies the
+funded or cooperatively settled order and original flips through the active
+node. It requires a locally built `fod` CLI with `direct-check`, configured by
+the absolute `IDENAAI_FOD_DIRECT_CHECK_BIN` path, plus the buyer's owner-only
+retained purchase and raw delivery-key files. The check does not save a vault
+or confirm payment; use `fod direct-receive` before confirmation. The desktop
+package does not bundle the CLI.
+
 ## Source and release status
 
 `main` contains ongoing development; the package version is currently `0.1.0-rc7`.

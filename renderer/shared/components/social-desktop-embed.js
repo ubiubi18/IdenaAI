@@ -25,6 +25,7 @@ import {
   SOCIAL_MESSAGE_CRYPTO_VERSION,
   SOCIAL_OFFICIAL_INDEXER_URL,
   validateSocialCryptoRequest,
+  validateSocialDirectCheckRequest,
   validateSocialRpcRequest,
   isTrustedSocialFrameMessage,
 } from './social-desktop-rpc-policy'
@@ -51,6 +52,8 @@ const SOCIAL_RPC_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_REQUEST'
 const SOCIAL_RPC_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_RESPONSE'
 const SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_REQUEST'
 const SOCIAL_CRYPTO_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_RESPONSE'
+const SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_DIRECT_CHECK_REQUEST'
+const SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_DIRECT_CHECK_RESPONSE'
 
 function formatBytesAsMib(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
@@ -220,8 +223,31 @@ export default function SocialDesktopEmbed({
 
     if (
       nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE &&
-      nextPayload?.type !== SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE
+      nextPayload?.type !== SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE &&
+      nextPayload?.type !== SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE
     ) {
+      return
+    }
+
+    if (nextPayload.type === SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE) {
+      const payload = nextPayload.payload
+      const requestId = payload?.requestId
+      let response
+      if (validateSocialDirectCheckRequest(payload)) {
+        response = {error: {message: 'Invalid flip delivery request.'}}
+      } else {
+        try {
+          const check = window.idena?.social?.directCheck
+          if (typeof check !== 'function') throw new Error('Local verification is unavailable.')
+          response = await check({message: payload.message})
+        } catch {
+          response = {error: {message: 'Local verification is unavailable.'}}
+        }
+      }
+      port.postMessage({
+        type: SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE,
+        payload: {requestId, response},
+      })
       return
     }
 

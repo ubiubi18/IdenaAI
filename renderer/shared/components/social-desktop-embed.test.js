@@ -4,6 +4,7 @@ const {
   SOCIAL_EMBED_ORIGIN,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
   validateSocialCryptoRequest,
+  validateSocialDirectCheckRequest,
   validateSocialRpcRequest,
   isTrustedSocialFrameMessage,
 } = require('./social-desktop-rpc-policy')
@@ -111,6 +112,23 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
         ciphertexts: Array(17).fill(groupCiphertexts[0]),
       })
     ).toBe('invalid_crypto_request')
+  })
+
+  it('passes only one bounded delivery text to the local checker', () => {
+    const valid = {
+      requestId: 'check-1',
+      message: '{"format":"fod.direct-delivery","version":2}',
+    }
+    expect(validateSocialDirectCheckRequest(valid)).toBeNull()
+    expect(
+      validateSocialDirectCheckRequest({...valid, binaryPath: '/tmp/other'})
+    ).toBe('invalid_direct_check_request')
+    expect(
+      validateSocialDirectCheckRequest({...valid, message: 'ordinary message'})
+    ).toBe('invalid_direct_check_request')
+    expect(
+      validateSocialDirectCheckRequest({...valid, message: 'x'.repeat(2049)})
+    ).toBe('invalid_direct_check_request')
   })
 
   it('allows the bounded transaction-history lookup required for messaging', () => {
