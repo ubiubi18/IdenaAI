@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 const {EventEmitter} = require('events')
+const {createHash} = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -13,17 +14,23 @@ const {
 const CONTRACT = 'e86d31069194690b1a818f24912bafdacfb29f19'
 const CODE_HASH =
   '0x9ee10f3588bd403460ff6149016a3e4544df5c2ef02f6e6123a5cd75588f3319'
+const V4_CONTRACT = '3730be2217b0de1fdfe73098d37f3174dd9748cb'
+const V4_CODE_HASH =
+  '0x8b9fd14f9c08708db1ab25d90396563d3efe6bed6843c5aae15932d68bdf614c'
+const TEST_BINARY_HASH = createHash('sha256')
+  .update(fs.readFileSync(process.execPath))
+  .digest('hex')
 const AUTHOR = 'a'.repeat(40)
 const BUYER = 'b'.repeat(40)
 const CIPHERTEXT = 'c'.repeat(438)
 const ORDER_ID = '18446744073709551615'
 
-function messageText(orderId = ORDER_ID) {
+function messageText(orderId = ORDER_ID, contract = CONTRACT) {
   const text = JSON.stringify({
     format: 'fod.direct-delivery',
     version: 2,
     network: 'idena',
-    contract: CONTRACT,
+    contract,
     author: AUTHOR,
     offerId: 'd'.repeat(64),
     orderId: 1,
@@ -35,15 +42,15 @@ function messageText(orderId = ORDER_ID) {
   return text.replace('"orderId":1', `"orderId":${orderId}`)
 }
 
-function resultText(orderId = ORDER_ID, author = AUTHOR) {
-  return `{"format":"fod.direct-check","version":1,"contract":"${CONTRACT}","orderId":${orderId},"author":"${author}","epoch":230,"usableFlips":3}`
+function resultText(orderId = ORDER_ID, author = AUTHOR, contract = CONTRACT) {
+  return `{"format":"fod.direct-check","version":1,"contract":"${contract}","orderId":${orderId},"author":"${author}","epoch":230,"usableFlips":3}`
 }
 
-function receiptText(orderId = ORDER_ID, author = AUTHOR) {
+function receiptText(orderId = ORDER_ID, author = AUTHOR, contract = CONTRACT) {
   const text = JSON.stringify({
     format: 'fod.opened-direct-delivery',
     version: 1,
-    contract: CONTRACT,
+    contract,
     offerId: 'd'.repeat(64),
     orderId: 1,
     orderNonce: 1,
@@ -138,6 +145,7 @@ describe('trusted FoD direct check', () => {
       spawn,
       fs,
       binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH,
     })
   }
 
@@ -151,7 +159,11 @@ describe('trusted FoD direct check', () => {
     const rpcKeyFile = args[args.indexOf('-key-file') + 1]
     const outPath = args[args.indexOf('-out') + 1]
 
-    expect(binary).toBe(process.execPath)
+    expect(binary).not.toBe(process.execPath)
+    expect(fs.statSync(path.dirname(binary)).mode & 0o777).toBe(0o700)
+    expect(fs.statSync(binary).mode & 0o777).toBe(0o700)
+    expect(createHash('sha256').update(fs.readFileSync(binary)).digest('hex'))
+      .toBe(TEST_BINARY_HASH)
     expect(options).toEqual(
       expect.objectContaining({shell: false, stdio: ['pipe', 'pipe', 'pipe']})
     )
@@ -196,6 +208,17 @@ describe('trusted FoD direct check', () => {
     expect(JSON.stringify(summary)).not.toContain(CIPHERTEXT)
     expect(JSON.stringify(summary)).not.toContain(root)
     expect(fs.existsSync(path.dirname(outPath))).toBe(false)
+  })
+
+  it('checks v4 with the pinned hash and explicit CLI version', async () => {
+    const child = fakeSpawn({result: resultText(ORDER_ID, AUTHOR, V4_CONTRACT)})
+    const summary = await service({spawn: child.spawn})({
+      message: messageText(ORDER_ID, V4_CONTRACT),
+    })
+    const {args} = child.calls[0]
+    expect(args.slice(0, 3)).toEqual(['direct-check', '-direct-version', '4'])
+    expect(args[args.indexOf('-code-hash') + 1]).toBe(V4_CODE_HASH)
+    expect(summary.contract).toBe(`0x${V4_CONTRACT}`)
   })
 
   it('rejects payload fields and malformed messages before opening files', async () => {
@@ -407,6 +430,7 @@ describe('trusted FoD direct receive', () => {
       spawn,
       fs,
       binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH,
       vaultRoot: selectedVaultRoot,
     })
   }
@@ -480,15 +504,33 @@ describe('trusted FoD direct receive', () => {
       expect(fs.statSync(file).mode & 0o777).toBe(0o600)
     }
     expect(summary).toEqual({
+      contract: `0x${CONTRACT}`,
       orderId: ORDER_ID,
+      buyer: `0x${BUYER}`,
       author: `0x${AUTHOR}`,
       epoch: 230,
       usableFlips: 3,
       vaultPath,
+      receiptPath,
     })
     expect(JSON.stringify(summary)).not.toContain('RPC_SECRET')
     expect(JSON.stringify(summary)).not.toContain(CIPHERTEXT)
     expect(JSON.stringify(summary)).not.toContain(passphrase)
+  })
+
+  it('saves v4 only after the pinned CLI verifies the receipt', async () => {
+    const child = fakeSpawn({
+      result: receiptText(ORDER_ID, AUTHOR, V4_CONTRACT),
+    })
+    const summary = await service({spawn: child.spawn})({
+      message: messageText(ORDER_ID, V4_CONTRACT),
+      passphrase,
+    })
+    const {args} = child.calls[0]
+    expect(args.slice(0, 3)).toEqual(['direct-receive', '-direct-version', '4'])
+    expect(args[args.indexOf('-code-hash') + 1]).toBe(V4_CODE_HASH)
+    expect(summary.contract).toBe(`0x${V4_CONTRACT}`)
+    expect(fs.existsSync(summary.receiptPath)).toBe(true)
   })
 
   it('accepts the indented signed receipt written by the Go client', async () => {

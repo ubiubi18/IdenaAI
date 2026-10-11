@@ -35,6 +35,9 @@ const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
 const {
   createFodDirectCheckService,
   createFodDirectReceiveService,
+  createFodDirectConfirmService,
+  DIRECT_V3_CONTRACT,
+  DIRECT_V4_CONTRACT,
 } = require('./fod-direct-check')
 const {
   validateExportKeyPayload,
@@ -753,8 +756,11 @@ async function performExportKeyRpc(payload = {}) {
   return sendNodeRpcRequest(payload)
 }
 
-async function sendNodeRpcRequest(payload = {}) {
-  const {url, key} = getNodeRpcConnection()
+async function sendNodeRpcRequest(
+  payload = {},
+  connection = getNodeRpcConnection()
+) {
+  const {url, key} = connection
   const requestBody = {
     method: String(payload.method || '').trim(),
     params: Array.isArray(payload.params) ? payload.params : [],
@@ -838,6 +844,11 @@ const fodDirectVaultRoot = join(app.getPath('userData'), 'fod-direct-vaults')
 const fodDirectReceiveService = createFodDirectReceiveService({
   ...fodDirectServiceOptions,
   vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectConfirmService = createFodDirectConfirmService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
 })
 
 function normalizeLocalAiPayload(payload = {}) {
@@ -3590,9 +3601,14 @@ handleTrusted('social.direct-check', async (_event, payload) => {
 handleTrusted('social.direct-receive', async (_event, payload) => {
   try {
     const result = await fodDirectReceiveService(payload)
+    const canConfirm = [DIRECT_V3_CONTRACT, DIRECT_V4_CONTRACT].includes(
+      result.contract
+    )
     return {
       result: {
         orderId: result.orderId,
+        contract: result.contract,
+        canConfirm,
         author: result.author,
         epoch: result.epoch,
         usableFlips: result.usableFlips,
@@ -3601,6 +3617,15 @@ handleTrusted('social.direct-receive', async (_event, payload) => {
     }
   } catch {
     return {error: {message: 'Could not save verified keys locally.'}}
+  }
+})
+
+handleTrusted('social.direct-confirm', async (_event, payload) => {
+  try {
+    const result = await fodDirectConfirmService(payload)
+    return {result}
+  } catch {
+    return {error: {message: 'Could not confirm payment on-chain.'}}
   }
 })
 

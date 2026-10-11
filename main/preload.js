@@ -1858,6 +1858,8 @@ const bridge = {
     directCheck: (payload) => invokeCloneable('social.direct-check', payload),
     directReceive: (payload) =>
       invokeCloneable('social.direct-receive', payload),
+    directConfirm: (payload) =>
+      invokeCloneable('social.direct-confirm', payload),
     openDirectVaultFolder: () =>
       invokeCloneable('social.open-direct-vault-folder'),
   },
