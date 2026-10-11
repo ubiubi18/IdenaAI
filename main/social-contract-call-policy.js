@@ -5,7 +5,7 @@ const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
 const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * IDNA_SCALE
-const SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT = 5n * IDNA_SCALE
+const SOCIAL_MESSAGE_MAX_FEE = 20n * IDNA_SCALE
 const SOCIAL_MAX_ARGUMENT_BYTES = 1024 * 1024
 const SOCIAL_MAX_TEXT_BYTES = 256 * 1024
 const SOCIAL_MAX_CIPHERTEXT_BYTES = SOCIAL_MAX_TEXT_BYTES + 256
@@ -171,8 +171,7 @@ function validateSocialContractCall(call) {
     if (ciphertextCount < 2 || ciphertextCount > 16) {
       return 'invalid_social_contract_call'
     }
-    maxFeeLimit =
-      global.BigInt(ciphertextCount) * SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT
+    maxFeeLimit = SOCIAL_MESSAGE_MAX_FEE
   }
   if (maxFeeAtoms > maxFeeLimit) return 'invalid_social_contract_call'
 

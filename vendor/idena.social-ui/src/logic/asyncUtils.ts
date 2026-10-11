@@ -1422,7 +1422,7 @@ export const prepareRpcMessageCall = async (
         throw new Error('The node returned an invalid message fee estimate.');
     }
     const maxFee = cost.add(fee).mul('1.2');
-    const feeLimit = inputMessage.length * 5;
+    const feeLimit = 20;
     if (maxFee.greaterThan(feeLimit)) throw new Error(`The message exceeds the desktop fee limit of ${feeLimit} IDNA.`);
     return {...call, maxFee: maxFee.toFixed()};
 };

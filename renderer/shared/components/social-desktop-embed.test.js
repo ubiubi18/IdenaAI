@@ -222,7 +222,7 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
     ).toBe('invalid_social_contract_call')
     expect(
       validateSocialRpcRequest('excess-fee-estimate', 'contract_estimateCall', [
-        {...messageCall, maxFee: '10.000000000000000001'},
+        {...messageCall, maxFee: '20.000000000000000001'},
       ])
     ).toBe('invalid_social_contract_call')
     const messageArgument = JSON.parse(messageCall.args[0].value)
@@ -240,9 +240,9 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
       ],
     })
     for (const [count, limit] of [
-      [2, 10],
-      [6, 30],
-      [16, 80],
+      [2, 20],
+      [6, 20],
+      [16, 20],
     ]) {
       for (const rpcMethod of ['contract_call', 'contract_estimateCall']) {
         expect(

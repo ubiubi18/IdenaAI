@@ -238,8 +238,6 @@ function Messages() {
             return;
         }
 
-        setRecipients([]);
-
         makePostsWith === 'rpc' ? handleOpenRpcSendMessageModal(location, recipients, replyToMessageId) : submitMessageHandler(location, recipients, replyToMessageId);
     };
 
