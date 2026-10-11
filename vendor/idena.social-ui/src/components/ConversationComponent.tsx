@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from "react-router";
 import { useReducer } from "react";
 import OneOnOneConversationHeaderComponent from "./OneOnOneConversationHeaderComponent";
 import GroupConversationHeaderComponent from "./GroupConversationHeaderComponent";
+import { isDirectDeliveryAuthor, isDirectDeliveryBuyer, parseDirectDelivery } from "../logic/directDelivery";
 
 type ConversationComponentProps = {
     conversationKey: string,
@@ -236,6 +237,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                         const posterAge = message.sendersDetails_atTimeOfMessage.age;
                         const { displayDate, displayTime } = getDisplayDateTime(message.timestamp);
                         const { messageLines } = getMessageLines(message.message);
+                        const delivery = typeof message.message === 'string' ? parseDirectDelivery(message.message) : null;
                         const replyToMessage = messagesRef.current[message.replyToMessageId];
                         const awaitingReplyToMessage = message.replyToMessageId && !replyToMessage;
 
@@ -283,6 +285,10 @@ function ConversationComponent(props: ConversationComponentProps) {
                                             </div>
                                             <div className="max-h-[9999px] pl-1 pr-2 pt-0.5 pb-1 text-[12px] text-wrap leading-5 overflow-hidden">
                                                 <p className="[word-break:break-word]">{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
+                                                {delivery && isDirectDeliveryBuyer(delivery, postersAddress) && isDirectDeliveryAuthor(delivery, message.sender) && <button type="button" className="mt-1 text-blue-400 hover:underline cursor-pointer" onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    void navigator.clipboard.writeText(delivery.text).catch(() => alert('Unable to copy flip delivery.'));
+                                                }}>Copy flip delivery</button>}
                                             </div>
                                             {message.image && <div className="my-1 mx-1">
                                                 <img className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm hover:cursor-pointer" src={message.image} onClick={(e) => handleExpandImageModal(e, message.image!, message.cid)} />

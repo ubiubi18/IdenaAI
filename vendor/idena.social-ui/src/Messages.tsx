@@ -1,10 +1,11 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { type Message, type Poster } from "./logic/asyncUtils";
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from "./App.exports";
 import ConversationComponent from "./components/ConversationComponent";
 import { isValidAddress } from "./logic/utils";
 import { resolveMessagingRecipient } from "./logic/messageRecipients";
+import { isDirectDeliveryAuthor, parseDirectDelivery } from "./logic/directDelivery";
 
 type MessagesProps = {
     copyMessageTxHandler: (location: string, recipients: string[], replyToMessageId?: string | undefined) => Promise<void>,
@@ -83,8 +84,16 @@ function Messages() {
     const [addNewRecipient, setAddNewRecipient] = useState<string>('');
     const [loadingNewRecipient, setLoadingNewRecipient] = useState<boolean>(false);
     const [addressInvalid, setAddressInvalid] = useState<string>('');
+    const [importingDelivery, setImportingDelivery] = useState(false);
 
     const [recipients, setRecipients] = useState<string[]>([]);
+    const recipientsRef = useRef(recipients);
+    const postersAddressRef = useRef(postersAddress);
+    const recipientInputRef = useRef<HTMLInputElement>(null);
+    const mainTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const deliveryFileInputRef = useRef<HTMLInputElement>(null);
+    recipientsRef.current = recipients;
+    postersAddressRef.current = postersAddress;
 
     const [, forceUpdate] = useReducer(x => x + 1, 0);
 
@@ -99,6 +108,7 @@ function Messages() {
     };
 
     const addRecipient = async () => {
+        if (importingDelivery) return;
         try {
             setLoadingNewRecipient(true);
 
@@ -147,6 +157,61 @@ function Messages() {
         }
     };
 
+    const hasExistingDraft = () => Boolean(
+        recipientsRef.current.length ||
+        recipientInputRef.current?.value.trim() ||
+        mainTextareaRef.current?.value ||
+        postMediaAttachmentsRef.current['message-main']
+    );
+
+    const importFlipDelivery = async (file: File) => {
+        if (inputPostDisabled || messageSettingsInvalid || loadingNewRecipient || importingDelivery) return;
+        if (hasExistingDraft()) {
+            alert('Clear the current draft and recipients before importing a flip delivery.');
+            return;
+        }
+
+        setImportingDelivery(true);
+        try {
+            if (file.size > 2048) throw new Error('Flip delivery file exceeds 2048 bytes.');
+            const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+            const delivery = parseDirectDelivery(text);
+            if (!delivery) throw new Error('Invalid flip delivery file.');
+            if (!isDirectDeliveryAuthor(delivery, postersAddressRef.current)) {
+                throw new Error('This flip delivery belongs to a different author identity.');
+            }
+
+            const buyer = `0x${delivery.buyer}`;
+            const result = await resolveMessagingRecipient({
+                address: buyer,
+                posters: postersRef.current,
+                preferredSource: findPostsWithRef.current,
+                rpcClient: rpcClientRef.current,
+                indexerApiUrl: indexerApiUrlRef.current,
+            });
+            if (result.error) {
+                throw new Error(result.error === 'pubkey missing'
+                    ? 'Buyer public key is not published yet.'
+                    : 'Buyer recipient was not found.');
+            }
+            if (!isDirectDeliveryAuthor(delivery, postersAddressRef.current)) {
+                throw new Error('The active author identity changed during import.');
+            }
+            if (hasExistingDraft() || !mainTextareaRef.current) {
+                throw new Error('The message draft changed during import. Clear it before trying again.');
+            }
+
+            mainTextareaRef.current.value = delivery.text;
+            recipientsRef.current = [buyer];
+            setRecipients([buyer]);
+            mainTextareaRef.current.focus();
+        } catch (error) {
+            alert(error instanceof Error ? error.message : String(error));
+        } finally {
+            setImportingDelivery(false);
+        }
+    };
+
     const removeMediaHandler = (e: MouseEventLocal, location: string) => {
         e?.stopPropagation();
 
@@ -190,13 +255,13 @@ function Messages() {
         </div>
         <div className="mb-4">
             <p className="mb-1">Add recipient address:</p>
-            <input className="w-full mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" placeholder="0x..." value={addNewRecipient} onChange={e => { setAddressInvalid(''); setAddNewRecipient(e.target.value); }} />
+            <input ref={recipientInputRef} className="w-full mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" placeholder="0x..." value={addNewRecipient} onChange={e => { setAddressInvalid(''); setAddNewRecipient(e.target.value); }} />
             {addressInvalid && <div className="flex gap-2 text-[11px] text-red-400">
                 <span>{addressInvalid === 'pubkey missing' ? 'Recipient public key is not published yet.' : `Invalid address: ${addressInvalid}.`}</span>
                 {addressInvalid === 'pubkey missing' && addNewRecipient.trim() && addNewRecipient.trim().toLowerCase() !== zeroAddress && <><span className="text-blue-400 hover:underline hover:cursor-pointer" onClick={(e) => handleSubmitPubkeyModal(e, addNewRecipient.trim().toLowerCase())}>Manually provide pubkey</span><span>then try again</span></>}
             </div>}
             <div>
-                <button className="h-7 w-30 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10" disabled={loadingNewRecipient} onClick={() => addRecipient()}>{loadingNewRecipient ? 'Loading...' : 'Add Recipient'}</button>
+                <button className="h-7 w-30 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10" disabled={loadingNewRecipient || importingDelivery} onClick={() => addRecipient()}>{loadingNewRecipient ? 'Loading...' : 'Add Recipient'}</button>
             </div>
         </div>
         {!!recipients.length && <div className="mb-4">
@@ -204,8 +269,17 @@ function Messages() {
             {recipients.map(recipient => <><p className="inline">{recipient}</p><button className="ml-2 text-[10px] align-[2.5px] h-4 w-5 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => removeRecipient(recipient)}>✖</button></>)}
         </div>}
         <div className="mb-4">
+            <input ref={deliveryFileInputRef} type="file" className="hidden" onChange={e => {
+                const file = e.currentTarget.files?.[0];
+                e.currentTarget.value = '';
+                if (file) void importFlipDelivery(file);
+            }} />
+            <button type="button" className="mb-2 text-blue-400 text-[12px] hover:underline cursor-pointer disabled:opacity-50" disabled={inputPostDisabled || messageSettingsInvalid || loadingNewRecipient || importingDelivery} onClick={() => deliveryFileInputRef.current?.click()}>
+                {importingDelivery ? 'Importing...' : 'Import flip delivery'}
+            </button>
             <textarea
                 id='message-input-main'
+                ref={mainTextareaRef}
                 rows={4}
                 className="w-full field-sizing-content min-h-[104px] max-h-[520px] py-1 px-2 outline-1 placeholder:text-gray-500 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500 [&::-webkit-scrollbar-corner]:bg-neutral-500"
                 placeholder="Write your message here..."
