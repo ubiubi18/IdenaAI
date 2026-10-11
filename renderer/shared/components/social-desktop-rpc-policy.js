@@ -12,7 +12,7 @@ const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
 const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * SOCIAL_IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * SOCIAL_IDNA_SCALE
-const SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT = 5n * SOCIAL_IDNA_SCALE
+const SOCIAL_MESSAGE_MAX_FEE = 20n * SOCIAL_IDNA_SCALE
 
 export const SOCIAL_CONTRACT_ADDRESS =
   '0x840e092e31e9656fF15E541505039ed77585338E'
@@ -181,8 +181,7 @@ function validateSocialContractCall(call) {
     if (ciphertextCount < 2 || ciphertextCount > 16) {
       return 'invalid_social_contract_call'
     }
-    maxFeeLimit =
-      BigInt(ciphertextCount) * SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT
+    maxFeeLimit = SOCIAL_MESSAGE_MAX_FEE
   }
   if (maxFee > maxFeeLimit) return 'invalid_social_contract_call'
 
