@@ -103,11 +103,11 @@ describe('social contract-call policy', () => {
     }
   })
 
-  it('limits DM fees to 5 IDNA per ciphertext while posts and tips stay at 10', () => {
+  it('limits message fees to 20 IDNA while posts and tips stay at 10', () => {
     for (const [count, limit] of [
-      [2, 10],
-      [6, 30],
-      [16, 80],
+      [2, 20],
+      [6, 20],
+      [16, 20],
     ]) {
       const call = makeMessageCall(count)
       expect(
