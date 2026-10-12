@@ -9,6 +9,7 @@ const {PassThrough} = require('stream')
 const {
   createFodDirectCheckService,
   createFodDirectReceiveService,
+  createFodDirectConfirmService,
 } = require('./fod-direct-check')
 
 const CONTRACT = 'e86d31069194690b1a818f24912bafdacfb29f19'
@@ -24,6 +25,7 @@ const AUTHOR = 'a'.repeat(40)
 const BUYER = 'b'.repeat(40)
 const CIPHERTEXT = 'c'.repeat(438)
 const ORDER_ID = '18446744073709551615'
+const CONFIRM_ORDER_ID = '17'
 
 function messageText(orderId = ORDER_ID, contract = CONTRACT) {
   const text = JSON.stringify({
@@ -91,13 +93,18 @@ function fakeSpawn({
     child.stdin.on('finish', () => {
       if (stderr) child.stderr.write(stderr)
       if (exitCode === 0) {
-        const outPath = args[args.indexOf('-out') + 1]
+        const outputFlag = args[0] === 'direct-confirm' ? '-prepared' : '-out'
+        const outPath = args[args.indexOf(outputFlag) + 1]
         if (args[0] === 'direct-receive') {
           fs.writeFileSync(args[args.indexOf('-vault') + 1], 'age-encrypted', {
             mode: vaultMode,
           })
         }
-        fs.writeFileSync(outPath, result, {mode: resultMode})
+        fs.writeFileSync(
+          outPath,
+          typeof result === 'function' ? result(args) : result,
+          {mode: resultMode}
+        )
       }
       setImmediate(() => child.emit('close', exitCode))
     })
@@ -151,7 +158,17 @@ describe('trusted FoD direct check', () => {
 
   it('uses fixed flags, private copies, stdin, and returns only a public summary', async () => {
     const child = fakeSpawn()
-    const check = service({spawn: child.spawn})
+    let stagedBinary
+    const check = service({
+      spawn: (binary, args, options) => {
+        stagedBinary = {
+          directoryMode: fs.statSync(path.dirname(binary)).mode & 0o777,
+          binaryMode: fs.statSync(binary).mode & 0o777,
+          hash: createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),
+        }
+        return child.spawn(binary, args, options)
+      },
+    })
     const summary = await check({message: messageText()})
     const [{binary, args, options, body}] = child.calls
     const purchaseCopy = args[args.indexOf('-purchase') + 1]
@@ -160,10 +177,11 @@ describe('trusted FoD direct check', () => {
     const outPath = args[args.indexOf('-out') + 1]
 
     expect(binary).not.toBe(process.execPath)
-    expect(fs.statSync(path.dirname(binary)).mode & 0o777).toBe(0o700)
-    expect(fs.statSync(binary).mode & 0o777).toBe(0o700)
-    expect(createHash('sha256').update(fs.readFileSync(binary)).digest('hex'))
-      .toBe(TEST_BINARY_HASH)
+    expect(stagedBinary).toEqual({
+      directoryMode: 0o700,
+      binaryMode: 0o700,
+      hash: TEST_BINARY_HASH,
+    })
     expect(options).toEqual(
       expect.objectContaining({shell: false, stdio: ['pipe', 'pipe', 'pipe']})
     )
@@ -385,6 +403,153 @@ describe('trusted FoD direct check', () => {
         .mockResolvedValueOnce({canceled: false, filePaths: [purchasePath]})
         .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]})
     }
+  })
+})
+
+describe('trusted FoD direct confirmation', () => {
+  let root
+  let vaultRoot
+  let markerPath
+
+  beforeEach(() => {
+    root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'idena-fod-confirm-test-'))
+    )
+    vaultRoot = path.join(root, 'vaults')
+    const receiptDir = path.join(vaultRoot, BUYER, 'fod-receive-ABC123')
+    fs.mkdirSync(receiptDir, {recursive: true, mode: 0o700})
+    fs.writeFileSync(
+      path.join(receiptDir, 'receipt.json'),
+      receiptText(CONFIRM_ORDER_ID, AUTHOR, V4_CONTRACT),
+      {mode: 0o600}
+    )
+    markerPath = path.join(
+      vaultRoot,
+      BUYER,
+      `confirm-${V4_CONTRACT}-${CONFIRM_ORDER_ID}.json`
+    )
+  })
+
+  afterEach(() => {
+    fs.rmSync(root, {recursive: true, force: true})
+  })
+
+  const request = {contract: `0x${V4_CONTRACT}`, orderId: CONFIRM_ORDER_ID}
+
+  function marketText(state) {
+    return JSON.stringify({
+      format: 'fod.direct-market-state',
+      version: 3,
+      network: 'idena',
+      source: 'node',
+      contract: V4_CONTRACT,
+      codeHash: V4_CODE_HASH.slice(2),
+      orders: [{orderId: CONFIRM_ORDER_ID, buyer: BUYER, state}],
+    })
+  }
+
+  function preparedText() {
+    const orderBytes = Buffer.alloc(8)
+    orderBytes.writeBigUInt64BE(BigInt(CONFIRM_ORDER_ID))
+    const ciphertextSha256 = createHash('sha256')
+      .update(Buffer.from(CIPHERTEXT, 'hex'))
+      .digest('hex')
+    return JSON.stringify({
+      format: 'fod.prepared-direct-confirm',
+      version: 1,
+      operation: 'confirm',
+      network: 'idena',
+      contract: V4_CONTRACT,
+      buyer: BUYER,
+      amount: '0',
+      calldata: `${orderBytes.toString('hex')}${ciphertextSha256}`,
+      ciphertextSha256,
+      directOrderId: Number(CONFIRM_ORDER_ID),
+    })
+  }
+
+  function service({spawn, rpcCall}) {
+    return createFodDirectConfirmService({
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: ''}),
+      getActiveCoinbase: async () => `0x${BUYER}`,
+      rpcCall,
+      spawn,
+      fs,
+      binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH,
+      vaultRoot,
+    })
+  }
+
+  it('does not prepare or broadcast a previously settled order', async () => {
+    const child = fakeSpawn({result: marketText('settled')})
+    const rpcCall = jest.fn()
+
+    await expect(
+      service({spawn: child.spawn, rpcCall})(request)
+    ).resolves.toEqual({orderId: CONFIRM_ORDER_ID, status: 'settled'})
+    expect(child.calls.map(({args}) => args[0])).toEqual(['direct-market'])
+    expect(rpcCall).not.toHaveBeenCalled()
+    expect(fs.existsSync(markerPath)).toBe(false)
+  })
+
+  it('persists a no-retry marker before an unknown broadcast response', async () => {
+    const child = fakeSpawn({
+      result: (args) =>
+        args[0] === 'direct-market' ? marketText('funded') : preparedText(),
+    })
+    const rpcCall = jest.fn(async (connection, {method}) => {
+      expect(connection.url).toBe('http://127.0.0.1:9009')
+      switch (method) {
+        case 'bcn_syncing':
+          return {
+            result: {
+              syncing: false,
+              wrongTime: false,
+              currentBlock: 7,
+              highestBlock: 7,
+            },
+          }
+        case 'dna_getCoinbaseAddr':
+          return {result: `0x${BUYER}`}
+        case 'dna_getBalance':
+          return {result: {balance: '3', nonce: 1, mempoolNonce: 1}}
+        case 'contract_getStake':
+          return {result: {Hash: V4_CODE_HASH}}
+        case 'bcn_feePerGas':
+          return {result: '1'}
+        case 'contract_estimateCall':
+          return {result: {success: true, gasCost: '0.1', txFee: '0.1'}}
+        case 'contract_call':
+          expect(JSON.parse(fs.readFileSync(markerPath, 'utf8'))).toMatchObject({
+            format: 'fod.direct-confirm-attempt',
+            contract: request.contract,
+            orderId: CONFIRM_ORDER_ID,
+            txHash: null,
+          })
+          return {result: 'unknown'}
+        default:
+          throw new Error(`unexpected RPC method: ${method}`)
+      }
+    })
+    const confirm = service({spawn: child.spawn, rpcCall})
+
+    await expect(confirm(request)).resolves.toEqual({
+      orderId: CONFIRM_ORDER_ID,
+      status: 'pending',
+    })
+    expect(fs.statSync(markerPath).mode & 0o777).toBe(0o600)
+    await expect(confirm(request)).resolves.toEqual({
+      orderId: CONFIRM_ORDER_ID,
+      status: 'pending',
+    })
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
+    expect(child.calls.map(({args}) => args[0])).toEqual([
+      'direct-market',
+      'direct-confirm',
+      'direct-market',
+    ])
   })
 })
 
