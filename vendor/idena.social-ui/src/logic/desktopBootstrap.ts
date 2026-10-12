@@ -32,7 +32,7 @@ export type DesktopDirectCheckResponse = {
 };
 
 export type DesktopDirectReceiveResponse = {
-    result?: {orderId: string; author?: string; epoch?: number; usableFlips?: number; saved?: true; confirmationStatus?: 'settled' | 'pending'};
+    result?: {orderId: string; author?: string; epoch?: number; usableFlips?: number; saved?: true; confirmationStatus?: 'settled' | 'pending' | 'uncertain'};
     error?: {message?: string};
 };
 
