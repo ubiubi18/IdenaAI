@@ -520,6 +520,8 @@ describe('trusted FoD direct confirmation', () => {
           return {result: '1'}
         case 'contract_estimateCall':
           return {result: {success: true, gasCost: '0.1', txFee: '0.1'}}
+        case 'bcn_pendingTransactions':
+          return {result: {transactions: []}}
         case 'contract_call':
           expect(JSON.parse(fs.readFileSync(markerPath, 'utf8'))).toMatchObject({
             format: 'fod.direct-confirm-attempt',
@@ -536,12 +538,12 @@ describe('trusted FoD direct confirmation', () => {
 
     await expect(confirm(request)).resolves.toEqual({
       orderId: CONFIRM_ORDER_ID,
-      status: 'pending',
+      status: 'uncertain',
     })
     expect(fs.statSync(markerPath).mode & 0o777).toBe(0o600)
     await expect(confirm(request)).resolves.toEqual({
       orderId: CONFIRM_ORDER_ID,
-      status: 'pending',
+      status: 'uncertain',
     })
     expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
       .toHaveLength(1)
@@ -550,6 +552,75 @@ describe('trusted FoD direct confirmation', () => {
       'direct-confirm',
       'direct-market',
     ])
+  })
+
+  it('recovers only the exact pending confirmation after a lost response', async () => {
+    const child = fakeSpawn({
+      result: (args) =>
+        args[0] === 'direct-market' ? marketText('funded') : preparedText(),
+    })
+    const orderBytes = Buffer.alloc(8)
+    orderBytes.writeBigUInt64BE(BigInt(CONFIRM_ORDER_ID))
+    const digest = createHash('sha256')
+      .update(Buffer.from(CIPHERTEXT, 'hex'))
+      .digest('hex')
+    const payload = `0x0a07636f6e6669726d1228${orderBytes.toString('hex')}${digest}`
+    const hash = `0x${'a'.repeat(64)}`
+    const pending = {
+      hash,
+      type: 'callContract',
+      from: `0x${BUYER}`,
+      to: request.contract,
+      amount: '0',
+      payload,
+    }
+    const rpcCall = jest.fn(async (connection, {method, params}) => {
+      expect(connection.url).toBe('http://127.0.0.1:9009')
+      switch (method) {
+        case 'bcn_syncing':
+          return {
+            result: {
+              syncing: false,
+              wrongTime: false,
+              currentBlock: 7,
+              highestBlock: 7,
+            },
+          }
+        case 'dna_getCoinbaseAddr':
+          return {result: `0x${BUYER}`}
+        case 'dna_getBalance':
+          return {result: {balance: '3', nonce: 1, mempoolNonce: 1}}
+        case 'contract_getStake':
+          return {result: {Hash: V4_CODE_HASH}}
+        case 'bcn_feePerGas':
+          return {result: '1'}
+        case 'contract_estimateCall':
+          return {result: {success: true, gasCost: '0.1', txFee: '0.1'}}
+        case 'contract_call':
+          return {result: 'unknown'}
+        case 'bcn_pendingTransactions':
+          expect(params).toEqual([{address: `0x${BUYER}`, count: 100}])
+          return {result: {transactions: [{...pending, payload: `0x${'0'.repeat(102)}`}, pending]}}
+        case 'bcn_txReceipt':
+          expect(params).toEqual([hash])
+          return {result: null}
+        default:
+          throw new Error(`unexpected RPC method: ${method}`)
+      }
+    })
+    const confirm = service({spawn: child.spawn, rpcCall})
+
+    await expect(confirm(request)).resolves.toEqual({
+      orderId: CONFIRM_ORDER_ID,
+      status: 'pending',
+    })
+    expect(JSON.parse(fs.readFileSync(markerPath, 'utf8')).txHash).toBe(hash)
+    await expect(confirm(request)).resolves.toEqual({
+      orderId: CONFIRM_ORDER_ID,
+      status: 'pending',
+    })
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
   })
 })
 

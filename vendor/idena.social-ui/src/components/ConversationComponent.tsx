@@ -307,6 +307,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                                                             let status = 'Could not save verified keys.';
                                                             if (response.result?.confirmationStatus === 'settled') status = 'Payment confirmed on-chain.';
                                                             else if (response.result?.confirmationStatus === 'pending') status = 'Payment confirmation is pending.';
+                                                            else if (response.result?.confirmationStatus === 'uncertain') status = 'Payment submission is unverified. Check status later.';
                                                             else if (response.result?.saved === true && typeof count === 'number' && Number.isInteger(count) && count > 0) status = `Saved ${count} verified flip${count === 1 ? '' : 's'} in an encrypted vault.`;
                                                             else if (response.error?.message === 'Vault save cancelled.') status = 'Vault save cancelled.';
                                                             else if (response.error?.message === 'Could not confirm saved payment.') status = 'Could not confirm saved payment.';
