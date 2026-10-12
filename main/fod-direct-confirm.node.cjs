@@ -239,13 +239,13 @@ test('refuses a wrong contract, an unaffordable fee, and a changed identity', as
   }
 })
 
-test('treats an unknown submission outcome as pending without signing again', async () => {
+test('treats an unknown submission outcome as uncertain without signing again', async () => {
   const f = fixture({unknownSubmission: true})
   try {
-    assert.deepEqual(await f.confirm({orderId: '1', contract}), {orderId: '1', status: 'pending'})
+    assert.deepEqual(await f.confirm({orderId: '1', contract}), {orderId: '1', status: 'uncertain'})
     const marker = path.join(f.buyerRoot, `confirm-${contract.slice(2)}-1.json`)
     assert.equal(fs.statSync(marker).mode & 0o777, 0o600)
-    assert.deepEqual(await f.newConfirm()({orderId: '1', contract}), {orderId: '1', status: 'pending'})
+    assert.deepEqual(await f.newConfirm()({orderId: '1', contract}), {orderId: '1', status: 'uncertain'})
     assert.equal(f.submissions(), 1)
     f.setMarketState('settled')
     assert.deepEqual(await f.newConfirm()({orderId: '1', contract}), {orderId: '1', status: 'settled'})
@@ -360,7 +360,7 @@ test('reconciles a v4 settled chain state after an unknown submission', async ()
   const f = fixture({v4: true, unknownSubmission: true})
   try {
     assert.deepEqual(await f.confirm({orderId: '1', contract: v4Contract}), {
-      orderId: '1', status: 'pending',
+      orderId: '1', status: 'uncertain',
     })
     f.setMarketState('settled')
     assert.deepEqual(await f.newConfirm()({orderId: '1', contract: v4Contract}), {
