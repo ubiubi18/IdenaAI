@@ -482,7 +482,7 @@ export default function SocialDesktopEmbed({
       const response = await confirm({orderId, contract})
       if (
         response?.result?.orderId === orderId &&
-        ['settled', 'pending'].includes(response.result.status)
+        ['settled', 'pending', 'uncertain'].includes(response.result.status)
       ) {
         status = response.result.status
       }
@@ -514,7 +514,7 @@ export default function SocialDesktopEmbed({
         payload: {
           requestId: request.requestId,
           response:
-            status === 'settled' || status === 'pending'
+            ['settled', 'pending', 'uncertain'].includes(status)
               ? {
                   result: {
                     orderId: request.savedPayment.orderId,
@@ -912,16 +912,20 @@ export default function SocialDesktopEmbed({
                           ? 'Confirming payment on-chain…'
                           : confirmation.status === 'pending'
                             ? 'Payment confirmation is pending.'
+                            : confirmation.status === 'uncertain'
+                              ? 'Payment submission is unverified. Your keys are saved.'
                             : 'Payment confirmation failed. Your keys are saved.'}
                     </Text>
-                    {['pending', 'failed'].includes(confirmation.status) && (
+                    {['pending', 'uncertain', 'failed'].includes(confirmation.status) && (
                       <Button
                         variant="link"
                         size="sm"
                         mt={1}
                         onClick={() => confirmSavedVault(confirmation)}
                       >
-                        Retry confirmation
+                        {confirmation.status === 'failed'
+                          ? 'Retry confirmation'
+                          : 'Check payment status'}
                       </Button>
                     )}
                   </>

@@ -1154,6 +1154,14 @@ function createFodDirectConfirmService({
       const receiptSha256 = createHash('sha256')
         .update(savedReceipt.data)
         .digest('hex')
+      const orderBytes = Buffer.alloc(8)
+      orderBytes.writeBigUInt64BE(BigInt(orderId))
+      const ciphertextDigest = createHash('sha256')
+        .update(Buffer.from(opened.ciphertext, 'hex'))
+        .digest()
+      const calldata = Buffer.concat([orderBytes, ciphertextDigest]).toString('hex')
+      // Protobuf CallContractAttachment: method "confirm", one 40-byte argument.
+      const confirmPayload = `0x0a07636f6e6669726d1228${calldata}`
       const marker = {
         format: 'fod.direct-confirm-attempt',
         version: 1,
@@ -1238,6 +1246,41 @@ function createFodDirectConfirmService({
         return {orderId, status: 'settled'}
       }
       if (order.state !== 'funded') refuse('fod_direct_confirm_failed')
+      const reconcileUnknown = async () => {
+        let pending
+        try {
+          pending = await rpc('bcn_pendingTransactions', [
+            {address: `0x${initial.coinbase}`, count: 100},
+          ])
+        } catch {
+          return {orderId, status: 'uncertain'}
+        }
+        if (!Array.isArray(pending?.transactions)) {
+          return {orderId, status: 'uncertain'}
+        }
+        const matches = pending.transactions.filter((tx) =>
+          tx?.type === 'callContract' &&
+          typeof tx.hash === 'string' &&
+          /^0x[0-9a-fA-F]{64}$/.test(tx.hash) &&
+          typeof tx.from === 'string' &&
+          tx.from.toLowerCase() === `0x${initial.coinbase}` &&
+          typeof tx.to === 'string' &&
+          tx.to.toLowerCase() === contract.toLowerCase() &&
+          tx.amount === '0' &&
+          typeof tx.payload === 'string' &&
+          tx.payload.toLowerCase() === confirmPayload
+        )
+        if (matches.length !== 1) return {orderId, status: 'uncertain'}
+        const hash = matches[0].hash.toLowerCase()
+        marker.txHash = hash
+        await saveConfirmAttempt(fs, markerPath, marker, true)
+        const receipt = await rpc('bcn_txReceipt', [hash]).catch(() => null)
+        if (receipt) {
+          if (receipt.success !== true) refuse('fod_direct_confirm_failed')
+          return {orderId, status: 'settled'}
+        }
+        return {orderId, status: 'pending'}
+      }
       if (previousAttempt) {
         if (previousAttempt.txHash) {
           const receipt = await rpc('bcn_txReceipt', [previousAttempt.txHash])
@@ -1246,8 +1289,9 @@ function createFodDirectConfirmService({
             if (receipt.success !== true) refuse('fod_direct_confirm_failed')
             return {orderId, status: 'settled'}
           }
+          return {orderId, status: 'pending'}
         }
-        return {orderId, status: 'pending'}
+        return reconcileUnknown()
       }
 
       const preparedPath = path.join(tempDir, 'confirm.json')
@@ -1284,12 +1328,6 @@ function createFodDirectConfirmService({
       } finally {
         preparedFile.data.fill(0)
       }
-      const orderBytes = Buffer.alloc(8)
-      orderBytes.writeBigUInt64BE(BigInt(orderId))
-      const ciphertextDigest = createHash('sha256')
-        .update(Buffer.from(opened.ciphertext, 'hex'))
-        .digest()
-      const calldata = Buffer.concat([orderBytes, ciphertextDigest]).toString('hex')
       const orderMatch = preparedText.match(/"directOrderId"\s*:\s*([0-9]+)/g)
       if (
         prepared.format !== 'fod.prepared-direct-confirm' ||
@@ -1377,7 +1415,7 @@ function createFodDirectConfirmService({
           params: [call],
         })
       } catch {
-        return {orderId, status: 'pending'}
+        return reconcileUnknown()
       }
       const hash = submitted?.result
       if (
@@ -1385,7 +1423,7 @@ function createFodDirectConfirmService({
         typeof hash !== 'string' ||
         !/^0x[0-9a-fA-F]{64}$/.test(hash)
       ) {
-        return {orderId, status: 'pending'}
+        return reconcileUnknown()
       }
       marker.txHash = hash.toLowerCase()
       await saveConfirmAttempt(fs, markerPath, marker, true)
