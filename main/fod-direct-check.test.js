@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 const {EventEmitter} = require('events')
-const {createHash} = require('crypto')
+const {createECDH, createHash} = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -9,6 +9,9 @@ const {PassThrough} = require('stream')
 const {
   createFodDirectCheckService,
   createFodDirectReceiveService,
+  createFodDirectBuyPrepareService,
+  createFodDirectBuyResumeService,
+  createFodDirectBuyCommitService,
   createFodDirectConfirmService,
 } = require('./fod-direct-check')
 
@@ -75,6 +78,8 @@ function fakeSpawn({
   stderr = '',
   vaultMode = 0o600,
   resultMode = 0o600,
+  marketMode = 0o644,
+  keyMode = 0o600,
 } = {}) {
   const calls = []
   const spawn = jest.fn((binary, args, options) => {
@@ -93,17 +98,26 @@ function fakeSpawn({
     child.stdin.on('finish', () => {
       if (stderr) child.stderr.write(stderr)
       if (exitCode === 0) {
-        const outputFlag = args[0] === 'direct-confirm' ? '-prepared' : '-out'
+        const outputFlag =
+          args[0] === 'direct-confirm' || args[0] === 'direct-buy'
+            ? '-prepared'
+            : '-out'
         const outPath = args[args.indexOf(outputFlag) + 1]
         if (args[0] === 'direct-receive') {
           fs.writeFileSync(args[args.indexOf('-vault') + 1], 'age-encrypted', {
             mode: vaultMode,
           })
         }
+        if (args[0] === 'direct-buy') {
+          const deliveryKey = args[args.indexOf('-delivery-key') + 1]
+          if (!fs.existsSync(deliveryKey)) {
+            fs.writeFileSync(deliveryKey, '1'.repeat(64), {mode: keyMode})
+          }
+        }
         fs.writeFileSync(
           outPath,
           typeof result === 'function' ? result(args) : result,
-          {mode: resultMode}
+          {mode: args[0] === 'direct-market' ? marketMode : resultMode}
         )
       }
       setImmediate(() => child.emit('close', exitCode))
@@ -897,5 +911,525 @@ describe('trusted FoD direct receive', () => {
       })
     ).rejects.toThrow('fod_direct_receive_failed')
     expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+  })
+})
+
+describe('trusted FoD direct buy preparation', () => {
+  let root
+  let vaultRoot
+  let sessionPath
+  let session
+  let dialog
+
+  const offerId = 'd'.repeat(64)
+  const inventoryCommitment = 'e'.repeat(64)
+  const keyCommitment = 'f'.repeat(64)
+  const curve = createECDH('secp256k1')
+  curve.setPrivateKey(Buffer.from('1'.repeat(64), 'hex'))
+  const deliveryPublicKey = curve.getPublicKey('hex', 'uncompressed')
+
+  beforeEach(() => {
+    root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'idena-fod-buy-test-'))
+    )
+    vaultRoot = path.join(root, 'vaults')
+    sessionPath = path.join(root, 'public-session.json')
+    session = {
+      format: 'fod.session-bundle',
+      version: 1,
+      author: AUTHOR,
+      epoch: 230,
+      manifest: ['cid-one'],
+      inventory: {},
+      verdict: {},
+    }
+    fs.writeFileSync(sessionPath, JSON.stringify(session), {mode: 0o644})
+    fs.chmodSync(sessionPath, 0o644)
+    dialog = {
+      showOpenDialog: jest.fn().mockResolvedValue({
+        canceled: false,
+        filePaths: [sessionPath],
+      }),
+    }
+  })
+
+  afterEach(() => {
+    fs.rmSync(root, {recursive: true, force: true})
+  })
+
+  function preparedBuy() {
+    return {
+      format: 'fod.prepared-direct-buy',
+      version: 1,
+      operation: 'buy',
+      network: 'idena',
+      contract: V4_CONTRACT,
+      amount: '7000000000000000000',
+      calldata: offerId + deliveryPublicKey,
+      preparedAt: '2026-10-12T12:00:00Z',
+      submitted: false,
+      price: '2000000000000000000',
+      availability: {
+        author: AUTHOR,
+        epoch: 230,
+        binding: 'committed-inventory',
+        coveredFlips: 1,
+        verifiedFlips: 1,
+        inventoryCommitment,
+        blobs: [{cid: 'cid-one', hex: 'ab'}],
+      },
+      orderNonce: 1,
+      buyer: BUYER,
+      deliveryKey: deliveryPublicKey,
+      author: AUTHOR,
+      epoch: 230,
+      coveredFlips: 1,
+      keyCommitment,
+      inventoryCommitment,
+      directOfferId: offerId,
+      directSession: session,
+    }
+  }
+
+  function service({
+    spawn = fakeSpawn({result: JSON.stringify(preparedBuy())}).spawn,
+    rpc = () => ({url: 'http://127.0.0.1:9009', key: 'RPC_SECRET'}),
+    selectedDialog = dialog,
+  } = {}) {
+    return createFodDirectBuyPrepareService({
+      dialog: selectedDialog,
+      getNodeRpcConnection: rpc,
+      getActiveCoinbase: async () => `0x${BUYER}`,
+      spawn,
+      fs,
+      binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH,
+      vaultRoot,
+    })
+  }
+
+  function commitService({
+    spawn,
+    rpcCall,
+    selectedDialog = {showMessageBox: jest.fn().mockResolvedValue({response: 1})},
+    coinbase = async () => `0x${BUYER}`,
+  }) {
+    return createFodDirectBuyCommitService({
+      dialog: selectedDialog,
+      getNodeRpcConnection: () => ({
+        url: 'http://127.0.0.1:9009',
+        key: 'RPC_SECRET',
+      }),
+      getActiveCoinbase: coinbase,
+      rpcCall,
+      spawn,
+      fs,
+      binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH,
+      vaultRoot,
+    })
+  }
+
+  function nodeRpc({
+    submit = () => { throw new Error('unexpected broadcast') },
+    feePerGas = '1',
+    estimate = {success: true, gasUsed: 100000},
+  } = {}) {
+    return jest.fn(async (connection, {method, params}) => {
+      expect(connection).toEqual({
+        url: 'http://127.0.0.1:9009',
+        key: 'RPC_SECRET',
+      })
+      switch (method) {
+        case 'bcn_syncing':
+          return {
+            result: {
+              syncing: false,
+              wrongTime: false,
+              currentBlock: 7,
+              highestBlock: 7,
+            },
+          }
+        case 'dna_getCoinbaseAddr':
+          return {result: `0x${BUYER}`}
+        case 'dna_getBalance':
+          expect(params).toEqual([`0x${BUYER}`])
+          return {result: {balance: '8', nonce: 1, mempoolNonce: 1}}
+        case 'contract_getStake':
+          expect(params).toEqual([`0x${V4_CONTRACT}`])
+          return {result: {Hash: V4_CODE_HASH}}
+        case 'bcn_feePerGas':
+          return {result: feePerGas}
+        case 'contract_estimateCall':
+          return {result: estimate}
+        case 'contract_call':
+          return submit(params)
+        case 'bcn_txReceipt':
+          return {result: {success: true}}
+        default:
+          throw new Error(`unexpected RPC method: ${method}`)
+      }
+    })
+  }
+
+  function fundedMarket(orderId = CONFIRM_ORDER_ID) {
+    return JSON.stringify({
+      format: 'fod.direct-market-state',
+      version: 3,
+      network: 'idena',
+      source: 'node',
+      contract: V4_CONTRACT,
+      codeHash: V4_CODE_HASH.slice(2),
+      offers: [{offerId, openOrderId: orderId}],
+      orders: [{
+        orderId,
+        offerId,
+        buyer: BUYER,
+        paid: '2000000000000000000',
+        bond: '5000000000000000000',
+        state: 'funded',
+      }],
+    })
+  }
+
+  it('saves one private buyer bundle and returns only display amounts', async () => {
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const summary = await service({spawn: child.spawn})({})
+    const [{binary, args, options, body}] = child.calls
+    const stagedSession = args[args.indexOf('-session') + 1]
+    const keyPath = args[args.indexOf('-delivery-key') + 1]
+    const preparedPath = args[args.indexOf('-prepared') + 1]
+    const rpcKeyFile = args[args.indexOf('-key-file') + 1]
+
+    expect(binary).not.toBe(process.execPath)
+    expect(options).toEqual(
+      expect.objectContaining({shell: false, stdio: ['pipe', 'pipe', 'pipe']})
+    )
+    expect(args).toEqual([
+      'direct-buy',
+      '-buyer',
+      `0x${BUYER}`,
+      '-session',
+      stagedSession,
+      '-delivery-key',
+      keyPath,
+      '-prepared',
+      preparedPath,
+      '-network',
+      'idena',
+      '-direct-version',
+      '4',
+      '-contract',
+      `0x${V4_CONTRACT}`,
+      '-code-hash',
+      V4_CODE_HASH,
+      '-rpc',
+      'http://127.0.0.1:9009',
+      '-key-file',
+      rpcKeyFile,
+    ])
+    expect(args).not.toContain('-nodekey')
+    expect(args).not.toContain('-broadcast')
+    expect(args).not.toContain('-signed')
+    expect(args.join(' ')).not.toContain('RPC_SECRET')
+    expect(Buffer.concat(body).length).toBe(0)
+    expect(stagedSession).not.toBe(sessionPath)
+    expect(fs.existsSync(path.dirname(stagedSession))).toBe(false)
+    expect(summary).toEqual({
+      purchaseId: expect.stringMatching(/^fod-buy-[0-9a-f]{32}$/),
+      priceIdna: '2',
+      bondIdna: '5',
+      totalIdna: '7',
+      author: `0x${AUTHOR}`,
+      epoch: 230,
+      usableFlips: 1,
+    })
+    expect(JSON.stringify(summary)).not.toContain(root)
+    expect(JSON.stringify(summary)).not.toContain(deliveryPublicKey)
+
+    const buyerRoot = path.join(vaultRoot, BUYER)
+    const [name] = fs.readdirSync(buyerRoot)
+    expect(name).toBe(summary.purchaseId)
+    const saved = path.join(buyerRoot, name)
+    for (const directory of [vaultRoot, buyerRoot, saved]) {
+      expect(fs.statSync(directory).mode & 0o777).toBe(0o700)
+    }
+    for (const file of ['delivery.key', 'purchase.json', 'session.json']) {
+      expect(fs.statSync(path.join(saved, file)).mode & 0o777).toBe(0o600)
+    }
+    expect(fs.readFileSync(path.join(saved, 'session.json'), 'utf8')).toBe(
+      JSON.stringify(session)
+    )
+    expect(fs.readFileSync(path.join(saved, 'purchase.json'), 'utf8')).toBe(
+      JSON.stringify(preparedBuy())
+    )
+  })
+
+  it('finds a saved purchase only for the active identity after restart', async () => {
+    const first = await service()({})
+    const resume = createFodDirectBuyResumeService({
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: ''}),
+      getActiveCoinbase: async () => `0x${BUYER}`,
+      fs,
+      vaultRoot,
+    })
+    await expect(resume({})).resolves.toEqual({purchaseId: first.purchaseId})
+    await expect(resume({purchaseId: first.purchaseId})).rejects.toThrow(
+      'fod_direct_buy_invalid_request'
+    )
+    const other = createFodDirectBuyResumeService({
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: ''}),
+      getActiveCoinbase: async () => `0x${AUTHOR}`,
+      fs,
+      vaultRoot,
+    })
+    await expect(other({})).resolves.toEqual({purchaseId: null})
+  })
+
+  it('refuses changed identity and unsafe prepared output without saving files', async () => {
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    let reads = 0
+    const changed = service({
+      spawn: child.spawn,
+      rpc: () => ({
+        url: ++reads > 4 ? 'https://other.example/rpc' : 'http://127.0.0.1:9009',
+        key: 'RPC_SECRET',
+      }),
+    })
+    await expect(changed({})).rejects.toThrow('fod_direct_buy_identity_changed')
+    expect(child.spawn).toHaveBeenCalledTimes(1)
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+
+    const bad = fakeSpawn({
+      result: JSON.stringify({...preparedBuy(), privateKey: 'secret'}),
+    })
+    await expect(service({spawn: bad.spawn})({})).rejects.toThrow(
+      'fod_direct_buy_failed'
+    )
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+
+    const publicOutput = fakeSpawn({
+      result: JSON.stringify(preparedBuy()),
+      resultMode: 0o644,
+    })
+    await expect(service({spawn: publicOutput.spawn})({})).rejects.toThrow(
+      'fod_direct_buy_failed'
+    )
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+  })
+
+  it('rejects duplicate prepared fields at the top level and in nested evidence', async () => {
+    const valid = JSON.stringify(preparedBuy())
+    const variants = [
+      valid.replace(
+        '"amount":"7000000000000000000"',
+        '"amount":"7000000000000000000","amount":"1"'
+      ),
+      valid.replace(
+        `"availability":{"author":"${AUTHOR}"`,
+        `"availability":{"author":"${AUTHOR}","author":"${AUTHOR}"`
+      ),
+      valid.replace(
+        '"directSession":{"format":"fod.session-bundle"',
+        '"directSession":{"format":"fod.session-bundle","format":"fod.session-bundle"'
+      ),
+    ]
+    for (const result of variants) {
+      expect(result).not.toBe(valid)
+      const child = fakeSpawn({result})
+      await expect(service({spawn: child.spawn})({})).rejects.toThrow(
+        'fod_direct_buy_failed'
+      )
+      expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+    }
+  })
+
+  it('rejects request fields before file selection', async () => {
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    await expect(service({spawn: child.spawn})({amount: '1'})).rejects.toThrow(
+      'fod_direct_buy_invalid_request'
+    )
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+    expect(child.spawn).not.toHaveBeenCalled()
+  })
+
+  it('commits only a saved purchase and honors native cancellation without broadcasting', async () => {
+    const {purchaseId} = await service()({})
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const rpcCall = nodeRpc()
+    const selectedDialog = {
+      showMessageBox: jest.fn().mockResolvedValue({response: 0}),
+    }
+    const commit = commitService({spawn: child.spawn, rpcCall, selectedDialog})
+
+    await expect(commit({purchaseId, amount: '1'})).rejects.toThrow(
+      'fod_direct_buy_invalid_request'
+    )
+    await expect(commit({purchaseId: `fod-buy-${'0'.repeat(32)}`}))
+      .rejects.toThrow('fod_direct_buy_failed')
+    expect(child.spawn).not.toHaveBeenCalled()
+    expect(selectedDialog.showMessageBox).not.toHaveBeenCalled()
+
+    await expect(commit({purchaseId})).resolves.toEqual({
+      purchaseId,
+      status: 'cancelled',
+    })
+    expect(selectedDialog.showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: ['Cancel', 'Lock funds'],
+        defaultId: 0,
+        cancelId: 0,
+      })
+    )
+    expect(child.calls.map(({args}) => args[0])).toEqual(['direct-buy'])
+    expect(rpcCall.mock.calls.some(([, call]) => call.method === 'contract_call'))
+      .toBe(false)
+    expect(fs.existsSync(path.join(vaultRoot, BUYER, purchaseId, 'buy-attempt.json')))
+      .toBe(false)
+  })
+
+  it('writes an owner-only attempt before the exact node-signed buy and finds its funded order', async () => {
+    const {purchaseId} = await service()({})
+    const markerPath = path.join(vaultRoot, BUYER, purchaseId, 'buy-attempt.json')
+    const hash = `0x${'a'.repeat(64)}`
+    const child = fakeSpawn({
+      result: (args) =>
+        args[0] === 'direct-market'
+          ? fundedMarket()
+          : JSON.stringify(preparedBuy()),
+    })
+    const rpcCall = nodeRpc({
+      submit: (params) => {
+        expect(params).toEqual([{
+          from: `0x${BUYER}`,
+          contract: `0x${V4_CONTRACT}`,
+          method: 'buy',
+          amount: '7',
+          maxFee: '0.00000000000512',
+          args: [{
+            index: 0,
+            format: 'hex',
+            value: `0x${offerId}${deliveryPublicKey}`,
+          }],
+        }])
+        expect(fs.statSync(markerPath).mode & 0o777).toBe(0o600)
+        expect(fs.statSync(path.dirname(markerPath)).mode & 0o777).toBe(0o700)
+        expect(JSON.parse(fs.readFileSync(markerPath, 'utf8'))).toEqual({
+          format: 'fod.direct-buy-attempt',
+          version: 1,
+          buyer: BUYER,
+          contract: `0x${V4_CONTRACT}`,
+          purchaseSha256: createHash('sha256')
+            .update(fs.readFileSync(path.join(vaultRoot, BUYER, purchaseId, 'purchase.json')))
+            .digest('hex'),
+          offerId,
+          amount: '7000000000000000000',
+          price: '2000000000000000000',
+          txHash: null,
+        })
+        return {result: hash}
+      },
+    })
+
+    await expect(commitService({spawn: child.spawn, rpcCall})({purchaseId}))
+      .resolves.toEqual({purchaseId, status: 'funded', orderId: CONFIRM_ORDER_ID})
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
+    expect(child.calls.map(({args}) => args[0])).toEqual([
+      'direct-buy',
+      'direct-market',
+    ])
+    expect(child.calls[0].args).not.toContain('-nodekey')
+    expect(child.calls[0].args).not.toContain('-broadcast')
+    expect(child.calls[0].args).not.toContain('-signed')
+    expect(child.calls[0].args.join(' ')).not.toContain('RPC_SECRET')
+    expect(JSON.parse(fs.readFileSync(markerPath, 'utf8')).txHash).toBe(hash)
+  })
+
+  it('accepts integer and hex node fee rates during a funded buy', async () => {
+    for (const feePerGas of [1, '0x1']) {
+      const {purchaseId} = await service()({})
+      const child = fakeSpawn({
+        result: (args) => args[0] === 'direct-market'
+          ? fundedMarket()
+          : JSON.stringify(preparedBuy()),
+      })
+      const rpcCall = nodeRpc({
+        feePerGas,
+        submit: () => ({result: `0x${'a'.repeat(64)}`}),
+      })
+      await expect(commitService({spawn: child.spawn, rpcCall})({purchaseId}))
+        .resolves.toEqual({purchaseId, status: 'funded', orderId: CONFIRM_ORDER_ID})
+    }
+  })
+
+  it('refuses a buy whose minimum gas limit exceeds the fee budget', async () => {
+    const {purchaseId} = await service()({})
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const selectedDialog = {showMessageBox: jest.fn()}
+    const rpcCall = nodeRpc({
+      estimate: {success: true, gasUsed: 100, minGasLimit: 6000000},
+    })
+    await expect(commitService({
+      spawn: child.spawn,
+      rpcCall,
+      selectedDialog,
+    })({purchaseId})).rejects.toThrow('fod_direct_buy_fee_unavailable')
+    expect(selectedDialog.showMessageBox).not.toHaveBeenCalled()
+    expect(rpcCall.mock.calls.some(([, call]) => call.method === 'contract_call'))
+      .toBe(false)
+  })
+
+  it('keeps a lost RPC response uncertain and never blindly retries the buy', async () => {
+    const {purchaseId} = await service()({})
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const rpcCall = nodeRpc({
+      submit: () => { throw new Error('response lost after submission') },
+    })
+    const commit = commitService({spawn: child.spawn, rpcCall})
+
+    await expect(commit({purchaseId})).resolves.toEqual({
+      purchaseId,
+      status: 'uncertain',
+    })
+    const markerPath = path.join(vaultRoot, BUYER, purchaseId, 'buy-attempt.json')
+    expect(JSON.parse(fs.readFileSync(markerPath, 'utf8')).txHash).toBeNull()
+    await expect(commit({purchaseId})).resolves.toEqual({
+      purchaseId,
+      status: 'uncertain',
+    })
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
+    expect(child.calls.map(({args}) => args[0])).toEqual(['direct-buy'])
+  })
+
+  it('refuses changed prepared terms or identity before showing the buy confirmation', async () => {
+    const {purchaseId} = await service()({})
+    const rpcCall = jest.fn()
+    const selectedDialog = {showMessageBox: jest.fn()}
+    const changedTerms = fakeSpawn({
+      result: JSON.stringify({
+        ...preparedBuy(),
+        amount: '8000000000000000000',
+      }),
+    })
+    await expect(commitService({
+      spawn: changedTerms.spawn,
+      rpcCall,
+      selectedDialog,
+    })({purchaseId})).rejects.toThrow('fod_direct_buy_changed')
+
+    let identityReads = 0
+    const changedIdentity = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    await expect(commitService({
+      spawn: changedIdentity.spawn,
+      rpcCall,
+      selectedDialog,
+      coinbase: async () => `0x${++identityReads > 1 ? AUTHOR : BUYER}`,
+    })({purchaseId})).rejects.toThrow('fod_direct_buy_identity_changed')
+    expect(selectedDialog.showMessageBox).not.toHaveBeenCalled()
+    expect(rpcCall).not.toHaveBeenCalled()
+    expect(fs.existsSync(path.join(vaultRoot, BUYER, purchaseId, 'buy-attempt.json')))
+      .toBe(false)
   })
 })
