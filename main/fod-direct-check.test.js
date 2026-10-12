@@ -1034,6 +1034,15 @@ describe('trusted FoD direct buy preparation', () => {
     submit = () => { throw new Error('unexpected broadcast') },
     feePerGas = '1',
     estimate = {success: true, gasUsed: 100000},
+    transaction = (hash) => ({
+      type: 'callContract',
+      hash,
+      from: `0x${BUYER}`,
+      to: `0x${V4_CONTRACT}`,
+      amount: '7',
+      payload: `0x0a036275791261${preparedBuy().calldata}`,
+      blockHash: `0x${'b'.repeat(64)}`,
+    }),
   } = {}) {
     return jest.fn(async (connection, {method, params}) => {
       expect(connection).toEqual({
@@ -1066,6 +1075,13 @@ describe('trusted FoD direct buy preparation', () => {
           return submit(params)
         case 'bcn_txReceipt':
           return {result: {success: true}}
+        case 'bcn_transaction':
+          return {result: transaction(params[0])}
+        case 'bcn_block':
+          return {result: {hash: params[0], height: 7}}
+        case 'bcn_blockAt':
+          expect(params).toEqual([7])
+          return {result: {hash: `0x${'b'.repeat(64)}`, height: 7}}
         default:
           throw new Error(`unexpected RPC method: ${method}`)
       }
@@ -1087,9 +1103,17 @@ describe('trusted FoD direct buy preparation', () => {
         buyer: BUYER,
         paid: '2000000000000000000',
         bond: '5000000000000000000',
+        fundedAtBlock: '7',
         state: 'funded',
       }],
     })
+  }
+
+  function settledMarket(orders = []) {
+    const market = JSON.parse(fundedMarket())
+    market.offers[0].openOrderId = '0'
+    market.orders = [{...market.orders[0], state: 'settled'}, ...orders]
+    return JSON.stringify(market)
   }
 
   it('saves one private buyer bundle and returns only display amounts', async () => {
@@ -1344,6 +1368,47 @@ describe('trusted FoD direct buy preparation', () => {
     expect(child.calls[0].args).not.toContain('-signed')
     expect(child.calls[0].args.join(' ')).not.toContain('RPC_SECRET')
     expect(JSON.parse(fs.readFileSync(markerPath, 'utf8')).txHash).toBe(hash)
+  })
+
+  it('recovers a settled purchase after restart without resubmitting or guessing an ambiguous order', async () => {
+    const {purchaseId} = await service()({})
+    const hash = `0x${'a'.repeat(64)}`
+    let market = fundedMarket()
+    let transactionValid = true
+    const child = fakeSpawn({
+      result: (args) => args[0] === 'direct-market'
+        ? market
+        : JSON.stringify(preparedBuy()),
+    })
+    const rpcCall = nodeRpc({
+      submit: () => ({result: hash}),
+      transaction: (txHash) => ({
+        type: 'callContract', hash: txHash,
+        from: `0x${transactionValid ? BUYER : AUTHOR}`,
+        to: `0x${V4_CONTRACT}`, amount: '7',
+        payload: `0x0a036275791261${preparedBuy().calldata}`,
+        blockHash: `0x${'b'.repeat(64)}`,
+      }),
+    })
+    await expect(commitService({spawn: child.spawn, rpcCall})({purchaseId}))
+      .resolves.toEqual({purchaseId, status: 'funded', orderId: CONFIRM_ORDER_ID})
+
+    market = settledMarket()
+    transactionValid = false
+    const resumed = commitService({spawn: child.spawn, rpcCall})
+    await expect(resumed({purchaseId}))
+      .resolves.toEqual({purchaseId, status: 'included'})
+    transactionValid = true
+    await expect(resumed({purchaseId}))
+      .resolves.toEqual({purchaseId, status: 'settled', orderId: CONFIRM_ORDER_ID})
+
+    const duplicate = {...JSON.parse(fundedMarket()).orders[0],
+      orderId: '99', state: 'settled'}
+    market = settledMarket([duplicate])
+    await expect(resumed({purchaseId}))
+      .resolves.toEqual({purchaseId, status: 'included'})
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
   })
 
   it('accepts integer and hex node fee rates during a funded buy', async () => {

@@ -640,7 +640,7 @@ export default function SocialDesktopEmbed({
     const result = response?.result
     if (
       result?.purchaseId !== purchaseId ||
-      !['funded', 'included', 'pending', 'uncertain', 'cancelled'].includes(
+      !['funded', 'settled', 'included', 'pending', 'uncertain', 'cancelled'].includes(
         result.status
       )
     ) {
@@ -806,12 +806,14 @@ export default function SocialDesktopEmbed({
             {buyAttempt && (
               <HStack spacing={2} flexWrap="wrap">
                 <Text
-                  color={buyAttempt.status === 'funded' ? 'green.600' : 'muted'}
+                  color={['funded', 'settled'].includes(buyAttempt.status) ? 'green.600' : 'muted'}
                   fontSize="sm"
                   role="status"
                 >
                   {buyAttempt.status === 'funded'
                     ? `Purchase funded on-chain. Order ${buyAttempt.orderId}.`
+                    : buyAttempt.status === 'settled'
+                      ? `Purchase settled on-chain. Order ${buyAttempt.orderId}.`
                     : buyAttempt.status === 'saved'
                       ? 'Saved purchase available. Check or continue it.'
                     : buyAttempt.status === 'included'
@@ -824,7 +826,7 @@ export default function SocialDesktopEmbed({
                             ? 'Purchase cancelled. Prepared files are saved.'
                             : 'Purchase could not complete.'}
                 </Text>
-                {buyAttempt.purchaseId && buyAttempt.status !== 'funded' && (
+                {buyAttempt.purchaseId && !['funded', 'settled'].includes(buyAttempt.status) && (
                   <Button variant="link" size="sm" onClick={checkBuy} isLoading={buyBusy}>
                     {['saved', 'cancelled', 'failed'].includes(buyAttempt.status)
                       ? 'Continue purchase'

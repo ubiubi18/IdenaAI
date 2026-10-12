@@ -1684,23 +1684,24 @@ async function readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags}) {
   }
 }
 
-function includedBuyOrder(market, prepared) {
+function includedBuyOrder(market, prepared, fundedAtBlock) {
   const offer = market.offers.filter(
     (item) => item.offerId === prepared.directOfferId
   )
-  if (offer.length !== 1 || !/^[1-9][0-9]*$/.test(offer[0].openOrderId)) {
-    return null
-  }
+  if (offer.length !== 1) return null
   const matching = market.orders.filter(
     (item) =>
-      item.orderId === offer[0].openOrderId &&
       item.offerId === prepared.directOfferId &&
       item.buyer === prepared.buyer &&
       item.paid === prepared.price &&
       item.bond === (BigInt(prepared.amount) - BigInt(prepared.price)).toString() &&
-      item.state === 'funded'
+      item.fundedAtBlock === fundedAtBlock &&
+      (item.state === 'settled' ||
+        (item.state === 'funded' && item.orderId === offer[0].openOrderId))
   )
-  return matching.length === 1 ? matching[0].orderId : null
+  return matching.length === 1
+    ? {orderId: matching[0].orderId, status: matching[0].state}
+    : null
 }
 
 function parseNodeFeePerGas(value) {
@@ -1864,10 +1865,39 @@ function createFodDirectBuyCommitService({
         const market = await readDirectBuyMarket({
           fs, spawn, binary: stagedBinary, tempDir, rpcFlags,
         })
-        const orderId = includedBuyOrder(market, saved)
-        return orderId
-          ? {purchaseId, status: 'funded', orderId}
-          : {purchaseId, status: 'included'}
+        const included = {purchaseId, status: 'included'}
+        const tx = await rpc('bcn_transaction', [attempt.txHash]).catch(() => null)
+        const blockHash = tx?.blockHash
+        if (
+          tx?.type !== 'callContract' ||
+          typeof tx.hash !== 'string' ||
+          tx.hash.toLowerCase() !== attempt.txHash ||
+          typeof tx.from !== 'string' ||
+          tx.from.toLowerCase() !== `0x${initial.coinbase}` ||
+          typeof tx.to !== 'string' ||
+          tx.to.toLowerCase() !== DIRECT_V4_CONTRACT ||
+          tx.amount !== toIdna(BigInt(saved.amount)) ||
+          typeof tx.payload !== 'string' ||
+          tx.payload.toLowerCase() !==
+            `0x0a036275791261${saved.calldata}`.toLowerCase() ||
+          typeof blockHash !== 'string' ||
+          !/^0x[0-9a-fA-F]{64}$/.test(blockHash)
+        ) return included
+        const block = await rpc('bcn_block', [blockHash]).catch(() => null)
+        if (
+          !Number.isSafeInteger(block?.height) || block.height < 1 ||
+          typeof block.hash !== 'string' ||
+          block.hash.toLowerCase() !== blockHash.toLowerCase()
+        ) return included
+        const canonical = await rpc('bcn_blockAt', [block.height]).catch(() => null)
+        if (
+          typeof canonical?.hash !== 'string' ||
+          canonical.hash.toLowerCase() !== blockHash.toLowerCase()
+        ) {
+          return included
+        }
+        const order = includedBuyOrder(market, saved, String(block.height))
+        return order ? {purchaseId, ...order} : included
       }
       if (previousAttempt) return reconcile(previousAttempt)
 
