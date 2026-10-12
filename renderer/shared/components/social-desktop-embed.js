@@ -24,6 +24,7 @@ import {SecondaryButton} from './button'
 import {ExternalLink, Page, PageTitle, TextLink} from './components'
 import {useSettingsState} from '../providers/settings-context'
 import {useChainState} from '../providers/chain-context'
+import {useIdentityState} from '../providers/identity-context'
 import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
 import {
   SOCIAL_CONTRACT_ADDRESS,
@@ -142,6 +143,7 @@ export default function SocialDesktopEmbed({
 }) {
   const settings = useSettingsState()
   const {offline, syncing} = useChainState()
+  const {address} = useIdentityState()
   const {internalPort, url, useExternalNode} = settings
 
   const [iframeNonce, setIframeNonce] = React.useState(0)
@@ -156,10 +158,30 @@ export default function SocialDesktopEmbed({
   const [savedVault, setSavedVault] = React.useState(false)
   const [confirmation, setConfirmation] = React.useState(null)
   const [vaultFolderError, setVaultFolderError] = React.useState('')
+  const [buyAttempt, setBuyAttempt] = React.useState(null)
+  const [buyBusy, setBuyBusy] = React.useState(false)
+  const buyStartedRef = React.useRef(false)
   const iframeRef = React.useRef(null)
   const messagePortRef = React.useRef(null)
   const receiveRequestRef = React.useRef(null)
   const savingVaultRef = React.useRef(false)
+
+  React.useEffect(() => {
+    let current = true
+    buyStartedRef.current = false
+    setBuyAttempt(null)
+    Promise.resolve(window.idena?.social?.directBuyResume?.({})).then((response) => {
+      const purchaseId = response?.result?.purchaseId
+      if (
+        current &&
+        !buyStartedRef.current &&
+        /^fod-buy-[0-9a-f]{32}$/.test(purchaseId || '')
+      ) {
+        setBuyAttempt((existing) => existing || {purchaseId, status: 'saved'})
+      }
+    }).catch(() => {})
+    return () => { current = false }
+  }, [address, internalPort, url, useExternalNode])
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -613,6 +635,51 @@ export default function SocialDesktopEmbed({
     }
   }, [])
 
+  const commitBuy = React.useCallback(async (purchaseId) => {
+    const response = await window.idena?.social?.directBuyCommit?.({purchaseId})
+    const result = response?.result
+    if (
+      result?.purchaseId !== purchaseId ||
+      !['funded', 'included', 'pending', 'uncertain', 'cancelled'].includes(
+        result.status
+      )
+    ) {
+      throw new Error('buy_failed')
+    }
+    setBuyAttempt({purchaseId, status: result.status, orderId: result.orderId})
+  }, [])
+
+  const startBuy = React.useCallback(async () => {
+    if (buyBusy) return
+    buyStartedRef.current = true
+    setBuyBusy(true)
+    let purchaseId
+    try {
+      const response = await window.idena?.social?.directBuyPrepare?.({})
+      purchaseId = response?.result?.purchaseId
+      if (!/^fod-buy-[0-9a-f]{32}$/.test(purchaseId || '')) {
+        throw new Error('buy_prepare_failed')
+      }
+      await commitBuy(purchaseId)
+    } catch {
+      if (purchaseId) setBuyAttempt({purchaseId, status: 'failed'})
+    } finally {
+      setBuyBusy(false)
+    }
+  }, [buyBusy, commitBuy])
+
+  const checkBuy = React.useCallback(async () => {
+    if (buyBusy || !buyAttempt?.purchaseId) return
+    setBuyBusy(true)
+    try {
+      await commitBuy(buyAttempt.purchaseId)
+    } catch {
+      setBuyAttempt((current) => current && {...current, status: 'failed'})
+    } finally {
+      setBuyBusy(false)
+    }
+  }, [buyAttempt, buyBusy, commitBuy])
+
   const initializeIframeChannel = React.useCallback(() => {
     const frameWindow = iframeRef.current?.contentWindow
 
@@ -703,6 +770,9 @@ export default function SocialDesktopEmbed({
                 </Text>
               </Box>
               <HStack spacing={2} flexWrap="wrap">
+                <SecondaryButton size="sm" onClick={startBuy} isLoading={buyBusy}>
+                  Buy flip keys
+                </SecondaryButton>
                 <SecondaryButton
                   size="sm"
                   onClick={() => setIframeNonce((value) => value + 1)}
@@ -733,6 +803,36 @@ export default function SocialDesktopEmbed({
               </HStack>
             </Flex>
             {headerContent}
+            {buyAttempt && (
+              <HStack spacing={2} flexWrap="wrap">
+                <Text
+                  color={buyAttempt.status === 'funded' ? 'green.600' : 'muted'}
+                  fontSize="sm"
+                  role="status"
+                >
+                  {buyAttempt.status === 'funded'
+                    ? `Purchase funded on-chain. Order ${buyAttempt.orderId}.`
+                    : buyAttempt.status === 'saved'
+                      ? 'Saved purchase available. Check or continue it.'
+                    : buyAttempt.status === 'included'
+                      ? 'Purchase included; waiting to identify its order.'
+                      : buyAttempt.status === 'pending'
+                        ? 'Purchase pending on-chain.'
+                        : buyAttempt.status === 'uncertain'
+                          ? 'Submission unverified. Check status before trying again.'
+                          : buyAttempt.status === 'cancelled'
+                            ? 'Purchase cancelled. Prepared files are saved.'
+                            : 'Purchase could not complete.'}
+                </Text>
+                {buyAttempt.purchaseId && buyAttempt.status !== 'funded' && (
+                  <Button variant="link" size="sm" onClick={checkBuy} isLoading={buyBusy}>
+                    {['saved', 'cancelled', 'failed'].includes(buyAttempt.status)
+                      ? 'Continue purchase'
+                      : 'Check status'}
+                  </Button>
+                )}
+              </HStack>
+            )}
             <HStack spacing={3} flexWrap="wrap">
               <Text color="muted" fontSize="xs">
                 {usingIndexerFallback

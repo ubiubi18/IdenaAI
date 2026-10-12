@@ -35,6 +35,9 @@ const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
 const {
   createFodDirectCheckService,
   createFodDirectReceiveService,
+  createFodDirectBuyPrepareService,
+  createFodDirectBuyResumeService,
+  createFodDirectBuyCommitService,
   createFodDirectConfirmService,
   DIRECT_V3_CONTRACT,
   DIRECT_V4_CONTRACT,
@@ -844,6 +847,19 @@ const fodDirectVaultRoot = join(app.getPath('userData'), 'fod-direct-vaults')
 const fodDirectReceiveService = createFodDirectReceiveService({
   ...fodDirectServiceOptions,
   vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectBuyPrepareService = createFodDirectBuyPrepareService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectBuyResumeService = createFodDirectBuyResumeService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectBuyCommitService = createFodDirectBuyCommitService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
 })
 const fodDirectConfirmService = createFodDirectConfirmService({
   ...fodDirectServiceOptions,
@@ -3617,6 +3633,30 @@ handleTrusted('social.direct-receive', async (_event, payload) => {
     }
   } catch {
     return {error: {message: 'Could not save verified keys locally.'}}
+  }
+})
+
+handleTrusted('social.direct-buy-prepare', async (_event, payload) => {
+  try {
+    return {result: await fodDirectBuyPrepareService(payload)}
+  } catch {
+    return {error: {message: 'Could not prepare this flip purchase.'}}
+  }
+})
+
+handleTrusted('social.direct-buy-resume', async (_event, payload) => {
+  try {
+    return {result: await fodDirectBuyResumeService(payload)}
+  } catch {
+    return {error: {message: 'Could not find a saved flip purchase.'}}
+  }
+})
+
+handleTrusted('social.direct-buy-commit', async (_event, payload) => {
+  try {
+    return {result: await fodDirectBuyCommitService(payload)}
+  } catch {
+    return {error: {message: 'Could not lock funds for this purchase.'}}
   }
 })
 
