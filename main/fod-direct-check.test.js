@@ -1191,13 +1191,19 @@ describe('trusted FoD direct buy preparation', () => {
 
   it('finds a saved purchase only for the active identity after restart', async () => {
     const first = await service()({})
+    const firstDir = path.join(vaultRoot, BUYER, first.purchaseId)
+    fs.utimesSync(firstDir, new Date(1000000), new Date(1000000))
+    const second = await service()({})
     const resume = createFodDirectBuyResumeService({
       getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: ''}),
       getActiveCoinbase: async () => `0x${BUYER}`,
       fs,
       vaultRoot,
     })
-    await expect(resume({})).resolves.toEqual({purchaseId: first.purchaseId})
+    await expect(resume({})).resolves.toEqual({
+      purchaseId: second.purchaseId,
+      purchaseIds: [second.purchaseId, first.purchaseId],
+    })
     await expect(resume({purchaseId: first.purchaseId})).rejects.toThrow(
       'fod_direct_buy_invalid_request'
     )
@@ -1207,7 +1213,7 @@ describe('trusted FoD direct buy preparation', () => {
       fs,
       vaultRoot,
     })
-    await expect(other({})).resolves.toEqual({purchaseId: null})
+    await expect(other({})).resolves.toEqual({purchaseId: null, purchaseIds: []})
   })
 
   it('refuses changed identity and unsafe prepared output without saving files', async () => {
