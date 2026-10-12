@@ -159,8 +159,9 @@ export default function SocialDesktopEmbed({
   const [confirmation, setConfirmation] = React.useState(null)
   const [vaultFolderError, setVaultFolderError] = React.useState('')
   const [buyAttempt, setBuyAttempt] = React.useState(null)
+  const [savedBuyIds, setSavedBuyIds] = React.useState([])
   const [buyBusy, setBuyBusy] = React.useState(false)
-  const buyStartedRef = React.useRef(false)
+  const buyContextRef = React.useRef(0)
   const iframeRef = React.useRef(null)
   const messagePortRef = React.useRef(null)
   const receiveRequestRef = React.useRef(null)
@@ -168,16 +169,29 @@ export default function SocialDesktopEmbed({
 
   React.useEffect(() => {
     let current = true
-    buyStartedRef.current = false
+    const buyContext = ++buyContextRef.current
     setBuyAttempt(null)
+    setSavedBuyIds([])
+    setBuyBusy(false)
     Promise.resolve(window.idena?.social?.directBuyResume?.({})).then((response) => {
       const purchaseId = response?.result?.purchaseId
+      const purchaseIds = response?.result?.purchaseIds
       if (
         current &&
-        !buyStartedRef.current &&
-        /^fod-buy-[0-9a-f]{32}$/.test(purchaseId || '')
+        buyContextRef.current === buyContext &&
+        Array.isArray(purchaseIds) &&
+        purchaseIds.length <= 1000 &&
+        purchaseIds.every((id) => /^fod-buy-[0-9a-f]{32}$/.test(id)) &&
+        new Set(purchaseIds).size === purchaseIds.length &&
+        (purchaseIds[0] || null) === purchaseId
       ) {
-        setBuyAttempt((existing) => existing || {purchaseId, status: 'saved'})
+        setSavedBuyIds((existing) => [
+          ...existing.filter((id) => !purchaseIds.includes(id)),
+          ...purchaseIds,
+        ])
+        if (purchaseId) {
+          setBuyAttempt((existing) => existing || {purchaseId, status: 'saved'})
+        }
       }
     }).catch(() => {})
     return () => { current = false }
@@ -636,6 +650,7 @@ export default function SocialDesktopEmbed({
   }, [])
 
   const commitBuy = React.useCallback(async (purchaseId) => {
+    const buyContext = buyContextRef.current
     const response = await window.idena?.social?.directBuyCommit?.({purchaseId})
     const result = response?.result
     if (
@@ -646,39 +661,55 @@ export default function SocialDesktopEmbed({
     ) {
       throw new Error('buy_failed')
     }
-    setBuyAttempt({purchaseId, status: result.status, orderId: result.orderId})
+    if (buyContextRef.current === buyContext) {
+      setBuyAttempt({purchaseId, status: result.status, orderId: result.orderId})
+    }
   }, [])
 
   const startBuy = React.useCallback(async () => {
     if (buyBusy) return
-    buyStartedRef.current = true
+    const buyContext = buyContextRef.current
     setBuyBusy(true)
     let purchaseId
     try {
       const response = await window.idena?.social?.directBuyPrepare?.({})
+      if (buyContextRef.current !== buyContext) return
       purchaseId = response?.result?.purchaseId
       if (!/^fod-buy-[0-9a-f]{32}$/.test(purchaseId || '')) {
         throw new Error('buy_prepare_failed')
       }
+      setSavedBuyIds((current) => [purchaseId, ...current.filter((id) => id !== purchaseId)])
       await commitBuy(purchaseId)
     } catch {
-      if (purchaseId) setBuyAttempt({purchaseId, status: 'failed'})
+      if (purchaseId && buyContextRef.current === buyContext) {
+        setBuyAttempt({purchaseId, status: 'failed'})
+      }
     } finally {
-      setBuyBusy(false)
+      if (buyContextRef.current === buyContext) setBuyBusy(false)
     }
   }, [buyBusy, commitBuy])
 
   const checkBuy = React.useCallback(async () => {
     if (buyBusy || !buyAttempt?.purchaseId) return
+    const buyContext = buyContextRef.current
     setBuyBusy(true)
     try {
       await commitBuy(buyAttempt.purchaseId)
     } catch {
-      setBuyAttempt((current) => current && {...current, status: 'failed'})
+      if (buyContextRef.current === buyContext) {
+        setBuyAttempt((current) => current && {...current, status: 'failed'})
+      }
     } finally {
-      setBuyBusy(false)
+      if (buyContextRef.current === buyContext) setBuyBusy(false)
     }
   }, [buyAttempt, buyBusy, commitBuy])
+
+  const showNextSavedBuy = React.useCallback(() => {
+    if (buyBusy || savedBuyIds.length < 2) return
+    const index = savedBuyIds.indexOf(buyAttempt?.purchaseId)
+    const purchaseId = savedBuyIds[(index + 1) % savedBuyIds.length]
+    setBuyAttempt({purchaseId, status: 'saved'})
+  }, [buyAttempt, buyBusy, savedBuyIds])
 
   const initializeIframeChannel = React.useCallback(() => {
     const frameWindow = iframeRef.current?.contentWindow
@@ -831,6 +862,11 @@ export default function SocialDesktopEmbed({
                     {['saved', 'cancelled', 'failed'].includes(buyAttempt.status)
                       ? 'Continue purchase'
                       : 'Check status'}
+                  </Button>
+                )}
+                {savedBuyIds.length > 1 && savedBuyIds.includes(buyAttempt.purchaseId) && (
+                  <Button variant="link" size="sm" onClick={showNextSavedBuy} isDisabled={buyBusy}>
+                    Saved purchase {savedBuyIds.indexOf(buyAttempt.purchaseId) + 1} of {savedBuyIds.length} · Next
                   </Button>
                 )}
               </HStack>

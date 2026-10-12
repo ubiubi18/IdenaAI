@@ -1575,7 +1575,7 @@ function createFodDirectBuyResumeService({
     try {
       metadata = await fs.promises.lstat(vaultRoot)
     } catch (error) {
-      if (error.code === 'ENOENT') return {purchaseId: null}
+      if (error.code === 'ENOENT') return {purchaseId: null, purchaseIds: []}
       throw error
     }
     if (!metadata.isDirectory()) refuse('fod_direct_buy_unavailable')
@@ -1584,7 +1584,7 @@ function createFodDirectBuyResumeService({
     try {
       metadata = await fs.promises.lstat(identityRoot)
     } catch (error) {
-      if (error.code === 'ENOENT') return {purchaseId: null}
+      if (error.code === 'ENOENT') return {purchaseId: null, purchaseIds: []}
       throw error
     }
     if (!metadata.isDirectory()) refuse('fod_direct_buy_unavailable')
@@ -1613,7 +1613,8 @@ function createFodDirectBuyResumeService({
       refuse('fod_direct_buy_identity_changed')
     }
     candidates.sort((a, b) => b.modified - a.modified || b.name.localeCompare(a.name))
-    return {purchaseId: candidates[0]?.name || null}
+    const purchaseIds = candidates.map(({name}) => name)
+    return {purchaseId: purchaseIds[0] || null, purchaseIds}
   }
 }
 
