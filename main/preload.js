@@ -1860,6 +1860,10 @@ const bridge = {
       invokeCloneable('social.direct-receive', payload),
     directBuyPrepare: (payload) =>
       invokeCloneable('social.direct-buy-prepare', payload),
+    directMarket: (payload) =>
+      invokeCloneable('social.direct-market', payload),
+    directList: (payload) =>
+      invokeCloneable('social.direct-list', payload),
     directBuyResume: (payload) =>
       invokeCloneable('social.direct-buy-resume', payload),
     directBuyCommit: (payload) =>
