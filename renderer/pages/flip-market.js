@@ -1,3 +1,4 @@
+/* global BigInt */
 import React from 'react'
 import {
   Badge,
@@ -28,6 +29,7 @@ const LIST_STATUSES = [
   'uncertain',
   'cancelled',
   'failed',
+  'conflict',
 ]
 const PRICE_IDNA = /^(0|[1-9][0-9]*)(\.[0-9]{1,18})?$/
 const BUY_STATUSES = [
@@ -88,6 +90,27 @@ function listingStatus(status) {
       return 'Listing cancelled.'
     case 'failed':
       return 'Listing failed on-chain. You can retry.'
+    case 'conflict':
+      return 'This identity and epoch already have a different listing.'
+    default:
+      return ''
+  }
+}
+
+function refundStatus(status) {
+  switch (status) {
+    case 'requesting':
+      return 'Requesting refund…'
+    case 'refunded':
+      return 'Refund confirmed on-chain.'
+    case 'pending':
+      return 'Refund pending. Check its status before taking another action.'
+    case 'uncertain':
+      return 'Refund status unknown. Check its status before taking another action.'
+    case 'failed':
+      return 'Refund failed on-chain. You can try again.'
+    case 'cancelled':
+      return 'Refund cancelled. You can try again.'
     default:
       return ''
   }
@@ -121,6 +144,10 @@ export default function FlipMarketPage() {
   const [savedError, setSavedError] = React.useState('')
   const [purchaseStates, setPurchaseStates] = React.useState({})
   const [purchaseError, setPurchaseError] = React.useState('')
+  const [recoveryPurchaseId, setRecoveryPurchaseId] = React.useState(null)
+  const [recoveryPassphrase, setRecoveryPassphrase] = React.useState('')
+  const [recoveryFeedback, setRecoveryFeedback] = React.useState(null)
+  const [refundStates, setRefundStates] = React.useState({})
   const [busy, setBusy] = React.useState(false)
   const [sellPrice, setSellPrice] = React.useState('')
   const [sellPassphrase, setSellPassphrase] = React.useState('')
@@ -165,6 +192,14 @@ export default function FlipMarketPage() {
       )
         return
       setMarket(result)
+      setRefundStates((current) => {
+        const next = {...current}
+        result.orders.forEach((order) => {
+          if (order.state === 'refunded' && next[order.orderId])
+            next[order.orderId] = 'refunded'
+        })
+        return next
+      })
       setSelectedOfferId((current) =>
         result.offers.some((offer) => offer.offerId === current)
           ? current
@@ -226,6 +261,10 @@ export default function FlipMarketPage() {
     setSavedLoading(!offline)
     setPurchaseStates({})
     setPurchaseError('')
+    setRecoveryPurchaseId(null)
+    setRecoveryPassphrase('')
+    setRecoveryFeedback(null)
+    setRefundStates({})
     setBusy(false)
     setSellPrice('')
     setSellPassphrase('')
@@ -255,6 +294,29 @@ export default function FlipMarketPage() {
     market?.orders?.filter((order) => sameAddress(order.buyer, address)) || []
   const canBuy = !offline && !syncing && !marketLoading && !busy
   const canSell = Boolean(address) && !offline && !syncing && !busy
+  const refundableOrder = (order) =>
+    ['funded', 'fallback-pending'].includes(order.state) &&
+    Number.isSafeInteger(market?.blockHeight) &&
+    /^[0-9]+$/.test(order.refundAtBlock) &&
+    BigInt(market.blockHeight) >= BigInt(order.refundAtBlock)
+  const recoverableOrderFor = (purchaseId) => {
+    const purchase = purchaseStates[purchaseId]
+    if (
+      !savedPurchaseIds.includes(purchaseId) ||
+      purchase?.status !== 'settled' ||
+      !purchase.orderId
+    )
+      return null
+    return (
+      market?.orders.find(
+        (order) =>
+          order.orderId === String(purchase.orderId) &&
+          sameAddress(order.buyer, address) &&
+          order.state === 'settled' &&
+          order.keysPublic === true
+      ) || null
+    )
+  }
 
   const listFlips = async (event, statusOnly = false) => {
     event?.preventDefault()
@@ -369,6 +431,103 @@ export default function FlipMarketPage() {
         }))
         setPurchaseError(error.message || 'Could not continue this purchase.')
       }
+    } finally {
+      if (contextRef.current === context) setBusy(false)
+    }
+  }
+
+  const recoverPurchase = async (event, purchaseId) => {
+    event.preventDefault()
+    const order = recoverableOrderFor(purchaseId)
+    if (
+      busy ||
+      offline ||
+      syncing ||
+      marketLoading ||
+      !PURCHASE_ID.test(purchaseId) ||
+      !order
+    )
+      return
+    const passphraseLength = Array.from(recoveryPassphrase).length
+    if (passphraseLength < 12 || passphraseLength > 512) {
+      setRecoveryFeedback({
+        purchaseId,
+        error: 'Enter a vault passphrase of 12–512 characters.',
+      })
+      return
+    }
+    const context = contextRef.current
+    setBusy(true)
+    setRecoveryFeedback(null)
+    try {
+      const request = window.idena?.social?.directRecover?.({
+        purchaseId,
+        orderId: order.orderId,
+        passphrase: recoveryPassphrase,
+      })
+      setRecoveryPassphrase('')
+      const result = resultOrThrow(await request, 'Could not recover flips.')
+      if (
+        result.purchaseId !== purchaseId ||
+        String(result.orderId) !== order.orderId ||
+        result.status !== 'recovered' ||
+        !Number.isInteger(result.usableFlips) ||
+        result.usableFlips < 1
+      )
+        throw new Error('The recovery result could not be read.')
+      if (contextRef.current === context) {
+        setRecoveryPurchaseId(null)
+        setRecoveryFeedback({purchaseId, usableFlips: result.usableFlips})
+      }
+    } catch {
+      if (contextRef.current === context)
+        setRecoveryFeedback({
+          purchaseId,
+          error:
+            'Could not recover flips. Check the vault passphrase and try again.',
+        })
+    } finally {
+      if (contextRef.current === context) {
+        setRecoveryPassphrase('')
+        setBusy(false)
+      }
+    }
+  }
+
+  const refundOrder = async (orderId) => {
+    const order = myOrders.find((item) => item.orderId === orderId)
+    if (
+      busy ||
+      offline ||
+      syncing ||
+      marketLoading ||
+      !order ||
+      !refundableOrder(order) ||
+      ['requesting', 'refunded'].includes(refundStates[orderId])
+    )
+      return
+    const context = contextRef.current
+    setBusy(true)
+    setRefundStates((current) => ({...current, [orderId]: 'requesting'}))
+    try {
+      const result = resultOrThrow(
+        await window.idena?.social?.directRefund?.({orderId}),
+        'Could not request refund.'
+      )
+      if (
+        result.orderId !== orderId ||
+        !['refunded', 'pending', 'uncertain', 'failed', 'cancelled'].includes(
+          result.status
+        )
+      )
+        throw new Error('The refund status could not be read.')
+      if (contextRef.current === context) {
+        setRefundStates((current) => ({...current, [orderId]: result.status}))
+        if (result.status === 'refunded') loadMarket()
+      }
+    } catch {
+      if (contextRef.current === context)
+        setRefundStates((current) => ({...current, [orderId]: 'uncertain'}))
     } finally {
       if (contextRef.current === context) setBusy(false)
     }
@@ -671,6 +830,48 @@ export default function FlipMarketPage() {
                         {['funded', 'fallback-pending'].includes(order.state) &&
                           ` · Refund at block ${order.refundAtBlock}`}
                       </Text>
+                      {refundStates[order.orderId] && (
+                        <Text
+                          color={
+                            ['failed', 'uncertain'].includes(
+                              refundStates[order.orderId]
+                            )
+                              ? 'red.500'
+                              : 'muted'
+                          }
+                          fontSize="sm"
+                          mt={2}
+                          role={
+                            ['failed', 'uncertain'].includes(
+                              refundStates[order.orderId]
+                            )
+                              ? 'alert'
+                              : 'status'
+                          }
+                        >
+                          {refundStatus(refundStates[order.orderId])}
+                        </Text>
+                      )}
+                      {!offline &&
+                        !syncing &&
+                        !marketLoading &&
+                        !busy &&
+                        refundableOrder(order) &&
+                        !['refunded', 'requesting'].includes(
+                          refundStates[order.orderId]
+                        ) && (
+                          <SecondaryButton
+                            size="sm"
+                            mt={2}
+                            onClick={() => refundOrder(order.orderId)}
+                          >
+                            {['pending', 'uncertain'].includes(
+                              refundStates[order.orderId]
+                            )
+                              ? 'Check refund'
+                              : 'Refund'}
+                          </SecondaryButton>
+                        )}
                     </Box>
                   ))}
                 </Stack>
@@ -709,44 +910,116 @@ export default function FlipMarketPage() {
             >
               {savedPurchaseIds.map((id) => {
                 const result = purchaseStates[id]
+                const recoverableOrder = recoverableOrderFor(id)
                 return (
-                  <Flex
+                  <Box
                     key={id}
                     py={3}
-                    align="center"
-                    justify="space-between"
-                    gap={4}
                     borderBottomWidth="1px"
                     borderColor="gray.100"
                   >
-                    <Box minW={0}>
-                      <Text
-                        fontSize="sm"
-                        fontFamily="mono"
-                        isTruncated
-                        title={id}
+                    <Flex align="center" justify="space-between" gap={4}>
+                      <Box minW={0}>
+                        <Text
+                          fontSize="sm"
+                          fontFamily="mono"
+                          isTruncated
+                          title={id}
+                        >
+                          Purchase · {id.slice(-8)}
+                        </Text>
+                        <Text color="muted" fontSize="sm" role="status">
+                          {purchaseStatus(result?.status, result?.orderId)}
+                        </Text>
+                      </Box>
+                      {!COMPLETE_STATUSES.includes(result?.status) && (
+                        <SecondaryButton
+                          size="sm"
+                          onClick={() => continuePurchase(id)}
+                          isLoading={busy}
+                          isDisabled={busy || offline || syncing}
+                        >
+                          {result?.status === 'pending' ||
+                          result?.status === 'included' ||
+                          result?.status === 'uncertain'
+                            ? 'Check status'
+                            : 'Continue'}
+                        </SecondaryButton>
+                      )}
+                      {recoverableOrder && (
+                        <SecondaryButton
+                          size="sm"
+                          onClick={() => {
+                            setRecoveryPurchaseId((current) =>
+                              current === id ? null : id
+                            )
+                            setRecoveryPassphrase('')
+                            setRecoveryFeedback(null)
+                          }}
+                          isLoading={busy}
+                          isDisabled={
+                            busy || offline || syncing || marketLoading
+                          }
+                        >
+                          {recoveryPurchaseId === id
+                            ? 'Cancel recovery'
+                            : 'Recover keys'}
+                        </SecondaryButton>
+                      )}
+                    </Flex>
+                    {recoverableOrder && recoveryPurchaseId === id && (
+                      <Box
+                        as="form"
+                        onSubmit={(event) => recoverPurchase(event, id)}
+                        mt={3}
+                        maxW="sm"
                       >
-                        Purchase · {id.slice(-8)}
-                      </Text>
-                      <Text color="muted" fontSize="sm" role="status">
-                        {purchaseStatus(result?.status, result?.orderId)}
-                      </Text>
-                    </Box>
-                    {!COMPLETE_STATUSES.includes(result?.status) && (
-                      <SecondaryButton
-                        size="sm"
-                        onClick={() => continuePurchase(id)}
-                        isLoading={busy}
-                        isDisabled={busy || offline || syncing}
-                      >
-                        {result?.status === 'pending' ||
-                        result?.status === 'included' ||
-                        result?.status === 'uncertain'
-                          ? 'Check status'
-                          : 'Continue'}
-                      </SecondaryButton>
+                        <FormControl>
+                          <FormLabel htmlFor={`fod-recover-passphrase-${id}`}>
+                            Vault passphrase
+                          </FormLabel>
+                          <Input
+                            id={`fod-recover-passphrase-${id}`}
+                            type="password"
+                            autoComplete="off"
+                            value={recoveryPassphrase}
+                            onChange={(event) =>
+                              setRecoveryPassphrase(event.target.value)
+                            }
+                            isDisabled={
+                              busy || offline || syncing || marketLoading
+                            }
+                          />
+                        </FormControl>
+                        <PrimaryButton
+                          type="submit"
+                          size="sm"
+                          mt={3}
+                          isLoading={busy}
+                          isDisabled={
+                            busy ||
+                            offline ||
+                            syncing ||
+                            marketLoading ||
+                            !recoveryPassphrase
+                          }
+                        >
+                          Recover flips
+                        </PrimaryButton>
+                      </Box>
                     )}
-                  </Flex>
+                    {recoveryFeedback?.purchaseId === id && (
+                      <Text
+                        color={recoveryFeedback.error ? 'red.500' : 'green.600'}
+                        fontSize="sm"
+                        mt={2}
+                        role={recoveryFeedback.error ? 'alert' : 'status'}
+                      >
+                        {recoveryFeedback.error ||
+                          `Recovered ${recoveryFeedback.usableFlips} usable flips.`}
+                      </Text>
+                    )}
+                  </Box>
                 )
               })}
             </Stack>
