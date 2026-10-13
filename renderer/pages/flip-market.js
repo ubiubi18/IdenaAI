@@ -22,7 +22,13 @@ const DIRECT_VERSION = 4
 const OFFER_ID = /^[0-9a-f]{64}$/
 const PURCHASE_ID = /^fod-buy-[0-9a-f]{32}$/
 const COMPLETE_STATUSES = ['funded', 'settled']
-const LIST_STATUSES = ['included', 'pending', 'uncertain', 'cancelled', 'failed']
+const LIST_STATUSES = [
+  'included',
+  'pending',
+  'uncertain',
+  'cancelled',
+  'failed',
+]
 const PRICE_IDNA = /^(0|[1-9][0-9]*)(\.[0-9]{1,18})?$/
 const BUY_STATUSES = [
   'funded',
@@ -253,9 +259,8 @@ export default function FlipMarketPage() {
   const listFlips = async (event, statusOnly = false) => {
     event?.preventDefault()
     if (!canSell) return
-    const priceIdna = statusOnly && listing
-      ? listing.priceIdna
-      : sellPrice.trim()
+    const priceIdna =
+      statusOnly && listing ? listing.priceIdna : sellPrice.trim()
     if (!PRICE_IDNA.test(priceIdna) || !/[1-9]/.test(priceIdna)) {
       setListingError('Enter a positive price in iDNA.')
       return
