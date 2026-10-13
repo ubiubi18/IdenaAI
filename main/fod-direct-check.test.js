@@ -1189,6 +1189,31 @@ describe('trusted FoD direct buy preparation', () => {
     )
   })
 
+  it('retains an explicit v4 selection and its prepared version', async () => {
+    const prepared = {...preparedBuy(), directVersion: 4}
+    const child = fakeSpawn({result: JSON.stringify(prepared)})
+    const {purchaseId} = await service({spawn: child.spawn})({directVersion: 4})
+    const args = child.calls[0].args
+    expect(args.slice(args.indexOf('-direct-version'), args.indexOf('-rpc'))).toEqual([
+      '-direct-version', '4', '-contract', `0x${V4_CONTRACT}`,
+      '-code-hash', V4_CODE_HASH,
+    ])
+    const retained = JSON.parse(fs.readFileSync(
+      path.join(vaultRoot, BUYER, purchaseId, 'purchase.json'), 'utf8'
+    ))
+    expect(retained.directVersion).toBe(4)
+    expect(retained.contract).toBe(V4_CONTRACT)
+
+    const fresh = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const rpcCall = jest.fn()
+    const selectedDialog = {showMessageBox: jest.fn()}
+    await expect(commitService({
+      spawn: fresh.spawn, rpcCall, selectedDialog,
+    })({purchaseId})).rejects.toThrow('fod_direct_buy_changed')
+    expect(selectedDialog.showMessageBox).not.toHaveBeenCalled()
+    expect(rpcCall).not.toHaveBeenCalled()
+  })
+
   it('finds a saved purchase only for the active identity after restart', async () => {
     const first = await service()({})
     const firstDir = path.join(vaultRoot, BUYER, first.purchaseId)
@@ -1281,6 +1306,45 @@ describe('trusted FoD direct buy preparation', () => {
     )
     expect(dialog.showOpenDialog).not.toHaveBeenCalled()
     expect(child.spawn).not.toHaveBeenCalled()
+  })
+
+  it('keeps v5 unavailable before identity, file, or CLI access', async () => {
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const rpc = jest.fn()
+    await expect(service({spawn: child.spawn, rpc})({directVersion: 5}))
+      .rejects.toThrow('fod_direct_buy_unavailable')
+    expect(rpc).not.toHaveBeenCalled()
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+    expect(child.spawn).not.toHaveBeenCalled()
+    expect(fs.existsSync(vaultRoot)).toBe(false)
+  })
+
+  it('rejects prepared version and contract mismatches without retaining a buy', async () => {
+    for (const prepared of [
+      {...preparedBuy(), directVersion: 5},
+      {...preparedBuy(), contract: 'f'.repeat(40)},
+    ]) {
+      const child = fakeSpawn({result: JSON.stringify(prepared)})
+      await expect(service({spawn: child.spawn})({})).rejects.toThrow(
+        'fod_direct_buy_failed'
+      )
+      expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+    }
+  })
+
+  it('rejects a retained purchase switched to an unpinned version', async () => {
+    const {purchaseId} = await service()({})
+    const savedPath = path.join(vaultRoot, BUYER, purchaseId, 'purchase.json')
+    const saved = JSON.parse(fs.readFileSync(savedPath, 'utf8'))
+    fs.writeFileSync(savedPath, JSON.stringify({...saved, directVersion: 5}))
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    const rpcCall = jest.fn()
+    await expect(commitService({spawn: child.spawn, rpcCall})({purchaseId}))
+      .rejects.toThrow('fod_direct_buy_unavailable')
+    expect(child.spawn).not.toHaveBeenCalled()
+    expect(rpcCall).not.toHaveBeenCalled()
+    expect(fs.existsSync(path.join(vaultRoot, BUYER, purchaseId, 'buy-attempt.json')))
+      .toBe(false)
   })
 
   it('commits only a saved purchase and honors native cancellation without broadcasting', async () => {

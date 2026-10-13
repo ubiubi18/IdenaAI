@@ -27,6 +27,20 @@ const DIRECT_V4_BUY_BINARY_SHA256_BY_PLATFORM = Object.freeze({
   'linux-x64': '8606243ff2528026cacc9cb6bbe75907657cc99cbe903f2a3d17c87a6888e776',
   'darwin-arm64': '062a96b5f5b91612836d4270e2233bd9b730c32ea53d1bd2c7b7459d7b8b562f',
 })
+// Enable v5 only after its deployed contract, code, CLI hashes, and market
+// output version have been independently verified together.
+const DIRECT_V5_RELEASE = null
+const DIRECT_BUY_RELEASES = Object.freeze({
+  4: Object.freeze({
+    version: 4,
+    contract: DIRECT_V4_CONTRACT,
+    codeHash: DIRECT_V4_CODE_HASH,
+    binaryHashes: DIRECT_V4_BINARY_SHA256_BY_PLATFORM,
+    buyBinaryHashes: DIRECT_V4_BUY_BINARY_SHA256_BY_PLATFORM,
+    marketVersion: 3,
+  }),
+  ...(DIRECT_V5_RELEASE ? {5: DIRECT_V5_RELEASE} : {}),
+})
 const CODE_HASH_BY_CONTRACT = Object.freeze({
   [CONTRACT.slice(2)]: CODE_HASH,
   [DIRECT_V3_CONTRACT.slice(2)]: DIRECT_V3_CODE_HASH,
@@ -108,9 +122,12 @@ function parseMessage(payload) {
   }
 
   const match = MESSAGE_PATTERN.exec(payload.message)
+  const release = match && directReleaseForContract(match[1])
+  const codeHash = match &&
+    (CODE_HASH_BY_CONTRACT[match[1]] || release?.codeHash)
   if (
     !match ||
-    !CODE_HASH_BY_CONTRACT[match[1]] ||
+    !codeHash ||
     !isUint64(match[4]) ||
     !isUint64(match[5]) ||
     /^0+$/.test(match[2]) ||
@@ -122,7 +139,7 @@ function parseMessage(payload) {
 
   return {
     contract: match[1],
-    codeHash: CODE_HASH_BY_CONTRACT[match[1]],
+    codeHash,
     author: match[2],
     orderId: match[4],
     buyer: match[6],
@@ -361,28 +378,61 @@ async function checkBinary(fs, binaryPath) {
 }
 
 function directVersionArgs(contract) {
-  return contract === DIRECT_V4_CONTRACT.slice(2) ||
-    contract === DIRECT_V4_CONTRACT
-    ? ['-direct-version', '4']
-    : []
+  const release = directReleaseForContract(contract)
+  return release ? ['-direct-version', String(release.version)] : []
+}
+
+function pinnedDirectRelease(version) {
+  const release = DIRECT_BUY_RELEASES[version]
+  const platform = `${process.platform}-${process.arch}`
+  return release &&
+    release.version === version &&
+    /^0x[0-9a-f]{40}$/.test(release.contract) &&
+    (version !== 5 ||
+      ![CONTRACT, DIRECT_V3_CONTRACT, DIRECT_V4_CONTRACT].includes(
+        release.contract
+      )) &&
+    /^0x[0-9a-f]{64}$/.test(release.codeHash) &&
+    /^[0-9a-f]{64}$/.test(release.binaryHashes?.[platform]) &&
+    /^[0-9a-f]{64}$/.test(release.buyBinaryHashes?.[platform]) &&
+    Number.isSafeInteger(release.marketVersion) &&
+    release.marketVersion > 0
+    ? release
+    : null
+}
+
+function directReleaseForContract(contract) {
+  const normalized = contract.startsWith('0x') ? contract : `0x${contract}`
+  return [4, 5]
+    .map(pinnedDirectRelease)
+    .find((release) => release?.contract === normalized)
+}
+
+function selectedBuyRelease(version) {
+  if (version !== 4 && version !== 5) refuse('fod_direct_buy_failed')
+  const release = pinnedDirectRelease(version)
+  if (!release) refuse('fod_direct_buy_unavailable')
+  return release
 }
 
 function reviewedBinaryHashes(contract, confirmation, expectedBinaryHash) {
+  const release = directReleaseForContract(contract)
   if (expectedBinaryHash !== undefined) return [expectedBinaryHash]
-  const v4Hash =
-    DIRECT_V4_BINARY_SHA256_BY_PLATFORM[`${process.platform}-${process.arch}`]
-  const buyHash =
-    DIRECT_V4_BUY_BINARY_SHA256_BY_PLATFORM[`${process.platform}-${process.arch}`]
+  const platform = `${process.platform}-${process.arch}`
+  const v4Hash = DIRECT_V4_BINARY_SHA256_BY_PLATFORM[platform]
+  const buyHash = DIRECT_V4_BUY_BINARY_SHA256_BY_PLATFORM[platform]
   if (contract === DIRECT_V3_CONTRACT && confirmation) {
     return [DIRECT_V3_BINARY_SHA256, v4Hash, buyHash].filter(Boolean)
+  }
+  if (release) {
+    return [release.binaryHashes[platform], release.buyBinaryHashes[platform]]
   }
   return [v4Hash, buyHash].filter(Boolean)
 }
 
-function reviewedDirectBuyBinaryHashes(expectedBinaryHash) {
+function reviewedDirectBuyBinaryHashes(release, expectedBinaryHash) {
   if (expectedBinaryHash !== undefined) return [expectedBinaryHash]
-  const buyHash =
-    DIRECT_V4_BUY_BINARY_SHA256_BY_PLATFORM[`${process.platform}-${process.arch}`]
+  const buyHash = release.buyBinaryHashes[`${process.platform}-${process.arch}`]
   return buyHash ? [buyHash] : []
 }
 
@@ -624,7 +674,7 @@ function parseBuySession(raw) {
 }
 
 const BUY_FIELDS = new Set([
-  'format', 'version', 'operation', 'network', 'contract', 'amount',
+  'format', 'version', 'directVersion', 'operation', 'network', 'contract', 'amount',
   'calldata', 'preparedAt', 'submitted', 'price', 'availability',
   'orderNonce', 'buyer', 'deliveryKey', 'author', 'epoch',
   'coveredFlips', 'keyCommitment', 'inventoryCommitment',
@@ -637,19 +687,27 @@ function toIdna(atoms) {
   return `${atoms / base}${fraction ? `.${fraction}` : ''}`
 }
 
-function parsePreparedBuy(raw, session, buyer, deliveryPublicKey) {
+function parsePreparedBuy(raw, session, buyer, deliveryPublicKey, expectedVersion) {
   const prepared = parseUniqueJson(raw, 'fod_direct_buy_failed')
   const availability = prepared.availability
   const retained = prepared.directSession
   const fields = Object.keys(prepared)
+  const hasDirectVersion = Object.prototype.hasOwnProperty.call(
+    prepared, 'directVersion'
+  )
+  const version = hasDirectVersion ? prepared.directVersion : 4
+  if (expectedVersion !== undefined && version !== expectedVersion) {
+    refuse('fod_direct_buy_failed')
+  }
+  const release = selectedBuyRelease(version)
   if (
-    fields.length !== BUY_FIELDS.size ||
+    fields.length !== BUY_FIELDS.size - (hasDirectVersion ? 0 : 1) ||
     fields.some((field) => !BUY_FIELDS.has(field)) ||
     prepared.format !== 'fod.prepared-direct-buy' ||
     prepared.version !== 1 ||
     prepared.operation !== 'buy' ||
     prepared.network !== 'idena' ||
-    prepared.contract !== DIRECT_V4_CONTRACT.slice(2) ||
+    prepared.contract !== release.contract.slice(2) ||
     prepared.buyer !== buyer ||
     prepared.submitted !== false ||
     typeof prepared.preparedAt !== 'string' ||
@@ -697,12 +755,15 @@ function parsePreparedBuy(raw, session, buyer, deliveryPublicKey) {
     refuse('fod_direct_buy_failed')
   }
   return {
-    priceIdna: toIdna(price),
-    bondIdna: toIdna(total - price),
-    totalIdna: toIdna(total),
-    author: `0x${prepared.author}`,
-    epoch: prepared.epoch,
-    usableFlips: prepared.coveredFlips,
+    release,
+    summary: {
+      priceIdna: toIdna(price),
+      bondIdna: toIdna(total - price),
+      totalIdna: toIdna(total),
+      author: `0x${prepared.author}`,
+      epoch: prepared.epoch,
+      usableFlips: prepared.coveredFlips,
+    },
   }
 }
 
@@ -1141,6 +1202,27 @@ function createFodDirectReceiveService({
   }
 }
 
+function parseBuyPrepareRequest(payload) {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    Array.isArray(payload) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(payload))
+  ) {
+    refuse('fod_direct_buy_invalid_request')
+  }
+  const fields = Reflect.ownKeys(payload)
+  const descriptor = Object.getOwnPropertyDescriptor(payload, 'directVersion')
+  if (
+    fields.length !== 0 &&
+    (fields.length !== 1 || !descriptor ||
+      (descriptor.value !== 4 && descriptor.value !== 5))
+  ) {
+    refuse('fod_direct_buy_invalid_request')
+  }
+  return selectedBuyRelease(descriptor ? descriptor.value : 4)
+}
+
 function createFodDirectBuyPrepareService({
   dialog,
   getNodeRpcConnection,
@@ -1160,20 +1242,14 @@ function createFodDirectBuyPrepareService({
     let outputDir
     let saved = false
     try {
-      if (
-        !payload ||
-        typeof payload !== 'object' ||
-        Array.isArray(payload) ||
-        ![Object.prototype, null].includes(Object.getPrototypeOf(payload)) ||
-        Reflect.ownKeys(payload).length !== 0
-      ) {
-        refuse('fod_direct_buy_invalid_request')
-      }
+      const release = parseBuyPrepareRequest(payload)
       const initial = await activeIdentity(
         getNodeRpcConnection,
         getActiveCoinbase
       )
-      const binaryHashes = reviewedDirectBuyBinaryHashes(expectedBinaryHash)
+      const binaryHashes = reviewedDirectBuyBinaryHashes(
+        release, expectedBinaryHash
+      )
       await checkPinnedBinary(fs, binaryPath, binaryHashes)
       const vaultParent = await ensurePrivateVaultRoot(fs, vaultRoot)
       const privateRoot = await ensurePrivateVaultRoot(
@@ -1220,11 +1296,11 @@ function createFodDirectBuyPrepareService({
           '-network',
           'idena',
           '-direct-version',
-          '4',
+          String(release.version),
           '-contract',
-          DIRECT_V4_CONTRACT,
+          release.contract,
           '-code-hash',
-          DIRECT_V4_CODE_HASH,
+          release.codeHash,
           '-rpc',
           initial.connection.url,
         ]
@@ -1279,11 +1355,12 @@ function createFodDirectBuyPrepareService({
             MAX_PURCHASE_BYTES
           )
           try {
-            const summary = parsePreparedBuy(
+            const {summary} = parsePreparedBuy(
               prepared.data,
               session,
               initial.coinbase,
-              deliveryPublicKey
+              deliveryPublicKey,
+              release.version
             )
             const finished = await activeIdentity(
               getNodeRpcConnection,
@@ -1407,7 +1484,9 @@ function parseConfirmRequest(payload) {
     typeof orderDescriptor.value !== 'string' ||
     !/^[1-9][0-9]{0,19}$/.test(orderDescriptor.value) ||
     !isUint64(orderDescriptor.value) ||
-    ![DIRECT_V3_CONTRACT, DIRECT_V4_CONTRACT].includes(contractDescriptor.value)
+    typeof contractDescriptor.value !== 'string' ||
+    (contractDescriptor.value !== DIRECT_V3_CONTRACT &&
+      !directReleaseForContract(contractDescriptor.value))
   ) {
     refuse('fod_direct_confirm_invalid_request')
   }
@@ -1649,14 +1728,14 @@ async function readBuyAttempt(fs, filePath, expected) {
   }
 }
 
-async function readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags}) {
+async function readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags, release}) {
   const marketPath = path.join(tempDir, `market-${randomBytes(8).toString('hex')}.json`)
   await runCheck(
     spawn,
     binary,
     [
-      'direct-market', '-direct-version', '4', '-network', 'idena',
-      '-contract', DIRECT_V4_CONTRACT, '-code-hash', DIRECT_V4_CODE_HASH,
+      'direct-market', '-direct-version', String(release.version), '-network', 'idena',
+      '-contract', release.contract, '-code-hash', release.codeHash,
       '-out', marketPath, ...rpcFlags,
     ],
     ''
@@ -1669,11 +1748,11 @@ async function readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags}) {
     const market = parseUniqueJson(marketFile.data, 'fod_direct_buy_failed')
     if (
       market.format !== 'fod.direct-market-state' ||
-      market.version !== 3 ||
+      market.version !== release.marketVersion ||
       market.network !== 'idena' ||
       market.source !== 'node' ||
-      market.contract !== DIRECT_V4_CONTRACT.slice(2) ||
-      market.codeHash !== DIRECT_V4_CODE_HASH.slice(2) ||
+      market.contract !== release.contract.slice(2) ||
+      market.codeHash !== release.codeHash.slice(2) ||
       !Array.isArray(market.offers) ||
       !Array.isArray(market.orders)
     ) {
@@ -1756,8 +1835,6 @@ function createFodDirectBuyCommitService({
     try {
       const purchaseId = parseBuyCommitRequest(payload)
       const initial = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
-      const binaryHashes = reviewedDirectBuyBinaryHashes(expectedBinaryHash)
-      await checkPinnedBinary(fs, binaryPath, binaryHashes)
       const vaultParent = await ensurePrivateVaultRoot(fs, vaultRoot)
       const privateRoot = await ensurePrivateVaultRoot(
         fs, path.join(vaultParent, initial.coinbase)
@@ -1797,16 +1874,20 @@ function createFodDirectBuyCommitService({
       } finally {
         deliveryKey.fill(0)
       }
-      const summary = parsePreparedBuy(
+      const {release, summary} = parsePreparedBuy(
         purchaseData, session, initial.coinbase, deliveryPublicKey
       )
+      const binaryHashes = reviewedDirectBuyBinaryHashes(
+        release, expectedBinaryHash
+      )
+      await checkPinnedBinary(fs, binaryPath, binaryHashes)
       const saved = parseUniqueJson(purchaseData, 'fod_direct_buy_invalid_file')
       const markerPath = path.join(purchaseRoot, 'buy-attempt.json')
       const marker = {
         format: 'fod.direct-buy-attempt',
         version: 1,
         buyer: initial.coinbase,
-        contract: DIRECT_V4_CONTRACT,
+        contract: release.contract,
         purchaseSha256: createHash('sha256').update(purchaseData).digest('hex'),
         offerId: saved.directOfferId,
         amount: saved.amount,
@@ -1851,7 +1932,7 @@ function createFodDirectBuyCommitService({
               typeof tx.hash === 'string' &&
               /^0x[0-9a-fA-F]{64}$/.test(tx.hash) &&
               tx.from?.toLowerCase() === `0x${initial.coinbase}` &&
-              tx.to?.toLowerCase() === DIRECT_V4_CONTRACT &&
+              tx.to?.toLowerCase() === release.contract &&
               tx.amount === toIdna(BigInt(saved.amount)) &&
               tx.payload?.toLowerCase() === expectedPayload
             )
@@ -1864,7 +1945,7 @@ function createFodDirectBuyCommitService({
         if (!receipt) return {purchaseId, status: 'pending'}
         if (receipt.success !== true) refuse('fod_direct_buy_failed')
         const market = await readDirectBuyMarket({
-          fs, spawn, binary: stagedBinary, tempDir, rpcFlags,
+          fs, spawn, binary: stagedBinary, tempDir, rpcFlags, release,
         })
         const included = {purchaseId, status: 'included'}
         const tx = await rpc('bcn_transaction', [attempt.txHash]).catch(() => null)
@@ -1876,7 +1957,7 @@ function createFodDirectBuyCommitService({
           typeof tx.from !== 'string' ||
           tx.from.toLowerCase() !== `0x${initial.coinbase}` ||
           typeof tx.to !== 'string' ||
-          tx.to.toLowerCase() !== DIRECT_V4_CONTRACT ||
+          tx.to.toLowerCase() !== release.contract ||
           tx.amount !== toIdna(BigInt(saved.amount)) ||
           typeof tx.payload !== 'string' ||
           tx.payload.toLowerCase() !==
@@ -1914,17 +1995,20 @@ function createFodDirectBuyCommitService({
           'direct-buy', '-buyer', `0x${initial.coinbase}`,
           '-session', sessionCopy, '-delivery-key', keyCopy,
           '-prepared', freshPath, '-network', 'idena',
-          '-direct-version', '4', '-contract', DIRECT_V4_CONTRACT,
-          '-code-hash', DIRECT_V4_CODE_HASH, ...rpcFlags,
+          '-direct-version', String(release.version), '-contract', release.contract,
+          '-code-hash', release.codeHash, ...rpcFlags,
         ],
         ''
       )
       const freshFile = await readPrivateSelectedFile(fs, freshPath, MAX_PURCHASE_BYTES)
       privateData.push(freshFile.data)
-      parsePreparedBuy(freshFile.data, session, initial.coinbase, deliveryPublicKey)
+      parsePreparedBuy(
+        freshFile.data, session, initial.coinbase, deliveryPublicKey,
+        release.version
+      )
       const fresh = parseUniqueJson(freshFile.data, 'fod_direct_buy_failed')
       for (const field of [
-        'contract', 'amount', 'price', 'calldata', 'author', 'epoch',
+        'directVersion', 'contract', 'amount', 'price', 'calldata', 'author', 'epoch',
         'coveredFlips', 'buyer', 'deliveryKey', 'orderNonce',
         'keyCommitment', 'inventoryCommitment', 'directOfferId',
       ]) {
@@ -1943,7 +2027,7 @@ function createFodDirectBuyCommitService({
       const sync = await rpc('bcn_syncing', [])
       const coinbase = normalizeCoinbase(await rpc('dna_getCoinbaseAddr', []))
       const account = await rpc('dna_getBalance', [`0x${coinbase}`])
-      const stake = await rpc('contract_getStake', [DIRECT_V4_CONTRACT])
+      const stake = await rpc('contract_getStake', [release.contract])
       const feePerGas = await rpc('bcn_feePerGas', [])
       const rate = parseNodeFeePerGas(feePerGas)
       const maxFeeAtoms = rate * 5120000n < MAX_DIRECT_BUY_FEE_ATOMS
@@ -1957,13 +2041,13 @@ function createFodDirectBuyCommitService({
         !account ||
         account.nonce !== account.mempoolNonce ||
         decimalAtoms(account.balance) < BigInt(saved.amount) + maxFeeAtoms ||
-        stake?.Hash?.toLowerCase() !== DIRECT_V4_CODE_HASH
+        stake?.Hash?.toLowerCase() !== release.codeHash
       ) {
         refuse('fod_direct_buy_node_unavailable')
       }
       const call = {
         from: `0x${initial.coinbase}`,
-        contract: DIRECT_V4_CONTRACT,
+        contract: release.contract,
         method: 'buy',
         amount: toIdna(BigInt(saved.amount)),
         maxFee: toIdna(maxFeeAtoms),
@@ -1991,7 +2075,7 @@ function createFodDirectBuyCommitService({
       }
       const finalSync = await rpc('bcn_syncing', [])
       const finalAccount = await rpc('dna_getBalance', [`0x${coinbase}`])
-      const finalStake = await rpc('contract_getStake', [DIRECT_V4_CONTRACT])
+      const finalStake = await rpc('contract_getStake', [release.contract])
       const finalRate = await rpc('bcn_feePerGas', [])
       if (
         finalSync?.syncing !== false ||
@@ -2001,7 +2085,7 @@ function createFodDirectBuyCommitService({
         finalAccount.nonce !== finalAccount.mempoolNonce ||
         finalAccount.nonce !== account.nonce ||
         decimalAtoms(finalAccount.balance) < BigInt(saved.amount) + maxFeeAtoms ||
-        finalStake?.Hash?.toLowerCase() !== DIRECT_V4_CODE_HASH ||
+        finalStake?.Hash?.toLowerCase() !== release.codeHash ||
         parseNodeFeePerGas(finalRate) !== rate
       ) {
         refuse('fod_direct_buy_node_unavailable')
@@ -2087,7 +2171,8 @@ function createFodDirectConfirmService({
         getNodeRpcConnection,
         getActiveCoinbase
       )
-      const codeHash = CODE_HASH_BY_CONTRACT[contract.slice(2)]
+      const release = directReleaseForContract(contract)
+      const codeHash = release?.codeHash || DIRECT_V3_CODE_HASH
       const binaryHashes = reviewedBinaryHashes(
         contract,
         true,
@@ -2184,7 +2269,7 @@ function createFodDirectConfirmService({
       const market = JSON.parse(await fs.promises.readFile(marketPath, 'utf8'))
       if (
         market.format !== 'fod.direct-market-state' ||
-        market.version !== (contract === DIRECT_V4_CONTRACT ? 3 : 2) ||
+        market.version !== (release ? release.marketVersion : 2) ||
         market.network !== 'idena' ||
         market.source !== 'node' ||
         market.contract !== contract.slice(2) ||
