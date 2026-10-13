@@ -1791,18 +1791,26 @@ async function readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags, releas
 
 function parseDirectListRequest(payload) {
   if (
-    !payload || typeof payload !== 'object' || Array.isArray(payload) ||
+    !payload ||
+    typeof payload !== 'object' ||
+    Array.isArray(payload) ||
     ![Object.prototype, null].includes(Object.getPrototypeOf(payload)) ||
     Reflect.ownKeys(payload).length !== 2
-  ) refuse('fod_direct_list_invalid_request')
+  )
+    refuse('fod_direct_list_invalid_request')
   const priceIdna = Object.getOwnPropertyDescriptor(payload, 'priceIdna')?.value
-  const passphrase = Object.getOwnPropertyDescriptor(payload, 'passphrase')?.value
+  const passphrase = Object.getOwnPropertyDescriptor(
+    payload,
+    'passphrase'
+  )?.value
   if (
     typeof priceIdna !== 'string' ||
     !/^(0|[1-9][0-9]{0,38})(\.[0-9]{1,18})?$/.test(priceIdna) ||
     typeof passphrase !== 'string' ||
-    Buffer.byteLength(passphrase, 'utf8') > 4096 || passphrase.includes('\0')
-  ) refuse('fod_direct_list_invalid_request')
+    Buffer.byteLength(passphrase, 'utf8') > 4096 ||
+    passphrase.includes('\0')
+  )
+    refuse('fod_direct_list_invalid_request')
   const price = decimalAtoms(priceIdna)
   if (price < 1n || price >= 1n << 128n) {
     refuse('fod_direct_list_invalid_request')
@@ -1837,22 +1845,39 @@ function directInventoryCommitment(session) {
 function parsePreparedList(raw, session, author, price, release) {
   const prepared = parseUniqueJson(raw, 'fod_direct_list_failed')
   const fields = new Set([
-    'format', 'version', 'operation', 'network', 'contract', 'amount',
-    'calldata', 'preparedAt', 'submitted', 'price', 'author', 'epoch',
-    'coveredFlips', 'keyCommitment', 'inventoryCommitment',
-    'directOfferId', 'directSession', 'directVersion',
+    'format',
+    'version',
+    'operation',
+    'network',
+    'contract',
+    'amount',
+    'calldata',
+    'preparedAt',
+    'submitted',
+    'price',
+    'author',
+    'epoch',
+    'coveredFlips',
+    'keyCommitment',
+    'inventoryCommitment',
+    'directOfferId',
+    'directSession',
+    'directVersion',
   ])
   if (
     Object.keys(prepared).some((field) => !fields.has(field)) ||
     prepared.format !== 'fod.prepared-direct-list' ||
-    prepared.version !== 1 || prepared.operation !== 'list' ||
+    prepared.version !== 1 ||
+    prepared.operation !== 'list' ||
     prepared.network !== 'idena' ||
     prepared.contract !== release.contract.slice(2) ||
-    prepared.amount !== '0' || prepared.submitted !== false ||
+    prepared.amount !== '0' ||
+    prepared.submitted !== false ||
     (prepared.directVersion !== undefined && prepared.directVersion !== 4) ||
     typeof prepared.preparedAt !== 'string' ||
     !Number.isFinite(Date.parse(prepared.preparedAt)) ||
-    prepared.price !== price.toString() || prepared.author !== author ||
+    prepared.price !== price.toString() ||
+    prepared.author !== author ||
     prepared.epoch !== session.epoch ||
     prepared.coveredFlips !== session.manifest.length ||
     !/^[0-9a-f]{64}$/.test(prepared.keyCommitment) ||
@@ -1861,15 +1886,17 @@ function parsePreparedList(raw, session, author, price, release) {
     !isDeepStrictEqual(prepared.directSession, session) ||
     typeof prepared.calldata !== 'string' ||
     !/^[0-9a-f]{172}$/.test(prepared.calldata)
-  ) refuse('fod_direct_list_failed')
+  )
+    refuse('fod_direct_list_failed')
   const data = Buffer.from(prepared.calldata, 'hex')
   if (
     data.readUInt16BE(0) !== session.epoch ||
     data.readUInt32BE(2) !== session.manifest.length ||
     data.subarray(6, 38).toString('hex') !== prepared.inventoryCommitment ||
     data.subarray(38, 70).toString('hex') !== prepared.keyCommitment ||
-    BigInt(`0x${data.subarray(70).toString('hex')}`) !== price
-  ) refuse('fod_direct_list_failed')
+    global.BigInt(`0x${data.subarray(70).toString('hex')}`) !== price
+  )
+    refuse('fod_direct_list_failed')
   return prepared
 }
 
@@ -1886,7 +1913,8 @@ async function readDirectListAttempt(fs, filePath, expected) {
     if (
       Object.keys(marker).join(',') !==
         'format,version,author,contract,offerId,price,inventoryCommitment,calldata,txHash' ||
-      marker.format !== 'fod.direct-list-attempt' || marker.version !== 1 ||
+      marker.format !== 'fod.direct-list-attempt' ||
+      marker.version !== 1 ||
       marker.author !== expected.author ||
       marker.contract !== expected.contract ||
       marker.offerId !== expected.offerId ||
@@ -1894,14 +1922,17 @@ async function readDirectListAttempt(fs, filePath, expected) {
       marker.inventoryCommitment !== expected.inventoryCommitment ||
       !/^[0-9a-f]{172}$/.test(marker.calldata) ||
       (marker.txHash !== null && !/^0x[0-9a-f]{64}$/.test(marker.txHash))
-    ) refuse('fod_direct_list_invalid_attempt')
+    )
+      refuse('fod_direct_list_invalid_attempt')
     const data = Buffer.from(marker.calldata, 'hex')
     if (
       data.readUInt16BE(0) !== expected.epoch ||
       data.readUInt32BE(2) !== expected.coveredFlips ||
       data.subarray(6, 38).toString('hex') !== expected.inventoryCommitment ||
-      BigInt(`0x${data.subarray(70).toString('hex')}`) !== BigInt(expected.price)
-    ) refuse('fod_direct_list_invalid_attempt')
+      global.BigInt(`0x${data.subarray(70).toString('hex')}`) !==
+        global.BigInt(expected.price)
+    )
+      refuse('fod_direct_list_invalid_attempt')
     return marker
   } finally {
     file.data.fill(0)
@@ -1910,7 +1941,9 @@ async function readDirectListAttempt(fs, filePath, expected) {
 
 function parseDirectMarketRequest(payload) {
   if (
-    !payload || typeof payload !== 'object' || Array.isArray(payload) ||
+    !payload ||
+    typeof payload !== 'object' ||
+    Array.isArray(payload) ||
     ![Object.prototype, null].includes(Object.getPrototypeOf(payload)) ||
     Reflect.ownKeys(payload).length !== 1 ||
     Object.getOwnPropertyDescriptor(payload, 'directVersion')?.value !== 4
@@ -1921,33 +1954,46 @@ function parseDirectMarketRequest(payload) {
 }
 
 function publicDirectMarket(market) {
-  const hex = (value, bytes) => typeof value === 'string' &&
+  const hex = (value, bytes) =>
+    typeof value === 'string' &&
     new RegExp(`^[0-9a-f]{${bytes * 2}}$`).test(value)
-  const decimal = (value) => typeof value === 'string' &&
-    /^(0|[1-9][0-9]{0,38})$/.test(value)
+  const decimal = (value) =>
+    typeof value === 'string' && /^(0|[1-9][0-9]{0,38})$/.test(value)
   if (
-    !Number.isSafeInteger(market.blockHeight) || market.blockHeight < 0 ||
+    !Number.isSafeInteger(market.blockHeight) ||
+    market.blockHeight < 0 ||
     typeof market.observedAt !== 'string' ||
     !Number.isFinite(Date.parse(market.observedAt)) ||
-    market.offers.length > 5000 || market.orders.length > 5000
+    market.offers.length > 5000 ||
+    market.orders.length > 5000
   ) {
     refuse('fod_direct_market_failed')
   }
   const offers = market.offers.map((offer) => {
     if (
-      !hex(offer?.offerId, 32) || !hex(offer.author, 20) ||
-      !Number.isInteger(offer.epoch) || offer.epoch < 1 || offer.epoch > 65535 ||
+      !hex(offer?.offerId, 32) ||
+      !hex(offer.author, 20) ||
+      !Number.isInteger(offer.epoch) ||
+      offer.epoch < 1 ||
+      offer.epoch > 65535 ||
       !Number.isInteger(offer.coveredFlips) ||
-      offer.coveredFlips < 1 || offer.coveredFlips > 32 ||
-      !hex(offer.inventoryCommitment, 32) || !decimal(offer.price) ||
-      offer.price === '0' || !decimal(offer.openOrderId) ||
+      offer.coveredFlips < 1 ||
+      offer.coveredFlips > 32 ||
+      !hex(offer.inventoryCommitment, 32) ||
+      !decimal(offer.price) ||
+      offer.price === '0' ||
+      !decimal(offer.openOrderId) ||
       typeof offer.retired !== 'boolean'
-    ) refuse('fod_direct_market_failed')
+    )
+      refuse('fod_direct_market_failed')
     return {
-      offerId: offer.offerId, author: offer.author, epoch: offer.epoch,
+      offerId: offer.offerId,
+      author: offer.author,
+      epoch: offer.epoch,
       coveredFlips: offer.coveredFlips,
       inventoryCommitment: offer.inventoryCommitment,
-      price: offer.price, openOrderId: offer.openOrderId,
+      price: offer.price,
+      openOrderId: offer.openOrderId,
       retired: offer.retired,
     }
   })
@@ -1955,31 +2001,53 @@ function publicDirectMarket(market) {
   if (offerIds.size !== offers.length) refuse('fod_direct_market_failed')
   const orders = market.orders.map((order) => {
     if (
-      !decimal(order?.orderId) || order.orderId === '0' ||
-      !hex(order.offerId, 32) || !offerIds.has(order.offerId) ||
-      !hex(order.buyer, 20) || !decimal(order.paid) || order.paid === '0' ||
-      !decimal(order.bond) || order.bond === '0' ||
-      !decimal(order.fundedAtBlock) || !decimal(order.refundAtBlock) ||
-      !['funded', 'fallback-pending', 'settled', 'refunded'].includes(order.state) ||
+      !decimal(order?.orderId) ||
+      order.orderId === '0' ||
+      !hex(order.offerId, 32) ||
+      !offerIds.has(order.offerId) ||
+      !hex(order.buyer, 20) ||
+      !decimal(order.paid) ||
+      order.paid === '0' ||
+      !decimal(order.bond) ||
+      order.bond === '0' ||
+      !decimal(order.fundedAtBlock) ||
+      !decimal(order.refundAtBlock) ||
+      !['funded', 'fallback-pending', 'settled', 'refunded'].includes(
+        order.state
+      ) ||
       typeof order.keysPublic !== 'boolean' ||
       (order.sellerStake !== undefined && !decimal(order.sellerStake))
-    ) refuse('fod_direct_market_failed')
+    )
+      refuse('fod_direct_market_failed')
     return {
-      orderId: order.orderId, offerId: order.offerId, buyer: order.buyer,
-      paid: order.paid, bond: order.bond,
-      ...(order.sellerStake === undefined ? {} : {sellerStake: order.sellerStake}),
-      fundedAtBlock: order.fundedAtBlock, refundAtBlock: order.refundAtBlock,
-      state: order.state, keysPublic: order.keysPublic,
+      orderId: order.orderId,
+      offerId: order.offerId,
+      buyer: order.buyer,
+      paid: order.paid,
+      bond: order.bond,
+      ...(order.sellerStake === undefined
+        ? {}
+        : {sellerStake: order.sellerStake}),
+      fundedAtBlock: order.fundedAtBlock,
+      refundAtBlock: order.refundAtBlock,
+      state: order.state,
+      keysPublic: order.keysPublic,
     }
   })
   if (new Set(orders.map(({orderId}) => orderId)).size !== orders.length) {
     refuse('fod_direct_market_failed')
   }
   return {
-    format: market.format, version: market.version, network: market.network,
-    contract: market.contract, codeHash: market.codeHash,
-    blockHeight: market.blockHeight, observedAt: market.observedAt,
-    source: market.source, offers, orders,
+    format: market.format,
+    version: market.version,
+    network: market.network,
+    contract: market.contract,
+    codeHash: market.codeHash,
+    blockHeight: market.blockHeight,
+    observedAt: market.observedAt,
+    source: market.source,
+    offers,
+    orders,
   }
 }
 
@@ -2004,13 +2072,20 @@ function createFodDirectListService({
       const {price, passphrase} = parseDirectListRequest(payload)
       const release = selectedBuyRelease(4)
       const initial = await activeIdentity(
-        getNodeRpcConnection, getActiveCoinbase
+        getNodeRpcConnection,
+        getActiveCoinbase
       )
       const hashes = reviewedDirectBuyBinaryHashes(release, expectedBinaryHash)
       await checkPinnedBinary(fs, binaryPath, hashes)
-      const selectedSession = await pickFile(dialog, 'Select your session bundle')
+      const selectedSession = await pickFile(
+        dialog,
+        'Select your session bundle'
+      )
       const sessionFile = await readPrivateSelectedFile(
-        fs, selectedSession, MAX_SESSION_BYTES, false
+        fs,
+        selectedSession,
+        MAX_SESSION_BYTES,
+        false
       )
       privateData.push(sessionFile.data)
       const session = parseBuySession(sessionFile.data)
@@ -2021,13 +2096,18 @@ function createFodDirectListService({
       const inventoryCommitment = directInventoryCommitment(session)
       const vaultParent = await ensurePrivateVaultRoot(fs, vaultRoot)
       const privateRoot = await ensurePrivateVaultRoot(
-        fs, path.join(vaultParent, initial.coinbase)
+        fs,
+        path.join(vaultParent, initial.coinbase)
       )
       const markerPath = path.join(privateRoot, `list-${offerId}.json`)
       const expected = {
-        author: initial.coinbase, contract: release.contract,
-        offerId, price: price.toString(), inventoryCommitment,
-        epoch: session.epoch, coveredFlips: session.manifest.length,
+        author: initial.coinbase,
+        contract: release.contract,
+        offerId,
+        price: price.toString(),
+        inventoryCommitment,
+        epoch: session.epoch,
+        coveredFlips: session.manifest.length,
       }
       tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'fod-list-'))
       tempDir = await fs.promises.realpath(tempDir)
@@ -2051,43 +2131,60 @@ function createFodDirectListService({
         }
         return response.result
       }
-      const marketState = async () => publicDirectMarket(
-        await readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags, release})
-      )
+      const marketState = async () =>
+        publicDirectMarket(
+          await readDirectBuyMarket({
+            fs,
+            spawn,
+            binary,
+            tempDir,
+            rpcFlags,
+            release,
+          })
+        )
       const publicResult = (status, txHash) => ({
-        status, offerId, priceIdna: toIdna(price),
+        status,
+        offerId,
+        priceIdna: toIdna(price),
         ...(txHash ? {txHash} : {}),
       })
       const reconcile = async (attempt) => {
-        const current = await activeIdentity(
-          getNodeRpcConnection, getActiveCoinbase
+        const currentIdentity = await activeIdentity(
+          getNodeRpcConnection,
+          getActiveCoinbase
         )
         if (
-          !sameConnection(initial.connection, current.connection) ||
-          initial.coinbase !== current.coinbase
-        ) refuse('fod_direct_list_identity_changed')
+          !sameConnection(initial.connection, currentIdentity.connection) ||
+          initial.coinbase !== currentIdentity.coinbase
+        )
+          refuse('fod_direct_list_identity_changed')
         const expectedPayload = `0x0a046c6973741256${attempt.calldata}`
         if (!attempt.txHash) {
           const pending = await rpc('bcn_pendingTransactions', [
             {address: `0x${initial.coinbase}`, count: 100},
           ]).catch(() => null)
           const matching = Array.isArray(pending?.transactions)
-            ? pending.transactions.filter((tx) =>
-              tx?.type === 'callContract' &&
-              /^0x[0-9a-fA-F]{64}$/.test(tx.hash || '') &&
-              tx.from?.toLowerCase() === `0x${initial.coinbase}` &&
-              tx.to?.toLowerCase() === release.contract &&
-              tx.amount === '0' &&
-              tx.payload?.toLowerCase() === expectedPayload
-            )
+            ? pending.transactions.filter(
+                (candidate) =>
+                  candidate?.type === 'callContract' &&
+                  /^0x[0-9a-fA-F]{64}$/.test(candidate.hash || '') &&
+                  candidate.from?.toLowerCase() === `0x${initial.coinbase}` &&
+                  candidate.to?.toLowerCase() === release.contract &&
+                  candidate.amount === '0' &&
+                  candidate.payload?.toLowerCase() === expectedPayload
+              )
             : []
           if (matching.length !== 1) return publicResult('uncertain')
           attempt.txHash = matching[0].hash.toLowerCase()
           await saveConfirmAttempt(fs, markerPath, attempt, true)
         }
-        const receipt = await rpc('bcn_txReceipt', [attempt.txHash]).catch(() => null)
+        const receipt = await rpc('bcn_txReceipt', [attempt.txHash]).catch(
+          () => null
+        )
         if (!receipt) return publicResult('pending', attempt.txHash)
-        const tx = await rpc('bcn_transaction', [attempt.txHash]).catch(() => null)
+        const tx = await rpc('bcn_transaction', [attempt.txHash]).catch(
+          () => null
+        )
         const blockHash = tx?.blockHash
         if (
           tx?.type !== 'callContract' ||
@@ -2097,34 +2194,45 @@ function createFodDirectListService({
           tx.amount !== '0' ||
           tx.payload?.toLowerCase() !== expectedPayload ||
           !/^0x[0-9a-fA-F]{64}$/.test(blockHash || '')
-        ) return publicResult('uncertain', attempt.txHash)
+        )
+          return publicResult('uncertain', attempt.txHash)
         const block = await rpc('bcn_block', [blockHash]).catch(() => null)
         if (
-          !Number.isSafeInteger(block?.height) || block.height < 1 ||
+          !Number.isSafeInteger(block?.height) ||
+          block.height < 1 ||
           block.hash?.toLowerCase() !== blockHash.toLowerCase()
-        ) return publicResult('uncertain', attempt.txHash)
-        const canonical = await rpc('bcn_blockAt', [block.height]).catch(() => null)
+        )
+          return publicResult('uncertain', attempt.txHash)
+        const canonical = await rpc('bcn_blockAt', [block.height]).catch(
+          () => null
+        )
         if (canonical?.hash?.toLowerCase() !== blockHash.toLowerCase()) {
           return publicResult('uncertain', attempt.txHash)
         }
-        const market = await marketState()
-        if (market.blockHeight < block.height) {
+        const observedMarket = await marketState()
+        if (observedMarket.blockHeight < block.height) {
           return publicResult('uncertain', attempt.txHash)
         }
-        const offer = market.offers.find((item) => item.offerId === offerId)
-        if (offer && (
-          offer.author !== initial.coinbase ||
-          offer.epoch !== session.epoch ||
-          offer.inventoryCommitment !== inventoryCommitment ||
-          offer.price !== price.toString()
-        )) refuse('fod_direct_list_changed')
+        const offer = observedMarket.offers.find(
+          (item) => item.offerId === offerId
+        )
+        if (
+          offer &&
+          (offer.author !== initial.coinbase ||
+            offer.epoch !== session.epoch ||
+            offer.inventoryCommitment !== inventoryCommitment ||
+            offer.price !== price.toString())
+        )
+          refuse('fod_direct_list_changed')
         const finalIdentity = await activeIdentity(
-          getNodeRpcConnection, getActiveCoinbase
+          getNodeRpcConnection,
+          getActiveCoinbase
         )
         if (
           !sameConnection(initial.connection, finalIdentity.connection) ||
           initial.coinbase !== finalIdentity.coinbase
-        ) refuse('fod_direct_list_identity_changed')
+        )
+          refuse('fod_direct_list_identity_changed')
         if (receipt.success === false && !offer) {
           await fs.promises.unlink(markerPath)
           await syncPrivateDirectory(fs, path.dirname(markerPath))
@@ -2135,19 +2243,31 @@ function createFodDirectListService({
         }
         return publicResult('uncertain', attempt.txHash)
       }
-      const previousAttempt = await readDirectListAttempt(fs, markerPath, expected)
+      const previousAttempt = await readDirectListAttempt(
+        fs,
+        markerPath,
+        expected
+      )
       if (previousAttempt) return reconcile(previousAttempt)
       if (!passphrase) refuse('fod_direct_list_invalid_request')
 
       const current = await activeIdentity(
-        getNodeRpcConnection, getActiveCoinbase
+        getNodeRpcConnection,
+        getActiveCoinbase
       )
       if (
         !sameConnection(initial.connection, current.connection) ||
         initial.coinbase !== current.coinbase
-      ) refuse('fod_direct_list_identity_changed')
-      const vaultPath = await pickFile(dialog, 'Select your encrypted epoch vault')
-      const nodeKeyPath = await pickFile(dialog, 'Select this author’s node key')
+      )
+        refuse('fod_direct_list_identity_changed')
+      const vaultPath = await pickFile(
+        dialog,
+        'Select your encrypted epoch vault'
+      )
+      const nodeKeyPath = await pickFile(
+        dialog,
+        'Select this author’s node key'
+      )
       const vaultFile = await readPrivateSelectedFile(fs, vaultPath, 128 * 1024)
       const nodeKeyFile = await readPrivateSelectedFile(fs, nodeKeyPath, 1024)
       privateData.push(vaultFile.data, nodeKeyFile.data)
@@ -2158,21 +2278,42 @@ function createFodDirectListService({
       await writePrivateFile(fs, vaultCopy, vaultFile.data)
       await writePrivateFile(fs, nodeKeyCopy, nodeKeyFile.data)
       const listArgs = (output) => [
-        'direct-list', '-session', sessionCopy, '-vault', vaultCopy,
-        '-nodekey', nodeKeyCopy, '-amount', price.toString(),
-        '-prepared', output, '-network', 'idena', '-direct-version', '4',
-        '-contract', release.contract, '-code-hash', release.codeHash,
+        'direct-list',
+        '-session',
+        sessionCopy,
+        '-vault',
+        vaultCopy,
+        '-nodekey',
+        nodeKeyCopy,
+        '-amount',
+        price.toString(),
+        '-prepared',
+        output,
+        '-network',
+        'idena',
+        '-direct-version',
+        '4',
+        '-contract',
+        release.contract,
+        '-code-hash',
+        release.codeHash,
         ...rpcFlags,
       ]
       const passphraseEnv = {FOD_PASSPHRASE: passphrase}
       const preparedPath = path.join(tempDir, 'listing.json')
       await runCheck(spawn, binary, listArgs(preparedPath), '', passphraseEnv)
       const preparedFile = await readPrivateSelectedFile(
-        fs, preparedPath, MAX_SESSION_BYTES
+        fs,
+        preparedPath,
+        MAX_SESSION_BYTES
       )
       privateData.push(preparedFile.data)
       const prepared = parsePreparedList(
-        preparedFile.data, session, initial.coinbase, price, release
+        preparedFile.data,
+        session,
+        initial.coinbase,
+        price,
+        release
       )
       const market = await marketState()
       if (market.offers.some((offer) => offer.offerId === offerId)) {
@@ -2183,78 +2324,126 @@ function createFodDirectListService({
       const account = await rpc('dna_getBalance', [`0x${coinbase}`])
       const stake = await rpc('contract_getStake', [release.contract])
       const rate = parseNodeFeePerGas(await rpc('bcn_feePerGas', []))
-      const maxFeeAtoms = rate * 5120000n < MAX_DIRECT_LIST_FEE_ATOMS
-        ? rate * 5120000n : MAX_DIRECT_LIST_FEE_ATOMS
+      const maxFeeAtoms =
+        rate * 5120000n < MAX_DIRECT_LIST_FEE_ATOMS
+          ? rate * 5120000n
+          : MAX_DIRECT_LIST_FEE_ATOMS
       if (
-        sync?.syncing !== false || sync.wrongTime !== false ||
+        sync?.syncing !== false ||
+        sync.wrongTime !== false ||
         sync.currentBlock !== sync.highestBlock ||
-        coinbase !== initial.coinbase || !account ||
+        coinbase !== initial.coinbase ||
+        !account ||
         account.nonce !== account.mempoolNonce ||
         decimalAtoms(account.balance) < maxFeeAtoms ||
         stake?.Hash?.toLowerCase() !== release.codeHash
-      ) refuse('fod_direct_list_node_unavailable')
+      )
+        refuse('fod_direct_list_node_unavailable')
       const call = {
-        from: `0x${initial.coinbase}`, contract: release.contract,
-        method: 'list', amount: '0', maxFee: toIdna(maxFeeAtoms),
+        from: `0x${initial.coinbase}`,
+        contract: release.contract,
+        method: 'list',
+        amount: '0',
+        maxFee: toIdna(maxFeeAtoms),
         args: [{index: 0, format: 'hex', value: `0x${prepared.calldata}`}],
       }
-      if (!buyEstimateFitsFee(await rpc('contract_estimateCall', [call]), rate, maxFeeAtoms)) {
+      if (
+        !buyEstimateFitsFee(
+          await rpc('contract_estimateCall', [call]),
+          rate,
+          maxFeeAtoms
+        )
+      ) {
         refuse('fod_direct_list_fee_unavailable')
       }
       const confirmation = await dialog.showMessageBox({
-        type: 'warning', title: 'List flip keys',
-        message: `Publish ${session.manifest.length} flips for ${toIdna(price)} iDNA?`,
+        type: 'warning',
+        title: 'List flip keys',
+        message: `Publish ${session.manifest.length} flips for ${toIdna(
+          price
+        )} iDNA?`,
         detail:
           `Network fee: up to ${toIdna(maxFeeAtoms)} iDNA. ` +
           'After funding, you must deliver the keys or use the contract fallback before the refund deadline.',
-        buttons: ['Cancel', 'Publish offer'], defaultId: 0, cancelId: 0,
+        buttons: ['Cancel', 'Publish offer'],
+        defaultId: 0,
+        cancelId: 0,
         noLink: true,
       })
       if (confirmation?.response !== 1) return publicResult('cancelled')
 
       const freshPath = path.join(tempDir, 'fresh-listing.json')
       await runCheck(spawn, binary, listArgs(freshPath), '', passphraseEnv)
-      const freshFile = await readPrivateSelectedFile(fs, freshPath, MAX_SESSION_BYTES)
+      const freshFile = await readPrivateSelectedFile(
+        fs,
+        freshPath,
+        MAX_SESSION_BYTES
+      )
       privateData.push(freshFile.data)
       const fresh = parsePreparedList(
-        freshFile.data, session, initial.coinbase, price, release
+        freshFile.data,
+        session,
+        initial.coinbase,
+        price,
+        release
       )
       for (const field of [
-        'contract', 'amount', 'calldata', 'author', 'epoch', 'coveredFlips',
-        'keyCommitment', 'inventoryCommitment', 'directOfferId', 'price',
+        'contract',
+        'amount',
+        'calldata',
+        'author',
+        'epoch',
+        'coveredFlips',
+        'keyCommitment',
+        'inventoryCommitment',
+        'directOfferId',
+        'price',
       ]) {
         if (fresh[field] !== prepared[field]) refuse('fod_direct_list_changed')
       }
       const finalMarket = await marketState()
       const finalSync = await rpc('bcn_syncing', [])
-      const finalCoinbase = normalizeCoinbase(await rpc('dna_getCoinbaseAddr', []))
+      const finalCoinbase = normalizeCoinbase(
+        await rpc('dna_getCoinbaseAddr', [])
+      )
       const finalAccount = await rpc('dna_getBalance', [`0x${finalCoinbase}`])
       const finalStake = await rpc('contract_getStake', [release.contract])
       const finalRate = parseNodeFeePerGas(await rpc('bcn_feePerGas', []))
       if (
         finalMarket.offers.some((offer) => offer.offerId === offerId) ||
-        finalSync?.syncing !== false || finalSync.wrongTime !== false ||
+        finalSync?.syncing !== false ||
+        finalSync.wrongTime !== false ||
         finalSync.currentBlock !== finalSync.highestBlock ||
-        finalCoinbase !== initial.coinbase || !finalAccount ||
+        finalCoinbase !== initial.coinbase ||
+        !finalAccount ||
         finalAccount.nonce !== finalAccount.mempoolNonce ||
         finalAccount.nonce !== account.nonce ||
         decimalAtoms(finalAccount.balance) < maxFeeAtoms ||
         finalStake?.Hash?.toLowerCase() !== release.codeHash ||
         finalRate !== rate ||
         !buyEstimateFitsFee(
-          await rpc('contract_estimateCall', [call]), rate, maxFeeAtoms
+          await rpc('contract_estimateCall', [call]),
+          rate,
+          maxFeeAtoms
         )
-      ) refuse('fod_direct_list_node_unavailable')
+      )
+        refuse('fod_direct_list_node_unavailable')
       const last = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
       if (
         !sameConnection(initial.connection, last.connection) ||
         initial.coinbase !== last.coinbase
-      ) refuse('fod_direct_list_identity_changed')
+      )
+        refuse('fod_direct_list_identity_changed')
       const marker = {
-        format: 'fod.direct-list-attempt', version: 1,
-        author: initial.coinbase, contract: release.contract,
-        offerId, price: price.toString(), inventoryCommitment,
-        calldata: prepared.calldata, txHash: null,
+        format: 'fod.direct-list-attempt',
+        version: 1,
+        author: initial.coinbase,
+        contract: release.contract,
+        offerId,
+        price: price.toString(),
+        inventoryCommitment,
+        calldata: prepared.calldata,
+        txHash: null,
       }
       try {
         await saveConfirmAttempt(fs, markerPath, marker)
@@ -2265,7 +2454,8 @@ function createFodDirectListService({
       let submitted
       try {
         submitted = await rpcCall(initial.connection, {
-          method: 'contract_call', params: [call],
+          method: 'contract_call',
+          params: [call],
         })
       } catch {
         return publicResult('uncertain')
@@ -2279,7 +2469,11 @@ function createFodDirectListService({
       for (let tries = 0; tries < 2; tries += 1) {
         const result = await reconcile(marker)
         if (result.status !== 'pending') return result
-        if (tries === 0) await new Promise((resolve) => setTimeout(resolve, 3000))
+        if (tries === 0) {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 3000)
+          })
+        }
       }
       return publicResult('pending', marker.txHash)
     } catch (error) {
@@ -2288,7 +2482,8 @@ function createFodDirectListService({
     } finally {
       privateData.forEach((data) => data.fill(0))
       try {
-        if (tempDir) await fs.promises.rm(tempDir, {recursive: true, force: true})
+        if (tempDir)
+          await fs.promises.rm(tempDir, {recursive: true, force: true})
       } finally {
         busy = false
       }
