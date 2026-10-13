@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types */
 import React from 'react'
+import {useRouter} from 'next/router'
 import {
   Box,
   Button,
@@ -25,6 +26,7 @@ import {ExternalLink, Page, PageTitle, TextLink} from './components'
 import {useSettingsState} from '../providers/settings-context'
 import {useChainState} from '../providers/chain-context'
 import {useIdentityState} from '../providers/identity-context'
+import {navigateRendererRoute} from '../utils/navigation'
 import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
 import {
   SOCIAL_CONTRACT_ADDRESS,
@@ -141,6 +143,7 @@ export default function SocialDesktopEmbed({
   bootstrapOverrides = null,
   iframeTitle = 'idena.social',
 }) {
+  const router = useRouter()
   const settings = useSettingsState()
   const {offline, syncing} = useChainState()
   const {address} = useIdentityState()
@@ -666,28 +669,9 @@ export default function SocialDesktopEmbed({
     }
   }, [])
 
-  const startBuy = React.useCallback(async () => {
-    if (buyBusy) return
-    const buyContext = buyContextRef.current
-    setBuyBusy(true)
-    let purchaseId
-    try {
-      const response = await window.idena?.social?.directBuyPrepare?.({})
-      if (buyContextRef.current !== buyContext) return
-      purchaseId = response?.result?.purchaseId
-      if (!/^fod-buy-[0-9a-f]{32}$/.test(purchaseId || '')) {
-        throw new Error('buy_prepare_failed')
-      }
-      setSavedBuyIds((current) => [purchaseId, ...current.filter((id) => id !== purchaseId)])
-      await commitBuy(purchaseId)
-    } catch {
-      if (purchaseId && buyContextRef.current === buyContext) {
-        setBuyAttempt({purchaseId, status: 'failed'})
-      }
-    } finally {
-      if (buyContextRef.current === buyContext) setBuyBusy(false)
-    }
-  }, [buyBusy, commitBuy])
+  const openFlipMarket = React.useCallback(() => {
+    navigateRendererRoute(router, '/flip-market')
+  }, [router])
 
   const checkBuy = React.useCallback(async () => {
     if (buyBusy || !buyAttempt?.purchaseId) return
@@ -801,7 +785,7 @@ export default function SocialDesktopEmbed({
                 </Text>
               </Box>
               <HStack spacing={2} flexWrap="wrap">
-                <SecondaryButton size="sm" onClick={startBuy} isLoading={buyBusy}>
+                <SecondaryButton size="sm" onClick={openFlipMarket}>
                   Buy flip keys
                 </SecondaryButton>
                 <SecondaryButton

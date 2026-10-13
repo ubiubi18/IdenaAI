@@ -36,6 +36,8 @@ const {
   createFodDirectCheckService,
   createFodDirectReceiveService,
   createFodDirectBuyPrepareService,
+  createFodDirectListService,
+  createFodDirectMarketService,
   createFodDirectBuyResumeService,
   createFodDirectBuyCommitService,
   createFodDirectConfirmService,
@@ -852,6 +854,14 @@ const fodDirectBuyPrepareService = createFodDirectBuyPrepareService({
   ...fodDirectServiceOptions,
   vaultRoot: fodDirectVaultRoot,
 })
+const fodDirectListService = createFodDirectListService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodDirectMarketService = createFodDirectMarketService(
+  fodDirectServiceOptions
+)
 const fodDirectBuyResumeService = createFodDirectBuyResumeService({
   ...fodDirectServiceOptions,
   vaultRoot: fodDirectVaultRoot,
@@ -3641,6 +3651,22 @@ handleTrusted('social.direct-buy-prepare', async (_event, payload) => {
     return {result: await fodDirectBuyPrepareService(payload)}
   } catch {
     return {error: {message: 'Could not prepare this flip purchase.'}}
+  }
+})
+
+handleTrusted('social.direct-market', async (_event, payload) => {
+  try {
+    return {result: await fodDirectMarketService(payload)}
+  } catch {
+    return {error: {message: 'Could not load direct flip offers.'}}
+  }
+})
+
+handleTrusted('social.direct-list', async (_event, payload) => {
+  try {
+    return {result: await fodDirectListService(payload)}
+  } catch {
+    return {error: {message: 'Could not publish this flip listing.'}}
   }
 })
 
