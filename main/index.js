@@ -41,6 +41,8 @@ const {
   createFodDirectBuyResumeService,
   createFodDirectBuyCommitService,
   createFodDirectConfirmService,
+  createFodDirectRecoverService,
+  createFodDirectRefundService,
   DIRECT_V3_CONTRACT,
   DIRECT_V4_CONTRACT,
 } = require('./fod-direct-check')
@@ -872,6 +874,15 @@ const fodDirectBuyCommitService = createFodDirectBuyCommitService({
   rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
 })
 const fodDirectConfirmService = createFodDirectConfirmService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodDirectRecoverService = createFodDirectRecoverService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectRefundService = createFodDirectRefundService({
   ...fodDirectServiceOptions,
   vaultRoot: fodDirectVaultRoot,
   rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
@@ -3692,6 +3703,22 @@ handleTrusted('social.direct-confirm', async (_event, payload) => {
     return {result}
   } catch {
     return {error: {message: 'Could not confirm payment on-chain.'}}
+  }
+})
+
+handleTrusted('social.direct-recover', async (_event, payload) => {
+  try {
+    return {result: await fodDirectRecoverService(payload)}
+  } catch {
+    return {error: {message: 'Could not recover verified keys locally.'}}
+  }
+})
+
+handleTrusted('social.direct-refund', async (_event, payload) => {
+  try {
+    return {result: await fodDirectRefundService(payload)}
+  } catch {
+    return {error: {message: 'Could not refund this flip order.'}}
   }
 })
 

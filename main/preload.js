@@ -1870,6 +1870,10 @@ const bridge = {
       invokeCloneable('social.direct-buy-commit', payload),
     directConfirm: (payload) =>
       invokeCloneable('social.direct-confirm', payload),
+    directRecover: (payload) =>
+      invokeCloneable('social.direct-recover', payload),
+    directRefund: (payload) =>
+      invokeCloneable('social.direct-refund', payload),
     openDirectVaultFolder: () =>
       invokeCloneable('social.open-direct-vault-folder'),
   },
