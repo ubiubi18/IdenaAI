@@ -27,8 +27,21 @@ const DIRECT_V4_BUY_BINARY_SHA256_BY_PLATFORM = Object.freeze({
   'linux-x64': '8606243ff2528026cacc9cb6bbe75907657cc99cbe903f2a3d17c87a6888e776',
   'darwin-arm64': '062a96b5f5b91612836d4270e2233bd9b730c32ea53d1bd2c7b7459d7b8b562f',
 })
-// Enable v5 only after its deployed contract, code, CLI hashes, and market
-// output version have been independently verified together.
+const DIRECT_V5_BINARY_SHA256_BY_PLATFORM = Object.freeze({
+  'linux-x64': '0504f8ff6c22552ce050213c28309b17929b917b420eb912a43ed2d8253b9f68',
+  'darwin-arm64': '74f4181e6114dcb55fe152f98be1e934f3ac505fae35c56736427239bd66fb20',
+})
+const DIRECT_V5_CANDIDATE = Object.freeze({
+  version: 5,
+  contract: '0x68d59c71669c872c848049f22e1388fc226fceb7',
+  codeHash:
+    '0x45d1d0ebf1140e0f9a7d0383878a6e6e00c424ec12c12de78cacb92ec92f268a',
+  binaryHashes: DIRECT_V5_BINARY_SHA256_BY_PLATFORM,
+  buyBinaryHashes: DIRECT_V5_BINARY_SHA256_BY_PLATFORM,
+  marketVersion: 3,
+})
+// Assign DIRECT_V5_CANDIDATE here only after the real proof and chain trade
+// gates pass. Until then v5 stops before identity, file, or CLI access.
 const DIRECT_V5_RELEASE = null
 const DIRECT_BUY_RELEASES = Object.freeze({
   4: Object.freeze({
@@ -2504,4 +2517,5 @@ module.exports = {
   createFodDirectConfirmService,
   DIRECT_V3_CONTRACT,
   DIRECT_V4_CONTRACT,
+  DIRECT_V5_CANDIDATE,
 }
