@@ -2233,7 +2233,8 @@ function createFodDirectListService({
           initial.coinbase !== finalIdentity.coinbase
         )
           refuse('fod_direct_list_identity_changed')
-        if (receipt.success === false && !offer) {
+        if (receipt.success === false) {
+          if (offer) return publicResult('conflict', attempt.txHash)
           await fs.promises.unlink(markerPath)
           await syncPrivateDirectory(fs, path.dirname(markerPath))
           return publicResult('failed', attempt.txHash)
@@ -3281,6 +3282,475 @@ function createFodDirectConfirmService({
   }
 }
 
+function parseDirectRecoverRequest(payload) {
+  if (
+    !payload || typeof payload !== 'object' || Array.isArray(payload) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(payload)) ||
+    Reflect.ownKeys(payload).length !== 3
+  ) refuse('fod_direct_recover_invalid_request')
+  const purchaseId = Object.getOwnPropertyDescriptor(payload, 'purchaseId')?.value
+  const orderId = Object.getOwnPropertyDescriptor(payload, 'orderId')?.value
+  const passphrase = Object.getOwnPropertyDescriptor(payload, 'passphrase')?.value
+  if (
+    typeof purchaseId !== 'string' || !/^fod-buy-[0-9a-f]{32}$/.test(purchaseId) ||
+    typeof orderId !== 'string' || !/^[1-9][0-9]{0,19}$/.test(orderId) ||
+    !isUint64(orderId) ||
+    typeof passphrase !== 'string' || passphrase.includes('\0') ||
+    passphrase.trim().length === 0 ||
+    Buffer.byteLength(passphrase, 'utf8') > 4096 ||
+    [...passphrase].length < 12 || [...passphrase].length > 512
+  ) refuse('fod_direct_recover_invalid_request')
+  return {purchaseId, orderId, passphrase}
+}
+
+function createFodDirectRecoverService({
+  getNodeRpcConnection,
+  getActiveCoinbase,
+  spawn = defaultSpawn,
+  fs = defaultFs,
+  binaryPath,
+  vaultRoot,
+  expectedBinaryHash,
+}) {
+  let busy = false
+  return async function recoverPublicDirectDelivery(payload) {
+    if (busy) refuse('fod_direct_recover_busy')
+    busy = true
+    let tempDir
+    const privateData = []
+    try {
+      const {purchaseId, orderId, passphrase} = parseDirectRecoverRequest(payload)
+      const initial = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
+      const vaultParent = await ensurePrivateVaultRoot(fs, vaultRoot)
+      const privateRoot = await ensurePrivateVaultRoot(
+        fs, path.join(vaultParent, initial.coinbase)
+      )
+      const purchaseRoot = path.join(privateRoot, purchaseId)
+      const before = await fs.promises.lstat(purchaseRoot)
+      if (
+        !before.isDirectory() || before.isSymbolicLink() ||
+        (process.platform !== 'win32' && (before.mode & 0o777) !== 0o700) ||
+        (await fs.promises.realpath(purchaseRoot)) !== purchaseRoot
+      ) refuse('fod_direct_recover_invalid_file')
+      const readSaved = async (name, limit) => {
+        const file = await readPrivateSelectedFile(
+          fs, path.join(purchaseRoot, name), limit
+        )
+        privateData.push(file.data)
+        return file.data
+      }
+      const sessionData = await readSaved('session.json', MAX_SESSION_BYTES)
+      const keyData = await readSaved('delivery.key', MAX_DELIVERY_KEY_BYTES)
+      const purchaseData = await readSaved('purchase.json', MAX_PURCHASE_BYTES)
+      const session = parseBuySession(sessionData)
+      const keyText = keyData.toString('utf8').trim()
+      if (!/^(?:0x)?[0-9a-fA-F]{64}$/.test(keyText)) {
+        refuse('fod_direct_recover_invalid_file')
+      }
+      const deliveryKey = Buffer.from(keyText.replace(/^0x/i, ''), 'hex')
+      let deliveryPublicKey
+      try {
+        const curve = createECDH('secp256k1')
+        curve.setPrivateKey(deliveryKey)
+        deliveryPublicKey = curve.getPublicKey('hex', 'uncompressed')
+      } finally {
+        deliveryKey.fill(0)
+      }
+      const {release} = parsePreparedBuy(
+        purchaseData, session, initial.coinbase, deliveryPublicKey, 4
+      )
+      const saved = parseUniqueJson(purchaseData, 'fod_direct_recover_invalid_file')
+      const hashes = reviewedDirectBuyBinaryHashes(release, expectedBinaryHash)
+      await checkPinnedBinary(fs, binaryPath, hashes)
+      tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'fod-recover-'))
+      tempDir = await fs.promises.realpath(tempDir)
+      await fs.promises.chmod(tempDir, 0o700)
+      const binary = await checkPinnedBinary(fs, binaryPath, hashes, tempDir)
+      const rpcFlags = ['-rpc', initial.connection.url]
+      if (initial.connection.key) {
+        const keyBytes = Buffer.from(initial.connection.key, 'utf8')
+        try {
+          const keyFile = path.join(tempDir, 'rpc.key')
+          await writePrivateFile(fs, keyFile, keyBytes)
+          rpcFlags.push('-key-file', keyFile)
+        } finally {
+          keyBytes.fill(0)
+        }
+      }
+      const market = await readDirectBuyMarket({
+        fs, spawn, binary, tempDir, rpcFlags, release,
+      })
+      const matches = market.orders.filter((order) => order.orderId === orderId)
+      if (
+        matches.length !== 1 ||
+        matches[0].buyer !== initial.coinbase ||
+        matches[0].offerId !== saved.directOfferId ||
+        matches[0].state !== 'settled' || !matches[0].keysPublic ||
+        matches[0].paid !== saved.price ||
+        matches[0].bond !==
+          (BigInt(saved.amount) - BigInt(saved.price)).toString()
+      ) refuse('fod_direct_recover_order_mismatch')
+      const current = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
+      if (
+        !sameConnection(initial.connection, current.connection) ||
+        initial.coinbase !== current.coinbase
+      ) refuse('fod_direct_recover_identity_changed')
+      const purchaseCopy = path.join(tempDir, 'purchase.json')
+      await writePrivateFile(fs, purchaseCopy, purchaseData)
+      const vaultPath = path.join(purchaseRoot, `recovered-${orderId}.age`)
+      const receiptPath = path.join(purchaseRoot, `recovered-${orderId}.json`)
+      await runCheck(
+        spawn, binary,
+        [
+          'direct-recover', '-direct-version', '4', '-network', 'idena',
+          '-contract', release.contract, '-code-hash', release.codeHash,
+          '-order', orderId, '-purchase', purchaseCopy,
+          '-vault', vaultPath, '-out', receiptPath, ...rpcFlags,
+        ], '', {FOD_PASSPHRASE: passphrase}
+      )
+      const after = await fs.promises.lstat(purchaseRoot)
+      const finished = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
+      if (
+        after.dev !== before.dev || after.ino !== before.ino ||
+        !after.isDirectory() || after.isSymbolicLink() ||
+        (process.platform !== 'win32' && (after.mode & 0o777) !== 0o700) ||
+        !sameConnection(initial.connection, finished.connection) ||
+        initial.coinbase !== finished.coinbase
+      ) refuse('fod_direct_recover_identity_changed')
+      await checkPrivateOutputFile(fs, vaultPath)
+      await checkPrivateOutputFile(fs, receiptPath)
+      const receipt = await readPrivateSelectedFile(fs, receiptPath, MAX_RECEIPT_BYTES)
+      try {
+        const raw = receipt.data.toString('utf8')
+        const record = parseUniqueJson(receipt.data, 'fod_direct_recover_failed')
+        const orderMatches = [...raw.matchAll(/"orderId"\s*:\s*([1-9][0-9]{0,19})/g)]
+        if (
+          Object.keys(record).join(',') !==
+            'format,version,network,contract,codeHash,offerId,orderId,orderNonce,buyer,deliveryKey,author,epoch,inventoryCommitment,keyCommitment,keySource,usableFlips' ||
+          record.format !== 'fod.recovered-direct-delivery' ||
+          record.version !== 1 || record.network !== 'idena' ||
+          record.contract !== release.contract.slice(2) ||
+          record.codeHash !== release.codeHash.slice(2) ||
+          record.offerId !== saved.directOfferId ||
+          orderMatches.length !== 1 || orderMatches[0][1] !== orderId ||
+          record.orderNonce !== saved.orderNonce ||
+          record.buyer !== initial.coinbase ||
+          record.deliveryKey !== deliveryPublicKey ||
+          record.author !== saved.author || record.epoch !== saved.epoch ||
+          record.inventoryCommitment !== saved.inventoryCommitment ||
+          record.keyCommitment !== saved.keyCommitment ||
+          record.keySource !== 'public-reveal' ||
+          record.usableFlips !== session.manifest.length
+        ) refuse('fod_direct_recover_failed')
+        return {purchaseId, orderId, status: 'recovered', usableFlips: record.usableFlips}
+      } finally {
+        receipt.data.fill(0)
+      }
+    } catch (error) {
+      if (error instanceof DirectCheckError) throw error
+      throw new DirectCheckError('fod_direct_recover_failed')
+    } finally {
+      privateData.forEach((data) => data.fill(0))
+      try {
+        if (tempDir) await fs.promises.rm(tempDir, {recursive: true, force: true})
+      } finally {
+        busy = false
+      }
+    }
+  }
+}
+
+function parseDirectRefundRequest(payload) {
+  const descriptor = payload && Object.getOwnPropertyDescriptor(payload, 'orderId')
+  if (
+    !payload || typeof payload !== 'object' || Array.isArray(payload) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(payload)) ||
+    Reflect.ownKeys(payload).length !== 1 || !descriptor ||
+    typeof descriptor.value !== 'string' ||
+    !/^[1-9][0-9]{0,19}$/.test(descriptor.value) ||
+    !isUint64(descriptor.value)
+  ) refuse('fod_direct_refund_invalid_request')
+  return descriptor.value
+}
+
+async function readDirectRefundAttempt(fs, filePath, expected) {
+  let file
+  try {
+    file = await readPrivateSelectedFile(fs, filePath, 512)
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+  try {
+    const marker = parseUniqueJson(file.data, 'fod_direct_refund_invalid_attempt')
+    if (
+      Object.keys(marker).join(',') !==
+        'format,version,buyer,contract,orderId,calldata,txHash' ||
+      marker.format !== 'fod.direct-refund-attempt' || marker.version !== 1 ||
+      marker.buyer !== expected.buyer || marker.contract !== expected.contract ||
+      marker.orderId !== expected.orderId || marker.calldata !== expected.calldata ||
+      (marker.txHash !== null && !/^0x[0-9a-f]{64}$/.test(marker.txHash))
+    ) refuse('fod_direct_refund_invalid_attempt')
+    return marker
+  } finally {
+    file.data.fill(0)
+  }
+}
+
+function createFodDirectRefundService({
+  dialog,
+  getNodeRpcConnection,
+  getActiveCoinbase,
+  rpcCall,
+  spawn = defaultSpawn,
+  fs = defaultFs,
+  binaryPath,
+  vaultRoot,
+  expectedBinaryHash,
+}) {
+  let busy = false
+  return async function refundDirectOrder(payload) {
+    if (busy) refuse('fod_direct_refund_busy')
+    busy = true
+    let tempDir
+    try {
+      const orderId = parseDirectRefundRequest(payload)
+      const release = selectedBuyRelease(4)
+      const initial = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
+      const hashes = reviewedDirectBuyBinaryHashes(release, expectedBinaryHash)
+      await checkPinnedBinary(fs, binaryPath, hashes)
+      const privateRoot = await ensurePrivateVaultRoot(
+        fs, path.join(await ensurePrivateVaultRoot(fs, vaultRoot), initial.coinbase)
+      )
+      const orderBytes = Buffer.alloc(8)
+      orderBytes.writeBigUInt64BE(BigInt(orderId))
+      const calldata = orderBytes.toString('hex')
+      const marker = {
+        format: 'fod.direct-refund-attempt', version: 1,
+        buyer: initial.coinbase, contract: release.contract,
+        orderId, calldata, txHash: null,
+      }
+      const markerPath = path.join(
+        privateRoot, `refund-${release.contract.slice(2)}-${orderId}.json`
+      )
+      const previousAttempt = await readDirectRefundAttempt(fs, markerPath, marker)
+      tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'fod-refund-'))
+      tempDir = await fs.promises.realpath(tempDir)
+      await fs.promises.chmod(tempDir, 0o700)
+      const binary = await checkPinnedBinary(fs, binaryPath, hashes, tempDir)
+      const rpcFlags = ['-rpc', initial.connection.url]
+      if (initial.connection.key) {
+        const keyBytes = Buffer.from(initial.connection.key, 'utf8')
+        try {
+          const keyFile = path.join(tempDir, 'rpc.key')
+          await writePrivateFile(fs, keyFile, keyBytes)
+          rpcFlags.push('-key-file', keyFile)
+        } finally {
+          keyBytes.fill(0)
+        }
+      }
+      const rpc = async (method, params) => {
+        const response = await rpcCall(initial.connection, {method, params})
+        if (response?.error || response?.result === undefined) {
+          refuse('fod_direct_refund_node_unavailable')
+        }
+        return response.result
+      }
+      const marketState = async () => publicDirectMarket(
+        await readDirectBuyMarket({fs, spawn, binary, tempDir, rpcFlags, release})
+      )
+      const sale = (market) => {
+        const orders = market.orders.filter((order) => order.orderId === orderId)
+        if (orders.length !== 1 || orders[0].buyer !== initial.coinbase) {
+          refuse('fod_direct_refund_order_mismatch')
+        }
+        const order = orders[0]
+        const offers = market.offers.filter((offer) => offer.offerId === order.offerId)
+        if (offers.length !== 1) refuse('fod_direct_refund_order_mismatch')
+        return {order, offer: offers[0]}
+      }
+      const firstMarket = await marketState()
+      const {order: firstOrder} = sale(firstMarket)
+      if (firstOrder.state === 'refunded') {
+        return {orderId, status: 'refunded'}
+      }
+      const expectedPayload = `0x0a06726566756e641208${calldata}`
+      const reconcile = async (attempt) => {
+        if (!attempt.txHash) {
+          const pending = await rpc('bcn_pendingTransactions', [
+            {address: `0x${initial.coinbase}`, count: 100},
+          ]).catch(() => null)
+          const matching = Array.isArray(pending?.transactions)
+            ? pending.transactions.filter((tx) =>
+              tx?.type === 'callContract' &&
+              /^0x[0-9a-fA-F]{64}$/.test(tx.hash) &&
+              tx.from?.toLowerCase() === `0x${initial.coinbase}` &&
+              tx.to?.toLowerCase() === release.contract &&
+              tx.amount === '0' &&
+              tx.payload?.toLowerCase() === expectedPayload
+            ) : []
+          if (matching.length !== 1) return {orderId, status: 'uncertain'}
+          attempt.txHash = matching[0].hash.toLowerCase()
+          await saveConfirmAttempt(fs, markerPath, attempt, true)
+        }
+        const receipt = await rpc('bcn_txReceipt', [attempt.txHash]).catch(() => null)
+        if (!receipt) return {orderId, status: 'pending'}
+        const tx = await rpc('bcn_transaction', [attempt.txHash]).catch(() => null)
+        if (
+          tx?.type !== 'callContract' ||
+          tx.hash?.toLowerCase() !== attempt.txHash ||
+          tx.from?.toLowerCase() !== `0x${initial.coinbase}` ||
+          tx.to?.toLowerCase() !== release.contract ||
+          tx.amount !== '0' ||
+          tx.payload?.toLowerCase() !== expectedPayload ||
+          !/^0x[0-9a-fA-F]{64}$/.test(tx.blockHash)
+        ) return {orderId, status: 'uncertain'}
+        const block = await rpc('bcn_block', [tx.blockHash]).catch(() => null)
+        const canonical = Number.isSafeInteger(block?.height)
+          ? await rpc('bcn_blockAt', [block.height]).catch(() => null)
+          : null
+        if (
+          block?.hash?.toLowerCase() !== tx.blockHash.toLowerCase() ||
+          canonical?.hash?.toLowerCase() !== tx.blockHash.toLowerCase()
+        ) return {orderId, status: 'uncertain'}
+        if (receipt.success === false) {
+          await fs.promises.unlink(markerPath)
+          await syncPrivateDirectory(fs, privateRoot)
+          return {orderId, status: 'failed'}
+        }
+        if (receipt.success !== true) return {orderId, status: 'uncertain'}
+        const latest = await marketState()
+        return sale(latest).order.state === 'refunded'
+          ? {orderId, status: 'refunded'}
+          : {orderId, status: 'pending'}
+      }
+      if (previousAttempt) return reconcile(previousAttempt)
+      if (
+        !['funded', 'fallback-pending'].includes(firstOrder.state) ||
+        firstOrder.keysPublic ||
+        BigInt(firstMarket.blockHeight) < BigInt(firstOrder.refundAtBlock)
+      ) refuse('fod_direct_refund_not_ready')
+      const confirmation = await dialog.showMessageBox({
+        type: 'warning', title: 'Refund flip purchase',
+        message: `Request escrow refund for order ${orderId}?`,
+        detail: 'The original buyer receives the escrow. The offer closes. Network fee: up to 3 iDNA.',
+        buttons: ['Cancel', 'Request refund'],
+        defaultId: 0, cancelId: 0, noLink: true,
+      })
+      if (confirmation?.response !== 1) return {orderId, status: 'cancelled'}
+
+      const preparedPath = path.join(tempDir, 'refund.json')
+      await runCheck(
+        spawn, binary,
+        [
+          'direct-refund', '-direct-version', '4', '-network', 'idena',
+          '-contract', release.contract, '-code-hash', release.codeHash,
+          '-order', orderId, '-prepared', preparedPath, ...rpcFlags,
+        ], ''
+      )
+      const preparedFile = await readPrivateSelectedFile(fs, preparedPath, 4096)
+      try {
+        const prepared = parseUniqueJson(preparedFile.data, 'fod_direct_refund_failed')
+        const orderMatches = [...preparedFile.data.toString('utf8').matchAll(
+          /"directOrderId"\s*:\s*([1-9][0-9]{0,19})/g
+        )]
+        if (
+          Object.keys(prepared).join(',') !==
+            'format,version,operation,network,contract,amount,calldata,preparedAt,submitted,directOfferId,directOrderId,directVersion' ||
+          prepared.format !== 'fod.prepared-direct-refund' ||
+          prepared.version !== 1 || prepared.operation !== 'refund' ||
+          prepared.network !== 'idena' ||
+          prepared.contract !== release.contract.slice(2) ||
+          prepared.amount !== '0' || prepared.calldata !== calldata ||
+          !Number.isFinite(Date.parse(prepared.preparedAt)) ||
+          prepared.submitted !== false ||
+          prepared.directOfferId !== firstOrder.offerId ||
+          orderMatches.length !== 1 || orderMatches[0][1] !== orderId ||
+          prepared.directVersion !== 4
+        ) refuse('fod_direct_refund_failed')
+      } finally {
+        preparedFile.data.fill(0)
+      }
+      const current = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
+      if (
+        !sameConnection(initial.connection, current.connection) ||
+        initial.coinbase !== current.coinbase
+      ) refuse('fod_direct_refund_identity_changed')
+      const sync = await rpc('bcn_syncing', [])
+      const coinbase = normalizeCoinbase(await rpc('dna_getCoinbaseAddr', []))
+      const account = await rpc('dna_getBalance', [`0x${coinbase}`])
+      const stake = await rpc('contract_getStake', [release.contract])
+      const rate = parseNodeFeePerGas(await rpc('bcn_feePerGas', []))
+      const maxFeeAtoms = 3n * 10n ** 18n
+      if (
+        sync?.syncing !== false || sync.wrongTime !== false ||
+        sync.currentBlock !== sync.highestBlock ||
+        coinbase !== initial.coinbase ||
+        !account || account.nonce !== account.mempoolNonce ||
+        decimalAtoms(account.balance) < maxFeeAtoms ||
+        stake?.Hash?.toLowerCase() !== release.codeHash
+      ) refuse('fod_direct_refund_node_unavailable')
+      const call = {
+        from: `0x${initial.coinbase}`, contract: release.contract,
+        method: 'refund', amount: '0', maxFee: '3',
+        args: [{index: 0, format: 'hex', value: `0x${calldata}`}],
+      }
+      if (!buyEstimateFitsFee(
+        await rpc('contract_estimateCall', [call]), rate, maxFeeAtoms
+      )) refuse('fod_direct_refund_fee_unavailable')
+      const finalMarket = await marketState()
+      const {order: finalOrder, offer: finalOffer} = sale(finalMarket)
+      if (
+        !['funded', 'fallback-pending'].includes(finalOrder.state) ||
+        finalOrder.keysPublic || finalOffer.retired ||
+        finalOffer.openOrderId !== orderId ||
+        BigInt(finalMarket.blockHeight) < BigInt(finalOrder.refundAtBlock)
+      ) refuse('fod_direct_refund_not_ready')
+      const last = await activeIdentity(getNodeRpcConnection, getActiveCoinbase)
+      if (
+        !sameConnection(initial.connection, last.connection) ||
+        initial.coinbase !== last.coinbase
+      ) refuse('fod_direct_refund_identity_changed')
+      try {
+        await saveConfirmAttempt(fs, markerPath, marker)
+      } catch (error) {
+        if (error.code === 'EEXIST') return {orderId, status: 'uncertain'}
+        throw error
+      }
+      let submitted
+      try {
+        submitted = await rpcCall(initial.connection, {
+          method: 'contract_call', params: [call],
+        })
+      } catch {
+        return reconcile(marker)
+      }
+      const hash = submitted?.result
+      if (
+        submitted?.error || typeof hash !== 'string' ||
+        !/^0x[0-9a-fA-F]{64}$/.test(hash)
+      ) return reconcile(marker)
+      marker.txHash = hash.toLowerCase()
+      await saveConfirmAttempt(fs, markerPath, marker, true)
+      for (let tries = 0; tries < 2; tries += 1) {
+        const result = await reconcile(marker)
+        if (result.status !== 'pending') return result
+        if (tries === 0) await new Promise((resolve) => setTimeout(resolve, 3000))
+      }
+      return {orderId, status: 'pending'}
+    } catch (error) {
+      if (error instanceof DirectCheckError) throw error
+      throw new DirectCheckError('fod_direct_refund_failed')
+    } finally {
+      try {
+        if (tempDir) await fs.promises.rm(tempDir, {recursive: true, force: true})
+      } finally {
+        busy = false
+      }
+    }
+  }
+}
+
 module.exports = {
   createFodDirectCheckService,
   createFodDirectReceiveService,
@@ -3290,6 +3760,8 @@ module.exports = {
   createFodDirectBuyResumeService,
   createFodDirectBuyCommitService,
   createFodDirectConfirmService,
+  createFodDirectRecoverService,
+  createFodDirectRefundService,
   DIRECT_V3_CONTRACT,
   DIRECT_V4_CONTRACT,
   DIRECT_V5_CANDIDATE,

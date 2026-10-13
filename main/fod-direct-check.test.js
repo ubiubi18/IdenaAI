@@ -15,6 +15,8 @@ const {
   createFodDirectBuyResumeService,
   createFodDirectBuyCommitService,
   createFodDirectConfirmService,
+  createFodDirectRecoverService,
+  createFodDirectRefundService,
 } = require('./fod-direct-check')
 
 const CONTRACT = 'e86d31069194690b1a818f24912bafdacfb29f19'
@@ -102,11 +104,11 @@ function fakeSpawn({
       if (exitCode === 0) {
         const outputFlag =
           args[0] === 'direct-confirm' || args[0] === 'direct-buy' ||
-          args[0] === 'direct-list'
+          args[0] === 'direct-list' || args[0] === 'direct-refund'
             ? '-prepared'
             : '-out'
         const outPath = args[args.indexOf(outputFlag) + 1]
-        if (args[0] === 'direct-receive') {
+        if (args[0] === 'direct-receive' || args[0] === 'direct-recover') {
           fs.writeFileSync(args[args.indexOf('-vault') + 1], 'age-encrypted', {
             mode: vaultMode,
           })
@@ -423,6 +425,161 @@ describe('trusted FoD direct check', () => {
   })
 })
 
+describe('trusted FoD direct buyer refund', () => {
+  let root
+  let vaultRoot
+  const orderId = CONFIRM_ORDER_ID
+  const offerId = 'd'.repeat(64)
+  const blockHash = `0x${'c'.repeat(64)}`
+  const txHash = `0x${'a'.repeat(64)}`
+  const calldata = '0000000000000011'
+  const payload = `0x0a06726566756e641208${calldata}`
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'idena-fod-refund-test-')))
+    vaultRoot = path.join(root, 'vaults')
+  })
+
+  afterEach(() => fs.rmSync(root, {recursive: true, force: true}))
+
+  function market(state = 'funded', height = 9000) {
+    return JSON.stringify({
+      format: 'fod.direct-market-state', version: 3, network: 'idena',
+      source: 'node', contract: V4_CONTRACT, codeHash: V4_CODE_HASH.slice(2),
+      blockHeight: height, observedAt: '2026-10-13T00:00:00Z',
+      offers: [{
+        offerId, author: AUTHOR, epoch: 230, coveredFlips: 1,
+        inventoryCommitment: 'e'.repeat(64), price: '1000000000000000000',
+        openOrderId: state === 'refunded' ? '0' : orderId,
+        retired: state === 'refunded',
+      }],
+      orders: [{
+        orderId, offerId, buyer: BUYER, paid: '1000000000000000000',
+        bond: '500000000000000000000', fundedAtBlock: '1',
+        refundAtBlock: '8641', state, keysPublic: false,
+      }],
+    })
+  }
+
+  function prepared() {
+    return JSON.stringify({
+      format: 'fod.prepared-direct-refund', version: 1,
+      operation: 'refund', network: 'idena', contract: V4_CONTRACT,
+      amount: '0', calldata, preparedAt: '2026-10-13T00:00:00Z',
+      submitted: false, directOfferId: offerId,
+      directOrderId: Number(orderId), directVersion: 4,
+    })
+  }
+
+  function service({spawn, rpcCall, dialog} = {}) {
+    return createFodDirectRefundService({
+      dialog: dialog || {showMessageBox: jest.fn().mockResolvedValue({response: 1})},
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: 'RPC_SECRET'}),
+      getActiveCoinbase: async () => `0x${BUYER}`,
+      rpcCall: rpcCall || jest.fn(), spawn, fs,
+      binaryPath: process.execPath, expectedBinaryHash: TEST_BINARY_HASH,
+      vaultRoot,
+    })
+  }
+
+  function nodeRpc(submit) {
+    return jest.fn(async (_connection, {method, params}) => {
+      switch (method) {
+        case 'bcn_syncing':
+          return {result: {syncing: false, wrongTime: false,
+            currentBlock: 9000, highestBlock: 9000}}
+        case 'dna_getCoinbaseAddr':
+          return {result: `0x${BUYER}`}
+        case 'dna_getBalance':
+          return {result: {balance: '3', nonce: 1, mempoolNonce: 1}}
+        case 'contract_getStake':
+          return {result: {Hash: V4_CODE_HASH}}
+        case 'bcn_feePerGas':
+          return {result: '1'}
+        case 'contract_estimateCall':
+          expect(params[0].method).toBe('refund')
+          expect(params[0].args[0].value).toBe(`0x${calldata}`)
+          return {result: {success: true, gasUsed: 100000}}
+        case 'contract_call':
+          return submit(params[0])
+        case 'bcn_pendingTransactions':
+          return {result: {transactions: []}}
+        case 'bcn_txReceipt':
+          return {result: {success: true}}
+        case 'bcn_transaction':
+          return {result: {type: 'callContract', hash: txHash,
+            from: `0x${BUYER}`, to: `0x${V4_CONTRACT}`,
+            amount: '0', payload, blockHash}}
+        case 'bcn_block':
+          return {result: {hash: blockHash, height: 9000}}
+        case 'bcn_blockAt':
+          return {result: {hash: blockHash, height: 9000}}
+        default:
+          throw new Error(`unexpected RPC method: ${method}`)
+      }
+    })
+  }
+
+  it('prepares and reconciles the exact refundable order', async () => {
+    let snapshots = 0
+    const child = fakeSpawn({result: (args) =>
+      args[0] === 'direct-market'
+        ? market(++snapshots >= 3 ? 'refunded' : 'funded')
+        : prepared()})
+    const rpcCall = nodeRpc((call) => {
+      expect(call).toMatchObject({
+        from: `0x${BUYER}`, contract: `0x${V4_CONTRACT}`,
+        method: 'refund', amount: '0', maxFee: '3',
+      })
+      return {result: txHash}
+    })
+    await expect(service({spawn: child.spawn, rpcCall})({orderId}))
+      .resolves.toEqual({orderId, status: 'refunded'})
+    expect(child.calls.map(({args}) => args[0])).toEqual([
+      'direct-market', 'direct-refund', 'direct-market', 'direct-market',
+    ])
+    expect(child.calls[1].args).not.toContain('-broadcast')
+    expect(child.calls[1].args.join(' ')).not.toContain('RPC_SECRET')
+    expect(fs.statSync(path.join(vaultRoot, BUYER,
+      `refund-${V4_CONTRACT}-${orderId}.json`)).mode & 0o777).toBe(0o600)
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
+  })
+
+  it('blocks an early refund and never retries an unknown broadcast', async () => {
+    const early = fakeSpawn({result: market('funded', 8640)})
+    const earlyRpc = jest.fn()
+    await expect(service({spawn: early.spawn, rpcCall: earlyRpc})({orderId}))
+      .rejects.toThrow('fod_direct_refund_not_ready')
+    expect(earlyRpc).not.toHaveBeenCalled()
+
+    const child = fakeSpawn({result: (args) =>
+      args[0] === 'direct-market' ? market() : prepared()})
+    const rpcCall = nodeRpc(() => { throw new Error('lost response') })
+    const refund = service({spawn: child.spawn, rpcCall})
+    await expect(refund({orderId})).resolves.toEqual({orderId, status: 'uncertain'})
+    await expect(refund({orderId})).resolves.toEqual({orderId, status: 'uncertain'})
+    expect(rpcCall.mock.calls.filter(([, call]) => call.method === 'contract_call'))
+      .toHaveLength(1)
+    expect(child.calls.map(({args}) => args[0])).toEqual([
+      'direct-market', 'direct-refund', 'direct-market', 'direct-market',
+    ])
+  })
+
+  it('refuses a refund for an order belonging to another buyer', async () => {
+    const other = JSON.parse(market())
+    other.orders[0].buyer = AUTHOR
+    const child = fakeSpawn({result: JSON.stringify(other)})
+    const rpcCall = jest.fn()
+    const dialog = {showMessageBox: jest.fn()}
+    await expect(service({spawn: child.spawn, rpcCall, dialog})({orderId}))
+      .rejects.toThrow('fod_direct_refund_order_mismatch')
+    expect(dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(rpcCall).not.toHaveBeenCalled()
+    expect(child.calls.map(({args}) => args[0])).toEqual(['direct-market'])
+  })
+})
+
 describe('public direct market', () => {
   const snapshot = {
     format: 'fod.direct-market-state',
@@ -721,11 +878,12 @@ describe('trusted FoD direct seller listing', () => {
   })
 
   it.each([
-    ['matching transaction', null, 'included'],
-    ['different listing calldata', '0x0a046c6973741256deadbeef', 'uncertain'],
+    ['matching transaction', null, 'included', true],
+    ['different listing calldata', '0x0a046c6973741256deadbeef', 'uncertain', true],
+    ['failed transaction beside an existing offer', null, 'conflict', false],
   ])(
     'reconciles a %s without attributing another listing',
-    async (_scenario, otherPayload, expectedStatus) => {
+    async (_scenario, otherPayload, expectedStatus, receiptSuccess) => {
       const txHash = `0x${'1'.repeat(64)}`
       const blockHash = `0x${'2'.repeat(64)}`
       let submitted = false
@@ -754,7 +912,7 @@ describe('trusted FoD direct seller listing', () => {
             submitted = true
             return {result: txHash}
           case 'bcn_txReceipt':
-            return {result: {success: true}}
+            return {result: {success: receiptSuccess}}
           case 'bcn_transaction':
             return {
               result: {
@@ -778,15 +936,28 @@ describe('trusted FoD direct seller listing', () => {
         }
       })
       dialog.showMessageBox.mockResolvedValue({response: 1})
+      const list = service(child)
 
       await expect(
-        service(child)({priceIdna: '1', passphrase: 'vault secret'})
+        list({priceIdna: '1', passphrase: 'vault secret'})
       ).resolves.toEqual({
         status: expectedStatus,
         offerId,
         priceIdna: '1',
         txHash,
       })
+      if (!receiptSuccess) {
+        dialog.showOpenDialog.mockResolvedValueOnce({
+          canceled: false,
+          filePaths: [sessionPath],
+        })
+        await expect(list({priceIdna: '1', passphrase: ''})).resolves.toEqual({
+          status: 'conflict',
+          offerId,
+          priceIdna: '1',
+          txHash,
+        })
+      }
       expect(
         rpcCall.mock.calls.filter(
           ([, payload]) => payload.method === 'contract_call'
@@ -1644,6 +1815,67 @@ describe('trusted FoD direct buy preparation', () => {
     expect(fs.readFileSync(path.join(saved, 'purchase.json'), 'utf8')).toBe(
       JSON.stringify(preparedBuy())
     )
+  })
+
+  it('recovers public fallback keys only for the matching saved buyer purchase', async () => {
+    const {purchaseId} = await service()({})
+    const orderId = CONFIRM_ORDER_ID
+    const passphrase = 'local vault secret'
+    const market = {
+      format: 'fod.direct-market-state', version: 3, network: 'idena',
+      source: 'node', contract: V4_CONTRACT, codeHash: V4_CODE_HASH.slice(2),
+      offers: [{offerId}],
+      orders: [{
+        orderId, offerId, buyer: BUYER, paid: preparedBuy().price,
+        bond: '5000000000000000000', state: 'settled', keysPublic: true,
+      }],
+    }
+    const record = {
+      format: 'fod.recovered-direct-delivery', version: 1,
+      network: 'idena', contract: V4_CONTRACT,
+      codeHash: V4_CODE_HASH.slice(2), offerId,
+      orderId: Number(orderId), orderNonce: 1, buyer: BUYER,
+      deliveryKey: deliveryPublicKey, author: AUTHOR, epoch: 230,
+      inventoryCommitment, keyCommitment, keySource: 'public-reveal',
+      usableFlips: 1,
+    }
+    const child = fakeSpawn({
+      result: (args) => JSON.stringify(
+        args[0] === 'direct-market' ? market : record
+      ),
+    })
+    const recover = createFodDirectRecoverService({
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: 'RPC_SECRET'}),
+      getActiveCoinbase: async () => `0x${BUYER}`,
+      spawn: child.spawn, fs, binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH, vaultRoot,
+    })
+
+    await expect(recover({purchaseId, orderId, passphrase})).resolves.toEqual({
+      purchaseId, orderId, status: 'recovered', usableFlips: 1,
+    })
+    const recovery = child.calls.find(({args}) => args[0] === 'direct-recover')
+    expect(recovery).toBeTruthy()
+    expect(recovery.args).not.toContain('-broadcast')
+    expect(recovery.args.join(' ')).not.toContain(passphrase)
+    expect(recovery.args.join(' ')).not.toContain('RPC_SECRET')
+    expect(recovery.options.env).toEqual({FOD_PASSPHRASE: passphrase})
+    const saved = path.join(vaultRoot, BUYER, purchaseId)
+    for (const name of [`recovered-${orderId}.age`, `recovered-${orderId}.json`]) {
+      expect(fs.statSync(path.join(saved, name)).mode & 0o777).toBe(0o600)
+    }
+    market.orders[0].buyer = AUTHOR
+    const mismatch = fakeSpawn({result: JSON.stringify(market)})
+    const wrongOrder = createFodDirectRecoverService({
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: ''}),
+      getActiveCoinbase: async () => `0x${BUYER}`,
+      spawn: mismatch.spawn, fs, binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH, vaultRoot,
+    })
+    await expect(wrongOrder({purchaseId, orderId, passphrase})).rejects.toThrow(
+      'fod_direct_recover_order_mismatch'
+    )
+    expect(mismatch.calls.map(({args}) => args[0])).toEqual(['direct-market'])
   })
 
   it('retains an explicit v4 selection and its prepared version', async () => {
