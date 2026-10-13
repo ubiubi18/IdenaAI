@@ -10,6 +10,8 @@ const {
   createFodDirectCheckService,
   createFodDirectReceiveService,
   createFodDirectBuyPrepareService,
+  createFodDirectListService,
+  createFodDirectMarketService,
   createFodDirectBuyResumeService,
   createFodDirectBuyCommitService,
   createFodDirectConfirmService,
@@ -99,7 +101,8 @@ function fakeSpawn({
       if (stderr) child.stderr.write(stderr)
       if (exitCode === 0) {
         const outputFlag =
-          args[0] === 'direct-confirm' || args[0] === 'direct-buy'
+          args[0] === 'direct-confirm' || args[0] === 'direct-buy' ||
+          args[0] === 'direct-list'
             ? '-prepared'
             : '-out'
         const outPath = args[args.indexOf(outputFlag) + 1]
@@ -417,6 +420,347 @@ describe('trusted FoD direct check', () => {
         .mockResolvedValueOnce({canceled: false, filePaths: [purchasePath]})
         .mockResolvedValueOnce({canceled: false, filePaths: [keyPath]})
     }
+  })
+})
+
+describe('public direct market', () => {
+  const snapshot = {
+    format: 'fod.direct-market-state',
+    version: 3,
+    network: 'idena',
+    contract: V4_CONTRACT,
+    codeHash: V4_CODE_HASH.slice(2),
+    blockHeight: 7,
+    observedAt: '2026-10-13T09:00:00Z',
+    source: 'node',
+    offers: [{
+      offerId: 'd'.repeat(64), author: AUTHOR, epoch: 230,
+      coveredFlips: 3, inventoryCommitment: 'e'.repeat(64),
+      price: '1000000000000000000', openOrderId: '0', retired: false,
+    }],
+    orders: [],
+  }
+
+  function service(spawn, coinbase = async () => `0x${BUYER}`) {
+    return createFodDirectMarketService({
+      getNodeRpcConnection: () => ({url: 'http://127.0.0.1:9009', key: 'RPC_SECRET'}),
+      getActiveCoinbase: coinbase,
+      spawn,
+      fs,
+      binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH,
+    })
+  }
+
+  it('returns only bounded public node records through the pinned CLI', async () => {
+    const child = fakeSpawn({result: JSON.stringify({...snapshot, privateKey: 'never-forward'})})
+    const market = await service(child.spawn)({directVersion: 4})
+    expect(market).toEqual(snapshot)
+    expect(child.calls).toHaveLength(1)
+    const {args} = child.calls[0]
+    expect(args[0]).toBe('direct-market')
+    expect(args).toContain(V4_CODE_HASH)
+    expect(args).not.toContain('-broadcast')
+    expect(args.join(' ')).not.toContain('RPC_SECRET')
+    expect(fs.existsSync(args[args.indexOf('-out') + 1])).toBe(false)
+  })
+
+  it('rejects unpinned versions, malformed records, and identity changes', async () => {
+    const child = fakeSpawn({result: JSON.stringify(snapshot)})
+    await expect(service(child.spawn)({directVersion: 5})).rejects.toThrow(
+      'fod_direct_market_invalid_request'
+    )
+    expect(child.spawn).not.toHaveBeenCalled()
+
+    const malformed = fakeSpawn({
+      result: JSON.stringify({...snapshot, offers: [{...snapshot.offers[0], price: '-1'}]}),
+    })
+    await expect(service(malformed.spawn)({directVersion: 4})).rejects.toThrow(
+      'fod_direct_market_failed'
+    )
+    let reads = 0
+    await expect(service(child.spawn, async () =>
+      `0x${++reads > 1 ? AUTHOR : BUYER}`
+    )({directVersion: 4})).rejects.toThrow(
+      'fod_direct_market_identity_changed'
+    )
+  })
+})
+
+describe('trusted FoD direct seller listing', () => {
+  let root
+  let vaultRoot
+  let sessionPath
+  let vaultPath
+  let nodeKeyPath
+  let session
+  let dialog
+  let rpcCall
+
+  const price = 10n ** 18n
+  const epochBytes = Buffer.from([0, 230])
+  const offerId = createHash('sha256')
+    .update('fod:direct-offer:v2')
+    .update(Buffer.from(AUTHOR, 'hex'))
+    .update(epochBytes)
+    .digest('hex')
+  const inventoryCommitment = createHash('sha256')
+    .update('fod.bundle-manifest:v1')
+    .update(AUTHOR)
+    .update(epochBytes)
+    .update(Buffer.from([0]))
+    .update('cid-one')
+    .digest('hex')
+  const keyCommitment = 'f'.repeat(64)
+  const calldata = Buffer.alloc(86)
+  calldata.writeUInt16BE(230, 0)
+  calldata.writeUInt32BE(1, 2)
+  Buffer.from(inventoryCommitment, 'hex').copy(calldata, 6)
+  Buffer.from(keyCommitment, 'hex').copy(calldata, 38)
+  Buffer.from(price.toString(16).padStart(32, '0'), 'hex').copy(calldata, 70)
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fod-list-test-')))
+    vaultRoot = path.join(root, 'vaults')
+    sessionPath = path.join(root, 'session.json')
+    vaultPath = path.join(root, 'vault.age')
+    nodeKeyPath = path.join(root, 'nodekey')
+    session = {
+      format: 'fod.session-bundle', version: 1, author: AUTHOR, epoch: 230,
+      manifest: ['cid-one'], inventory: {}, verdict: {},
+    }
+    fs.writeFileSync(sessionPath, JSON.stringify(session), {mode: 0o644})
+    fs.writeFileSync(vaultPath, 'encrypted-vault', {mode: 0o600})
+    fs.writeFileSync(nodeKeyPath, '1'.repeat(64), {mode: 0o600})
+    dialog = {
+      showOpenDialog: jest.fn()
+        .mockResolvedValueOnce({canceled: false, filePaths: [sessionPath]})
+        .mockResolvedValueOnce({canceled: false, filePaths: [vaultPath]})
+        .mockResolvedValueOnce({canceled: false, filePaths: [nodeKeyPath]}),
+      showMessageBox: jest.fn().mockResolvedValue({response: 0}),
+    }
+    rpcCall = jest.fn(async (_connection, {method}) => {
+      switch (method) {
+        case 'bcn_syncing':
+          return {result: {syncing: false, wrongTime: false, currentBlock: 100, highestBlock: 100}}
+        case 'dna_getCoinbaseAddr':
+          return {result: `0x${AUTHOR}`}
+        case 'dna_getBalance':
+          return {result: {nonce: 0, mempoolNonce: 0, balance: '100'}}
+        case 'contract_getStake':
+          return {result: {Hash: V4_CODE_HASH}}
+        case 'bcn_feePerGas':
+          return {result: '1'}
+        case 'contract_estimateCall':
+          return {result: {success: true, gasUsed: 1000, minGasLimit: 1000}}
+        case 'bcn_pendingTransactions':
+          return {result: {transactions: []}}
+        default:
+          throw new Error(`unexpected ${method}`)
+      }
+    })
+  })
+
+  afterEach(() => {
+    fs.rmSync(root, {recursive: true, force: true})
+  })
+
+  function preparedList(overrides = {}) {
+    return {
+      format: 'fod.prepared-direct-list', version: 1, operation: 'list',
+      network: 'idena', contract: V4_CONTRACT, amount: '0',
+      calldata: calldata.toString('hex'), preparedAt: '2026-10-13T08:00:00Z',
+      submitted: false, price: price.toString(), author: AUTHOR,
+      epoch: 230, coveredFlips: 1, keyCommitment, inventoryCommitment,
+      directOfferId: offerId, directSession: session, ...overrides,
+    }
+  }
+
+  function market() {
+    return {
+      format: 'fod.direct-market-state', version: 3, network: 'idena',
+      contract: V4_CONTRACT, codeHash: V4_CODE_HASH.slice(2),
+      blockHeight: 100, observedAt: '2026-10-13T08:00:00Z',
+      source: 'node', offers: [], orders: [],
+    }
+  }
+
+  function service(child) {
+    return createFodDirectListService({
+      dialog, fs, spawn: child.spawn, binaryPath: process.execPath,
+      expectedBinaryHash: TEST_BINARY_HASH, vaultRoot,
+      getNodeRpcConnection: async () => ({url: 'http://127.0.0.1:9009', key: 'RPC_SECRET'}),
+      getActiveCoinbase: async () => `0x${AUTHOR}`, rpcCall,
+    })
+  }
+
+  function childForListing(overrides = {}) {
+    return fakeSpawn({
+      result: (args) => JSON.stringify(
+        args[0] === 'direct-market' ? market() : preparedList(overrides)
+      ),
+    })
+  }
+
+  it('prepares with owner-only files and a native confirmation before publishing', async () => {
+    const child = childForListing()
+    const result = await service(child)({priceIdna: '1', passphrase: 'vault secret'})
+    expect(result).toEqual({status: 'cancelled', offerId, priceIdna: '1'})
+    expect(rpcCall).not.toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({method: 'contract_call'})
+    )
+    const list = child.calls.find(({args}) => args[0] === 'direct-list')
+    expect(list.options.env).toEqual({FOD_PASSPHRASE: 'vault secret'})
+    expect(list.args.join(' ')).not.toContain('vault secret')
+    expect(list.args).toContain('-nodekey')
+    expect(dialog.showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({buttons: ['Cancel', 'Publish offer']})
+    )
+    expect(fs.readdirSync(path.join(vaultRoot, AUTHOR))).toEqual([])
+  })
+
+  it('records an uncertain broadcast and never submits it again blindly', async () => {
+    const child = childForListing()
+    dialog.showMessageBox.mockResolvedValue({response: 1})
+    rpcCall.mockImplementation(async (_connection, {method}) => {
+      if (method === 'contract_call') throw new Error('transport lost')
+      switch (method) {
+        case 'bcn_syncing': return {result: {syncing: false, wrongTime: false, currentBlock: 100, highestBlock: 100}}
+        case 'dna_getCoinbaseAddr': return {result: `0x${AUTHOR}`}
+        case 'dna_getBalance': return {result: {nonce: 0, mempoolNonce: 0, balance: '100'}}
+        case 'contract_getStake': return {result: {Hash: V4_CODE_HASH}}
+        case 'bcn_feePerGas': return {result: '1'}
+        case 'contract_estimateCall': return {result: {success: true, gasUsed: 1000, minGasLimit: 1000}}
+        case 'bcn_pendingTransactions': return {result: {transactions: []}}
+        default: throw new Error(`unexpected ${method}`)
+      }
+    })
+    const list = service(child)
+    await expect(list({priceIdna: '1', passphrase: 'vault secret'})).resolves.toEqual(
+      {status: 'uncertain', offerId, priceIdna: '1'}
+    )
+    expect(fs.existsSync(path.join(vaultRoot, AUTHOR, `list-${offerId}.json`))).toBe(true)
+    dialog.showOpenDialog.mockResolvedValueOnce({canceled: false, filePaths: [sessionPath]})
+    await expect(list({priceIdna: '1', passphrase: ''})).resolves.toEqual(
+      {status: 'uncertain', offerId, priceIdna: '1'}
+    )
+    expect(rpcCall.mock.calls.filter(([, payload]) => payload.method === 'contract_call')).toHaveLength(1)
+    expect(dialog.showOpenDialog).toHaveBeenCalledTimes(4)
+  })
+
+  it.each([
+    ['matching transaction', null, 'included'],
+    ['different listing calldata', '0x0a046c6973741256deadbeef', 'uncertain'],
+  ])('reconciles a %s without attributing another listing', async (
+    _scenario, otherPayload, expectedStatus
+  ) => {
+    const txHash = `0x${'1'.repeat(64)}`
+    const blockHash = `0x${'2'.repeat(64)}`
+    let submitted = false
+    const child = fakeSpawn({
+      result: (args) => {
+        if (args[0] !== 'direct-market') return JSON.stringify(preparedList())
+        const state = market()
+        if (submitted) state.offers.push({
+          offerId, author: AUTHOR, epoch: 230, coveredFlips: 1,
+          inventoryCommitment, price: price.toString(),
+          openOrderId: '0', retired: false,
+        })
+        return JSON.stringify(state)
+      },
+    })
+    const baseRpc = rpcCall.getMockImplementation()
+    rpcCall.mockImplementation(async (connection, {method, params}) => {
+      switch (method) {
+        case 'contract_call':
+          submitted = true
+          return {result: txHash}
+        case 'bcn_txReceipt':
+          return {result: {success: true}}
+        case 'bcn_transaction':
+          return {result: {
+            type: 'callContract', hash: params[0],
+            from: `0x${AUTHOR}`, to: `0x${V4_CONTRACT}`, amount: '0',
+            payload: otherPayload || `0x0a046c6973741256${calldata.toString('hex')}`,
+            blockHash,
+          }}
+        case 'bcn_block':
+          return {result: {hash: blockHash, height: 100}}
+        case 'bcn_blockAt':
+          return {result: {hash: blockHash, height: 100}}
+        default:
+          return baseRpc(connection, {method, params})
+      }
+    })
+    dialog.showMessageBox.mockResolvedValue({response: 1})
+
+    await expect(service(child)({priceIdna: '1', passphrase: 'vault secret'}))
+      .resolves.toEqual({status: expectedStatus, offerId, priceIdna: '1', txHash})
+    expect(rpcCall.mock.calls.filter(([, payload]) =>
+      payload.method === 'contract_call'
+    )).toHaveLength(1)
+  })
+
+  it('clears a canonically failed attempt so the seller can retry', async () => {
+    const txHash = `0x${'1'.repeat(64)}`
+    const blockHash = `0x${'2'.repeat(64)}`
+    const child = childForListing()
+    const baseRpc = rpcCall.getMockImplementation()
+    rpcCall.mockImplementation(async (connection, {method, params}) => {
+      switch (method) {
+        case 'contract_call': return {result: txHash}
+        case 'bcn_txReceipt': return {result: {success: false}}
+        case 'bcn_transaction': return {result: {
+          type: 'callContract', hash: params[0],
+          from: `0x${AUTHOR}`, to: `0x${V4_CONTRACT}`, amount: '0',
+          payload: `0x0a046c6973741256${calldata.toString('hex')}`,
+          blockHash,
+        }}
+        case 'bcn_block': return {result: {hash: blockHash, height: 100}}
+        case 'bcn_blockAt': return {result: {hash: blockHash, height: 100}}
+        default: return baseRpc(connection, {method, params})
+      }
+    })
+    dialog.showMessageBox.mockResolvedValue({response: 1})
+    const list = service(child)
+    await expect(list({priceIdna: '1', passphrase: 'vault secret'}))
+      .resolves.toEqual({status: 'failed', offerId, priceIdna: '1', txHash})
+    expect(fs.existsSync(path.join(vaultRoot, AUTHOR, `list-${offerId}.json`)))
+      .toBe(false)
+
+    dialog.showOpenDialog
+      .mockResolvedValueOnce({canceled: false, filePaths: [sessionPath]})
+      .mockResolvedValueOnce({canceled: false, filePaths: [vaultPath]})
+      .mockResolvedValueOnce({canceled: false, filePaths: [nodeKeyPath]})
+    await expect(list({priceIdna: '1', passphrase: 'vault secret'}))
+      .resolves.toEqual({status: 'failed', offerId, priceIdna: '1', txHash})
+    expect(rpcCall.mock.calls.filter(([, payload]) =>
+      payload.method === 'contract_call'
+    )).toHaveLength(2)
+  })
+
+  it('rejects a different active author or changed listing before a transaction', async () => {
+    const child = childForListing()
+    session.author = BUYER
+    fs.writeFileSync(sessionPath, JSON.stringify(session))
+    await expect(service(child)({priceIdna: '1', passphrase: 'vault secret'}))
+      .rejects.toThrow('fod_direct_list_identity_changed')
+    expect(child.spawn).not.toHaveBeenCalled()
+    expect(dialog.showOpenDialog).toHaveBeenCalledTimes(1)
+
+    session.author = AUTHOR
+    fs.writeFileSync(sessionPath, JSON.stringify(session))
+    dialog.showOpenDialog.mockReset()
+    dialog.showOpenDialog
+      .mockResolvedValueOnce({canceled: false, filePaths: [sessionPath]})
+      .mockResolvedValueOnce({canceled: false, filePaths: [vaultPath]})
+      .mockResolvedValueOnce({canceled: false, filePaths: [nodeKeyPath]})
+    const changed = childForListing({price: '2'})
+    await expect(service(changed)({priceIdna: '1', passphrase: 'vault secret'}))
+      .rejects.toThrow('fod_direct_list_failed')
+    expect(rpcCall).not.toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({method: 'contract_call'})
+    )
   })
 })
 
@@ -1212,6 +1556,22 @@ describe('trusted FoD direct buy preparation', () => {
     })({purchaseId})).rejects.toThrow('fod_direct_buy_changed')
     expect(selectedDialog.showMessageBox).not.toHaveBeenCalled()
     expect(rpcCall).not.toHaveBeenCalled()
+  })
+
+  it('binds a selected market offer to the verified purchase before saving it', async () => {
+    const child = fakeSpawn({result: JSON.stringify(preparedBuy())})
+    await expect(service({spawn: child.spawn})({
+      directVersion: 4,
+      offerId: 'a'.repeat(64),
+    })).rejects.toThrow('fod_direct_buy_offer_changed')
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([])
+
+    const result = await service({spawn: child.spawn})({
+      directVersion: 4,
+      offerId,
+    })
+    expect(result.purchaseId).toMatch(/^fod-buy-[0-9a-f]{32}$/)
+    expect(fs.readdirSync(path.join(vaultRoot, BUYER))).toEqual([result.purchaseId])
   })
 
   it('finds a saved purchase only for the active identity after restart', async () => {
