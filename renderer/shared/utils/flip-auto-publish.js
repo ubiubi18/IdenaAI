@@ -82,6 +82,22 @@ function isCompletePassingPanelAudit(value) {
   )
 }
 
+function isCompletePanelAudit(value) {
+  const audit = value && typeof value === 'object' ? value : {}
+  return (
+    audit.invoked === true &&
+    typeof audit.passed === 'boolean' &&
+    REQUIRED_PANEL_AUDIT_LAYERS.every((layerName) => {
+      const layer = audit[layerName]
+      return (
+        layer &&
+        ['pass', 'fail'].includes(layer.status) &&
+        typeof layer.passed === 'boolean'
+      )
+    })
+  )
+}
+
 function buildAuditedShuffleCandidates() {
   return AUDITED_SHUFFLE_CANDIDATES.map((candidate) => candidate.slice())
 }
@@ -254,9 +270,11 @@ function evaluateAutoPublishRender({response = null} = {}) {
   }
   if (
     validators.length !== 4 ||
-    validators.some((item) => !isCompletePassingPanelAudit(item))
+    validators.some((item) => !isCompletePanelAudit(item))
   ) {
     reasons.push('panel_audit_incomplete')
+  } else if (validators.some((item) => !isCompletePassingPanelAudit(item))) {
+    reasons.push('panel_audit_failed')
   }
 
   return {
