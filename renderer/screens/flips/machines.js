@@ -372,7 +372,10 @@ export const flipMachine = Machine(
       },
       idle: {
         on: {
-          PUBLISH: 'publishing',
+          PUBLISH: {
+            target: 'publishing',
+            cond: ({requiresManualReview}) => !requiresManualReview,
+          },
           DELETE: 'deleting',
           ARCHIVE: {
             actions: [

@@ -305,7 +305,7 @@ describe('scheduled generation runtime', () => {
     expect(JSON.stringify(state)).not.toContain('private provider detail')
   })
 
-  it('stops before saving a draft when the rendered sequence is rejected', async () => {
+  it('retains rejected rendered panels for manual review without publish evidence', async () => {
     bridge.generateFlipPanels.mockResolvedValue(
       passingRender({
         sequenceAudit: {
@@ -318,15 +318,26 @@ describe('scheduled generation runtime', () => {
       })
     )
 
-    expect(await createFlipGenerationRuntime(options).tick()).toBe(
-      'quality_blocked'
-    )
-    expect(drafts).toHaveLength(0)
+    const service = createFlipGenerationRuntime(options)
+    expect(await service.tick()).toBe('review_required')
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toMatchObject({
+      type: 'draft',
+      requiresManualReview: true,
+      renderAudit: {
+        status: 'needs_review',
+        reasons: expect.arrayContaining(['sequence_audit_rejected']),
+      },
+    })
+    expect(drafts[0].images).toHaveLength(4)
+    expect(drafts[0].autoPublishAudit).toBeUndefined()
     expect(
       JSON.parse(
         fs.readFileSync(path.join(directory, 'post-session-flips.json'), 'utf8')
-      ).lastAuditReasons
-    ).toEqual(expect.arrayContaining(['sequence_audit_rejected']))
+      ).completedPairs
+    ).toEqual([0])
+    drafts[0].requiresManualReview = false
+    expect(await service.publishPending()).toBe('publish_failed')
     expect(
       rpc.mock.calls.some(([payload]) => payload.method === 'flip_submit')
     ).toBe(false)

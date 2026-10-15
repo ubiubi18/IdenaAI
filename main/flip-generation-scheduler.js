@@ -25,6 +25,7 @@ const AUDIT_REASON_CODES = new Set([
   'audited_shuffle_missing',
   'render_feedback_rejected',
   'panel_audit_incomplete',
+  'panel_audit_failed',
   'rendered_sequence_audit',
   'character_scene_continuity',
   'keyword_causal_role',
