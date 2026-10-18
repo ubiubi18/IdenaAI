@@ -567,12 +567,13 @@ export default function FlipMarketV7({onSelectV4}) {
                           {item.actionId.slice(-8)} · Max fee{' '}
                           {amountLabel(item.maxFee || '0')}
                           {item.submitted && ` · ${item.submitted.status}`}
+                          {item.pinChanged && ' · Previous deployment'}
                           {item.attempted &&
                             !item.submitted &&
                             ' · Sign attempt stopped'}
                         </Text>
                       </Box>
-                      {!item.attempted && (
+                      {!item.attempted && !item.pinChanged && (
                         <SecondaryButton
                           size="sm"
                           isDisabled={!canAct}

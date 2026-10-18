@@ -12,15 +12,20 @@ const {
   writePrivateFile,
   runCheck,
 } = require('./fod-direct-check')
+const {privateKeyToAddress} = require('./utils/idena-crypto')
 
 const HEX20 = /^(?:0x)?[0-9a-f]{40}$/
 const HEX32 = /^(?:0x)?[0-9a-f]{64}$/
 const DECIMAL = /^(0|[1-9][0-9]*)$/
 const ACTION_ID = /^v7-[0-9a-f]{32}$/
 const ATTEMPT_GUARD = 'attempt.guard'
+const NONCE_JOURNAL = 'nonce-journal.jsonl'
+const NONCE_LOCK = 'nonce.lock'
+const NONCE_JOURNAL_HEADER = 'fod.v7.nonce-journal/1'
 const MAX_FILE_BYTES = 16 * 1024 * 1024
 const MAX_PREPARED_BYTES = 20 * 1024 * 1024
 const MAX_SIGNED_BYTES = 2 * MAX_PREPARED_BYTES
+const MAX_NONCE_JOURNAL_BYTES = 4 * 1024 * 1024
 const MAX_FEE = 100n * 10n ** 18n
 
 const OPERATIONS = Object.freeze({
@@ -120,6 +125,28 @@ function idnaAtoms(value) {
   }
   const [whole, fraction = ''] = text.split('.')
   return BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, '0') || '0')
+}
+
+function nodekeyAddress(raw) {
+  let {length} = raw
+  if (length && raw[length - 1] === 10) length -= 1
+  if (length && raw[length - 1] === 13) length -= 1
+  if (length !== 64) fail('The selected nodekey is invalid.')
+  const key = Buffer.alloc(32)
+  try {
+    const digit = (byte) => {
+      if (byte >= 48 && byte <= 57) return byte - 48
+      if (byte >= 65 && byte <= 70) return byte - 55
+      if (byte >= 97 && byte <= 102) return byte - 87
+      fail('The selected nodekey is invalid.')
+    }
+    for (let index = 0; index < 32; index += 1) {
+      key[index] = (digit(raw[index * 2]) << 4) | digit(raw[index * 2 + 1])
+    }
+    return privateKeyToAddress(key, false).toLowerCase()
+  } finally {
+    key.fill(0)
+  }
 }
 
 function orderId(value) {
@@ -264,10 +291,243 @@ async function markWindowsSigningAttempt(fs, directory) {
   }
 }
 
+function validNonceRecord(record) {
+  return (
+    plainObject(record, [
+      'coinbase',
+      'accountNonce',
+      'actionId',
+      'contract',
+      'codeHash',
+    ]) &&
+    typeof record.coinbase === 'string' &&
+    HEX20.test(record.coinbase) &&
+    record.coinbase.length === 40 &&
+    Number.isSafeInteger(record.accountNonce) &&
+    record.accountNonce > 0 &&
+    record.accountNonce < 2 ** 32 &&
+    ACTION_ID.test(record.actionId) &&
+    typeof record.contract === 'string' &&
+    HEX20.test(record.contract) &&
+    record.contract.length === 40 &&
+    typeof record.codeHash === 'string' &&
+    HEX32.test(record.codeHash) &&
+    record.codeHash.length === 64
+  )
+}
+
+async function readNonceJournal(fs, root) {
+  const {data} = await readPrivateSelectedFile(
+    fs,
+    path.join(root, NONCE_JOURNAL),
+    MAX_NONCE_JOURNAL_BYTES,
+    true,
+    true
+  )
+  try {
+    if (data.length && data[data.length - 1] !== 10)
+      fail('The v7 nonce journal is incomplete.')
+    const lines = data.toString('utf8').split('\n')
+    if (lines[0] !== NONCE_JOURNAL_HEADER)
+      fail('The v7 nonce journal is invalid.')
+    const records = lines.slice(1, -1).map((line) => {
+      let record
+      try {
+        record = JSON.parse(line)
+      } catch {
+        fail('The v7 nonce journal is invalid.')
+      }
+      if (!validNonceRecord(record)) fail('The v7 nonce journal is invalid.')
+      return record
+    })
+    const reserved = new Set()
+    for (const record of records) {
+      const key = `${record.coinbase}:${record.accountNonce}`
+      if (reserved.has(key)) fail('The v7 nonce journal is invalid.')
+      reserved.add(key)
+    }
+    return records
+  } finally {
+    data.fill(0)
+  }
+}
+
+async function appendNonceJournal(fs, root, record) {
+  const file = path.join(root, NONCE_JOURNAL)
+  const before = await fs.promises.lstat(file)
+  if (
+    !before.isFile() ||
+    before.isSymbolicLink() ||
+    before.nlink !== 1 ||
+    before.size > MAX_NONCE_JOURNAL_BYTES
+  ) {
+    fail('The v7 nonce journal is unavailable.')
+  }
+  const bytes = Buffer.from(`${JSON.stringify(record)}\n`)
+  if (before.size + bytes.length > MAX_NONCE_JOURNAL_BYTES)
+    fail('The v7 nonce journal is full.')
+  const handle = await fs.promises.open(
+    file,
+    fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW
+  )
+  try {
+    const opened = await handle.stat()
+    if (opened.dev !== before.dev || opened.ino !== before.ino)
+      fail('The v7 nonce journal changed.')
+    await handle.writeFile(bytes)
+    await handle.sync()
+    const after = await handle.stat()
+    const afterPath = await fs.promises.lstat(file)
+    if (
+      after.size !== before.size + bytes.length ||
+      afterPath.size !== after.size ||
+      afterPath.dev !== before.dev ||
+      afterPath.ino !== before.ino
+    ) {
+      fail('The v7 nonce journal changed.')
+    }
+  } finally {
+    await handle.close()
+    bytes.fill(0)
+  }
+}
+
+async function withNonceLock(fs, root, callback) {
+  const file = path.join(root, NONCE_LOCK)
+  try {
+    await writePrivateFile(fs, file, '')
+  } catch (error) {
+    if (error.code === 'EEXIST')
+      fail('A v7 nonce check is unfinished. Reconcile it before signing.')
+    throw error
+  }
+  try {
+    if (process.platform !== 'win32') await syncDirectory(fs, root)
+    return await callback()
+  } finally {
+    await fs.promises.unlink(file)
+    if (process.platform !== 'win32') await syncDirectory(fs, root)
+  }
+}
+
+async function attemptedActions(fs, root, selectedCoinbase) {
+  const actionsRoot = await privateDirectory(fs, path.join(root, 'actions'))
+  const identities = await fs.promises.readdir(actionsRoot, {
+    withFileTypes: true,
+  })
+  const records = []
+  for (const identity of identities.filter(
+    (item) =>
+      /^[0-9a-f]{40}$/.test(item.name) &&
+      (!selectedCoinbase || item.name === selectedCoinbase)
+  )) {
+    if (!identity.isDirectory()) fail('A saved v7 identity is invalid.')
+    const identityRoot = await privateDirectory(
+      fs,
+      path.join(actionsRoot, identity.name)
+    )
+    const entries = await fs.promises.readdir(identityRoot, {
+      withFileTypes: true,
+    })
+    for (const entry of entries.filter((item) => ACTION_ID.test(item.name))) {
+      if (!entry.isDirectory()) fail('A saved v7 action is invalid.')
+      const directory = await privateDirectory(
+        fs,
+        path.join(identityRoot, entry.name)
+      )
+      const metaPath = path.join(directory, 'meta.json')
+      const attemptPath = path.join(directory, 'attempt.json')
+      if (!fs.existsSync(metaPath)) {
+        if (
+          fs.existsSync(attemptPath) ||
+          fs.existsSync(path.join(directory, ATTEMPT_GUARD))
+        ) {
+          fail('A saved v7 signing attempt is incomplete.')
+        }
+      } else if (await signingAttempted(fs, directory)) {
+        let meta
+        let attempt
+        try {
+          meta = await privateJSON(fs, metaPath)
+          attempt = await privateJSON(fs, attemptPath)
+        } catch {
+          fail('A saved v7 signing attempt cannot be reconciled.')
+        }
+        const record = {
+          coinbase: identity.name,
+          accountNonce: attempt?.accountNonce,
+          actionId: entry.name,
+          contract: meta?.contract,
+          codeHash: meta?.codeHash,
+        }
+        if (
+          !validNonceRecord(record) ||
+          meta?.coinbase !== identity.name ||
+          meta?.actionId !== entry.name
+        ) {
+          fail('A saved v7 signing attempt is invalid.')
+        }
+        records.push(record)
+      }
+    }
+  }
+  return records
+}
+
+async function ensureNonceJournal(fs, root) {
+  try {
+    return await readNonceJournal(fs, root)
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error
+  }
+  const records = await attemptedActions(fs, root)
+  const seen = new Set()
+  for (const record of records) {
+    const key = `${record.coinbase}:${record.accountNonce}`
+    if (seen.has(key)) fail('Saved v7 attempts reuse a nonce.')
+    seen.add(key)
+  }
+  await writePrivateFile(
+    fs,
+    path.join(root, NONCE_JOURNAL),
+    `${NONCE_JOURNAL_HEADER}\n${records
+      .map((record) => `${JSON.stringify(record)}\n`)
+      .join('')}`
+  )
+  if (process.platform !== 'win32') await syncDirectory(fs, root)
+  return records
+}
+
+async function checkNonceReservations(fs, root, coinbase, nonce) {
+  const records = await readNonceJournal(fs, root)
+  const byAction = new Map(
+    records.map((record) => [`${record.coinbase}:${record.actionId}`, record])
+  )
+  for (const legacy of await attemptedActions(fs, root, coinbase)) {
+    const journaled = byAction.get(`${coinbase}:${legacy.actionId}`)
+    if (
+      !journaled ||
+      journaled.accountNonce !== legacy.accountNonce ||
+      journaled.contract !== legacy.contract ||
+      journaled.codeHash !== legacy.codeHash
+    ) {
+      fail('A saved v7 signing attempt is absent from the nonce journal.')
+    }
+  }
+  if (
+    records.some(
+      (record) => record.coinbase === coinbase && record.accountNonce === nonce
+    )
+  ) {
+    fail('This identity and nonce already have a v7 signing attempt.')
+  }
+}
+
 async function saveConfig(fs, root, config) {
   const temp = path.join(root, `config-${randomBytes(8).toString('hex')}.json`)
   await writePrivateFile(fs, temp, JSON.stringify(config))
   await fs.promises.rename(temp, path.join(root, 'config.json'))
+  if (process.platform !== 'win32') await syncDirectory(fs, root)
 }
 
 async function selectedInput(fs, dialog, tempDir, name, privateOnly) {
@@ -368,27 +628,38 @@ function createFodV7Service({
 
   async function configOrNull() {
     await privateDirectory(fs, root)
+    let config
     try {
-      const config = await privateJSON(fs, path.join(root, 'config.json'))
-      if (
-        !plainObject(config, [
-          'contract',
-          'codeHash',
-          'binaryPath',
-          'binarySha256',
-        ]) ||
-        hex(config.contract, HEX20) !== config.contract ||
-        hex(config.codeHash, HEX32) !== config.codeHash ||
-        hex(config.binarySha256, HEX32) !== config.binarySha256 ||
-        typeof config.binaryPath !== 'string' ||
-        !path.isAbsolute(config.binaryPath)
-      )
-        fail('Invalid local v7 configuration.')
-      return config
+      config = await privateJSON(fs, path.join(root, 'config.json'))
     } catch (error) {
       if (error.code === 'ENOENT') return null
       throw error
     }
+    if (
+      !plainObject(config, [
+        'contract',
+        'codeHash',
+        'binaryPath',
+        'binarySha256',
+        'nonceGuardVersion',
+      ]) ||
+      hex(config.contract, HEX20) !== config.contract ||
+      hex(config.codeHash, HEX32) !== config.codeHash ||
+      hex(config.binarySha256, HEX32) !== config.binarySha256 ||
+      typeof config.binaryPath !== 'string' ||
+      !path.isAbsolute(config.binaryPath)
+    )
+      fail('Invalid local v7 configuration.')
+    if (config.nonceGuardVersion === undefined) {
+      await ensureNonceJournal(fs, root)
+      config.nonceGuardVersion = 1
+      await saveConfig(fs, root, config)
+    } else if (config.nonceGuardVersion === 1) {
+      await readNonceJournal(fs, root)
+    } else {
+      fail('Invalid local v7 signing guard.')
+    }
+    return config
   }
 
   async function context(config, requireFreeNonce = false) {
@@ -483,7 +754,7 @@ function createFodV7Service({
     return privateDirectory(fs, path.join(root, 'actions', coinbase))
   }
 
-  async function readAction(config, coinbase, actionId) {
+  async function readAction(config, coinbase, actionId, historical = false) {
     if (typeof actionId !== 'string' || !ACTION_ID.test(actionId))
       fail('Invalid saved v7 action.')
     const directory = path.join(await actionDirectory(coinbase), actionId)
@@ -497,31 +768,50 @@ function createFodV7Service({
     if (
       meta?.actionId !== actionId ||
       meta?.coinbase !== coinbase ||
-      meta?.contract !== config.contract ||
-      meta?.codeHash !== config.codeHash ||
+      (historical
+        ? typeof meta.contract !== 'string' ||
+          !HEX20.test(meta.contract) ||
+          meta.contract.length !== 40 ||
+          typeof meta.codeHash !== 'string' ||
+          !HEX32.test(meta.codeHash) ||
+          meta.codeHash.length !== 64
+        : meta?.contract !== config.contract ||
+          meta?.codeHash !== config.codeHash) ||
       !DECIMAL.test(meta?.maxFee || '')
     )
       fail('Invalid saved v7 action.')
-    const summary = preparedSummary(prepared, config, meta.operation)
+    const savedConfig = historical
+      ? {contract: meta.contract, codeHash: meta.codeHash}
+      : config
+    const summary = preparedSummary(prepared, savedConfig, meta.operation)
     const attempted = await signingAttempted(fs, directory)
-    return {directory, meta, prepared, summary, attempted}
+    return {
+      directory,
+      meta,
+      prepared,
+      summary,
+      attempted,
+      savedConfig,
+      pinChanged:
+        meta.contract !== config.contract || meta.codeHash !== config.codeHash,
+    }
   }
 
   async function listActions(config, coinbase) {
     const directory = await actionDirectory(coinbase)
     const entries = await fs.promises.readdir(directory, {withFileTypes: true})
     const actions = []
-    for (const entry of entries
-      .filter((item) => item.isDirectory() && ACTION_ID.test(item.name))
-      .slice(-100)) {
+    for (const entry of entries.filter(
+      (item) => item.isDirectory() && ACTION_ID.test(item.name)
+    )) {
       try {
-        const saved = await readAction(config, coinbase, entry.name)
+        const saved = await readAction(config, coinbase, entry.name, true)
         const signedPath = path.join(saved.directory, 'signed.json')
         let submission = null
         try {
           submission = submittedSummary(
             await privateJSON(fs, signedPath, MAX_SIGNED_BYTES),
-            config,
+            saved.savedConfig,
             saved,
             coinbase
           )
@@ -534,6 +824,7 @@ function createFodV7Service({
           maxFee: saved.meta.maxFee,
           submitted: submission,
           attempted: saved.attempted,
+          pinChanged: saved.pinChanged,
         })
       } catch {
         // An incomplete local preparation is never offered for signing.
@@ -586,6 +877,9 @@ function createFodV7Service({
     )
     await context(config)
     await privateDirectory(fs, root)
+    await configOrNull()
+    await ensureNonceJournal(fs, root)
+    config.nonceGuardVersion = 1
     await saveConfig(fs, root, config)
     return status()
   }
@@ -764,28 +1058,51 @@ function createFodV7Service({
       true,
       true
     )
-    selectedKey.data.fill(0)
-    const fresh = await context(config, true)
-    if (
-      fresh.coinbase !== initial.coinbase ||
-      fresh.connection.url !== initial.connection.url ||
-      fresh.connection.key !== initial.connection.key
-    ) {
-      fail('The active node or identity changed.')
+    let selectedSender
+    try {
+      selectedSender = nodekeyAddress(selectedKey.data)
+    } finally {
+      selectedKey.data.fill(0)
     }
-    await writePrivateFile(
-      fs,
-      path.join(action.directory, 'attempt.json'),
-      JSON.stringify({
-        at: new Date().toISOString(),
-        accountNonce: fresh.account.nonce + 1,
+    if (selectedSender !== initial.coinbase) {
+      fail('The selected nodekey does not control the active identity.')
+    }
+    let fresh
+    await withNonceLock(fs, root, async () => {
+      fresh = await context(config, true)
+      if (
+        fresh.coinbase !== initial.coinbase ||
+        fresh.connection.url !== initial.connection.url ||
+        fresh.connection.key !== initial.connection.key
+      ) {
+        fail('The active node or identity changed.')
+      }
+      if (
+        BigInt(attached) + BigInt(action.meta.maxFee) >
+        idnaAtoms(fresh.account.balance)
+      ) {
+        fail('The active identity has insufficient spendable balance.')
+      }
+      const accountNonce = fresh.account.nonce + 1
+      await checkNonceReservations(fs, root, fresh.coinbase, accountNonce)
+      await appendNonceJournal(fs, root, {
+        coinbase: fresh.coinbase,
+        accountNonce,
+        actionId: payload.actionId,
+        contract: config.contract,
+        codeHash: config.codeHash,
       })
-    )
-    if (process.platform === 'win32') {
-      await markWindowsSigningAttempt(fs, action.directory)
-    } else {
-      await syncDirectory(fs, action.directory)
-    }
+      await writePrivateFile(
+        fs,
+        path.join(action.directory, 'attempt.json'),
+        JSON.stringify({at: new Date().toISOString(), accountNonce})
+      )
+      if (process.platform === 'win32') {
+        await markWindowsSigningAttempt(fs, action.directory)
+      } else {
+        await syncDirectory(fs, action.directory)
+      }
+    })
     let error
     try {
       await withCLI(config, fresh, '', async ({tempDir, rpcFlags}) => {
@@ -798,6 +1115,9 @@ function createFodV7Service({
         )
         const copiedKey = path.join(tempDir, 'nodekey')
         try {
+          if (nodekeyAddress(data) !== fresh.coinbase) {
+            fail('The selected nodekey changed before signing.')
+          }
           await writePrivateFile(fs, copiedKey, data)
         } finally {
           data.fill(0)
@@ -851,13 +1171,23 @@ function createFodV7Service({
     const config = await configOrNull()
     if (!config) fail('Set the local v7 deployment pin first.')
     const initial = await context(config)
-    const action = await readAction(config, initial.coinbase, payload.actionId)
+    const action = await readAction(
+      config,
+      initial.coinbase,
+      payload.actionId,
+      true
+    )
     const signed = await privateJSON(
       fs,
       path.join(action.directory, 'signed.json'),
       MAX_SIGNED_BYTES
     )
-    const summary = submittedSummary(signed, config, action, initial.coinbase)
+    const summary = submittedSummary(
+      signed,
+      action.savedConfig,
+      action,
+      initial.coinbase
+    )
     let receipt
     try {
       receipt = await initial.rpc('bcn_txReceipt', [summary.txHash])
