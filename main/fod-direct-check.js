@@ -294,6 +294,21 @@ async function readBounded(handle, maxBytes) {
   }
 }
 
+async function selectedPathIsCanonical(fs, selectedPath, allowWindows) {
+  const resolved = await fs.promises.realpath(selectedPath)
+  if (allowWindows && process.platform === 'win32') {
+    const expected = path.join(
+      await fs.promises.realpath(path.dirname(selectedPath)),
+      path.basename(selectedPath)
+    )
+    return (
+      path.win32.normalize(resolved).toLowerCase() ===
+      path.win32.normalize(expected).toLowerCase()
+    )
+  }
+  return resolved === path.resolve(selectedPath)
+}
+
 async function readPrivateSelectedFile(
   fs,
   selectedPath,
@@ -305,22 +320,8 @@ async function readPrivateSelectedFile(
   if (typeof selectedPath !== 'string' || !path.isAbsolute(selectedPath)) {
     refuse('fod_direct_check_invalid_file')
   }
-  const absolute = path.resolve(selectedPath)
-  const resolved = await fs.promises.realpath(selectedPath)
-  const expected =
-    allowWindows && process.platform === 'win32'
-      ? path.join(
-          await fs.promises.realpath(path.dirname(selectedPath)),
-          path.basename(selectedPath)
-        )
-      : absolute
-  const samePath =
-    allowWindows && process.platform === 'win32'
-      ? path.win32.normalize(resolved).toLowerCase() ===
-        path.win32.normalize(expected).toLowerCase()
-      : resolved === expected
   if (
-    !samePath ||
+    !(await selectedPathIsCanonical(fs, selectedPath, allowWindows)) ||
     (!fs.constants.O_NOFOLLOW &&
       !(allowWindows && process.platform === 'win32'))
   ) {
@@ -404,15 +405,13 @@ async function syncPrivateDirectory(fs, directory) {
   }
 }
 
-async function checkBinary(fs, binaryPath) {
+async function checkBinary(fs, binaryPath, allowWindows = false) {
   if (typeof binaryPath !== 'string' || !path.isAbsolute(binaryPath)) {
     refuse('fod_direct_check_unavailable')
   }
-  const absolute = path.resolve(binaryPath)
-  const resolved = await fs.promises.realpath(binaryPath)
   const metadata = await fs.promises.lstat(binaryPath)
   if (
-    resolved !== absolute ||
+    !(await selectedPathIsCanonical(fs, binaryPath, allowWindows)) ||
     !metadata.isFile() ||
     metadata.isSymbolicLink() ||
     (process.platform !== 'win32' && (metadata.mode & 0o111) === 0)
@@ -488,7 +487,7 @@ async function checkPinnedBinary(
   allowWindows = false
 ) {
   // Legacy callers still require O_NOFOLLOW when Windows cannot supply it.
-  await checkBinary(fs, binaryPath)
+  await checkBinary(fs, binaryPath, allowWindows)
   if (
     (!fs.constants.O_NOFOLLOW &&
       !(allowWindows && process.platform === 'win32')) ||

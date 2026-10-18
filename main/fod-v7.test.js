@@ -210,6 +210,10 @@ describe('direct v7 desktop bridge', () => {
       ADDRESS,
       prepared.actionId
     )
+    const syncTarget =
+      process.platform === 'win32'
+        ? path.join(actionDir, 'attempt.guard')
+        : actionDir
     const originalOpen = fs.promises.open.bind(fs.promises)
     const fsWithFailedSync = {
       ...fs,
@@ -217,10 +221,12 @@ describe('direct v7 desktop bridge', () => {
         ...fs.promises,
         open: async (file, ...args) => {
           const handle = await originalOpen(file, ...args)
-          if (file !== actionDir) return handle
+          if (file !== syncTarget) return handle
           return {
+            stat: () => handle.stat(),
+            write: (...values) => handle.write(...values),
             sync: async () => {
-              throw new Error('directory sync failed')
+              throw new Error('attempt sync failed')
             },
             close: () => handle.close(),
           }
@@ -231,12 +237,66 @@ describe('direct v7 desktop bridge', () => {
       service({fsImpl: fsWithFailedSync})('submit', {
         actionId: prepared.actionId,
       })
-    ).rejects.toThrow('directory sync failed')
+    ).rejects.toThrow('attempt sync failed')
     expect(calls.map(({args}) => args[0])).toEqual(['direct-v7-prepare'])
     await expect(v7('submit', {actionId: prepared.actionId})).rejects.toThrow(
       'already had a signing attempt'
     )
   })
+
+  if (process.platform === 'win32') {
+    it('refuses a prepared action whose durable signing guard is missing', async () => {
+      const v7 = service()
+      await v7('configure', pins)
+      const prepared = await v7('prepare', {
+        operation: 'challenge',
+        orderId: '17',
+        maxFee: '1000000000000000000',
+      })
+      fs.unlinkSync(
+        path.join(
+          root,
+          'v7',
+          'actions',
+          ADDRESS,
+          prepared.actionId,
+          'attempt.guard'
+        )
+      )
+      await expect(
+        v7('submit', {actionId: prepared.actionId})
+      ).rejects.toThrow()
+      expect(calls.map(({args}) => args[0])).toEqual(['direct-v7-prepare'])
+    })
+
+    it('does not repeat a Windows signing attempt if its new marker is lost', async () => {
+      const v7 = service()
+      await v7('configure', pins)
+      const prepared = await v7('prepare', {
+        operation: 'challenge',
+        orderId: '17',
+        maxFee: '1000000000000000000',
+      })
+      await v7('submit', {actionId: prepared.actionId})
+      fs.unlinkSync(
+        path.join(
+          root,
+          'v7',
+          'actions',
+          ADDRESS,
+          prepared.actionId,
+          'attempt.json'
+        )
+      )
+      await expect(v7('submit', {actionId: prepared.actionId})).rejects.toThrow(
+        'already had a signing attempt'
+      )
+      expect(calls.map(({args}) => args[0])).toEqual([
+        'direct-v7-prepare',
+        'submit',
+      ])
+    })
+  }
 
   it('supplies a vault passphrase when preparing a private listing', async () => {
     const v7 = service()

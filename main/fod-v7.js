@@ -17,6 +17,7 @@ const HEX20 = /^(?:0x)?[0-9a-f]{40}$/
 const HEX32 = /^(?:0x)?[0-9a-f]{64}$/
 const DECIMAL = /^(0|[1-9][0-9]*)$/
 const ACTION_ID = /^v7-[0-9a-f]{32}$/
+const ATTEMPT_GUARD = 'attempt.guard'
 const MAX_FILE_BYTES = 16 * 1024 * 1024
 const MAX_PREPARED_BYTES = 20 * 1024 * 1024
 const MAX_SIGNED_BYTES = 2 * MAX_PREPARED_BYTES
@@ -198,6 +199,9 @@ async function syncDirectory(fs, directory) {
 }
 
 async function syncActionDirectories(fs, directory, root) {
+  // Windows refuses directory fsync. Its pre-created attempt guard is synced
+  // in place before signing; a missing guard makes the action unusable.
+  if (process.platform === 'win32') return
   for (
     let current = directory;
     current !== path.dirname(root);
@@ -206,6 +210,58 @@ async function syncActionDirectories(fs, directory, root) {
     await syncDirectory(fs, current)
   }
   await syncDirectory(fs, path.dirname(root))
+}
+
+async function signingAttempted(fs, directory) {
+  const marker = fs.existsSync(path.join(directory, 'attempt.json'))
+  if (process.platform !== 'win32') return marker
+  const guard = await fs.promises.lstat(path.join(directory, ATTEMPT_GUARD))
+  if (
+    !guard.isFile() ||
+    guard.isSymbolicLink() ||
+    guard.nlink !== 1 ||
+    guard.size > 1
+  ) {
+    fail('The saved v7 signing guard is invalid.')
+  }
+  return marker || guard.size === 1
+}
+
+async function markWindowsSigningAttempt(fs, directory) {
+  const file = path.join(directory, ATTEMPT_GUARD)
+  const before = await fs.promises.lstat(file)
+  if (
+    !before.isFile() ||
+    before.isSymbolicLink() ||
+    before.nlink !== 1 ||
+    before.size !== 0
+  ) {
+    fail('This v7 action has already had a signing attempt.')
+  }
+  const handle = await fs.promises.open(
+    file,
+    fs.constants.O_WRONLY | fs.constants.O_APPEND
+  )
+  try {
+    const opened = await handle.stat()
+    if (opened.dev !== before.dev || opened.ino !== before.ino)
+      fail('The saved v7 signing guard changed.')
+    const {bytesWritten} = await handle.write(Buffer.from([1]))
+    if (bytesWritten !== 1) fail('The v7 signing attempt could not be saved.')
+    await handle.sync()
+    const after = await handle.stat()
+    const afterPath = await fs.promises.lstat(file)
+    if (
+      after.size !== 1 ||
+      afterPath.size !== 1 ||
+      afterPath.dev !== before.dev ||
+      afterPath.ino !== before.ino
+    ) {
+      fail('The saved v7 signing guard changed.')
+    }
+  } finally {
+    await handle.close()
+  }
 }
 
 async function saveConfig(fs, root, config) {
@@ -447,7 +503,8 @@ function createFodV7Service({
     )
       fail('Invalid saved v7 action.')
     const summary = preparedSummary(prepared, config, meta.operation)
-    return {directory, meta, prepared, summary}
+    const attempted = await signingAttempted(fs, directory)
+    return {directory, meta, prepared, summary, attempted}
   }
 
   async function listActions(config, coinbase) {
@@ -476,7 +533,7 @@ function createFodV7Service({
           ...saved.summary,
           maxFee: saved.meta.maxFee,
           submitted: submission,
-          attempted: fs.existsSync(path.join(saved.directory, 'attempt.json')),
+          attempted: saved.attempted,
         })
       } catch {
         // An incomplete local preparation is never offered for signing.
@@ -581,6 +638,9 @@ function createFodV7Service({
       actionId
     )
     await fs.promises.mkdir(directory, {mode: 0o700})
+    if (process.platform === 'win32') {
+      await writePrivateFile(fs, path.join(directory, ATTEMPT_GUARD), '')
+    }
     const preparedPath = path.join(directory, 'prepared.json')
     await withCLI(
       config,
@@ -656,7 +716,7 @@ function createFodV7Service({
     if (!config) fail('Set the local v7 deployment pin first.')
     const initial = await context(config, true)
     const action = await readAction(config, initial.coinbase, payload.actionId)
-    if (fs.existsSync(path.join(action.directory, 'attempt.json'))) {
+    if (action.attempted) {
       fail(
         'This v7 action has already had a signing attempt. Check its transaction before preparing a new action.'
       )
@@ -721,7 +781,11 @@ function createFodV7Service({
         accountNonce: fresh.account.nonce + 1,
       })
     )
-    await syncDirectory(fs, action.directory)
+    if (process.platform === 'win32') {
+      await markWindowsSigningAttempt(fs, action.directory)
+    } else {
+      await syncDirectory(fs, action.directory)
+    }
     let error
     try {
       await withCLI(config, fresh, '', async ({tempDir, rpcFlags}) => {
