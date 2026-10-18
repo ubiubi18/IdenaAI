@@ -358,14 +358,16 @@ export function validateSocialDirectCheckRequest(payload) {
   return null
 }
 
-const SOCIAL_DIRECT_V4_DELIVERY_PATTERN = new RegExp([
-  '^\\{"format":"fod\\.direct-delivery","version":2,"network":"idena",',
-  `"contract":"${SOCIAL_DIRECT_V4_CONTRACT}",`,
-  '"author":"[0-9a-f]{40}","offerId":"[0-9a-f]{64}",',
-  '"orderId":([1-9][0-9]{0,19}),"orderNonce":([1-9][0-9]{0,19}),',
-  '"buyer":"[0-9a-f]{40}","deliveryKey":"04[0-9a-f]{128}",',
-  '"ciphertext":"[0-9a-f]{438}"\\}$',
-].join(''))
+const SOCIAL_DIRECT_V4_DELIVERY_PATTERN = new RegExp(
+  [
+    '^\\{"format":"fod\\.direct-delivery","version":2,"network":"idena",',
+    `"contract":"${SOCIAL_DIRECT_V4_CONTRACT}",`,
+    '"author":"[0-9a-f]{40}","offerId":"[0-9a-f]{64}",',
+    '"orderId":([1-9][0-9]{0,19}),"orderNonce":([1-9][0-9]{0,19}),',
+    '"buyer":"[0-9a-f]{40}","deliveryKey":"04[0-9a-f]{128}",',
+    '"ciphertext":"[0-9a-f]{438}"\\}$',
+  ].join('')
+)
 
 export function parseSocialV4DeliveryOrder(message) {
   if (typeof message !== 'string' || message.length > 2048) return null

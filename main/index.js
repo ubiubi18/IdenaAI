@@ -3770,7 +3770,7 @@ handleTrusted('social.open-direct-vault-folder', async () => {
     if (
       !rootMetadata.isDirectory() ||
       rootMetadata.isSymbolicLink() ||
-      (process.platform !== 'win32' && (rootMetadata.mode & 0o777) !== 0o700)
+      (process.platform !== 'win32' && rootMetadata.mode % 0o1000 !== 0o700)
     ) {
       throw new Error('invalid_vault_root')
     }
@@ -3779,7 +3779,7 @@ handleTrusted('social.open-direct-vault-folder', async () => {
     if (
       !metadata.isDirectory() ||
       metadata.isSymbolicLink() ||
-      (process.platform !== 'win32' && (metadata.mode & 0o777) !== 0o700) ||
+      (process.platform !== 'win32' && metadata.mode % 0o1000 !== 0o700) ||
       (await nativeFs.promises.realpath(scopedRoot)) !== scopedRoot
     ) {
       throw new Error('invalid_vault_folder')
