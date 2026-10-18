@@ -172,32 +172,39 @@ export default function SocialDesktopEmbed({
 
   React.useEffect(() => {
     let current = true
-    const buyContext = ++buyContextRef.current
+    buyContextRef.current += 1
+    const buyContext = buyContextRef.current
     setBuyAttempt(null)
     setSavedBuyIds([])
     setBuyBusy(false)
-    Promise.resolve(window.idena?.social?.directBuyResume?.({})).then((response) => {
-      const purchaseId = response?.result?.purchaseId
-      const purchaseIds = response?.result?.purchaseIds
-      if (
-        current &&
-        buyContextRef.current === buyContext &&
-        Array.isArray(purchaseIds) &&
-        purchaseIds.length <= 1000 &&
-        purchaseIds.every((id) => /^fod-buy-[0-9a-f]{32}$/.test(id)) &&
-        new Set(purchaseIds).size === purchaseIds.length &&
-        (purchaseIds[0] || null) === purchaseId
-      ) {
-        setSavedBuyIds((existing) => [
-          ...existing.filter((id) => !purchaseIds.includes(id)),
-          ...purchaseIds,
-        ])
-        if (purchaseId) {
-          setBuyAttempt((existing) => existing || {purchaseId, status: 'saved'})
+    Promise.resolve(window.idena?.social?.directBuyResume?.({}))
+      .then((response) => {
+        const purchaseId = response?.result?.purchaseId
+        const purchaseIds = response?.result?.purchaseIds
+        if (
+          current &&
+          buyContextRef.current === buyContext &&
+          Array.isArray(purchaseIds) &&
+          purchaseIds.length <= 1000 &&
+          purchaseIds.every((id) => /^fod-buy-[0-9a-f]{32}$/.test(id)) &&
+          new Set(purchaseIds).size === purchaseIds.length &&
+          (purchaseIds[0] || null) === purchaseId
+        ) {
+          setSavedBuyIds((existing) => [
+            ...existing.filter((id) => !purchaseIds.includes(id)),
+            ...purchaseIds,
+          ])
+          if (purchaseId) {
+            setBuyAttempt(
+              (existing) => existing || {purchaseId, status: 'saved'}
+            )
+          }
         }
-      }
-    }).catch(() => {})
-    return () => { current = false }
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
   }, [address, internalPort, url, useExternalNode])
 
   React.useEffect(() => {
@@ -346,9 +353,10 @@ export default function SocialDesktopEmbed({
       } else {
         let confirmableDelivery = false
         try {
-          confirmableDelivery = [DIRECT_V3_CONTRACT, DIRECT_V4_CONTRACT].includes(
-            JSON.parse(payload.message).contract
-          )
+          confirmableDelivery = [
+            DIRECT_V3_CONTRACT,
+            DIRECT_V4_CONTRACT,
+          ].includes(JSON.parse(payload.message).contract)
         } catch {
           // The native verifier will reject malformed delivery messages.
         }
@@ -552,15 +560,14 @@ export default function SocialDesktopEmbed({
         type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
         payload: {
           requestId: request.requestId,
-          response:
-            ['settled', 'pending', 'uncertain'].includes(status)
-              ? {
-                  result: {
-                    orderId: request.savedPayment.orderId,
-                    confirmationStatus: status,
-                  },
-                }
-              : {error: {message: 'Could not confirm saved payment.'}},
+          response: ['settled', 'pending', 'uncertain'].includes(status)
+            ? {
+                result: {
+                  orderId: request.savedPayment.orderId,
+                  confirmationStatus: status,
+                },
+              }
+            : {error: {message: 'Could not confirm saved payment.'}},
         },
       })
     } catch {
@@ -658,14 +665,23 @@ export default function SocialDesktopEmbed({
     const result = response?.result
     if (
       result?.purchaseId !== purchaseId ||
-      !['funded', 'settled', 'included', 'pending', 'uncertain', 'cancelled'].includes(
-        result.status
-      )
+      ![
+        'funded',
+        'settled',
+        'included',
+        'pending',
+        'uncertain',
+        'cancelled',
+      ].includes(result.status)
     ) {
       throw new Error('buy_failed')
     }
     if (buyContextRef.current === buyContext) {
-      setBuyAttempt({purchaseId, status: result.status, orderId: result.orderId})
+      setBuyAttempt({
+        purchaseId,
+        status: result.status,
+        orderId: result.orderId,
+      })
     }
   }, [])
 
@@ -821,38 +837,70 @@ export default function SocialDesktopEmbed({
             {buyAttempt && (
               <HStack spacing={2} flexWrap="wrap">
                 <Text
-                  color={['funded', 'settled'].includes(buyAttempt.status) ? 'green.600' : 'muted'}
+                  color={
+                    ['funded', 'settled'].includes(buyAttempt.status)
+                      ? 'green.600'
+                      : 'muted'
+                  }
                   fontSize="sm"
                   role="status"
                 >
-                  {buyAttempt.status === 'funded'
-                    ? `Purchase funded on-chain. Order ${buyAttempt.orderId}.`
-                    : buyAttempt.status === 'settled'
-                      ? `Purchase settled on-chain. Order ${buyAttempt.orderId}.`
-                    : buyAttempt.status === 'saved'
-                      ? 'Saved purchase available. Check or continue it.'
-                    : buyAttempt.status === 'included'
-                      ? 'Purchase included; waiting to identify its order.'
-                      : buyAttempt.status === 'pending'
-                        ? 'Purchase pending on-chain.'
-                        : buyAttempt.status === 'uncertain'
-                          ? 'Submission unverified. Check status before trying again.'
-                          : buyAttempt.status === 'cancelled'
-                            ? 'Purchase cancelled. Prepared files are saved.'
-                            : 'Purchase could not complete.'}
+                  {new Map([
+                    [
+                      'funded',
+                      `Purchase funded on-chain. Order ${buyAttempt.orderId}.`,
+                    ],
+                    [
+                      'settled',
+                      `Purchase settled on-chain. Order ${buyAttempt.orderId}.`,
+                    ],
+                    [
+                      'saved',
+                      'Saved purchase available. Check or continue it.',
+                    ],
+                    [
+                      'included',
+                      'Purchase included; waiting to identify its order.',
+                    ],
+                    ['pending', 'Purchase pending on-chain.'],
+                    [
+                      'uncertain',
+                      'Submission unverified. Check status before trying again.',
+                    ],
+                    [
+                      'cancelled',
+                      'Purchase cancelled. Prepared files are saved.',
+                    ],
+                  ]).get(buyAttempt.status) || 'Purchase could not complete.'}
                 </Text>
-                {buyAttempt.purchaseId && !['funded', 'settled'].includes(buyAttempt.status) && (
-                  <Button variant="link" size="sm" onClick={checkBuy} isLoading={buyBusy}>
-                    {['saved', 'cancelled', 'failed'].includes(buyAttempt.status)
-                      ? 'Continue purchase'
-                      : 'Check status'}
-                  </Button>
-                )}
-                {savedBuyIds.length > 1 && savedBuyIds.includes(buyAttempt.purchaseId) && (
-                  <Button variant="link" size="sm" onClick={showNextSavedBuy} isDisabled={buyBusy}>
-                    Saved purchase {savedBuyIds.indexOf(buyAttempt.purchaseId) + 1} of {savedBuyIds.length} · Next
-                  </Button>
-                )}
+                {buyAttempt.purchaseId &&
+                  !['funded', 'settled'].includes(buyAttempt.status) && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={checkBuy}
+                      isLoading={buyBusy}
+                    >
+                      {['saved', 'cancelled', 'failed'].includes(
+                        buyAttempt.status
+                      )
+                        ? 'Continue purchase'
+                        : 'Check status'}
+                    </Button>
+                  )}
+                {savedBuyIds.length > 1 &&
+                  savedBuyIds.includes(buyAttempt.purchaseId) && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={showNextSavedBuy}
+                      isDisabled={buyBusy}
+                    >
+                      Saved purchase{' '}
+                      {savedBuyIds.indexOf(buyAttempt.purchaseId) + 1} of{' '}
+                      {savedBuyIds.length} · Next
+                    </Button>
+                  )}
               </HStack>
             )}
             <HStack spacing={3} flexWrap="wrap">
@@ -1023,22 +1071,27 @@ export default function SocialDesktopEmbed({
                     <Text
                       fontSize="sm"
                       color={
-                        confirmation.status === 'settled' ? 'green.600' : 'muted'
+                        confirmation.status === 'settled'
+                          ? 'green.600'
+                          : 'muted'
                       }
                       mt={2}
                       role="status"
                     >
-                      {confirmation.status === 'settled'
-                        ? 'Payment confirmed on-chain.'
-                        : confirmation.status === 'confirming'
-                          ? 'Confirming payment on-chain…'
-                          : confirmation.status === 'pending'
-                            ? 'Payment confirmation is pending.'
-                            : confirmation.status === 'uncertain'
-                              ? 'Payment submission is unverified. Your keys are saved.'
-                            : 'Payment confirmation failed. Your keys are saved.'}
+                      {new Map([
+                        ['settled', 'Payment confirmed on-chain.'],
+                        ['confirming', 'Confirming payment on-chain…'],
+                        ['pending', 'Payment confirmation is pending.'],
+                        [
+                          'uncertain',
+                          'Payment submission is unverified. Your keys are saved.',
+                        ],
+                      ]).get(confirmation.status) ||
+                        'Payment confirmation failed. Your keys are saved.'}
                     </Text>
-                    {['pending', 'uncertain', 'failed'].includes(confirmation.status) && (
+                    {['pending', 'uncertain', 'failed'].includes(
+                      confirmation.status
+                    ) && (
                       <Button
                         variant="link"
                         size="sm"
@@ -1094,14 +1147,14 @@ export default function SocialDesktopEmbed({
                         up to 3 iDNA. Keep your passphrase.
                       </>
                     ) : (
-                        <>
-                          The app will verify the original flips again and save
-                          an encrypted vault in this app profile.
-                          {receiveRequest?.confirmableDelivery &&
-                            ' Saving valid keys also submits an on-chain payment confirmation, with a network fee capped at 3 iDNA.'}{' '}
-                          Keep this passphrase; it cannot be recovered.
-                        </>
-                      )}
+                      <>
+                        The app will verify the original flips again and save an
+                        encrypted vault in this app profile.
+                        {receiveRequest?.confirmableDelivery &&
+                          ' Saving valid keys also submits an on-chain payment confirmation, with a network fee capped at 3 iDNA.'}{' '}
+                        Keep this passphrase; it cannot be recovered.
+                      </>
+                    )}
                   </Text>
                   <FormControl>
                     <FormLabel htmlFor="fod-vault-passphrase">
