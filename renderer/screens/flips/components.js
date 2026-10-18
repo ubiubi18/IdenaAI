@@ -105,6 +105,7 @@ export function FlipCard({flipService, onDelete, onAddToTestUnit}) {
     originalOrder,
     images,
     type,
+    requiresManualReview,
     createdAt,
     modifiedAt = createdAt,
   } = current.context
@@ -117,7 +118,8 @@ export function FlipCard({flipService, onDelete, onAddToTestUnit}) {
     FlipType.Archived,
     FlipType.Invalid,
   ].includes(type)
-  const isSubmittable = [FlipType.Draft, FlipType.Invalid].includes(type)
+  const isSubmittable =
+    [FlipType.Draft, FlipType.Invalid].includes(type) && !requiresManualReview
   const isViewable = [FlipType.Published, FlipType.Archived].includes(type)
   const isEditable = [FlipType.Draft, FlipType.Invalid].includes(type)
   const isDeletable = [FlipType.Published, FlipType.Draft].includes(type)
@@ -174,6 +176,11 @@ export function FlipCard({flipService, onDelete, onAddToTestUnit}) {
             <FlipCardSubtitle>
               {new Date(modifiedAt).toLocaleString()}
             </FlipCardSubtitle>
+            {type === FlipType.Draft && requiresManualReview && (
+              <Text fontSize="xs" color="orange.700" mt={1}>
+                {t('Review panels before submitting')}
+              </Text>
+            )}
           </Box>
           {isActionable && (
             <FlipCardMenu>
