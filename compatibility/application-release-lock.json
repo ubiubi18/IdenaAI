@@ -5,7 +5,7 @@
   "compatibilityReleaseId": "idena-mainnet-legacy-compat-2026.09.25-rc16",
   "consensusChangesAllowed": false,
   "protectedFiles": {
-    ".github/workflows/application-candidate-artifacts.yml": "60994e0e15a50ede7ea3a340bb3a878d34ff4b7ba17d20d1b94ad027b9620ce5",
+    ".github/workflows/application-candidate-artifacts.yml": "cbafb0f1279fa976ce82bd64e96a84695eac502b423d5ed7d6ee36e50a0c2d8e",
     ".github/workflows/release.yml": "15e447b56603a89ce163aaa9e2310603f09f59d388431e5fada28f58274eb4de",
     ".node-version": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
     ".nvmrc": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
