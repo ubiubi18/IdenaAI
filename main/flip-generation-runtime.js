@@ -511,13 +511,11 @@ function createFlipGenerationRuntime({
     recordCost(rendered, 'images', imageProvider, imageModel)
     const auditedRender = evaluateAutoPublishRender({response: rendered})
     if (rendered?.ok !== true) throw failure('image_provider_failed')
-    if (!auditedRender.passed || !isAuditedShuffle(auditedRender.shuffleOrder))
-      throw failure('render_rejected', [
-        ...auditedRender.reasons,
-        ...(Array.isArray(rendered?.renderFeedback?.failureReasons)
-          ? rendered.renderFeedback.failureReasons
-          : []),
-      ])
+    // A failed visual audit still leaves four paid-for panels worth reviewing.
+    // Keep them as a manual draft; only a fully accepted render receives the
+    // audit evidence needed for automatic publication.
+    if (!Array.isArray(rendered.panels) || rendered.panels.length !== 4)
+      throw failure('render_rejected', auditedRender.reasons)
     const images = normalizePanelImages(rendered, nativeImage)
     await stillNeeded(pair, current)
     const draftId = `scheduled-${current.sessionId}-${pair.id}`
@@ -538,10 +536,25 @@ function createFlipGenerationRuntime({
       adversarialImageId: -1,
       requiresManualReview: true,
     }
-    draft.autoPublishAudit = {
-      version: 1,
-      shuffleOrder: auditedRender.shuffleOrder,
-      imageDigest: auditDigest(draft, images, auditedRender.shuffleOrder),
+    if (auditedRender.passed && isAuditedShuffle(auditedRender.shuffleOrder)) {
+      draft.autoPublishAudit = {
+        version: 1,
+        shuffleOrder: auditedRender.shuffleOrder,
+        imageDigest: auditDigest(draft, images, auditedRender.shuffleOrder),
+      }
+    } else {
+      draft.renderAudit = {
+        status: 'needs_review',
+        reasons: Array.from(
+          new Set(
+            auditedRender.reasons.concat(
+              isAuditedShuffle(auditedRender.shuffleOrder)
+                ? []
+                : ['audited_shuffle_missing']
+            )
+          )
+        ),
+      }
     }
     flips.addDraft(draft)
   }
