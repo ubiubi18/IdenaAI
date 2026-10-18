@@ -155,11 +155,24 @@ function loopbackConnection(connection) {
 async function privateDirectory(fs, directory) {
   await fs.promises.mkdir(directory, {recursive: true, mode: 0o700})
   const stat = await fs.promises.lstat(directory)
+  const realDirectory = await fs.promises.realpath(directory)
+  const expectedDirectory =
+    process.platform === 'win32'
+      ? path.join(
+          await fs.promises.realpath(path.dirname(directory)),
+          path.basename(directory)
+        )
+      : path.resolve(directory)
+  const sameDirectory =
+    process.platform === 'win32'
+      ? path.win32.normalize(realDirectory).toLowerCase() ===
+        path.win32.normalize(expectedDirectory).toLowerCase()
+      : realDirectory === expectedDirectory
   if (
     !stat.isDirectory() ||
     stat.isSymbolicLink() ||
     (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) ||
-    (await fs.promises.realpath(directory)) !== path.resolve(directory)
+    !sameDirectory
   ) {
     fail('Private v7 storage is unavailable.')
   }
