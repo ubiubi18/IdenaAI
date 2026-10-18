@@ -46,6 +46,7 @@ const {
   DIRECT_V3_CONTRACT,
   DIRECT_V4_CONTRACT,
 } = require('./fod-direct-check')
+const {createFodV7Service} = require('./fod-v7')
 const {
   validateExportKeyPayload,
   validateGenericRpcMethod,
@@ -885,6 +886,11 @@ const fodDirectRecoverService = createFodDirectRecoverService({
 const fodDirectRefundService = createFodDirectRefundService({
   ...fodDirectServiceOptions,
   vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodV7Service = createFodV7Service({
+  ...fodDirectServiceOptions,
+  root: join(app.getPath('userData'), 'fod-v7'),
   rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
 })
 
@@ -3719,6 +3725,34 @@ handleTrusted('social.direct-refund', async (_event, payload) => {
     return {result: await fodDirectRefundService(payload)}
   } catch {
     return {error: {message: 'Could not refund this flip order.'}}
+  }
+})
+
+handleTrusted('social.v7', async (_event, payload) => {
+  try {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      typeof payload.method !== 'string'
+    ) {
+      throw new Error('Invalid v7 request.')
+    }
+    const result = await fodV7Service(payload.method, payload.data)
+    if (result?.folder) {
+      const {folder, ...publicResult} = result
+      const openError = await shell.openPath(folder)
+      return {result: {...publicResult, folderOpened: !openError}}
+    }
+    return {result}
+  } catch (error) {
+    const message = error?.message || ''
+    return {
+      error: {
+        message: /^[A-Za-z0-9 .,!?'-]{1,180}$/.test(message)
+          ? message
+          : 'The v7 action was refused. Check local pins, node state and selected files.',
+      },
+    }
   }
 })
 

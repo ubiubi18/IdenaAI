@@ -3765,4 +3765,8 @@ module.exports = {
   DIRECT_V3_CONTRACT,
   DIRECT_V4_CONTRACT,
   DIRECT_V5_CANDIDATE,
+  checkPinnedBinary,
+  readPrivateSelectedFile,
+  writePrivateFile,
+  runCheck,
 }
