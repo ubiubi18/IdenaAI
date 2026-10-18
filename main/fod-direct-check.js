@@ -307,8 +307,20 @@ async function readPrivateSelectedFile(
   }
   const absolute = path.resolve(selectedPath)
   const resolved = await fs.promises.realpath(selectedPath)
+  const expected =
+    allowWindows && process.platform === 'win32'
+      ? path.join(
+          await fs.promises.realpath(path.dirname(selectedPath)),
+          path.basename(selectedPath)
+        )
+      : absolute
+  const samePath =
+    allowWindows && process.platform === 'win32'
+      ? path.win32.normalize(resolved).toLowerCase() ===
+        path.win32.normalize(expected).toLowerCase()
+      : resolved === expected
   if (
-    resolved !== absolute ||
+    !samePath ||
     (!fs.constants.O_NOFOLLOW &&
       !(allowWindows && process.platform === 'win32'))
   ) {
