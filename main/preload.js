@@ -1860,10 +1860,8 @@ const bridge = {
       invokeCloneable('social.direct-receive', payload),
     directBuyPrepare: (payload) =>
       invokeCloneable('social.direct-buy-prepare', payload),
-    directMarket: (payload) =>
-      invokeCloneable('social.direct-market', payload),
-    directList: (payload) =>
-      invokeCloneable('social.direct-list', payload),
+    directMarket: (payload) => invokeCloneable('social.direct-market', payload),
+    directList: (payload) => invokeCloneable('social.direct-list', payload),
     directBuyResume: (payload) =>
       invokeCloneable('social.direct-buy-resume', payload),
     directBuyCommit: (payload) =>
@@ -1872,8 +1870,7 @@ const bridge = {
       invokeCloneable('social.direct-confirm', payload),
     directRecover: (payload) =>
       invokeCloneable('social.direct-recover', payload),
-    directRefund: (payload) =>
-      invokeCloneable('social.direct-refund', payload),
+    directRefund: (payload) => invokeCloneable('social.direct-refund', payload),
     v7: (method, data) => invokeCloneable('social.v7', {method, data}),
     openDirectVaultFolder: () =>
       invokeCloneable('social.open-direct-vault-folder'),
