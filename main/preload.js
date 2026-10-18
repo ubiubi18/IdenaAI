@@ -1874,6 +1874,7 @@ const bridge = {
       invokeCloneable('social.direct-recover', payload),
     directRefund: (payload) =>
       invokeCloneable('social.direct-refund', payload),
+    v7: (method, data) => invokeCloneable('social.v7', {method, data}),
     openDirectVaultFolder: () =>
       invokeCloneable('social.open-direct-vault-folder'),
   },
