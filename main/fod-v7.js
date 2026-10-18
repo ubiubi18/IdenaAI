@@ -167,7 +167,7 @@ async function privateDirectory(fs, directory) {
 }
 
 async function privateJSON(fs, file, maxBytes = 16 * 1024) {
-  const {data} = await readPrivateSelectedFile(fs, file, maxBytes)
+  const {data} = await readPrivateSelectedFile(fs, file, maxBytes, true, true)
   try {
     return JSON.parse(data.toString('utf8'))
   } finally {
@@ -212,7 +212,8 @@ async function selectedInput(fs, dialog, tempDir, name, privateOnly) {
     fs,
     result.filePaths[0],
     MAX_FILE_BYTES,
-    privateOnly
+    privateOnly,
+    true
   )
   const destination = path.join(tempDir, `input-${name}`)
   try {
@@ -376,7 +377,8 @@ function createFodV7Service({
         fs,
         config.binaryPath,
         [config.binarySha256],
-        tempDir
+        tempDir,
+        true
       )
       const rpcFlags = ['-rpc', initial.connection.url]
       if (initial.connection.key) {
@@ -505,7 +507,13 @@ function createFodV7Service({
     ) {
       fail('Choose an absolute path to the locally built v7 CLI.')
     }
-    await checkPinnedBinary(fs, config.binaryPath, [config.binarySha256])
+    await checkPinnedBinary(
+      fs,
+      config.binaryPath,
+      [config.binarySha256],
+      undefined,
+      true
+    )
     await context(config)
     await privateDirectory(fs, root)
     await saveConfig(fs, root, config)
@@ -676,7 +684,13 @@ function createFodV7Service({
     if (nodeKey?.canceled || nodeKey?.filePaths?.length !== 1)
       return {status: 'cancelled'}
     const keyPath = nodeKey.filePaths[0]
-    const selectedKey = await readPrivateSelectedFile(fs, keyPath, 1024)
+    const selectedKey = await readPrivateSelectedFile(
+      fs,
+      keyPath,
+      1024,
+      true,
+      true
+    )
     selectedKey.data.fill(0)
     const fresh = await context(config, true)
     if (
@@ -698,7 +712,13 @@ function createFodV7Service({
     let error
     try {
       await withCLI(config, fresh, '', async ({tempDir, rpcFlags}) => {
-        const {data} = await readPrivateSelectedFile(fs, keyPath, 1024)
+        const {data} = await readPrivateSelectedFile(
+          fs,
+          keyPath,
+          1024,
+          true,
+          true
+        )
         const copiedKey = path.join(tempDir, 'nodekey')
         try {
           await writePrivateFile(fs, copiedKey, data)

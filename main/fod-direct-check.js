@@ -298,14 +298,20 @@ async function readPrivateSelectedFile(
   fs,
   selectedPath,
   maxBytes,
-  requirePrivate = true
+  requirePrivate = true,
+  allowWindows = false
 ) {
+  // Windows lacks O_NOFOLLOW; v7 opts into handle and path identity checks.
   if (typeof selectedPath !== 'string' || !path.isAbsolute(selectedPath)) {
     refuse('fod_direct_check_invalid_file')
   }
   const absolute = path.resolve(selectedPath)
   const resolved = await fs.promises.realpath(selectedPath)
-  if (resolved !== absolute || !fs.constants.O_NOFOLLOW) {
+  if (
+    resolved !== absolute ||
+    (!fs.constants.O_NOFOLLOW &&
+      !(allowWindows && process.platform === 'win32'))
+  ) {
     refuse('fod_direct_check_invalid_file')
   }
   const before = await fs.promises.lstat(selectedPath)
@@ -323,7 +329,7 @@ async function readPrivateSelectedFile(
   }
   const flags =
     fs.constants.O_RDONLY |
-    fs.constants.O_NOFOLLOW |
+    (fs.constants.O_NOFOLLOW || 0) |
     (fs.constants.O_NONBLOCK || 0)
   const handle = await fs.promises.open(selectedPath, flags)
   try {
@@ -342,11 +348,16 @@ async function readPrivateSelectedFile(
     }
     const data = await readBounded(handle, maxBytes)
     const after = await handle.stat()
+    const afterPath = await fs.promises.lstat(selectedPath)
     if (
       data.length !== opened.size ||
       after.size !== opened.size ||
       after.mtimeMs !== opened.mtimeMs ||
-      after.ctimeMs !== opened.ctimeMs
+      after.ctimeMs !== opened.ctimeMs ||
+      !afterPath.isFile() ||
+      afterPath.isSymbolicLink() ||
+      afterPath.dev !== opened.dev ||
+      afterPath.ino !== opened.ino
     ) {
       data.fill(0)
       refuse('fod_direct_check_invalid_file')
@@ -457,15 +468,26 @@ function reviewedDirectBuyBinaryHashes(release, expectedBinaryHash) {
   return buyHash ? [buyHash] : []
 }
 
-async function checkPinnedBinary(fs, binaryPath, expectedHashes, stageDir) {
+async function checkPinnedBinary(
+  fs,
+  binaryPath,
+  expectedHashes,
+  stageDir,
+  allowWindows = false
+) {
+  // Legacy callers still require O_NOFOLLOW when Windows cannot supply it.
   await checkBinary(fs, binaryPath)
-  if (!fs.constants.O_NOFOLLOW || expectedHashes.length === 0) {
+  if (
+    (!fs.constants.O_NOFOLLOW &&
+      !(allowWindows && process.platform === 'win32')) ||
+    expectedHashes.length === 0
+  ) {
     refuse('fod_direct_check_unavailable')
   }
   const beforePath = await fs.promises.lstat(binaryPath)
   const handle = await fs.promises.open(
     binaryPath,
-    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)
   )
   let staged
   const stagedPath = stageDir && path.join(stageDir, 'fod-verified')
@@ -487,7 +509,7 @@ async function checkPinnedBinary(fs, binaryPath, expectedHashes, stageDir) {
         fs.constants.O_WRONLY |
           fs.constants.O_CREAT |
           fs.constants.O_EXCL |
-          fs.constants.O_NOFOLLOW,
+          (fs.constants.O_NOFOLLOW || 0),
         0o700
       )
       await staged.chmod(0o700)
