@@ -175,6 +175,26 @@ async function privateJSON(fs, file, maxBytes = 16 * 1024) {
   }
 }
 
+async function syncDirectory(fs, directory) {
+  const handle = await fs.promises.open(directory, fs.constants.O_RDONLY)
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+async function syncActionDirectories(fs, directory, root) {
+  for (
+    let current = directory;
+    current !== path.dirname(root);
+    current = path.dirname(current)
+  ) {
+    await syncDirectory(fs, current)
+  }
+  await syncDirectory(fs, path.dirname(root))
+}
+
 async function saveConfig(fs, root, config) {
   const temp = path.join(root, `config-${randomBytes(8).toString('hex')}.json`)
   await writePrivateFile(fs, temp, JSON.stringify(config))
@@ -604,6 +624,7 @@ function createFodV7Service({
         maxFee,
       })
     )
+    await syncActionDirectories(fs, directory, root)
     return {actionId, ...summary}
   }
 
@@ -673,6 +694,7 @@ function createFodV7Service({
         accountNonce: fresh.account.nonce + 1,
       })
     )
+    await syncDirectory(fs, action.directory)
     let error
     try {
       await withCLI(config, fresh, '', async ({tempDir, rpcFlags}) => {
