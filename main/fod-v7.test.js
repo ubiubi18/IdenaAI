@@ -95,9 +95,9 @@ describe('direct v7 desktop bridge', () => {
 
   afterEach(() => fs.rmSync(root, {recursive: true, force: true}))
 
-  function service({connection, stakeHash} = {}) {
+  function service({connection, stakeHash, fsImpl = fs} = {}) {
     return createFodV7Service({
-      fs,
+      fs: fsImpl,
       dialog,
       spawn: fakeSpawn(calls),
       root: path.join(root, 'v7'),
@@ -193,6 +193,49 @@ describe('direct v7 desktop bridge', () => {
         )
       )
     ).toBe(false)
+  })
+
+  it('keeps a sign attempt and never launches the CLI when marker sync fails', async () => {
+    const v7 = service()
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    })
+    const actionDir = path.join(
+      root,
+      'v7',
+      'actions',
+      ADDRESS,
+      prepared.actionId
+    )
+    const originalOpen = fs.promises.open.bind(fs.promises)
+    const fsWithFailedSync = {
+      ...fs,
+      promises: {
+        ...fs.promises,
+        open: async (file, ...args) => {
+          const handle = await originalOpen(file, ...args)
+          if (file !== actionDir) return handle
+          return {
+            sync: async () => {
+              throw new Error('directory sync failed')
+            },
+            close: () => handle.close(),
+          }
+        },
+      },
+    }
+    await expect(
+      service({fsImpl: fsWithFailedSync})('submit', {
+        actionId: prepared.actionId,
+      })
+    ).rejects.toThrow('directory sync failed')
+    expect(calls.map(({args}) => args[0])).toEqual(['direct-v7-prepare'])
+    await expect(v7('submit', {actionId: prepared.actionId})).rejects.toThrow(
+      'already had a signing attempt'
+    )
   })
 
   it('supplies a vault passphrase when preparing a private listing', async () => {
