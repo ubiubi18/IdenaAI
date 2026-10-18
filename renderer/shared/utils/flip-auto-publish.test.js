@@ -256,4 +256,30 @@ describe('audited flip auto publish gates', () => {
     expect(result.passed).toBe(false)
     expect(result.reasons).toContain('panel_audit_incomplete')
   })
+
+  it('distinguishes a completed failed panel audit from an incomplete one', () => {
+    const validators = passingValidators()
+    validators[2].passed = false
+    validators[2].alignment_check = {status: 'fail', passed: false}
+
+    const result = evaluateAutoPublishRender({
+      response: {
+        ok: true,
+        panels: [{}, {}, {}, {}],
+        validatorAuditByPanel: validators,
+        sequenceAudit: {
+          invoked: true,
+          complete: true,
+          passed: true,
+          verdict: 'accept',
+          safeShuffleOrder: [2, 0, 3, 1],
+        },
+        renderFeedback: {verdict: 'accept_rendered_story'},
+      },
+    })
+
+    expect(result.passed).toBe(false)
+    expect(result.reasons).toContain('panel_audit_failed')
+    expect(result.reasons).not.toContain('panel_audit_incomplete')
+  })
 })
