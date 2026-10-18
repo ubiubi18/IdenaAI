@@ -1,4 +1,5 @@
 /* global BigInt */
+/* eslint-disable react/prop-types */
 import React from 'react'
 import {
   Badge,
@@ -18,6 +19,7 @@ import {PrimaryButton, SecondaryButton} from '../shared/components/button'
 import {useChainState} from '../shared/providers/chain-context'
 import {useIdentityState} from '../shared/providers/identity-context'
 import {useSettingsState} from '../shared/providers/settings-context'
+import FlipMarketV7 from '../shared/components/flip-market-v7'
 
 const DIRECT_VERSION = 4
 const OFFER_ID = /^[0-9a-f]{64}$/
@@ -131,6 +133,15 @@ function sameAddress(left, right) {
 }
 
 export default function FlipMarketPage() {
+  const [version, setVersion] = React.useState(4)
+  return version === 7 ? (
+    <FlipMarketV7 onSelectV4={() => setVersion(4)} />
+  ) : (
+    <FlipMarketV4 onSelectV7={() => setVersion(7)} />
+  )
+}
+
+function FlipMarketV4({onSelectV7}) {
   const {offline, syncing} = useChainState()
   const {address} = useIdentityState()
   const {internalPort, url, useExternalNode} = useSettingsState()
@@ -575,9 +586,12 @@ export default function FlipMarketPage() {
                 Offers from your node
               </Text>
             </Box>
-            <SecondaryButton onClick={loadMarket} isLoading={marketLoading}>
-              Refresh
-            </SecondaryButton>
+            <Flex gap={2}>
+              <SecondaryButton onClick={onSelectV7}>Direct v7</SecondaryButton>
+              <SecondaryButton onClick={loadMarket} isLoading={marketLoading}>
+                Refresh
+              </SecondaryButton>
+            </Flex>
           </Flex>
 
           {market && (

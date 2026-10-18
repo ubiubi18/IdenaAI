@@ -275,6 +275,24 @@ retained purchase and raw delivery-key files. The check does not save a vault
 or confirm payment; use `fod direct-receive` before confirmation. The desktop
 package does not bundle the CLI.
 
+### Experimental direct v7 market (source checkout)
+
+The source checkout's **Flip market → Direct v7** page prepares typed contract
+actions through a locally built `fod` CLI and a loopback RPC connection to your
+own synced node. Before use, independently verify the v7 contract address and
+deployed code hash, then enter those values plus the CLI's absolute path and
+SHA-256 in **Local deployment pin**. A published IdenaAI binary may not include
+this page; the CLI is never bundled. See the [Flips on Demand v7 guide](https://github.com/ubiubi18/flips-on-demand/blob/main/README.md)
+for the node, proof, fee, bond, and lifecycle requirements.
+
+Choose an action, supply the requested private files, and prepare it without
+signing. Review the attached value and maximum fee before **Review and send**;
+the app asks for the active node key and confirms again before broadcasting.
+For a private sale, **Create private ciphertext** saves a local file for the
+seller to deliver through a channel they choose. The buyer uses **Verify
+received ciphertext** to check the funded order and original flips, then may
+prepare `confirm` with the saved receipt. The app does not send messages.
+
 ## Source and release status
 
 `main` contains ongoing development; the package version is currently `0.1.0-rc7`.
