@@ -362,7 +362,7 @@ function Navbar() {
           {t('idena.social')}
         </NavItem>
         <NavItem href="/flip-market" icon={GalleryIcon}>
-          {t('Flip market')}
+          {t('Flips on Demand')}
         </NavItem>
       </Box>
       <Box mt={5}>

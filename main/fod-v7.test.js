@@ -13,6 +13,18 @@ const ADDRESS = privateKeyToAddress('1'.repeat(64), false)
 const CONTRACT = 'b'.repeat(40)
 const CODE_HASH = 'c'.repeat(64)
 const OFFER_ID = 'd'.repeat(64)
+const PREVIEW_CIDS = [`b${'a'.repeat(58)}`, `b${'c'.repeat(58)}`]
+const INVENTORY_COMMITMENT = createHash('sha256')
+  .update('fod.bundle-manifest:v1')
+  .update(ADDRESS)
+  .update(Buffer.from([0, 230]))
+  .update(`\0${PREVIEW_CIDS[0]}\0${PREVIEW_CIDS[1]}`)
+  .digest('hex')
+const CHAIN_OFFER_ID = createHash('sha256')
+  .update('fod:pool-offer:v7')
+  .update(Buffer.from(ADDRESS, 'hex'))
+  .update(Buffer.from([0, 230]))
+  .digest('hex')
 const TX_HASH = `0x${'e'.repeat(64)}`
 const BINARY_HASH = createHash('sha256')
   .update(fs.readFileSync(process.execPath))
@@ -45,10 +57,26 @@ function fakeSpawn(calls) {
             contract,
             codeHash: CODE_HASH,
             directOfferId: OFFER_ID,
-            amount: '0',
+            amount: operation === 'buy' ? '2500000000000000000' : '0',
+            ...(operation === 'buy' ? {price: '2000000000000000000'} : {}),
+            ...(operation === 'buy'
+              ? {
+                  author: ADDRESS,
+                  epoch: 230,
+                  coveredFlips: PREVIEW_CIDS.length,
+                  inventoryCommitment: INVENTORY_COMMITMENT,
+                  directSession: {
+                    author: ADDRESS,
+                    epoch: 230,
+                    manifest: PREVIEW_CIDS,
+                  },
+                }
+              : {}),
           }),
           {mode: 0o600}
         )
+      } else if (args[0] === 'direct-v7-dm') {
+        fs.writeFileSync(args[args.indexOf('-out') + 1], '{}', {mode: 0o600})
       } else if (args[0] === 'submit') {
         const contract = args[args.indexOf('-contract') + 1]
         fs.writeFileSync(
@@ -104,6 +132,8 @@ describe('direct v7 desktop bridge', () => {
     fsImpl = fs,
     getNonce = () => 2,
     onRpc,
+    openFolder,
+    getExplorer,
   } = {}) {
     return createFodV7Service({
       fs: fsImpl,
@@ -113,8 +143,11 @@ describe('direct v7 desktop bridge', () => {
       getNodeRpcConnection: () =>
         connection || {url: 'http://127.0.0.1:9009', key: 'local-key'},
       getActiveCoinbase: async () => `0x${ADDRESS}`,
-      rpcCall: async (_connection, {method}) => {
-        await onRpc?.(method)
+      openFolder,
+      getExplorer,
+      rpcCall: async (_connection, {method, params}) => {
+        const override = await onRpc?.(method, params)
+        if (override !== undefined) return {result: override}
         const results = {
           bcn_syncing: {
             syncing: false,
@@ -207,6 +240,168 @@ describe('direct v7 desktop bridge', () => {
         )
       )
     ).toBe(false)
+    expect(dialog.showMessageBox.mock.calls[0][0].detail).toContain(
+      'Maximum network fee: 1 iDNA'
+    )
+  })
+
+  it('shows the private purchase price and buyer bond before signing', async () => {
+    dialog.showMessageBox.mockResolvedValue({response: 0})
+    const v7 = service()
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'buy',
+      offerId: OFFER_ID,
+      maxFee: '1000000000000000000',
+    })
+
+    expect(await v7('submit', {actionId: prepared.actionId})).toEqual({
+      status: 'cancelled',
+    })
+    const {title, message, detail} = dialog.showMessageBox.mock.calls[0][0]
+    expect(title).toBe('Flips on Demand · Review transaction')
+    expect(message).toBe('Sign and broadcast buy private flips?')
+    expect(detail).toContain('Price: 2 iDNA')
+    expect(detail).toContain('Buyer bond: 0.5 iDNA')
+    expect(detail).toContain('Total attached: 2.5 iDNA')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('shows only matching public explorer images for a verified saved purchase', async () => {
+    const jpeg = '0xffd8ffdb00000000ffd9'
+    const getExplorer = jest.fn(async (route) => {
+      if (route.startsWith('Epoch/')) {
+        return {
+          result: [
+            {cid: PREVIEW_CIDS[0], author: `0x${ADDRESS}`, epoch: 230},
+            {cid: PREVIEW_CIDS[1], author: `0x${'f'.repeat(40)}`, epoch: 230},
+          ],
+        }
+      }
+      if (route === `Flip/${PREVIEW_CIDS[0]}/Content`) {
+        return {result: {pics: [jpeg, jpeg], privateKey: 'never expose'}}
+      }
+      throw new Error('An unmatched flip must not be fetched.')
+    })
+    const v7 = service({getExplorer})
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'buy',
+      offerId: OFFER_ID,
+      maxFee: '1000000000000000000',
+    })
+
+    const preview = await v7('preview', {actionId: prepared.actionId})
+    expect(preview.count).toBe(2)
+    const image = `data:image/jpeg;base64,${Buffer.from(
+      jpeg.slice(2),
+      'hex'
+    ).toString('base64')}`
+    expect(preview.flips[0].images).toEqual([image, image])
+    expect(preview.flips[1].images).toEqual([])
+    expect(JSON.stringify(preview)).not.toContain('never expose')
+    expect(getExplorer).toHaveBeenCalledTimes(2)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('previews a public offer before preparation using its pinned on-chain inventory', async () => {
+    const offer = Buffer.alloc(222)
+    Buffer.from(ADDRESS, 'hex').copy(offer, 0)
+    offer.writeUInt16BE(230, 20)
+    offer.writeUInt32BE(PREVIEW_CIDS.length, 22)
+    Buffer.from(INVENTORY_COMMITMENT, 'hex').copy(offer, 26)
+    const inventory = Buffer.concat([
+      Buffer.from([PREVIEW_CIDS.length]),
+      ...PREVIEW_CIDS.flatMap((cid) => [
+        Buffer.from([cid.length]),
+        Buffer.from(cid),
+      ]),
+    ])
+    const getExplorer = jest.fn(async (route) =>
+      route.startsWith('Epoch/')
+        ? {
+            result: PREVIEW_CIDS.map((cid) => ({
+              cid,
+              author: `0x${ADDRESS}`,
+              epoch: 230,
+            })),
+          }
+        : {
+            result: {
+              pics: ['0xffd8ffdb00000000ffd9', '0xffd8ffdb00000000ffd9'],
+            },
+          }
+    )
+    const v7 = service({
+      getExplorer,
+      onRpc: (method, params) => {
+        if (method !== 'contract_iterateMap') return undefined
+        const bytes = params[1] === 'pool/offer/' ? offer : inventory
+        return {
+          items: [
+            {key: `0x${CHAIN_OFFER_ID}`, value: `0x${bytes.toString('hex')}`},
+          ],
+          continuationToken: null,
+        }
+      },
+    })
+    await v7('configure', pins)
+
+    const preview = await v7('preview', {offerId: CHAIN_OFFER_ID})
+    expect(preview.count).toBe(2)
+    expect(preview.flips).toHaveLength(2)
+    expect(preview.flips[0].images[0]).toMatch(/^data:image\/jpeg;base64,/)
+    expect(calls).toHaveLength(0)
+    expect(getExplorer).toHaveBeenCalledTimes(3)
+
+    inventory[inventory.length - 1] = 'd'.charCodeAt(0)
+    await expect(v7('preview', {offerId: CHAIN_OFFER_ID})).rejects.toThrow(
+      'offer commitment'
+    )
+    expect(getExplorer).toHaveBeenCalledTimes(3)
+  })
+
+  it('refuses preview if the saved public inventory no longer matches its commitment', async () => {
+    const getExplorer = jest.fn()
+    const v7 = service({getExplorer})
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'buy',
+      offerId: OFFER_ID,
+      maxFee: '1000000000000000000',
+    })
+    const file = path.join(
+      root,
+      'v7',
+      'actions',
+      ADDRESS,
+      prepared.actionId,
+      'prepared.json'
+    )
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+    saved.directSession.manifest = [PREVIEW_CIDS[1]]
+    fs.writeFileSync(file, JSON.stringify(saved), {mode: 0o600})
+
+    await expect(v7('preview', {actionId: prepared.actionId})).rejects.toThrow(
+      'verified public flip inventory'
+    )
+    expect(getExplorer).not.toHaveBeenCalled()
+  })
+
+  it('opens the saved ciphertext folder without sending the file', async () => {
+    const openFolder = jest.fn().mockResolvedValue(true)
+    const v7 = service({openFolder})
+    await v7('configure', pins)
+
+    expect(
+      await v7('privateMessage', {orderId: '17', passphrase: 'vault-key'})
+    ).toEqual({
+      status: 'saved',
+      fileName: 'ciphertext.json',
+      folderOpened: true,
+    })
+    expect(openFolder).toHaveBeenCalledTimes(1)
+    expect(calls.map(({args}) => args[0])).toEqual(['direct-v7-dm'])
   })
 
   it('refuses a selected nodekey for another identity before signing', async () => {

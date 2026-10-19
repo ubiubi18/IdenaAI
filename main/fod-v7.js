@@ -1,7 +1,7 @@
 /* global BigInt */
 /* eslint-disable no-bitwise */
 
-const {randomBytes} = require('crypto')
+const {createHash, randomBytes} = require('crypto')
 const {spawn: defaultSpawn} = require('child_process')
 const defaultFs = require('fs')
 const os = require('os')
@@ -13,6 +13,7 @@ const {
   runCheck,
 } = require('./fod-direct-check')
 const {privateKeyToAddress} = require('./utils/idena-crypto')
+const {createFetchClient} = require('./utils/fetch-client')
 
 const HEX20 = /^(?:0x)?[0-9a-f]{40}$/
 const HEX32 = /^(?:0x)?[0-9a-f]{64}$/
@@ -27,6 +28,14 @@ const MAX_PREPARED_BYTES = 20 * 1024 * 1024
 const MAX_SIGNED_BYTES = 2 * MAX_PREPARED_BYTES
 const MAX_NONCE_JOURNAL_BYTES = 4 * 1024 * 1024
 const MAX_FEE = 100n * 10n ** 18n
+const FLIP_CID = /^b[a-z2-7]{58}$/
+const PREVIEW_FLIPS = 5
+const explorer = createFetchClient({
+  baseURL: 'https://api.idena.io/api/',
+  timeout: 5000,
+  redirect: 'error',
+  maxResponseBytes: 2 * 1024 * 1024,
+})
 
 const OPERATIONS = Object.freeze({
   qualify: {
@@ -62,6 +71,25 @@ const OPERATIONS = Object.freeze({
   expireHead: {format: 'expire-head'},
   topUpBond: {format: 'top-up-bond'},
   slashUnproved: {format: 'slash-unproved'},
+})
+const OPERATION_LABELS = Object.freeze({
+  qualify: 'qualify bundle',
+  proveBundle: 'prove bundle content',
+  seedBundle: 'publish public seed',
+  activate: 'activate market',
+  list: 'list private flips',
+  buy: 'buy private flips',
+  buyPublicSeed: 'buy public seed',
+  confirm: 'confirm delivery',
+  challenge: 'report a delivery problem',
+  startFallback: 'start public fallback',
+  proveAndReveal: 'prove and publish keys',
+  refund: 'request refund',
+  relist: 'relist flips',
+  cancel: 'cancel listing',
+  expireHead: 'expire oldest offer',
+  topUpBond: 'top up seller bond',
+  slashUnproved: 'slash unproved order',
 })
 const ORDER_OPERATIONS = new Set([
   'confirm',
@@ -125,6 +153,15 @@ function idnaAtoms(value) {
   }
   const [whole, fraction = ''] = text.split('.')
   return BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, '0') || '0')
+}
+
+function formatIdnaAtoms(value) {
+  const units = BigInt(value)
+  const whole = units / 10n ** 18n
+  const fraction = String(units % 10n ** 18n)
+    .padStart(18, '0')
+    .replace(/0+$/, '')
+  return `${whole}${fraction ? `.${fraction}` : ''} iDNA`
 }
 
 function nodekeyAddress(raw) {
@@ -532,7 +569,7 @@ async function saveConfig(fs, root, config) {
 
 async function selectedInput(fs, dialog, tempDir, name, privateOnly) {
   const result = await dialog.showOpenDialog({
-    title: `Choose v7 ${name}`,
+    title: `Choose ${name}`,
     properties: ['openFile'],
   })
   if (result?.canceled || result?.filePaths?.length !== 1)
@@ -590,6 +627,154 @@ function preparedSummary(prepared, config, operation) {
   }
 }
 
+function inventoryDigest(author, epoch, cids) {
+  const epochBytes = Buffer.alloc(2)
+  epochBytes.writeUInt16BE(epoch)
+  const digest = createHash('sha256')
+    .update('fod.bundle-manifest:v1')
+    .update(author)
+    .update(epochBytes)
+  for (const cid of [...cids].sort()) digest.update('\0').update(cid)
+  return digest.digest('hex')
+}
+
+function previewSession(prepared) {
+  const session = prepared.directSession
+  const {author, epoch} = prepared
+  const cids = session?.manifest
+  if (
+    prepared.operation !== 'buy' ||
+    typeof author !== 'string' ||
+    !/^[0-9a-f]{40}$/.test(author) ||
+    !Number.isInteger(epoch) ||
+    epoch < 1 ||
+    epoch > 65535 ||
+    session?.author !== author ||
+    session?.epoch !== epoch ||
+    !Array.isArray(cids) ||
+    cids.length < 1 ||
+    cids.length > 32 ||
+    cids.length !== prepared.coveredFlips ||
+    cids.some((cid) => typeof cid !== 'string' || !FLIP_CID.test(cid)) ||
+    new Set(cids).size !== cids.length
+  ) {
+    fail('The saved purchase has no verified public flip inventory.')
+  }
+  if (inventoryDigest(author, epoch, cids) !== prepared.inventoryCommitment) {
+    fail('The saved purchase inventory differs from its commitment.')
+  }
+  return {author, epoch, cids}
+}
+
+async function readPublicMapValue(rpc, contract, prefix, offerId) {
+  let token = null
+  const seen = new Set()
+  for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
+    // The pinned node exposes binary map suffixes through this read-only RPC.
+    // eslint-disable-next-line no-await-in-loop
+    const page = await rpc('contract_iterateMap', [
+      `0x${contract}`,
+      prefix,
+      token,
+      'hex',
+      'hex',
+      100,
+    ])
+    if (!Array.isArray(page?.items) || page.items.length > 100)
+      fail('The public offer inventory could not be read.')
+    for (const item of page.items) {
+      if (
+        typeof item?.key !== 'string' ||
+        !HEX32.test(item.key.toLowerCase()) ||
+        typeof item?.value !== 'string' ||
+        !/^(?:0x)?(?:[0-9a-f]{2})+$/i.test(item.value)
+      ) {
+        fail('The public offer inventory is invalid.')
+      }
+      if (item.key.toLowerCase().replace(/^0x/, '') === offerId) {
+        return Buffer.from(item.value.replace(/^0x/i, ''), 'hex')
+      }
+    }
+    const next = page.continuationToken
+    if (next === null || next === undefined || next === '') return null
+    if (typeof next !== 'string' || page.items.length === 0 || seen.has(next)) {
+      fail('The public offer inventory pagination is invalid.')
+    }
+    seen.add(next)
+    token = next
+  }
+  fail('The public offer inventory is too large to preview.')
+}
+
+async function publicOfferSession(rpc, contract, offerId) {
+  const offer = await readPublicMapValue(rpc, contract, 'pool/offer/', offerId)
+  if (!offer || offer.length !== 222)
+    fail('This offer was not found in the market.')
+  const author = offer.subarray(0, 20).toString('hex')
+  const epoch = offer.readUInt16BE(20)
+  const count = offer.readUInt32BE(22)
+  const commitment = offer.subarray(26, 58).toString('hex')
+  const derived = createHash('sha256')
+    .update('fod:pool-offer:v7')
+    .update(offer.subarray(0, 22))
+    .digest('hex')
+  if (derived !== offerId || count < 1 || count > 32 || epoch < 1)
+    fail('The offer code does not match the public market record.')
+  const inventory = await readPublicMapValue(
+    rpc,
+    contract,
+    'pool/inventory/',
+    offerId
+  )
+  if (!inventory || inventory[0] !== count)
+    fail('The offer has no matching public flip inventory.')
+  const cids = []
+  let position = 1
+  for (let index = 0; index < count; index += 1) {
+    const length = inventory[position]
+    position += 1
+    if (length !== 59 || position + length > inventory.length)
+      fail('The public flip inventory is invalid.')
+    const cid = inventory
+      .subarray(position, position + length)
+      .toString('ascii')
+    if (!FLIP_CID.test(cid) || (index > 0 && cids[index - 1] >= cid))
+      fail('The public flip inventory is invalid.')
+    cids.push(cid)
+    position += length
+  }
+  if (
+    position !== inventory.length ||
+    inventoryDigest(author, epoch, cids) !== commitment
+  ) {
+    fail('The public flip inventory differs from the offer commitment.')
+  }
+  return {author, epoch, cids}
+}
+
+function publicJpegDataUrl(value) {
+  if (
+    typeof value !== 'string' ||
+    !/^0x[0-9a-f]+$/i.test(value) ||
+    value.length < 12 ||
+    value.length > 512 * 1024 + 2 ||
+    value.length % 2 !== 0
+  ) {
+    return null
+  }
+  const bytes = Buffer.from(value.slice(2), 'hex')
+  if (
+    bytes.length < 4 ||
+    bytes[0] !== 0xff ||
+    bytes[1] !== 0xd8 ||
+    bytes[bytes.length - 2] !== 0xff ||
+    bytes[bytes.length - 1] !== 0xd9
+  ) {
+    return null
+  }
+  return `data:image/jpeg;base64,${bytes.toString('base64')}`
+}
+
 function submittedSummary(submitted, config, action, coinbase) {
   if (
     submitted?.format !== 'fod.submitted-transaction' ||
@@ -623,8 +808,19 @@ function createFodV7Service({
   getNodeRpcConnection,
   getActiveCoinbase,
   rpcCall,
+  openFolder,
+  getExplorer = async (route) => (await explorer.get(route)).data,
 }) {
   let busy = false
+
+  async function openSavedFolder(directory) {
+    if (typeof openFolder !== 'function') return false
+    try {
+      return (await openFolder(directory)) === true
+    } catch {
+      return false
+    }
+  }
 
   async function configOrNull() {
     await privateDirectory(fs, root)
@@ -845,6 +1041,69 @@ function createFodV7Service({
     }
   }
 
+  async function preview(payload) {
+    if (
+      !plainObject(payload, ['actionId', 'offerId']) ||
+      Boolean(payload.actionId) === Boolean(payload.offerId)
+    )
+      fail('Invalid market preview request.')
+    const config = await configOrNull()
+    if (!config) fail('Set the local market deployment pin first.')
+    let session
+    if (payload.actionId) {
+      const coinbase = hex((await getActiveCoinbase()).toLowerCase(), HEX20)
+      const action = await readAction(config, coinbase, payload.actionId)
+      if (action.pinChanged)
+        fail('This purchase belongs to a previous deployment.')
+      session = previewSession(action.prepared)
+    } else {
+      const offerId = hex(payload.offerId.toLowerCase(), HEX32)
+      const initial = await context(config)
+      session = await publicOfferSession(initial.rpc, config.contract, offerId)
+    }
+    const {author, epoch, cids} = session
+    const selected = cids.slice(0, PREVIEW_FLIPS)
+    let records
+    try {
+      const page = await getExplorer(
+        `Epoch/${epoch}/Identity/0x${author}/Flips?limit=100`
+      )
+      records = Array.isArray(page?.result) ? page.result : []
+    } catch {
+      records = []
+    }
+    const listed = new Set(
+      records
+        .filter(
+          (record) =>
+            record &&
+            record.epoch === epoch &&
+            String(record.author || '')
+              .replace(/^0x/i, '')
+              .toLowerCase() === author &&
+            selected.includes(record.cid)
+        )
+        .map((record) => record.cid)
+    )
+    const flips = await Promise.all(
+      selected.map(async (cid) => {
+        if (!listed.has(cid)) return {cid, images: []}
+        try {
+          const content = await getExplorer(`Flip/${cid}/Content`)
+          const pictures = content?.result?.pics
+          const images =
+            Array.isArray(pictures) && pictures.length === 2
+              ? pictures.map(publicJpegDataUrl)
+              : []
+          return {cid, images: images.every(Boolean) ? images : []}
+        } catch {
+          return {cid, images: []}
+        }
+      })
+    )
+    return {count: cids.length, flips}
+  }
+
   async function configure(payload) {
     if (
       !plainObject(payload, [
@@ -1033,11 +1292,25 @@ function createFodV7Service({
     } else if (OPERATIONS[action.meta.operation].irreversible) {
       effect = 'This action has an irreversible contract effect.'
     }
+    const details = []
+    if (action.meta.operation === 'buy' && action.summary.price) {
+      const buyerBond = BigInt(attached) - BigInt(action.summary.price)
+      if (buyerBond >= 0n) {
+        details.push(`Price: ${formatIdnaAtoms(action.summary.price)}`)
+        details.push(`Buyer bond: ${formatIdnaAtoms(buyerBond.toString())}`)
+      }
+    }
+    details.push(`Total attached: ${formatIdnaAtoms(attached)}`)
+    details.push(`Maximum network fee: ${formatIdnaAtoms(action.meta.maxFee)}`)
+    details.push(
+      `Exact base units: attached ${attached}; fee cap ${action.meta.maxFee}`
+    )
+    details.push(effect)
     const confirmation = await dialog.showMessageBox({
       type: 'warning',
-      title: `Send v7 ${action.meta.operation}`,
-      message: `Sign and broadcast ${action.meta.operation}?`,
-      detail: `Attached: ${attached} base units. Maximum fee: ${action.meta.maxFee} base units. ${effect}`,
+      title: 'Flips on Demand · Review transaction',
+      message: `Sign and broadcast ${OPERATION_LABELS[action.meta.operation]}?`,
+      detail: details.join('\n'),
       buttons: ['Cancel', 'Sign and broadcast'],
       defaultId: 0,
       cancelId: 0,
@@ -1241,7 +1514,11 @@ function createFodV7Service({
         ]
       }
     )
-    return {status: 'saved', fileName: 'ciphertext.json', folder: directory}
+    return {
+      status: 'saved',
+      fileName: 'ciphertext.json',
+      folderOpened: await openSavedFolder(directory),
+    }
   }
 
   async function receive(payload) {
@@ -1312,11 +1589,12 @@ function createFodV7Service({
     return {
       status: 'verified',
       usableFlips: receipt.usableFlips,
-      folder: directory,
+      folderOpened: await openSavedFolder(directory),
     }
   }
 
   async function perform(method, payload) {
+    if (method === 'preview') return preview(payload)
     if (busy) fail('A v7 action is already in progress.')
     busy = true
     try {
