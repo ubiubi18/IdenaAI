@@ -133,7 +133,7 @@ function sameAddress(left, right) {
 }
 
 export default function FlipMarketPage() {
-  const [version, setVersion] = React.useState(4)
+  const [version, setVersion] = React.useState(7)
   return version === 7 ? (
     <FlipMarketV7 onSelectV4={() => setVersion(4)} />
   ) : (
@@ -581,13 +581,15 @@ function FlipMarketV4({onSelectV7}) {
         <Box w="full" maxW="5xl">
           <Flex justify="space-between" align="center" mb={5} gap={4}>
             <Box>
-              <PageTitle mb={0}>Flip market</PageTitle>
+              <PageTitle mb={0}>Flips on Demand</PageTitle>
               <Text color="muted" fontSize="sm">
-                Offers from your node
+                Previous test market · Offers from your node
               </Text>
             </Box>
             <Flex gap={2}>
-              <SecondaryButton onClick={onSelectV7}>Direct v7</SecondaryButton>
+              <SecondaryButton onClick={onSelectV7}>
+                Flips on Demand v0.1 preview
+              </SecondaryButton>
               <SecondaryButton onClick={loadMarket} isLoading={marketLoading}>
                 Refresh
               </SecondaryButton>
