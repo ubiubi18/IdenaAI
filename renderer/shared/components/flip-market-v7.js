@@ -7,6 +7,7 @@ import {
   Checkbox,
   Flex,
   FormControl,
+  FormErrorMessage,
   FormLabel,
   Heading,
   Image,
@@ -150,6 +151,7 @@ const FILE_OPERATIONS = new Set([
 const MAX_FEE_BASE_UNITS = 100n * 10n ** 18n
 const MAX_ORDER_ID = 18446744073709551615n
 const OFFER_ID = /^(?:0x)?[0-9a-f]{64}$/i
+const RECEIPT_ID = /^v7-receipt-[0-9a-f]{32}$/
 
 function operationLabel(operation) {
   return OPERATIONS.find(([value]) => value === operation)?.[1] || operation
@@ -187,27 +189,44 @@ function resultOrThrow(response) {
   return response.result
 }
 
-function Field({label, value, onChange, id, ...props}) {
+function Field({
+  label,
+  value,
+  onChange,
+  id,
+  error,
+  descriptionId,
+  isRequired,
+  ...props
+}) {
   return (
-    <FormControl>
+    <FormControl isInvalid={Boolean(error)} isRequired={isRequired}>
       <FormLabel htmlFor={id}>{label}</FormLabel>
       <Input
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         autoComplete="off"
+        aria-describedby={
+          [descriptionId, error && `${id}-error`].filter(Boolean).join(' ') ||
+          undefined
+        }
         {...props}
       />
+      {error && <FormErrorMessage id={`${id}-error`}>{error}</FormErrorMessage>}
     </FormControl>
   )
 }
 
 function BundlePreview({actionId, offerId}) {
   const [preview, setPreview] = React.useState(null)
+  const [previewError, setPreviewError] = React.useState(false)
+  const [retry, setRetry] = React.useState(0)
 
   React.useEffect(() => {
     let active = true
     setPreview(null)
+    setPreviewError(false)
     const timer = setTimeout(
       () => {
         Promise.resolve()
@@ -218,10 +237,13 @@ function BundlePreview({actionId, offerId}) {
             )
           )
           .then((response) => {
-            if (active) setPreview(response?.result || {flips: []})
+            const result = resultOrThrow(response)
+            if (!Array.isArray(result.flips))
+              throw new Error('The public flip preview could not be read.')
+            if (active) setPreview(result)
           })
           .catch(() => {
-            if (active) setPreview({flips: []})
+            if (active) setPreviewError(true)
           })
       },
       actionId ? 0 : 300
@@ -230,7 +252,7 @@ function BundlePreview({actionId, offerId}) {
       active = false
       clearTimeout(timer)
     }
-  }, [actionId, offerId])
+  }, [actionId, offerId, retry])
 
   const flips = Array.isArray(preview?.flips) ? preview.flips : []
   return (
@@ -238,9 +260,15 @@ function BundlePreview({actionId, offerId}) {
       <Text fontSize="sm" fontWeight={500} mb={1}>
         Public flip preview · Idena explorer
       </Text>
-      {!preview && (
+      {!preview && !previewError && (
         <Text color="muted" fontSize="sm">
           Loading images…
+        </Text>
+      )}
+      {previewError && (
+        <Text color="muted" fontSize="sm" role="status">
+          The public flip preview could not load. Check your node connection or
+          try again.
         </Text>
       )}
       {preview && flips.some((flip) => flip.images?.length) && (
@@ -294,9 +322,15 @@ function BundlePreview({actionId, offerId}) {
       )}
       {preview && !flips.some((flip) => flip.images?.length) && (
         <Text color="muted" fontSize="sm">
-          Preview unavailable. Check the offer code and node, or try again
-          later. The purchase checks the original bundle before payment.
+          Explorer images are unavailable. The purchase checks the original
+          bundle before payment.
         </Text>
+      )}
+      {(previewError ||
+        (preview && !flips.some((flip) => flip.images?.length))) && (
+        <SecondaryButton size="sm" mt={2} onClick={() => setRetry(retry + 1)}>
+          Retry preview
+        </SecondaryButton>
       )}
     </Box>
   )
@@ -332,8 +366,13 @@ export default function FlipMarketV7({onSelectV4}) {
   const [orderLookupState, setOrderLookupState] = React.useState('')
   const [orderLookupError, setOrderLookupError] = React.useState('')
   const [orderLookupLoading, setOrderLookupLoading] = React.useState(false)
+  const [sellerLookupState, setSellerLookupState] = React.useState('')
+  const [sellerLookupError, setSellerLookupError] = React.useState('')
+  const [sellerLookupLoading, setSellerLookupLoading] = React.useState(false)
+  const [verifiedReceipt, setVerifiedReceipt] = React.useState(null)
   const requestRef = React.useRef(0)
   const orderLookupRef = React.useRef(0)
+  const sellerLookupRef = React.useRef(0)
 
   const load = React.useCallback(async () => {
     requestRef.current += 1
@@ -378,6 +417,7 @@ export default function FlipMarketV7({onSelectV4}) {
 
   React.useEffect(() => {
     orderLookupRef.current += 1
+    sellerLookupRef.current += 1
     setState(null)
     setNotice('')
     setError('')
@@ -386,10 +426,15 @@ export default function FlipMarketV7({onSelectV4}) {
     setOrderLookupState('')
     setOrderLookupError('')
     setOrderLookupLoading(false)
+    setSellerLookupState('')
+    setSellerLookupError('')
+    setSellerLookupLoading(false)
+    setVerifiedReceipt(null)
     load()
     return () => {
       requestRef.current += 1
       orderLookupRef.current += 1
+      sellerLookupRef.current += 1
     }
   }, [address, internalPort, url, useExternalNode, load])
 
@@ -400,7 +445,14 @@ export default function FlipMarketV7({onSelectV4}) {
     }
   }, [marketOffer, operation])
 
-  const canAct = Boolean(address) && !offline && !syncing && !busy && !loading
+  const canAct =
+    Boolean(address) &&
+    !offline &&
+    !syncing &&
+    !busy &&
+    !loading &&
+    !orderLookupLoading &&
+    !sellerLookupLoading
   const savedBuys =
     state?.actions.filter((item) => item.operation === 'buy') || []
   const sentBuys = savedBuys.filter(
@@ -420,11 +472,16 @@ export default function FlipMarketV7({onSelectV4}) {
       if (currentRequest !== requestRef.current) return
       if (method === 'configure') {
         orderLookupRef.current += 1
+        sellerLookupRef.current += 1
         setPurchaseActionId('')
         setOrderId('')
         setOrderLookupState('')
         setOrderLookupError('')
         setOrderLookupLoading(false)
+        setSellerLookupState('')
+        setSellerLookupError('')
+        setSellerLookupLoading(false)
+        setVerifiedReceipt(null)
         setState(result)
         setShowConfig(false)
         setBinaryPath('')
@@ -445,24 +502,51 @@ export default function FlipMarketV7({onSelectV4}) {
         )
         await load()
       } else if (method === 'submit' || method === 'check') {
+        const action = state?.actions.find(
+          (item) => item.actionId === data.actionId
+        )
         const txStateLabel =
           {
             included: 'Included',
             failed: 'Failed on-chain',
           }[result.status] || 'Outcome uncertain'
-        setNotice(
-          result.status === 'cancelled'
-            ? 'No transaction was signed.'
-            : `${txStateLabel} · ${result.txHash || ''}`
-        )
+        let nextNotice = `${txStateLabel} · ${result.txHash || ''}`
+        if (result.status === 'cancelled') {
+          nextNotice = 'No transaction was signed.'
+        } else if (
+          result.status === 'included' &&
+          action?.operation === 'buy'
+        ) {
+          nextNotice = `Private purchase included. The seller must send the ciphertext privately. Verify it before confirming delivery. Transaction: ${
+            result.txHash || 'recorded'
+          }`
+        } else if (
+          result.status === 'included' &&
+          action?.operation === 'buyPublicSeed'
+        ) {
+          nextNotice = `Public seed purchase included and settled. Its keys were already public. Transaction: ${
+            result.txHash || 'recorded'
+          }`
+        }
+        setNotice(nextNotice)
         await load()
       } else if (method === 'receive') {
+        const savedReceipt = RECEIPT_ID.test(result.receiptId)
+          ? {
+              id: result.receiptId,
+              orderId: data.orderId,
+              purchaseActionId: data.actionId,
+            }
+          : null
+        setVerifiedReceipt(savedReceipt)
+        let receiptLocation = 'The receipt is saved in this app’s local data.'
+        if (savedReceipt) {
+          receiptLocation = 'The saved receipt is ready for confirmation.'
+        } else if (result.folderOpened) {
+          receiptLocation = 'The receipt folder is open.'
+        }
         setNotice(
-          `Verified ${result.usableFlips} original flips. ${
-            result.folderOpened
-              ? 'The receipt folder is open.'
-              : 'The receipt is saved in this app’s local data.'
-          } Next, confirm this order using the saved receipt.`
+          `Verified ${result.usableFlips} original flips. ${receiptLocation} Next, confirm this order.`
         )
         setFlow('buy')
         setOperation('confirm')
@@ -492,6 +576,7 @@ export default function FlipMarketV7({onSelectV4}) {
     setOrderId('')
     setOrderLookupState('')
     setOrderLookupError('')
+    setVerifiedReceipt(null)
     if (!actionId) {
       setOrderLookupLoading(false)
       return
@@ -517,6 +602,48 @@ export default function FlipMarketV7({onSelectV4}) {
     }
   }
 
+  const chooseSellerOffer = (value) => {
+    sellerLookupRef.current += 1
+    setOfferId(value.trim())
+    setOrderId('')
+    setSellerLookupState('')
+    setSellerLookupError('')
+    setSellerLookupLoading(false)
+  }
+
+  const findSellerOrder = async (selectedOfferId) => {
+    if (!canAct || !OFFER_ID.test(selectedOfferId)) return
+    sellerLookupRef.current += 1
+    const request = sellerLookupRef.current
+    setFlow('sell')
+    setOperation('privateMessage')
+    setOfferId(selectedOfferId)
+    setPurchaseActionId('')
+    setVerifiedReceipt(null)
+    setOrderId('')
+    setSellerLookupState('')
+    setSellerLookupError('')
+    setSellerLookupLoading(true)
+    try {
+      const found = resultOrThrow(
+        await window.idena?.social?.v7?.('sellerOrder', {
+          offerId: selectedOfferId,
+        })
+      )
+      if (request !== sellerLookupRef.current) return
+      if (!/^[1-9][0-9]*$/.test(found.orderId) || found.state !== 'funded') {
+        throw new Error('This listing has no valid funded private order.')
+      }
+      setOrderId(found.orderId)
+      setSellerLookupState('funded')
+    } catch (cause) {
+      if (request === sellerLookupRef.current)
+        setSellerLookupError(cause.message)
+    } finally {
+      if (request === sellerLookupRef.current) setSellerLookupLoading(false)
+    }
+  }
+
   const configure = (event) => {
     event.preventDefault()
     run(
@@ -525,6 +652,30 @@ export default function FlipMarketV7({onSelectV4}) {
       'Local deployment pin saved.'
     )
   }
+
+  const chooseBinary = async () => {
+    if (!canAct) return
+    setBusy(true)
+    setError('')
+    try {
+      const selected = resultOrThrow(
+        await window.idena?.social?.v7?.('chooseBinary')
+      )
+      if (selected.path) {
+        setBinaryPath(selected.path)
+        setBinarySha256('')
+      }
+    } catch (cause) {
+      setError(cause.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const useVerifiedReceipt =
+    operation === 'confirm' &&
+    verifiedReceipt?.orderId === orderId &&
+    verifiedReceipt?.purchaseActionId === purchaseActionId
 
   const prepare = (event) => {
     event.preventDefault()
@@ -556,6 +707,7 @@ export default function FlipMarketV7({onSelectV4}) {
         minimumPayout: minimumPayout ? positiveBaseUnits(minimumPayout) : '',
         amount: positiveBaseUnits(amount),
         ...(operation === 'startFallback' ? {sealedFallback} : {}),
+        ...(useVerifiedReceipt ? {receiptId: verifiedReceipt.id} : {}),
         passphrase,
       },
       'Prepared market action'
@@ -568,7 +720,9 @@ export default function FlipMarketV7({onSelectV4}) {
   else if (operation === 'buy')
     prepareLabel = 'Choose session and prepare purchase'
   else if (operation === 'confirm')
-    prepareLabel = 'Choose receipt and prepare confirmation'
+    prepareLabel = useVerifiedReceipt
+      ? 'Prepare confirmation'
+      : 'Choose receipt and prepare confirmation'
   else if (!FILE_OPERATIONS.has(operation))
     prepareLabel = `Prepare ${operationLabel(operation).toLowerCase()}`
 
@@ -607,9 +761,45 @@ export default function FlipMarketV7({onSelectV4}) {
       !orderLookupError &&
       (orderLookupState === 'funded' ||
         (operation === 'refund' && orderLookupState === 'fallback')))
+  let preparationProblem = ''
+  if (!validOfferId) {
+    preparationProblem = BUY_OPERATIONS.has(operation)
+      ? 'Wait for an available bundle with a valid quote.'
+      : 'Enter the seller’s offer code.'
+  } else if (!validOrderId) {
+    preparationProblem = 'Enter a valid order number.'
+  } else if (!validSavedOrder) {
+    preparationProblem = 'Check the saved purchase and its current order state.'
+  } else if (operation === 'receive' && !purchaseActionId) {
+    preparationProblem = 'Choose a saved private purchase.'
+  } else if (VAULT_OPERATIONS.has(operation) && !passphrase) {
+    preparationProblem = 'Enter the vault passphrase.'
+  } else if (!['privateMessage', 'receive'].includes(operation) && !validFee) {
+    preparationProblem =
+      'Enter a maximum network fee above 0 and at most 100 iDNA.'
+  } else if (!validMinimumPayout) {
+    preparationProblem = 'Enter a valid minimum seller payout.'
+  } else if (!validTopUp) {
+    preparationProblem = 'Enter a valid bond top-up.'
+  }
+  const chooseOperation = (nextOperation) => {
+    orderLookupRef.current += 1
+    sellerLookupRef.current += 1
+    setOperation(nextOperation)
+    setOrderId('')
+    setPurchaseActionId('')
+    setOrderLookupState('')
+    setOrderLookupError('')
+    setOrderLookupLoading(false)
+    setSellerLookupState('')
+    setSellerLookupError('')
+    setSellerLookupLoading(false)
+    setVerifiedReceipt(null)
+  }
+
   const chooseFlow = (nextFlow) => {
     setFlow(nextFlow.id)
-    setOperation(nextFlow.operations[0])
+    chooseOperation(nextFlow.operations[0])
   }
 
   const toggleAdvanced = () => {
@@ -629,7 +819,11 @@ export default function FlipMarketV7({onSelectV4}) {
               </Text>
             </Box>
             <Flex gap={2}>
-              <SecondaryButton onClick={load} isLoading={loading}>
+              <SecondaryButton
+                onClick={load}
+                isLoading={loading}
+                isDisabled={busy || orderLookupLoading || sellerLookupLoading}
+              >
                 Refresh
               </SecondaryButton>
             </Flex>
@@ -695,6 +889,7 @@ export default function FlipMarketV7({onSelectV4}) {
                     label="Contract address"
                     value={contract}
                     onChange={setContract}
+                    isRequired
                     isDisabled={!canAct}
                   />
                   <Field
@@ -702,6 +897,7 @@ export default function FlipMarketV7({onSelectV4}) {
                     label="Expected deployed code hash"
                     value={codeHash}
                     onChange={setCodeHash}
+                    isRequired
                     isDisabled={!canAct}
                   />
                   <Field
@@ -709,18 +905,33 @@ export default function FlipMarketV7({onSelectV4}) {
                     label="Local Flips on Demand tool path"
                     value={binaryPath}
                     onChange={setBinaryPath}
+                    isRequired
                     isDisabled={!canAct}
                   />
+                  <SecondaryButton
+                    size="sm"
+                    alignSelf="flex-start"
+                    onClick={chooseBinary}
+                    isDisabled={!canAct}
+                  >
+                    Choose tool file
+                  </SecondaryButton>
                   <Field
                     id="v7-binary-hash"
                     label="CLI SHA-256"
                     value={binarySha256}
                     onChange={setBinarySha256}
+                    isRequired
                     isDisabled={!canAct}
                   />
                   <PrimaryButton
                     type="submit"
                     isLoading={busy}
+                    aria-describedby={
+                      !contract || !codeHash || !binaryPath || !binarySha256
+                        ? 'v7-connection-help'
+                        : undefined
+                    }
                     isDisabled={
                       !canAct ||
                       !contract ||
@@ -731,6 +942,11 @@ export default function FlipMarketV7({onSelectV4}) {
                   >
                     Check and save pins
                   </PrimaryButton>
+                  {(!contract || !codeHash || !binaryPath || !binarySha256) && (
+                    <Text id="v7-connection-help" color="muted" fontSize="sm">
+                      Enter all four values from independently verified sources.
+                    </Text>
+                  )}
                 </Stack>
               </Box>
             </Box>
@@ -797,7 +1013,9 @@ export default function FlipMarketV7({onSelectV4}) {
                       <Select
                         id="v7-operation"
                         value={operation}
-                        onChange={(event) => setOperation(event.target.value)}
+                        onChange={(event) =>
+                          chooseOperation(event.target.value)
+                        }
                         isDisabled={!canAct}
                       >
                         {flowOperations.map((value) => (
@@ -819,16 +1037,15 @@ export default function FlipMarketV7({onSelectV4}) {
                           label="Seller’s offer code"
                           value={offerId}
                           onChange={(value) => setOfferId(value.trim())}
+                          isRequired
+                          error={
+                            offerId && !validOfferId
+                              ? 'The offer code needs 64 hexadecimal characters.'
+                              : ''
+                          }
                           placeholder="Paste the 64-character code"
                           isDisabled={!canAct}
                         />
-                      )}
-                    {offerId &&
-                      !BUY_OPERATIONS.has(operation) &&
-                      !validOfferId && (
-                        <Text color="red.500" fontSize="sm" role="alert">
-                          The offer code needs 64 hexadecimal characters.
-                        </Text>
                       )}
                     {BUY_OPERATIONS.has(operation) && (
                       <Box>
@@ -934,19 +1151,65 @@ export default function FlipMarketV7({onSelectV4}) {
                           and new challenges are closed.
                         </Text>
                       )}
+                    {operation === 'privateMessage' && (
+                      <Box>
+                        <Field
+                          id="v7-seller-offer"
+                          label="Your listed offer code (optional)"
+                          value={offerId}
+                          onChange={chooseSellerOffer}
+                          error={
+                            offerId && !OFFER_ID.test(offerId)
+                              ? 'The offer code needs 64 hexadecimal characters.'
+                              : ''
+                          }
+                          placeholder="Paste the 64-character code"
+                          isDisabled={!canAct}
+                        />
+                        <SecondaryButton
+                          size="sm"
+                          mt={2}
+                          isDisabled={!canAct || !OFFER_ID.test(offerId)}
+                          onClick={() => findSellerOrder(offerId)}
+                        >
+                          Find funded order
+                        </SecondaryButton>
+                      </Box>
+                    )}
+                    {operation === 'privateMessage' && sellerLookupLoading && (
+                      <Text color="muted" fontSize="sm">
+                        Checking the funded order on your node…
+                      </Text>
+                    )}
+                    {operation === 'privateMessage' && sellerLookupError && (
+                      <Text color="red.500" fontSize="sm" role="alert">
+                        {sellerLookupError}
+                      </Text>
+                    )}
                     {ORDER_OPERATIONS.has(operation) && (
                       <Field
                         id="v7-order"
                         label="Order number"
                         value={orderId}
-                        onChange={setOrderId}
-                        isDisabled={!canAct || Boolean(purchaseActionId)}
+                        onChange={(value) => {
+                          setOrderId(value)
+                          if (operation === 'privateMessage')
+                            setSellerLookupState('')
+                        }}
+                        isRequired
+                        error={
+                          orderId && !validOrderId
+                            ? 'Enter a valid order number.'
+                            : ''
+                        }
+                        isDisabled={
+                          !canAct ||
+                          (BUYER_ORDER_OPERATIONS.has(operation) &&
+                            Boolean(purchaseActionId)) ||
+                          (operation === 'privateMessage' &&
+                            sellerLookupState === 'funded')
+                        }
                       />
-                    )}
-                    {orderId && !validOrderId && (
-                      <Text color="red.500" fontSize="sm" role="alert">
-                        Enter a valid order number.
-                      </Text>
                     )}
                     {!['privateMessage', 'receive'].includes(operation) && (
                       <Field
@@ -955,23 +1218,23 @@ export default function FlipMarketV7({onSelectV4}) {
                         value={maxFee}
                         onChange={setMaxFee}
                         inputMode="decimal"
+                        isRequired
+                        descriptionId="v7-fee-help"
+                        error={
+                          maxFee && !validFee
+                            ? 'Enter a fee cap above 0 and at most 100 iDNA.'
+                            : ''
+                        }
                         isDisabled={!canAct}
                       />
                     )}
                     {!['privateMessage', 'receive'].includes(operation) && (
-                      <Text color="muted" fontSize="sm">
+                      <Text id="v7-fee-help" color="muted" fontSize="sm">
                         Set the most you permit for the network fee. The exact
                         call is simulated during preparation and checked again
                         before signing.
                       </Text>
                     )}
-                    {maxFee &&
-                    !validFee &&
-                    !['privateMessage', 'receive'].includes(operation) ? (
-                      <Text color="red.500" fontSize="sm" role="alert">
-                        Enter a fee cap above 0 and at most 100 iDNA.
-                      </Text>
-                    ) : null}
                     {['list', 'relist'].includes(operation) && (
                       <Field
                         id="v7-min-payout"
@@ -979,14 +1242,13 @@ export default function FlipMarketV7({onSelectV4}) {
                         value={minimumPayout}
                         onChange={setMinimumPayout}
                         inputMode="decimal"
+                        error={
+                          !validMinimumPayout
+                            ? 'Enter a positive iDNA amount with at most 18 decimal places.'
+                            : ''
+                        }
                         isDisabled={!canAct}
                       />
-                    )}
-                    {!validMinimumPayout && (
-                      <Text color="red.500" fontSize="sm" role="alert">
-                        Enter a positive iDNA amount with at most 18 decimal
-                        places.
-                      </Text>
                     )}
                     {operation === 'topUpBond' && (
                       <Field
@@ -995,14 +1257,14 @@ export default function FlipMarketV7({onSelectV4}) {
                         value={amount}
                         onChange={setAmount}
                         inputMode="decimal"
+                        isRequired
+                        error={
+                          amount && !validTopUp
+                            ? 'Enter a positive iDNA amount with at most 18 decimal places.'
+                            : ''
+                        }
                         isDisabled={!canAct}
                       />
-                    )}
-                    {!validTopUp && (
-                      <Text color="red.500" fontSize="sm" role="alert">
-                        Enter a positive iDNA amount with at most 18 decimal
-                        places.
-                      </Text>
                     )}
                     {operation === 'startFallback' && (
                       <Checkbox
@@ -1026,18 +1288,48 @@ export default function FlipMarketV7({onSelectV4}) {
                         value={passphrase}
                         onChange={setPassphrase}
                         type="password"
+                        isRequired
                         isDisabled={!canAct}
                       />
                     )}
-                    {FILE_OPERATIONS.has(operation) ||
+                    {useVerifiedReceipt && (
+                      <Flex align="center" gap={2}>
+                        <Text fontSize="sm" color="muted">
+                          Using the receipt you just verified on this computer.
+                        </Text>
+                        <Button
+                          size="sm"
+                          variant="link"
+                          onClick={() => setVerifiedReceipt(null)}
+                        >
+                          Choose another
+                        </Button>
+                      </Flex>
+                    )}
+                    {(FILE_OPERATIONS.has(operation) && !useVerifiedReceipt) ||
                     (operation === 'startFallback' && sealedFallback) ? (
                       <Text fontSize="sm" color="muted">
                         The app will ask for the required local files.
                       </Text>
                     ) : null}
+                    {canAct && preparationProblem && (
+                      <Text
+                        id="v7-preparation-help"
+                        color="muted"
+                        fontSize="sm"
+                        role="status"
+                      >
+                        {preparationProblem}
+                      </Text>
+                    )}
                     <PrimaryButton
                       type="submit"
                       isLoading={busy}
+                      aria-describedby={
+                        canAct && preparationProblem
+                          ? 'v7-preparation-help'
+                          : undefined
+                      }
                       isDisabled={
                         !canAct ||
                         !validOfferId ||
@@ -1102,6 +1394,33 @@ export default function FlipMarketV7({onSelectV4}) {
                             ' · Sign attempt stopped'}
                         </Text>
                         {item.operation === 'buy' &&
+                          item.submitted?.status === 'included' &&
+                          !item.pinChanged && (
+                            <Text color="muted" fontSize="sm">
+                              Private purchase recorded. Verify the seller’s
+                              ciphertext before confirming delivery.
+                            </Text>
+                          )}
+                        {['list', 'relist'].includes(item.operation) &&
+                          item.submitted?.status === 'included' &&
+                          !item.pinChanged && (
+                            <SecondaryButton
+                              size="sm"
+                              mt={2}
+                              isDisabled={!canAct}
+                              onClick={() => findSellerOrder(item.offerId)}
+                            >
+                              Find buyer order
+                            </SecondaryButton>
+                          )}
+                        {item.operation === 'buyPublicSeed' &&
+                          item.submitted?.status === 'included' && (
+                            <Text color="muted" fontSize="sm">
+                              Public seed purchase settled. Its keys were
+                              already public.
+                            </Text>
+                          )}
+                        {item.operation === 'buy' &&
                           !item.attempted &&
                           !item.pinChanged && (
                             <BundlePreview actionId={item.actionId} />
@@ -1110,6 +1429,9 @@ export default function FlipMarketV7({onSelectV4}) {
                       {!item.attempted && !item.pinChanged && (
                         <SecondaryButton
                           size="sm"
+                          aria-label={`Review and send ${operationLabel(
+                            item.operation
+                          )}, action ${item.actionId.slice(-8)}`}
                           isDisabled={!canAct}
                           onClick={() =>
                             run('submit', {actionId: item.actionId})
@@ -1121,6 +1443,9 @@ export default function FlipMarketV7({onSelectV4}) {
                       {item.attempted && item.submitted?.txHash && (
                         <SecondaryButton
                           size="sm"
+                          aria-label={`Check ${operationLabel(
+                            item.operation
+                          )}, action ${item.actionId.slice(-8)}`}
                           isDisabled={!canAct}
                           onClick={() =>
                             run('check', {actionId: item.actionId})
