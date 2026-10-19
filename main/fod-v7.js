@@ -28,6 +28,8 @@ const MAX_PREPARED_BYTES = 20 * 1024 * 1024
 const MAX_SIGNED_BYTES = 2 * MAX_PREPARED_BYTES
 const MAX_NONCE_JOURNAL_BYTES = 4 * 1024 * 1024
 const MAX_FEE = 100n * 10n ** 18n
+const PRICE_CAP = 1000n * 10n ** 18n
+const BOND_GAS = 5000000n
 const FLIP_CID = /^b[a-z2-7]{58}$/
 const PREVIEW_FLIPS = 5
 const explorer = createFetchClient({
@@ -153,6 +155,21 @@ function idnaAtoms(value) {
   }
   const [whole, fraction = ''] = text.split('.')
   return BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, '0') || '0')
+}
+
+function feeRate(value) {
+  const text =
+    typeof value === 'number' && Number.isSafeInteger(value)
+      ? String(value)
+      : value
+  if (
+    typeof text !== 'string' ||
+    !(/^[1-9][0-9]*$/.test(text) || /^0x[0-9a-f]+$/i.test(text)) ||
+    BigInt(text) === 0n
+  ) {
+    fail('The node fee rate could not be read.')
+  }
+  return BigInt(text)
 }
 
 function formatIdnaAtoms(value) {
@@ -706,6 +723,17 @@ async function readPublicMapValue(rpc, contract, prefix, offerId) {
   fail('The public offer inventory is too large to preview.')
 }
 
+async function readPublicField(rpc, contract, key, size) {
+  const value = await rpc('contract_readData', [`0x${contract}`, key, 'hex'])
+  if (
+    typeof value !== 'string' ||
+    !new RegExp(`^(?:0x)?[0-9a-f]{${size * 2}}$`, 'i').test(value)
+  ) {
+    fail('The public market state could not be read.')
+  }
+  return Buffer.from(value.replace(/^0x/i, ''), 'hex')
+}
+
 async function publicOfferSession(rpc, contract, offerId) {
   const offer = await readPublicMapValue(rpc, contract, 'pool/offer/', offerId)
   if (!offer || offer.length !== 222)
@@ -749,7 +777,7 @@ async function publicOfferSession(rpc, contract, offerId) {
   ) {
     fail('The public flip inventory differs from the offer commitment.')
   }
-  return {author, epoch, cids}
+  return {author, epoch, cids, record: offer}
 }
 
 function publicJpegDataUrl(value) {
@@ -900,7 +928,14 @@ function createFodV7Service({
         fail('Resolve the node account nonce and epoch before signing.')
       }
     }
-    return {connection, coinbase, rpc, account, epoch}
+    return {
+      connection,
+      coinbase,
+      rpc,
+      account,
+      epoch,
+      blockHeight: sync.currentBlock,
+    }
   }
 
   async function withCLI(config, initial, passphrase, command) {
@@ -1039,6 +1074,170 @@ function createFodV7Service({
       codeHash: config.codeHash,
       actions: await listActions(config, coinbase),
     }
+  }
+
+  async function nextOffer() {
+    const config = await configOrNull()
+    if (!config) fail('Set the local market deployment pin first.')
+    const initial = await context(config)
+    const primary = await readPublicField(
+      initial.rpc,
+      config.contract,
+      'pool/primary-head',
+      32
+    )
+    const secondary = await readPublicField(
+      initial.rpc,
+      config.contract,
+      'pool/secondary-head',
+      32
+    )
+    const head = primary.some(Boolean) ? primary : secondary
+    if (!head.some(Boolean)) return {available: false}
+    const offerId = head.toString('hex')
+    const session = await publicOfferSession(
+      initial.rpc,
+      config.contract,
+      offerId
+    )
+    const offer = session.record
+    const publicSeed = offer[221] === 1
+    const expectedStatus = primary.some(Boolean) ? 1 : 2
+    const sellerBond = BigInt(`0x${offer.subarray(90, 106).toString('hex')}`)
+    const openOrder = offer.readBigUInt64BE(114)
+    const contentProven = offer[204] === 1
+    const everSold = offer[123] === 1
+    if (
+      offer[122] !== expectedStatus ||
+      openOrder !== 0n ||
+      offer.readBigUInt64BE(106) === 0n ||
+      (publicSeed &&
+        (expectedStatus !== 2 ||
+          !contentProven ||
+          sellerBond !== 0n ||
+          offer.subarray(205, 221).some(Boolean))) ||
+      (!publicSeed &&
+        (sellerBond === 0n ||
+          (expectedStatus === 1 && everSold) ||
+          (expectedStatus === 2 && (!everSold || !contentProven))))
+    ) {
+      fail('The next offer does not match the public queue.')
+    }
+    const [primaryUnits, secondaryUnits, reserve, insurance] =
+      await Promise.all([
+        readPublicField(initial.rpc, config.contract, 'pool/primary-units', 8),
+        readPublicField(
+          initial.rpc,
+          config.contract,
+          'pool/secondary-units',
+          8
+        ),
+        readPublicField(initial.rpc, config.contract, 'pool/reserve', 16),
+        readPublicField(initial.rpc, config.contract, 'pool/insurance', 16),
+      ])
+    const primaryCount = primaryUnits.readBigUInt64BE()
+    const secondaryCount = secondaryUnits.readBigUInt64BE()
+    const units = primaryCount + secondaryCount
+    if (
+      (expectedStatus === 1 && primaryCount === 0n) ||
+      (expectedStatus === 2 && secondaryCount === 0n)
+    ) {
+      fail('The next offer does not match the public queue.')
+    }
+    const pricingReserve =
+      BigInt(`0x${reserve.toString('hex')}`) -
+      BigInt(`0x${insurance.toString('hex')}`)
+    if (units < 1n || units > (1n << 64n) - 11n || pricingReserve < 1n) {
+      fail('The market has no valid current quote.')
+    }
+    const rawPrice = (pricingReserve + units + 8n) / (units + 9n)
+    const price = rawPrice > PRICE_CAP ? PRICE_CAP : rawPrice
+    if (price < 1n) fail('The market has no valid current quote.')
+    const rate = feeRate(await initial.rpc('bcn_feePerGas', []))
+    const buyerBond = publicSeed ? 0n : rate * BOND_GAS
+    if (buyerBond > (1n << 128n) - 1n) {
+      fail('The current fee bond exceeds the contract limit.')
+    }
+    const bondTopUp =
+      !publicSeed && sellerBond < buyerBond ? buyerBond - sellerBond : 0n
+    const sync = await initial.rpc('bcn_syncing', [])
+    if (
+      sync?.syncing !== false ||
+      sync.wrongTime !== false ||
+      sync.currentBlock !== initial.blockHeight ||
+      sync.highestBlock !== sync.currentBlock
+    ) {
+      fail('The market changed while the next offer was read. Refresh it.')
+    }
+    return {
+      available: true,
+      offerId,
+      epoch: session.epoch,
+      count: session.cids.length,
+      publicSeed,
+      price: price.toString(),
+      buyerBond: buyerBond.toString(),
+      total: (price + buyerBond).toString(),
+      bondTopUp: bondTopUp.toString(),
+      blockHeight: initial.blockHeight,
+    }
+  }
+
+  async function purchaseOrder(payload) {
+    if (!plainObject(payload, ['actionId']))
+      fail('Choose a saved private purchase.')
+    const config = await configOrNull()
+    if (!config) fail('Set the local market deployment pin first.')
+    const initial = await context(config)
+    const action = await readAction(config, initial.coinbase, payload.actionId)
+    if (action.meta.operation !== 'buy')
+      fail('Choose a saved private purchase.')
+    const {prepared} = action
+    if (
+      prepared.buyer !== initial.coinbase ||
+      typeof prepared.deliveryKey !== 'string' ||
+      !/^[0-9a-f]{130}$/.test(prepared.deliveryKey) ||
+      !Number.isSafeInteger(prepared.orderNonce) ||
+      prepared.orderNonce < 1
+    ) {
+      fail('The saved purchase has no valid delivery identity.')
+    }
+    const {offerId} = action.summary
+    const session = await publicOfferSession(
+      initial.rpc,
+      config.contract,
+      offerId
+    )
+    const {record: offer} = session
+    const id = offer.readBigUInt64BE(114)
+    if (offer[122] !== 3 || id === 0n)
+      fail('This purchase has no active private order.')
+    const order = await readPublicField(
+      initial.rpc,
+      config.contract,
+      `pool/order/${id}`,
+      215
+    )
+    const state = order[181]
+    if (
+      ![1, 4].includes(state) ||
+      order.subarray(0, 32).toString('hex') !== offerId ||
+      order.subarray(32, 52).toString('hex') !== initial.coinbase ||
+      order.subarray(52, 117).toString('hex') !== prepared.deliveryKey ||
+      order.readBigUInt64BE(173) !== BigInt(prepared.orderNonce)
+    ) {
+      fail('The active order does not match this saved purchase.')
+    }
+    const sync = await initial.rpc('bcn_syncing', [])
+    if (
+      sync?.syncing !== false ||
+      sync.wrongTime !== false ||
+      sync.currentBlock !== initial.blockHeight ||
+      sync.highestBlock !== sync.currentBlock
+    ) {
+      fail('The order changed while it was read. Refresh it.')
+    }
+    return {orderId: id.toString(), state: state === 1 ? 'funded' : 'fallback'}
   }
 
   async function preview(payload) {
@@ -1259,7 +1458,7 @@ function createFodV7Service({
       })
     )
     await syncActionDirectories(fs, directory, root)
-    return {actionId, ...summary}
+    return {actionId, ...summary, maxFee}
   }
 
   async function submit(payload) {
@@ -1301,7 +1500,13 @@ function createFodV7Service({
       }
     }
     details.push(`Total attached: ${formatIdnaAtoms(attached)}`)
+    details.push('App fee: 0 iDNA')
     details.push(`Maximum network fee: ${formatIdnaAtoms(action.meta.maxFee)}`)
+    details.push(
+      `Maximum funds needed: ${formatIdnaAtoms(
+        BigInt(attached) + BigInt(action.meta.maxFee)
+      )}`
+    )
     details.push(
       `Exact base units: attached ${attached}; fee cap ${action.meta.maxFee}`
     )
@@ -1601,6 +1806,10 @@ function createFodV7Service({
       switch (method) {
         case 'status':
           return await status()
+        case 'nextOffer':
+          return await nextOffer()
+        case 'purchaseOrder':
+          return await purchaseOrder(payload)
         case 'configure':
           return await configure(payload)
         case 'prepare':

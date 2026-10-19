@@ -26,6 +26,58 @@ const CHAIN_OFFER_ID = createHash('sha256')
   .update(Buffer.from([0, 230]))
   .digest('hex')
 const TX_HASH = `0x${'e'.repeat(64)}`
+const DELIVERY_KEY = `04${'a'.repeat(128)}`
+
+function marketRpc({publicSeed = false, sellerBond, noHead = false} = {}) {
+  const rate = 1000000000000n
+  const fixed = (value, bytes) =>
+    Buffer.from(value.toString(16).padStart(bytes * 2, '0'), 'hex')
+  const offer = Buffer.alloc(222)
+  Buffer.from(ADDRESS, 'hex').copy(offer, 0)
+  offer.writeUInt16BE(230, 20)
+  offer.writeUInt32BE(PREVIEW_CIDS.length, 22)
+  Buffer.from(INVENTORY_COMMITMENT, 'hex').copy(offer, 26)
+  Buffer.alloc(32, 1).copy(offer, 58)
+  fixed(sellerBond ?? (publicSeed ? 0n : rate * 10000000n), 16).copy(offer, 90)
+  offer.writeBigUInt64BE(1n, 106)
+  offer[122] = publicSeed ? 2 : 1
+  offer[123] = publicSeed ? 1 : 0
+  offer[204] = 1
+  offer[221] = publicSeed ? 1 : 0
+  const inventory = Buffer.concat([
+    Buffer.from([PREVIEW_CIDS.length]),
+    ...PREVIEW_CIDS.flatMap((cid) => [
+      Buffer.from([cid.length]),
+      Buffer.from(cid),
+    ]),
+  ])
+  const head = Buffer.from(CHAIN_OFFER_ID, 'hex')
+  const zero = Buffer.alloc(32)
+  const fields = {
+    'pool/primary-head': !publicSeed && !noHead ? head : zero,
+    'pool/secondary-head': publicSeed && !noHead ? head : zero,
+    'pool/primary-units': fixed(publicSeed ? 0n : 2n, 8),
+    'pool/secondary-units': fixed(publicSeed ? 1n : 0n, 8),
+    'pool/reserve': fixed(10000n * 10n ** 18n, 16),
+    'pool/insurance': fixed(0n, 16),
+  }
+  const onRpc = (method, params) => {
+    if (method === 'bcn_feePerGas') return rate.toString()
+    if (method === 'contract_readData')
+      return `0x${fields[params[1]].toString('hex')}`
+    if (method === 'contract_iterateMap') {
+      const bytes = params[1] === 'pool/offer/' ? offer : inventory
+      return {
+        items: [
+          {key: `0x${CHAIN_OFFER_ID}`, value: `0x${bytes.toString('hex')}`},
+        ],
+        continuationToken: null,
+      }
+    }
+    return undefined
+  }
+  return {onRpc, offer}
+}
 const BINARY_HASH = createHash('sha256')
   .update(fs.readFileSync(process.execPath))
   .digest('hex')
@@ -56,7 +108,9 @@ function fakeSpawn(calls) {
             network: 'idena',
             contract,
             codeHash: CODE_HASH,
-            directOfferId: OFFER_ID,
+            directOfferId: args.includes('-v7-offer-id')
+              ? args[args.indexOf('-v7-offer-id') + 1]
+              : OFFER_ID,
             amount: operation === 'buy' ? '2500000000000000000' : '0',
             ...(operation === 'buy' ? {price: '2000000000000000000'} : {}),
             ...(operation === 'buy'
@@ -65,6 +119,9 @@ function fakeSpawn(calls) {
                   epoch: 230,
                   coveredFlips: PREVIEW_CIDS.length,
                   inventoryCommitment: INVENTORY_COMMITMENT,
+                  buyer: ADDRESS,
+                  deliveryKey: DELIVERY_KEY,
+                  orderNonce: 1,
                   directSession: {
                     author: ADDRESS,
                     epoch: 230,
@@ -264,6 +321,7 @@ describe('direct v7 desktop bridge', () => {
     expect(detail).toContain('Price: 2 iDNA')
     expect(detail).toContain('Buyer bond: 0.5 iDNA')
     expect(detail).toContain('Total attached: 2.5 iDNA')
+    expect(detail).toContain('App fee: 0 iDNA')
     expect(calls).toHaveLength(1)
   })
 
@@ -302,6 +360,100 @@ describe('direct v7 desktop bridge', () => {
     expect(JSON.stringify(preview)).not.toContain('never expose')
     expect(getExplorer).toHaveBeenCalledTimes(2)
     expect(calls).toHaveLength(1)
+  })
+
+  it('reads the next private bundle and its current price and buyer bond', async () => {
+    const v7 = service(marketRpc())
+    await v7('configure', pins)
+
+    const next = await v7('nextOffer')
+    const price = (10000n * 10n ** 18n + 10n) / 11n
+    expect(next).toEqual({
+      available: true,
+      offerId: CHAIN_OFFER_ID,
+      epoch: 230,
+      count: 2,
+      publicSeed: false,
+      price: price.toString(),
+      buyerBond: (5n * 10n ** 18n).toString(),
+      total: (price + 5n * 10n ** 18n).toString(),
+      bondTopUp: '0',
+      blockHeight: 100,
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('shows the public seed without a buyer bond or private order', async () => {
+    const v7 = service(marketRpc({publicSeed: true}))
+    await v7('configure', pins)
+
+    const next = await v7('nextOffer')
+    expect(next.available).toBe(true)
+    expect(next.publicSeed).toBe(true)
+    expect(next.price).toBe((1000n * 10n ** 18n).toString())
+    expect(next.buyerBond).toBe('0')
+    expect(next.total).toBe(next.price)
+  })
+
+  it('reports an empty queue without selecting another offer', async () => {
+    const v7 = service(marketRpc({noHead: true}))
+    await v7('configure', pins)
+    expect(await v7('nextOffer')).toEqual({available: false})
+  })
+
+  it('marks the head unavailable when its seller bond needs a top-up', async () => {
+    const v7 = service(marketRpc({sellerBond: 1n}))
+    await v7('configure', pins)
+    const next = await v7('nextOffer')
+    expect(next.available).toBe(true)
+    expect(next.bondTopUp).toBe((5n * 10n ** 18n - 1n).toString())
+  })
+
+  it('accepts a seller bond equal to the contract minimum', async () => {
+    const v7 = service(marketRpc({sellerBond: 5n * 10n ** 18n}))
+    await v7('configure', pins)
+    expect((await v7('nextOffer')).bondTopUp).toBe('0')
+  })
+
+  it('rejects a queue head whose offer record is not queued', async () => {
+    const market = marketRpc()
+    market.offer[122] = 5
+    const v7 = service(market)
+    await v7('configure', pins)
+    await expect(v7('nextOffer')).rejects.toThrow(
+      'does not match the public queue'
+    )
+  })
+
+  it('resolves the active order only for the matching saved buyer purchase', async () => {
+    const market = marketRpc()
+    market.offer[122] = 3
+    market.offer.writeBigUInt64BE(17n, 114)
+    const order = Buffer.alloc(215)
+    Buffer.from(CHAIN_OFFER_ID, 'hex').copy(order, 0)
+    Buffer.from(ADDRESS, 'hex').copy(order, 32)
+    Buffer.from(DELIVERY_KEY, 'hex').copy(order, 52)
+    order.writeBigUInt64BE(1n, 173)
+    order[181] = 1
+    const onRpc = (method, params) =>
+      method === 'contract_readData' && params[1] === 'pool/order/17'
+        ? `0x${order.toString('hex')}`
+        : market.onRpc(method, params)
+    const v7 = service({onRpc})
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'buy',
+      offerId: CHAIN_OFFER_ID,
+      maxFee: '1000000000000000000',
+    })
+    expect(await v7('purchaseOrder', {actionId: prepared.actionId})).toEqual({
+      orderId: '17',
+      state: 'funded',
+    })
+    order[52] = 3
+    await expect(
+      v7('purchaseOrder', {actionId: prepared.actionId})
+    ).rejects.toThrow('does not match this saved purchase')
   })
 
   it('previews a public offer before preparation using its pinned on-chain inventory', async () => {
