@@ -101,7 +101,9 @@ function fakeSpawn(calls) {
         fs.writeFileSync(
           args[args.indexOf('-prepared') + 1],
           JSON.stringify({
-            format: `fod.prepared-direct-v7-${operation}`,
+            format: `fod.prepared-direct-v7-${
+              operation === 'buyPublicSeed' ? 'buy-public-seed' : operation
+            }`,
             operation,
             directVersion: 7,
             version: 1,
@@ -134,6 +136,25 @@ function fakeSpawn(calls) {
         )
       } else if (args[0] === 'direct-v7-dm') {
         fs.writeFileSync(args[args.indexOf('-out') + 1], '{}', {mode: 0o600})
+      } else if (args[0] === 'direct-v7-receive') {
+        const purchase = JSON.parse(
+          fs.readFileSync(args[args.indexOf('-purchase') + 1], 'utf8')
+        )
+        fs.writeFileSync(
+          args[args.indexOf('-out') + 1],
+          JSON.stringify({
+            format: 'fod.opened-direct-delivery',
+            version: 1,
+            contract: args[args.indexOf('-contract') + 1],
+            offerId: purchase.directOfferId,
+            orderId: Number(args[args.indexOf('-order') + 1]),
+            buyer: purchase.buyer,
+            deliveryKey: purchase.deliveryKey,
+            orderNonce: purchase.orderNonce,
+            usableFlips: 2,
+          }),
+          {mode: 0o600}
+        )
       } else if (args[0] === 'submit') {
         const contract = args[args.indexOf('-contract') + 1]
         fs.writeFileSync(
@@ -188,6 +209,7 @@ describe('direct v7 desktop bridge', () => {
     stakeHash,
     fsImpl = fs,
     getNonce = () => 2,
+    identity = ADDRESS,
     onRpc,
     openFolder,
     getExplorer,
@@ -199,7 +221,7 @@ describe('direct v7 desktop bridge', () => {
       root: path.join(root, 'v7'),
       getNodeRpcConnection: () =>
         connection || {url: 'http://127.0.0.1:9009', key: 'local-key'},
-      getActiveCoinbase: async () => `0x${ADDRESS}`,
+      getActiveCoinbase: async () => `0x${identity}`,
       openFolder,
       getExplorer,
       rpcCall: async (_connection, {method, params}) => {
@@ -213,7 +235,7 @@ describe('direct v7 desktop bridge', () => {
             highestBlock: 100,
           },
           contract_getStake: {Hash: stakeHash || `0x${CODE_HASH}`},
-          dna_getCoinbaseAddr: `0x${ADDRESS}`,
+          dna_getCoinbaseAddr: `0x${identity}`,
           dna_getBalance: {
             balance: '10',
             nonce: getNonce(),
@@ -233,6 +255,13 @@ describe('direct v7 desktop bridge', () => {
     binaryPath: process.execPath,
     binarySha256: BINARY_HASH,
   }
+
+  it('lets the user choose a tool path without treating it as verified', async () => {
+    const v7 = service()
+    expect(await v7('chooseBinary')).toEqual({path: keyFile})
+    expect(fs.existsSync(path.join(root, 'v7', 'config.json'))).toBe(false)
+    expect(calls).toHaveLength(0)
+  })
 
   it('refuses a wrong code pin and non-loopback RPC before storing configuration', async () => {
     const badCode = service({stakeHash: `0x${'f'.repeat(64)}`})
@@ -322,7 +351,25 @@ describe('direct v7 desktop bridge', () => {
     expect(detail).toContain('Buyer bond: 0.5 iDNA')
     expect(detail).toContain('Total attached: 2.5 iDNA')
     expect(detail).toContain('App fee: 0 iDNA')
+    expect(detail).toContain('Verify the delivered ciphertext')
     expect(calls).toHaveLength(1)
+  })
+
+  it('repeats the public-key limitation in the transaction review', async () => {
+    dialog.showMessageBox.mockResolvedValue({response: 0})
+    const v7 = service()
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'buyPublicSeed',
+      offerId: OFFER_ID,
+      maxFee: '1000000000000000000',
+    })
+    expect(await v7('submit', {actionId: prepared.actionId})).toEqual({
+      status: 'cancelled',
+    })
+    const {detail} = dialog.showMessageBox.mock.calls[0][0]
+    expect(detail).toContain('These keys are already public')
+    expect(detail).toContain('no private delivery or dispute')
   })
 
   it('shows only matching public explorer images for a verified saved purchase', async () => {
@@ -456,6 +503,76 @@ describe('direct v7 desktop bridge', () => {
     ).rejects.toThrow('does not match this saved purchase')
   })
 
+  it('resolves only a funded order for the active seller offer', async () => {
+    const market = marketRpc()
+    market.offer[122] = 3
+    market.offer.writeBigUInt64BE(17n, 114)
+    const order = Buffer.alloc(215)
+    Buffer.from(CHAIN_OFFER_ID, 'hex').copy(order, 0)
+    order[181] = 1
+    const onRpc = (method, params) =>
+      method === 'contract_readData' && params[1] === 'pool/order/17'
+        ? `0x${order.toString('hex')}`
+        : market.onRpc(method, params)
+    const v7 = service({onRpc})
+    await v7('configure', pins)
+
+    expect(await v7('sellerOrder', {offerId: CHAIN_OFFER_ID})).toEqual({
+      orderId: '17',
+      state: 'funded',
+    })
+    order[181] = 4
+    await expect(v7('sellerOrder', {offerId: CHAIN_OFFER_ID})).rejects.toThrow(
+      'does not match this offer'
+    )
+    order[181] = 1
+    order[0] = 0
+    await expect(v7('sellerOrder', {offerId: CHAIN_OFFER_ID})).rejects.toThrow(
+      'does not match this offer'
+    )
+    const [firstOfferByte] = Buffer.from(CHAIN_OFFER_ID, 'hex')
+    order[0] = firstOfferByte
+    market.offer[122] = 1
+    await expect(v7('sellerOrder', {offerId: CHAIN_OFFER_ID})).rejects.toThrow(
+      'no funded private order'
+    )
+  })
+
+  it('rejects another seller identity and an order that changes during lookup', async () => {
+    const market = marketRpc()
+    market.offer[122] = 3
+    market.offer.writeBigUInt64BE(17n, 114)
+    const otherSeller = service({identity: 'a'.repeat(40), onRpc: market.onRpc})
+    await otherSeller('configure', pins)
+    await expect(
+      otherSeller('sellerOrder', {offerId: CHAIN_OFFER_ID})
+    ).rejects.toThrow('does not belong to the active identity')
+
+    const order = Buffer.alloc(215)
+    Buffer.from(CHAIN_OFFER_ID, 'hex').copy(order, 0)
+    order[181] = 1
+    let block = 100
+    const onRpc = (method, params) => {
+      if (method === 'bcn_syncing')
+        return {
+          syncing: false,
+          wrongTime: false,
+          currentBlock: block,
+          highestBlock: block,
+        }
+      if (method === 'contract_readData' && params[1] === 'pool/order/17') {
+        block = 101
+        return `0x${order.toString('hex')}`
+      }
+      return market.onRpc(method, params)
+    }
+    const v7 = service({onRpc})
+    await v7('configure', pins)
+    await expect(v7('sellerOrder', {offerId: CHAIN_OFFER_ID})).rejects.toThrow(
+      'changed while it was read'
+    )
+  })
+
   it('previews a public offer before preparation using its pinned on-chain inventory', async () => {
     const offer = Buffer.alloc(222)
     Buffer.from(ADDRESS, 'hex').copy(offer, 0)
@@ -554,6 +671,48 @@ describe('direct v7 desktop bridge', () => {
     })
     expect(openFolder).toHaveBeenCalledTimes(1)
     expect(calls.map(({args}) => args[0])).toEqual(['direct-v7-dm'])
+  })
+
+  it('uses the verified buyer receipt for the same order without selecting it again', async () => {
+    const v7 = service()
+    await v7('configure', pins)
+    const purchase = await v7('prepare', {
+      operation: 'buy',
+      offerId: OFFER_ID,
+      maxFee: '1000000000000000000',
+    })
+    const verified = await v7('receive', {
+      actionId: purchase.actionId,
+      orderId: '17',
+      passphrase: 'new-buyer-vault',
+    })
+    expect(verified).toMatchObject({
+      status: 'verified',
+      usableFlips: 2,
+      receiptId: expect.stringMatching(/^v7-receipt-[0-9a-f]{32}$/),
+    })
+    expect(verified).not.toHaveProperty('receiptPath')
+
+    const dialogsBeforeConfirm = dialog.showOpenDialog.mock.calls.length
+    await expect(
+      v7('prepare', {
+        operation: 'confirm',
+        orderId: '18',
+        maxFee: '1000000000000000000',
+        receiptId: verified.receiptId,
+      })
+    ).rejects.toThrow('does not match this order and identity')
+    const confirm = await v7('prepare', {
+      operation: 'confirm',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+      receiptId: verified.receiptId,
+    })
+    expect(confirm.operation).toBe('confirm')
+    expect(dialog.showOpenDialog).toHaveBeenCalledTimes(dialogsBeforeConfirm)
+    const confirmArgs = calls.at(-1).args
+    expect(confirmArgs[0]).toBe('direct-v7-prepare')
+    expect(confirmArgs).toContain('-delivery')
   })
 
   it('refuses a selected nodekey for another identity before signing', async () => {
