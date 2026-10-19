@@ -19,6 +19,7 @@ const HEX20 = /^(?:0x)?[0-9a-f]{40}$/
 const HEX32 = /^(?:0x)?[0-9a-f]{64}$/
 const DECIMAL = /^(0|[1-9][0-9]*)$/
 const ACTION_ID = /^v7-[0-9a-f]{32}$/
+const RECEIPT_ID = /^v7-receipt-[0-9a-f]{32}$/
 const ATTEMPT_GUARD = 'attempt.guard'
 const NONCE_JOURNAL = 'nonce-journal.jsonl'
 const NONCE_LOCK = 'nonce.lock'
@@ -584,16 +585,28 @@ async function saveConfig(fs, root, config) {
   if (process.platform !== 'win32') await syncDirectory(fs, root)
 }
 
-async function selectedInput(fs, dialog, tempDir, name, privateOnly) {
-  const result = await dialog.showOpenDialog({
-    title: `Choose ${name}`,
-    properties: ['openFile'],
-  })
-  if (result?.canceled || result?.filePaths?.length !== 1)
-    fail('File selection cancelled.')
+async function selectedInput(
+  fs,
+  dialog,
+  tempDir,
+  name,
+  privateOnly,
+  verifiedPath
+) {
+  let selectedPath = verifiedPath
+  if (!selectedPath) {
+    const result = await dialog.showOpenDialog({
+      title: `Choose ${name}`,
+      properties: ['openFile'],
+    })
+    if (result?.canceled || result?.filePaths?.length !== 1)
+      fail('File selection cancelled.')
+    const [chosenPath] = result.filePaths
+    selectedPath = chosenPath
+  }
   const {data} = await readPrivateSelectedFile(
     fs,
-    result.filePaths[0],
+    selectedPath,
     MAX_FILE_BYTES,
     privateOnly,
     true
@@ -840,6 +853,7 @@ function createFodV7Service({
   getExplorer = async (route) => (await explorer.get(route)).data,
 }) {
   let busy = false
+  let verifiedReceipt = null
 
   async function openSavedFolder(directory) {
     if (typeof openFolder !== 'function') return false
@@ -1240,6 +1254,48 @@ function createFodV7Service({
     return {orderId: id.toString(), state: state === 1 ? 'funded' : 'fallback'}
   }
 
+  async function sellerOrder(payload) {
+    if (
+      !plainObject(payload, ['offerId']) ||
+      typeof payload.offerId !== 'string'
+    )
+      fail('Enter a seller offer code.')
+    const offerId = hex(payload.offerId.toLowerCase(), HEX32)
+    const config = await configOrNull()
+    if (!config) fail('Set the local market deployment pin first.')
+    const initial = await context(config)
+    const session = await publicOfferSession(
+      initial.rpc,
+      config.contract,
+      offerId
+    )
+    if (session.author !== initial.coinbase)
+      fail('This offer does not belong to the active identity.')
+    const {record: offer} = session
+    const id = offer.readBigUInt64BE(114)
+    if (offer[122] !== 3 || id === 0n)
+      fail('This offer has no funded private order.')
+    const order = await readPublicField(
+      initial.rpc,
+      config.contract,
+      `pool/order/${id}`,
+      215
+    )
+    if (order[181] !== 1 || order.subarray(0, 32).toString('hex') !== offerId) {
+      fail('The funded order does not match this offer.')
+    }
+    const sync = await initial.rpc('bcn_syncing', [])
+    if (
+      sync?.syncing !== false ||
+      sync.wrongTime !== false ||
+      sync.currentBlock !== initial.blockHeight ||
+      sync.highestBlock !== sync.currentBlock
+    ) {
+      fail('The order changed while it was read. Refresh it.')
+    }
+    return {orderId: id.toString(), state: 'funded'}
+  }
+
   async function preview(payload) {
     if (
       !plainObject(payload, ['actionId', 'offerId']) ||
@@ -1303,6 +1359,21 @@ function createFodV7Service({
     return {count: cids.length, flips}
   }
 
+  async function chooseBinary() {
+    const choice = await dialog.showOpenDialog({
+      title: 'Choose the separately built Flips on Demand tool',
+      properties: ['openFile'],
+    })
+    if (choice?.canceled) return {path: ''}
+    if (
+      choice?.filePaths?.length !== 1 ||
+      !path.isAbsolute(choice.filePaths[0])
+    ) {
+      fail('Choose one local Flips on Demand tool file.')
+    }
+    return {path: choice.filePaths[0]}
+  }
+
   async function configure(payload) {
     if (
       !plainObject(payload, [
@@ -1353,6 +1424,7 @@ function createFodV7Service({
         'amount',
         'sealedFallback',
         'passphrase',
+        'receiptId',
       ])
     )
       fail('Invalid v7 preparation request.')
@@ -1365,6 +1437,14 @@ function createFodV7Service({
     const order = ORDER_OPERATIONS.has(payload.operation)
       ? orderId(payload.orderId)
       : ''
+    if (
+      payload.receiptId !== undefined &&
+      (payload.operation !== 'confirm' ||
+        typeof payload.receiptId !== 'string' ||
+        !RECEIPT_ID.test(payload.receiptId))
+    ) {
+      fail('Invalid verified receipt reference.')
+    }
     const minimumPayout =
       payload.minimumPayout === undefined || payload.minimumPayout === ''
         ? '0'
@@ -1384,6 +1464,17 @@ function createFodV7Service({
     const config = await configOrNull()
     if (!config) fail('Set the local v7 deployment pin first.')
     const initial = await context(config)
+    if (
+      payload.receiptId &&
+      (!verifiedReceipt ||
+        verifiedReceipt.id !== payload.receiptId ||
+        verifiedReceipt.coinbase !== initial.coinbase ||
+        verifiedReceipt.contract !== config.contract ||
+        verifiedReceipt.codeHash !== config.codeHash ||
+        verifiedReceipt.orderId !== order)
+    ) {
+      fail('The verified receipt does not match this order and identity.')
+    }
     const actionId = `v7-${randomBytes(16).toString('hex')}`
     const directory = path.join(
       await actionDirectory(initial.coinbase),
@@ -1433,7 +1524,10 @@ function createFodV7Service({
             dialog,
             tempDir,
             name,
-            ['vault', 'delivery'].includes(name)
+            ['vault', 'delivery'].includes(name),
+            name === 'delivery' && payload.receiptId
+              ? verifiedReceipt.path
+              : undefined
           )
           args.push(`-${name}`, input)
         }
@@ -1488,6 +1582,12 @@ function createFodV7Service({
         'Activation permanently locks 10,000 iDNA without a redeemable share.'
     } else if (action.meta.operation === 'cancel') {
       effect = 'Cancellation can forfeit fraud collateral.'
+    } else if (action.meta.operation === 'buyPublicSeed') {
+      effect =
+        'These keys are already public. Buying settles immediately, with no private delivery or dispute.'
+    } else if (action.meta.operation === 'buy') {
+      effect =
+        'This funds a private order. Verify the delivered ciphertext before confirming.'
     } else if (OPERATIONS[action.meta.operation].irreversible) {
       effect = 'This action has an irreversible contract effect.'
     }
@@ -1786,14 +1886,30 @@ function createFodV7Service({
       receipt?.format !== 'fod.opened-direct-delivery' ||
       receipt.version !== 1 ||
       receipt.contract !== config.contract ||
+      receipt.offerId !== action.summary.offerId ||
+      !Number.isSafeInteger(receipt.orderId) ||
+      String(receipt.orderId) !== order ||
+      receipt.buyer !== initial.coinbase ||
+      receipt.deliveryKey !== action.prepared.deliveryKey ||
+      receipt.orderNonce !== action.prepared.orderNonce ||
       !Number.isInteger(receipt.usableFlips) ||
       receipt.usableFlips < 1 ||
       receipt.usableFlips > 32
     )
       fail('The verified v7 receipt could not be read.')
+    const receiptId = `v7-receipt-${randomBytes(16).toString('hex')}`
+    verifiedReceipt = {
+      id: receiptId,
+      path: path.join(directory, 'receipt.json'),
+      coinbase: initial.coinbase,
+      contract: config.contract,
+      codeHash: config.codeHash,
+      orderId: order,
+    }
     return {
       status: 'verified',
       usableFlips: receipt.usableFlips,
+      receiptId,
       folderOpened: await openSavedFolder(directory),
     }
   }
@@ -1804,12 +1920,16 @@ function createFodV7Service({
     busy = true
     try {
       switch (method) {
+        case 'chooseBinary':
+          return await chooseBinary()
         case 'status':
           return await status()
         case 'nextOffer':
           return await nextOffer()
         case 'purchaseOrder':
           return await purchaseOrder(payload)
+        case 'sellerOrder':
+          return await sellerOrder(payload)
         case 'configure':
           return await configure(payload)
         case 'prepare':
