@@ -892,6 +892,7 @@ const fodV7Service = createFodV7Service({
   ...fodDirectServiceOptions,
   root: join(app.getPath('userData'), 'fod-v7'),
   rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+  openFolder: async (directory) => (await shell.openPath(directory)) === '',
 })
 
 function normalizeLocalAiPayload(payload = {}) {
@@ -3735,7 +3736,7 @@ handleTrusted('social.v7', async (_event, payload) => {
       typeof payload !== 'object' ||
       typeof payload.method !== 'string'
     ) {
-      throw new Error('Invalid v7 request.')
+      throw new Error('Invalid market request.')
     }
     const result = await fodV7Service(payload.method, payload.data)
     if (result?.folder) {
@@ -3750,7 +3751,7 @@ handleTrusted('social.v7', async (_event, payload) => {
       error: {
         message: /^[A-Za-z0-9 .,!?'-]{1,180}$/.test(message)
           ? message
-          : 'The v7 action was refused. Check local pins, node state and selected files.',
+          : 'The market action was refused. Check local pins, node state and selected files.',
       },
     }
   }
