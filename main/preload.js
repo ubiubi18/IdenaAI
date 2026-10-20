@@ -1855,6 +1855,25 @@ const bridge = {
   social: {
     rpc: (payload) => invokeCloneable('social.rpc', payload),
     crypto: (payload) => invokeCloneable('social.crypto', payload),
+    directCheck: (payload) => invokeCloneable('social.direct-check', payload),
+    directReceive: (payload) =>
+      invokeCloneable('social.direct-receive', payload),
+    directBuyPrepare: (payload) =>
+      invokeCloneable('social.direct-buy-prepare', payload),
+    directMarket: (payload) => invokeCloneable('social.direct-market', payload),
+    directList: (payload) => invokeCloneable('social.direct-list', payload),
+    directBuyResume: (payload) =>
+      invokeCloneable('social.direct-buy-resume', payload),
+    directBuyCommit: (payload) =>
+      invokeCloneable('social.direct-buy-commit', payload),
+    directConfirm: (payload) =>
+      invokeCloneable('social.direct-confirm', payload),
+    directRecover: (payload) =>
+      invokeCloneable('social.direct-recover', payload),
+    directRefund: (payload) => invokeCloneable('social.direct-refund', payload),
+    v7: (method, data) => invokeCloneable('social.v7', {method, data}),
+    openDirectVaultFolder: () =>
+      invokeCloneable('social.open-direct-vault-folder'),
   },
   rpc: {
     call: (payload) => invokeCloneable('rpc.call', payload),

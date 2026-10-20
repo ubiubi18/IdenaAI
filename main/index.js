@@ -1,6 +1,8 @@
 const {join, resolve} = require('path')
+const nativeFs = require('fs')
 const os = require('os')
 const https = require('https')
+const {spawn} = require('child_process')
 const {
   BrowserWindow,
   app,
@@ -30,6 +32,21 @@ const {
   resolveIdenaSocialRoot,
 } = require('./idena-social-protocol')
 const {createIdenaSocialCryptoService} = require('./idena-social-crypto')
+const {
+  createFodDirectCheckService,
+  createFodDirectReceiveService,
+  createFodDirectBuyPrepareService,
+  createFodDirectListService,
+  createFodDirectMarketService,
+  createFodDirectBuyResumeService,
+  createFodDirectBuyCommitService,
+  createFodDirectConfirmService,
+  createFodDirectRecoverService,
+  createFodDirectRefundService,
+  DIRECT_V3_CONTRACT,
+  DIRECT_V4_CONTRACT,
+} = require('./fod-direct-check')
+const {createFodV7Service} = require('./fod-v7')
 const {
   validateExportKeyPayload,
   validateGenericRpcMethod,
@@ -747,8 +764,11 @@ async function performExportKeyRpc(payload = {}) {
   return sendNodeRpcRequest(payload)
 }
 
-async function sendNodeRpcRequest(payload = {}) {
-  const {url, key} = getNodeRpcConnection()
+async function sendNodeRpcRequest(
+  payload = {},
+  connection = getNodeRpcConnection()
+) {
+  const {url, key} = connection
   const requestBody = {
     method: String(payload.method || '').trim(),
     params: Array.isArray(payload.params) ? payload.params : [],
@@ -805,6 +825,74 @@ async function performSocialCryptoNodeRpc(payload = {}) {
 
 const idenaSocialCryptoService = createIdenaSocialCryptoService({
   rpcCall: performSocialCryptoNodeRpc,
+})
+
+const fodDirectServiceOptions = {
+  dialog,
+  fs: nativeFs,
+  spawn,
+  binaryPath: process.env.IDENAAI_FOD_DIRECT_CHECK_BIN || '',
+  getNodeRpcConnection,
+  getActiveCoinbase: async () => {
+    const response = await sendNodeRpcRequest({
+      method: 'dna_getCoinbaseAddr',
+      params: [],
+    })
+    if (response?.error || typeof response?.result !== 'string') {
+      throw new Error('active_identity_unavailable')
+    }
+    return response.result
+  },
+}
+
+const fodDirectCheckService = createFodDirectCheckService(
+  fodDirectServiceOptions
+)
+const fodDirectVaultRoot = join(app.getPath('userData'), 'fod-direct-vaults')
+const fodDirectReceiveService = createFodDirectReceiveService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectBuyPrepareService = createFodDirectBuyPrepareService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectListService = createFodDirectListService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodDirectMarketService = createFodDirectMarketService(
+  fodDirectServiceOptions
+)
+const fodDirectBuyResumeService = createFodDirectBuyResumeService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectBuyCommitService = createFodDirectBuyCommitService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodDirectConfirmService = createFodDirectConfirmService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodDirectRecoverService = createFodDirectRecoverService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+})
+const fodDirectRefundService = createFodDirectRefundService({
+  ...fodDirectServiceOptions,
+  vaultRoot: fodDirectVaultRoot,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+const fodV7Service = createFodV7Service({
+  ...fodDirectServiceOptions,
+  root: join(app.getPath('userData'), 'fod-v7'),
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+  openFolder: async (directory) => (await shell.openPath(directory)) === '',
 })
 
 function normalizeLocalAiPayload(payload = {}) {
@@ -3537,6 +3625,177 @@ handleTrusted('social.rpc', async (_event, payload) =>
 handleTrusted('social.crypto', async (_event, payload) =>
   idenaSocialCryptoService(payload)
 )
+
+handleTrusted('social.direct-check', async (_event, payload) => {
+  try {
+    const result = await fodDirectCheckService(payload)
+    return {
+      result: {
+        orderId: result.orderId,
+        author: result.author,
+        epoch: result.epoch,
+        usableFlips: result.usableFlips,
+      },
+    }
+  } catch {
+    return {error: {message: 'Could not verify locally.'}}
+  }
+})
+
+handleTrusted('social.direct-receive', async (_event, payload) => {
+  try {
+    const result = await fodDirectReceiveService(payload)
+    const canConfirm = [DIRECT_V3_CONTRACT, DIRECT_V4_CONTRACT].includes(
+      result.contract
+    )
+    return {
+      result: {
+        orderId: result.orderId,
+        contract: result.contract,
+        canConfirm,
+        author: result.author,
+        epoch: result.epoch,
+        usableFlips: result.usableFlips,
+        saved: true,
+      },
+    }
+  } catch {
+    return {error: {message: 'Could not save verified keys locally.'}}
+  }
+})
+
+handleTrusted('social.direct-buy-prepare', async (_event, payload) => {
+  try {
+    return {result: await fodDirectBuyPrepareService(payload)}
+  } catch {
+    return {error: {message: 'Could not prepare this flip purchase.'}}
+  }
+})
+
+handleTrusted('social.direct-market', async (_event, payload) => {
+  try {
+    return {result: await fodDirectMarketService(payload)}
+  } catch {
+    return {error: {message: 'Could not load direct flip offers.'}}
+  }
+})
+
+handleTrusted('social.direct-list', async (_event, payload) => {
+  try {
+    return {result: await fodDirectListService(payload)}
+  } catch {
+    return {error: {message: 'Could not publish this flip listing.'}}
+  }
+})
+
+handleTrusted('social.direct-buy-resume', async (_event, payload) => {
+  try {
+    return {result: await fodDirectBuyResumeService(payload)}
+  } catch {
+    return {error: {message: 'Could not find a saved flip purchase.'}}
+  }
+})
+
+handleTrusted('social.direct-buy-commit', async (_event, payload) => {
+  try {
+    return {result: await fodDirectBuyCommitService(payload)}
+  } catch {
+    return {error: {message: 'Could not lock funds for this purchase.'}}
+  }
+})
+
+handleTrusted('social.direct-confirm', async (_event, payload) => {
+  try {
+    const result = await fodDirectConfirmService(payload)
+    return {result}
+  } catch {
+    return {error: {message: 'Could not confirm payment on-chain.'}}
+  }
+})
+
+handleTrusted('social.direct-recover', async (_event, payload) => {
+  try {
+    return {result: await fodDirectRecoverService(payload)}
+  } catch {
+    return {error: {message: 'Could not recover verified keys locally.'}}
+  }
+})
+
+handleTrusted('social.direct-refund', async (_event, payload) => {
+  try {
+    return {result: await fodDirectRefundService(payload)}
+  } catch {
+    return {error: {message: 'Could not refund this flip order.'}}
+  }
+})
+
+handleTrusted('social.v7', async (_event, payload) => {
+  try {
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      typeof payload.method !== 'string'
+    ) {
+      throw new Error('Invalid market request.')
+    }
+    const result = await fodV7Service(payload.method, payload.data)
+    if (result?.folder) {
+      const {folder, ...publicResult} = result
+      const openError = await shell.openPath(folder)
+      return {result: {...publicResult, folderOpened: !openError}}
+    }
+    return {result}
+  } catch (error) {
+    const message = error?.message || ''
+    return {
+      error: {
+        message: /^[A-Za-z0-9 .,!?'-]{1,180}$/.test(message)
+          ? message
+          : 'The market action was refused. Check local pins, node state and selected files.',
+      },
+    }
+  }
+})
+
+handleTrusted('social.open-direct-vault-folder', async () => {
+  try {
+    const coinbase = (await fodDirectServiceOptions.getActiveCoinbase())
+      .replace(/^0x/i, '')
+      .toLowerCase()
+    if (!/^[0-9a-f]{40}$/.test(coinbase) || /^0+$/.test(coinbase)) {
+      throw new Error('invalid_identity')
+    }
+    const root = await nativeFs.promises.realpath(fodDirectVaultRoot)
+    if (root !== fodDirectVaultRoot) throw new Error('invalid_vault_root')
+    const rootMetadata = await nativeFs.promises.lstat(root)
+    if (
+      !rootMetadata.isDirectory() ||
+      rootMetadata.isSymbolicLink() ||
+      (process.platform !== 'win32' && rootMetadata.mode % 0o1000 !== 0o700)
+    ) {
+      throw new Error('invalid_vault_root')
+    }
+    const scopedRoot = join(root, coinbase)
+    const metadata = await nativeFs.promises.lstat(scopedRoot)
+    if (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      (process.platform !== 'win32' && metadata.mode % 0o1000 !== 0o700) ||
+      (await nativeFs.promises.realpath(scopedRoot)) !== scopedRoot
+    ) {
+      throw new Error('invalid_vault_folder')
+    }
+    const currentCoinbase = (await fodDirectServiceOptions.getActiveCoinbase())
+      .replace(/^0x/i, '')
+      .toLowerCase()
+    if (currentCoinbase !== coinbase) throw new Error('identity_changed')
+    const error = await shell.openPath(scopedRoot)
+    if (error) throw new Error('vault_folder_unavailable')
+    return {result: {opened: true}}
+  } catch {
+    return {error: {message: 'Could not open the saved keys folder.'}}
+  }
+})
 
 handleTrusted('shell.openExternal.safe', async (_event, payload) =>
   openExternalSafely(payload && payload.url)
