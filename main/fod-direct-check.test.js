@@ -1547,8 +1547,8 @@ describe('trusted FoD direct receive', () => {
     const prettyReceipt = receiptText()
       .replace(/:/g, ': ')
       .replace(/,/g, ',\n  ')
-      .replace('{', '{\n  ')
-      .replace('}', '\n}')
+      .replaceAll('{', '{\n  ')
+      .replaceAll('}', '\n}')
     const receive = service({spawn: fakeSpawn({result: prettyReceipt}).spawn})
 
     await expect(
