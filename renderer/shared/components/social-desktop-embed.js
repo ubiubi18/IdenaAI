@@ -1,11 +1,21 @@
 /* eslint-disable react/prop-types */
 import React from 'react'
+import {useRouter} from 'next/router'
 import {
   Box,
   Button,
   Collapse,
   Flex,
+  FormControl,
+  FormLabel,
   HStack,
+  Input,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Stack,
   Text,
   Tooltip,
@@ -15,6 +25,8 @@ import {SecondaryButton} from './button'
 import {ExternalLink, Page, PageTitle, TextLink} from './components'
 import {useSettingsState} from '../providers/settings-context'
 import {useChainState} from '../providers/chain-context'
+import {useIdentityState} from '../providers/identity-context'
+import {navigateRendererRoute} from '../utils/navigation'
 import {BASE_API_URL, BASE_INTERNAL_API_PORT} from '../api/api-client'
 import {
   SOCIAL_CONTRACT_ADDRESS,
@@ -23,8 +35,11 @@ import {
   SOCIAL_IMAGE_FORMATS,
   SOCIAL_MAX_IMAGE_BYTES,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
+  SOCIAL_DIRECT_V4_CONTRACT,
   SOCIAL_OFFICIAL_INDEXER_URL,
+  parseSocialV4DeliveryOrder,
   validateSocialCryptoRequest,
+  validateSocialDirectCheckRequest,
   validateSocialRpcRequest,
   isTrustedSocialFrameMessage,
 } from './social-desktop-rpc-policy'
@@ -51,6 +66,16 @@ const SOCIAL_RPC_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_REQUEST'
 const SOCIAL_RPC_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_RPC_RESPONSE'
 const SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_REQUEST'
 const SOCIAL_CRYPTO_RESPONSE_MESSAGE_TYPE = 'IDENA_SOCIAL_CRYPTO_RESPONSE'
+const SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_CHECK_REQUEST'
+const SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_CHECK_RESPONSE'
+const SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_RECEIVE_REQUEST'
+const SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE =
+  'IDENA_SOCIAL_DIRECT_RECEIVE_RESPONSE'
+const DIRECT_V3_CONTRACT = '6bc41502f4611d041a986cda580209d7f5a4e0d4'
+const DIRECT_V4_CONTRACT = SOCIAL_DIRECT_V4_CONTRACT
 
 function formatBytesAsMib(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
@@ -118,16 +143,69 @@ export default function SocialDesktopEmbed({
   bootstrapOverrides = null,
   iframeTitle = 'idena.social',
 }) {
+  const router = useRouter()
   const settings = useSettingsState()
   const {offline, syncing} = useChainState()
+  const {address} = useIdentityState()
   const {internalPort, url, useExternalNode} = settings
 
   const [iframeNonce, setIframeNonce] = React.useState(0)
   const [bootstrapReady, setBootstrapReady] = React.useState(false)
   const [historyMode, setHistoryMode] = React.useState('indexer-api')
   const [showTechnicalDetails, setShowTechnicalDetails] = React.useState(false)
+  const [receiveRequest, setReceiveRequest] = React.useState(null)
+  const [vaultPassphrase, setVaultPassphrase] = React.useState('')
+  const [vaultPassphraseRepeat, setVaultPassphraseRepeat] = React.useState('')
+  const [savingVault, setSavingVault] = React.useState(false)
+  const [vaultInputError, setVaultInputError] = React.useState('')
+  const [savedVault, setSavedVault] = React.useState(false)
+  const [confirmation, setConfirmation] = React.useState(null)
+  const [vaultFolderError, setVaultFolderError] = React.useState('')
+  const [buyAttempt, setBuyAttempt] = React.useState(null)
+  const [savedBuyIds, setSavedBuyIds] = React.useState([])
+  const [buyBusy, setBuyBusy] = React.useState(false)
+  const buyContextRef = React.useRef(0)
   const iframeRef = React.useRef(null)
   const messagePortRef = React.useRef(null)
+  const receiveRequestRef = React.useRef(null)
+  const savingVaultRef = React.useRef(false)
+
+  React.useEffect(() => {
+    let current = true
+    buyContextRef.current += 1
+    const buyContext = buyContextRef.current
+    setBuyAttempt(null)
+    setSavedBuyIds([])
+    setBuyBusy(false)
+    Promise.resolve(window.idena?.social?.directBuyResume?.({}))
+      .then((response) => {
+        const purchaseId = response?.result?.purchaseId
+        const purchaseIds = response?.result?.purchaseIds
+        if (
+          current &&
+          buyContextRef.current === buyContext &&
+          Array.isArray(purchaseIds) &&
+          purchaseIds.length <= 1000 &&
+          purchaseIds.every((id) => /^fod-buy-[0-9a-f]{32}$/.test(id)) &&
+          new Set(purchaseIds).size === purchaseIds.length &&
+          (purchaseIds[0] || null) === purchaseId
+        ) {
+          setSavedBuyIds((existing) => [
+            ...existing.filter((id) => !purchaseIds.includes(id)),
+            ...purchaseIds,
+          ])
+          if (purchaseId) {
+            setBuyAttempt(
+              (existing) => existing || {purchaseId, status: 'saved'}
+            )
+          }
+        }
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [address, internalPort, url, useExternalNode])
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -220,8 +298,82 @@ export default function SocialDesktopEmbed({
 
     if (
       nextPayload?.type !== SOCIAL_RPC_REQUEST_MESSAGE_TYPE &&
-      nextPayload?.type !== SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE
+      nextPayload?.type !== SOCIAL_CRYPTO_REQUEST_MESSAGE_TYPE &&
+      nextPayload?.type !== SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE &&
+      nextPayload?.type !== SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE
     ) {
+      return
+    }
+
+    if (nextPayload.type === SOCIAL_DIRECT_CHECK_REQUEST_MESSAGE_TYPE) {
+      const {payload} = nextPayload
+      const {requestId: checkRequestId} = payload || {}
+      let response
+      if (validateSocialDirectCheckRequest(payload)) {
+        response = {error: {message: 'Invalid flip delivery request.'}}
+      } else {
+        try {
+          const check = window.idena?.social?.directCheck
+          if (typeof check !== 'function')
+            throw new Error('Local verification is unavailable.')
+          response = await check({message: payload.message})
+        } catch {
+          response = {error: {message: 'Local verification is unavailable.'}}
+        }
+      }
+      port.postMessage({
+        type: SOCIAL_DIRECT_CHECK_RESPONSE_MESSAGE_TYPE,
+        payload: {requestId: checkRequestId, response},
+      })
+      return
+    }
+
+    if (nextPayload.type === SOCIAL_DIRECT_RECEIVE_REQUEST_MESSAGE_TYPE) {
+      const {payload} = nextPayload
+      const {requestId: receiveRequestId} = payload || {}
+      const receiveValidationError = validateSocialDirectCheckRequest(payload)
+      if (
+        receiveValidationError ||
+        receiveRequestRef.current ||
+        savingVaultRef.current
+      ) {
+        port.postMessage({
+          type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+          payload: {
+            requestId: receiveRequestId,
+            response: {
+              error: {
+                message: receiveValidationError
+                  ? 'Invalid flip delivery request.'
+                  : 'A vault save is already open.',
+              },
+            },
+          },
+        })
+      } else {
+        let confirmableDelivery = false
+        try {
+          confirmableDelivery = [
+            DIRECT_V3_CONTRACT,
+            DIRECT_V4_CONTRACT,
+          ].includes(JSON.parse(payload.message).contract)
+        } catch {
+          // The native verifier will reject malformed delivery messages.
+        }
+        const request = {
+          port,
+          requestId: receiveRequestId,
+          message: payload.message,
+          confirmableDelivery,
+          savedPayment: parseSocialV4DeliveryOrder(payload.message),
+        }
+        receiveRequestRef.current = request
+        setSavedVault(false)
+        setConfirmation(null)
+        setVaultFolderError('')
+        setReceiveRequest(request)
+        setVaultInputError('')
+      }
       return
     }
 
@@ -322,11 +474,242 @@ export default function SocialDesktopEmbed({
   }, [])
 
   const closeMessagePort = React.useCallback(() => {
+    if (receiveRequestRef.current) {
+      const request = receiveRequestRef.current
+      receiveRequestRef.current = null
+      try {
+        request.port.postMessage({
+          type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+          payload: {
+            requestId: request.requestId,
+            response: {error: {message: 'Vault save cancelled.'}},
+          },
+        })
+      } catch {
+        // The embedded view may already have closed its port.
+      }
+      setReceiveRequest(null)
+      setVaultPassphrase('')
+      setVaultPassphraseRepeat('')
+    }
     if (messagePortRef.current) {
       messagePortRef.current.close()
       messagePortRef.current = null
     }
   }, [])
+
+  const cancelVaultSave = React.useCallback(() => {
+    if (savingVaultRef.current || !receiveRequestRef.current) return
+    const {current: request} = receiveRequestRef
+    receiveRequestRef.current = null
+    try {
+      request.port.postMessage({
+        type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+        payload: {
+          requestId: request.requestId,
+          response: {error: {message: 'Vault save cancelled.'}},
+        },
+      })
+    } catch {
+      // The embedded view may already have closed its port.
+    }
+    setReceiveRequest(null)
+    setVaultPassphrase('')
+    setVaultPassphraseRepeat('')
+    setVaultInputError('')
+  }, [])
+
+  const confirmSavedVault = React.useCallback(async ({orderId, contract}) => {
+    setConfirmation({orderId, contract, status: 'confirming'})
+    let status = 'failed'
+    try {
+      const confirm = window.idena?.social?.directConfirm
+      if (typeof confirm !== 'function')
+        throw new Error('Local payment confirmation is unavailable.')
+      const response = await confirm({orderId, contract})
+      if (
+        response?.result?.orderId === orderId &&
+        ['settled', 'pending', 'uncertain'].includes(response.result.status)
+      ) {
+        status = response.result.status
+      }
+    } catch {
+      // The keys remain saved even when payment confirmation cannot complete.
+    }
+    setConfirmation((current) =>
+      current?.orderId === orderId && current?.contract === contract
+        ? {...current, status}
+        : current
+    )
+    return status
+  }, [])
+
+  const confirmExistingVault = React.useCallback(async () => {
+    const request = receiveRequestRef.current
+    if (!request?.savedPayment || savingVaultRef.current) return
+    savingVaultRef.current = true
+    setSavingVault(true)
+    const status = await confirmSavedVault(request.savedPayment)
+    savingVaultRef.current = false
+    setSavingVault(false)
+    if (receiveRequestRef.current !== request) return
+    receiveRequestRef.current = null
+    setReceiveRequest(null)
+    try {
+      request.port.postMessage({
+        type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+        payload: {
+          requestId: request.requestId,
+          response: ['settled', 'pending', 'uncertain'].includes(status)
+            ? {
+                result: {
+                  orderId: request.savedPayment.orderId,
+                  confirmationStatus: status,
+                },
+              }
+            : {error: {message: 'Could not confirm saved payment.'}},
+        },
+      })
+    } catch {
+      // The embedded view may already have closed its port.
+    }
+  }, [confirmSavedVault])
+
+  const saveVerifiedVault = React.useCallback(async () => {
+    const request = receiveRequestRef.current
+    if (!request || savingVaultRef.current) return
+    const codepoints = Array.from(vaultPassphrase)
+    if (
+      codepoints.length < 12 ||
+      codepoints.length > 512 ||
+      vaultPassphrase.includes('\0')
+    ) {
+      setVaultInputError('Use a passphrase between 12 and 512 characters.')
+      return
+    }
+    if (vaultPassphrase !== vaultPassphraseRepeat) {
+      setVaultInputError('Passphrases do not match.')
+      return
+    }
+    setVaultInputError('')
+    savingVaultRef.current = true
+    setSavingVault(true)
+    let response
+    try {
+      const receive = window.idena?.social?.directReceive
+      if (typeof receive !== 'function')
+        throw new Error('Local vault save is unavailable.')
+      response = await receive({
+        message: request.message,
+        passphrase: vaultPassphrase,
+      })
+    } catch {
+      response = {error: {message: 'Could not save verified keys locally.'}}
+    }
+    setVaultPassphrase('')
+    setVaultPassphraseRepeat('')
+    savingVaultRef.current = false
+    setSavingVault(false)
+    const result = response?.result
+    if (result?.saved === true) setSavedVault(true)
+    if (receiveRequestRef.current === request) {
+      receiveRequestRef.current = null
+      setReceiveRequest(null)
+      try {
+        request.port.postMessage({
+          type: SOCIAL_DIRECT_RECEIVE_RESPONSE_MESSAGE_TYPE,
+          payload: {
+            requestId: request.requestId,
+            response:
+              result?.saved === true
+                ? {
+                    result: {
+                      orderId: result.orderId,
+                      author: result.author,
+                      epoch: result.epoch,
+                      usableFlips: result.usableFlips,
+                      saved: true,
+                    },
+                  }
+                : {
+                    error: {
+                      message:
+                        response?.error?.message ||
+                        'Could not save verified keys locally.',
+                    },
+                  },
+          },
+        })
+      } catch {
+        // The embedded view may already have closed its port.
+      }
+    }
+    if (result?.saved === true && result.canConfirm === true) {
+      confirmSavedVault({orderId: result.orderId, contract: result.contract})
+    }
+  }, [confirmSavedVault, vaultPassphrase, vaultPassphraseRepeat])
+
+  const openSavedVaultFolder = React.useCallback(async () => {
+    try {
+      const result = await window.idena?.social?.openDirectVaultFolder?.()
+      if (result?.result?.opened !== true) throw new Error('open_failed')
+      setVaultFolderError('')
+    } catch {
+      setVaultFolderError('Could not open the saved keys folder.')
+    }
+  }, [])
+
+  const commitBuy = React.useCallback(async (purchaseId) => {
+    const buyContext = buyContextRef.current
+    const response = await window.idena?.social?.directBuyCommit?.({purchaseId})
+    const result = response?.result
+    if (
+      result?.purchaseId !== purchaseId ||
+      ![
+        'funded',
+        'settled',
+        'included',
+        'pending',
+        'uncertain',
+        'cancelled',
+      ].includes(result.status)
+    ) {
+      throw new Error('buy_failed')
+    }
+    if (buyContextRef.current === buyContext) {
+      setBuyAttempt({
+        purchaseId,
+        status: result.status,
+        orderId: result.orderId,
+      })
+    }
+  }, [])
+
+  const openFlipMarket = React.useCallback(() => {
+    navigateRendererRoute(router, '/flip-market')
+  }, [router])
+
+  const checkBuy = React.useCallback(async () => {
+    if (buyBusy || !buyAttempt?.purchaseId) return
+    const buyContext = buyContextRef.current
+    setBuyBusy(true)
+    try {
+      await commitBuy(buyAttempt.purchaseId)
+    } catch {
+      if (buyContextRef.current === buyContext) {
+        setBuyAttempt((current) => current && {...current, status: 'failed'})
+      }
+    } finally {
+      if (buyContextRef.current === buyContext) setBuyBusy(false)
+    }
+  }, [buyAttempt, buyBusy, commitBuy])
+
+  const showNextSavedBuy = React.useCallback(() => {
+    if (buyBusy || savedBuyIds.length < 2) return
+    const index = savedBuyIds.indexOf(buyAttempt?.purchaseId)
+    const purchaseId = savedBuyIds[(index + 1) % savedBuyIds.length]
+    setBuyAttempt({purchaseId, status: 'saved'})
+  }, [buyAttempt, buyBusy, savedBuyIds])
 
   const initializeIframeChannel = React.useCallback(() => {
     const frameWindow = iframeRef.current?.contentWindow
@@ -418,6 +801,9 @@ export default function SocialDesktopEmbed({
                 </Text>
               </Box>
               <HStack spacing={2} flexWrap="wrap">
+                <SecondaryButton size="sm" onClick={openFlipMarket}>
+                  Buy flip keys
+                </SecondaryButton>
                 <SecondaryButton
                   size="sm"
                   onClick={() => setIframeNonce((value) => value + 1)}
@@ -448,6 +834,75 @@ export default function SocialDesktopEmbed({
               </HStack>
             </Flex>
             {headerContent}
+            {buyAttempt && (
+              <HStack spacing={2} flexWrap="wrap">
+                <Text
+                  color={
+                    ['funded', 'settled'].includes(buyAttempt.status)
+                      ? 'green.600'
+                      : 'muted'
+                  }
+                  fontSize="sm"
+                  role="status"
+                >
+                  {new Map([
+                    [
+                      'funded',
+                      `Purchase funded on-chain. Order ${buyAttempt.orderId}.`,
+                    ],
+                    [
+                      'settled',
+                      `Purchase settled on-chain. Order ${buyAttempt.orderId}.`,
+                    ],
+                    [
+                      'saved',
+                      'Saved purchase available. Check or continue it.',
+                    ],
+                    [
+                      'included',
+                      'Purchase included; waiting to identify its order.',
+                    ],
+                    ['pending', 'Purchase pending on-chain.'],
+                    [
+                      'uncertain',
+                      'Submission unverified. Check status before trying again.',
+                    ],
+                    [
+                      'cancelled',
+                      'Purchase cancelled. Prepared files are saved.',
+                    ],
+                  ]).get(buyAttempt.status) || 'Purchase could not complete.'}
+                </Text>
+                {buyAttempt.purchaseId &&
+                  !['funded', 'settled'].includes(buyAttempt.status) && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={checkBuy}
+                      isLoading={buyBusy}
+                    >
+                      {['saved', 'cancelled', 'failed'].includes(
+                        buyAttempt.status
+                      )
+                        ? 'Continue purchase'
+                        : 'Check status'}
+                    </Button>
+                  )}
+                {savedBuyIds.length > 1 &&
+                  savedBuyIds.includes(buyAttempt.purchaseId) && (
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={showNextSavedBuy}
+                      isDisabled={buyBusy}
+                    >
+                      Saved purchase{' '}
+                      {savedBuyIds.indexOf(buyAttempt.purchaseId) + 1} of{' '}
+                      {savedBuyIds.length} · Next
+                    </Button>
+                  )}
+              </HStack>
+            )}
             <HStack spacing={3} flexWrap="wrap">
               <Text color="muted" fontSize="xs">
                 {usingIndexerFallback
@@ -594,6 +1049,185 @@ export default function SocialDesktopEmbed({
           </Box>
         </Flex>
       </Page>
+      <Modal
+        isOpen={Boolean(receiveRequest || savedVault)}
+        onClose={savedVault ? () => setSavedVault(false) : cancelVaultSave}
+        isCentered
+        closeOnOverlayClick={!savingVault}
+        closeOnEsc={!savingVault}
+      >
+        <ModalOverlay />
+        <ModalContent>
+          {savedVault ? (
+            <>
+              <ModalHeader>Verified keys saved</ModalHeader>
+              <ModalBody>
+                <Text fontSize="sm" color="muted">
+                  The encrypted vault is in this identity’s app profile. Keep
+                  your passphrase to open it later.
+                </Text>
+                {confirmation && (
+                  <>
+                    <Text
+                      fontSize="sm"
+                      color={
+                        confirmation.status === 'settled'
+                          ? 'green.600'
+                          : 'muted'
+                      }
+                      mt={2}
+                      role="status"
+                    >
+                      {new Map([
+                        ['settled', 'Payment confirmed on-chain.'],
+                        ['confirming', 'Confirming payment on-chain…'],
+                        ['pending', 'Payment confirmation is pending.'],
+                        [
+                          'uncertain',
+                          'Payment submission is unverified. Your keys are saved.',
+                        ],
+                      ]).get(confirmation.status) ||
+                        'Payment confirmation failed. Your keys are saved.'}
+                    </Text>
+                    {['pending', 'uncertain', 'failed'].includes(
+                      confirmation.status
+                    ) && (
+                      <Button
+                        variant="link"
+                        size="sm"
+                        mt={1}
+                        onClick={() => confirmSavedVault(confirmation)}
+                      >
+                        {confirmation.status === 'failed'
+                          ? 'Retry confirmation'
+                          : 'Check payment status'}
+                      </Button>
+                    )}
+                  </>
+                )}
+                {vaultFolderError && (
+                  <Text color="red.500" fontSize="sm" role="alert">
+                    {vaultFolderError}
+                  </Text>
+                )}
+              </ModalBody>
+              <ModalFooter>
+                <Button
+                  variant="ghost"
+                  mr={3}
+                  onClick={() => setSavedVault(false)}
+                >
+                  Close
+                </Button>
+                <Button colorScheme="blue" onClick={openSavedVaultFolder}>
+                  Open keys folder
+                </Button>
+              </ModalFooter>
+            </>
+          ) : (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                saveVerifiedVault()
+              }}
+            >
+              <ModalHeader>
+                {receiveRequest?.savedPayment
+                  ? 'Save keys or confirm payment'
+                  : 'Save verified flip keys'}
+              </ModalHeader>
+              <ModalBody>
+                <Stack spacing={4}>
+                  <Text fontSize="sm" color="muted">
+                    {receiveRequest?.savedPayment ? (
+                      <>
+                        Order {receiveRequest.savedPayment.orderId}: save
+                        verified keys with a passphrase, or confirm payment for
+                        keys already saved. A new on-chain confirmation can cost
+                        up to 3 iDNA. Keep your passphrase.
+                      </>
+                    ) : (
+                      <>
+                        The app will verify the original flips again and save an
+                        encrypted vault in this app profile.
+                        {receiveRequest?.confirmableDelivery &&
+                          ' Saving valid keys also submits an on-chain payment confirmation, with a network fee capped at 3 iDNA.'}{' '}
+                        Keep this passphrase; it cannot be recovered.
+                      </>
+                    )}
+                  </Text>
+                  <FormControl>
+                    <FormLabel htmlFor="fod-vault-passphrase">
+                      Vault passphrase
+                    </FormLabel>
+                    <Input
+                      id="fod-vault-passphrase"
+                      type="password"
+                      autoComplete="off"
+                      value={vaultPassphrase}
+                      maxLength={512}
+                      onChange={(event) =>
+                        setVaultPassphrase(event.target.value)
+                      }
+                      autoFocus
+                    />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel htmlFor="fod-vault-passphrase-repeat">
+                      Repeat passphrase
+                    </FormLabel>
+                    <Input
+                      id="fod-vault-passphrase-repeat"
+                      type="password"
+                      autoComplete="off"
+                      value={vaultPassphraseRepeat}
+                      maxLength={512}
+                      onChange={(event) =>
+                        setVaultPassphraseRepeat(event.target.value)
+                      }
+                    />
+                  </FormControl>
+                  {vaultInputError && (
+                    <Text color="red.500" fontSize="sm" role="alert">
+                      {vaultInputError}
+                    </Text>
+                  )}
+                </Stack>
+              </ModalBody>
+              <ModalFooter>
+                <Button
+                  variant="ghost"
+                  mr={3}
+                  onClick={cancelVaultSave}
+                  isDisabled={savingVault}
+                >
+                  Cancel
+                </Button>
+                {receiveRequest?.savedPayment && (
+                  <Button
+                    variant="outline"
+                    mr={3}
+                    type="button"
+                    isLoading={savingVault}
+                    onClick={confirmExistingVault}
+                  >
+                    Confirm saved payment
+                  </Button>
+                )}
+                <Button
+                  colorScheme="blue"
+                  type="submit"
+                  isLoading={savingVault}
+                >
+                  {receiveRequest?.confirmableDelivery
+                    ? 'Save keys and confirm payment'
+                    : 'Save verified keys'}
+                </Button>
+              </ModalFooter>
+            </form>
+          )}
+        </ModalContent>
+      </Modal>
     </Layout>
   )
 }

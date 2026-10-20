@@ -267,6 +267,36 @@ The desktop's main process handles private-key operations for the supported
 message path; the embedded page receives decrypted message text, not the private
 identity key. Legacy messages may require the social app's manual session credentials.
 
+For a received Flips on Demand delivery, **Check flip keys** verifies the
+funded or cooperatively settled order and original flips through the active
+node. It requires a locally built `fod` CLI with `direct-check`, configured by
+the absolute `IDENAAI_FOD_DIRECT_CHECK_BIN` path, plus the buyer's owner-only
+retained purchase and raw delivery-key files. The check does not save a vault
+or confirm payment; use `fod direct-receive` before confirmation. The desktop
+package does not bundle the CLI.
+
+### Experimental Flips on Demand v0.1 (source checkout)
+
+The source checkout's **Flip market** page reads the next eligible bundle and
+quote from your synced loopback node, with CID-matched public explorer previews.
+It prepares typed contract actions through a separately built `fod` CLI. Before
+use, independently establish the intended contract address and code hash, then
+enter those values plus the CLI's absolute path and SHA-256. The app checks
+these inputs against your node and local file; this does not establish their
+provenance or safety. Published IdenaAI binaries do not include this page or
+the CLI. See the [Flips on Demand guide](https://github.com/ubiubi18/flips-on-demand/blob/main/README.md)
+for node, proof, fee, bond, and lifecycle requirements.
+
+Choose an action, supply the requested private files, and prepare it without
+signing. Review the attached value and maximum fee before **Review and send**;
+the app asks for the active node key and confirms again before broadcasting.
+For a private sale, **Create private ciphertext** saves a local file for the
+seller to deliver through a channel they choose. The buyer uses **Verify
+received ciphertext** to check the funded order and original flips, then may
+prepare `confirm` with the saved receipt. For a saved private purchase, the page
+finds its active order number on your node; orders created elsewhere still need
+an entered number. The app does not send messages.
+
 ## Source and release status
 
 `main` contains ongoing development; the package version is currently `0.1.0-rc7`.
