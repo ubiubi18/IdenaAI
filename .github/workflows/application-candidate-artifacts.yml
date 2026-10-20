@@ -71,6 +71,9 @@ jobs:
       - name: Run release check
         run: npm run release:check
 
+      - name: Test Direct v7 desktop bridge
+        run: npm test -- --runInBand main/fod-v7.test.js
+
       - name: Build renderer
         run: npm run build
 
