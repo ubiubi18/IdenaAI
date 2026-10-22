@@ -18,7 +18,7 @@ const post = (overrides: Partial<Post> = {}) => ({
 describe('top-level feed visibility', () => {
     it('shows resolved top-level text and media posts', () => {
         expect(isRenderableTopLevelPost(post())).toBe(true);
-        expect(isRenderableTopLevelPost(post({message: '', image: 'blob:image'}))).toBe(true);
+        expect(isRenderableTopLevelPost(post({message: '', image: new File([], 'image.png')}))).toBe(true);
     });
 
     it('hides unresolved shells until their content is available', () => {

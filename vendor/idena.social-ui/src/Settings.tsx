@@ -1,5 +1,11 @@
 import { useEffect } from "react";
 import { useNavigate, useOutletContext } from "react-router";
+import { clearMessagesCache } from "./logic/messagesStore";
+import { clearPostersCache } from "./logic/postersStore";
+import { clearPostsCache } from "./logic/postsStore";
+import { clearTipsCache } from "./logic/tipsStore";
+import { clearIgnoresCache } from "./logic/ignoreStore";
+import { clearBlocksCapturedRange } from "./logic/blocksCapturedStore";
 
 type SettingsProps = {
     inputNodeApplied: boolean,
@@ -90,6 +96,22 @@ function Settings() {
         }
     };
 
+    const handleClearCachedContent = async () => {
+        const userConfirmed = window.confirm('Clear cached social content?');
+
+        if (userConfirmed) {
+            await Promise.all([
+                clearMessagesCache(),
+                clearPostersCache(),
+                clearPostsCache(),
+                clearTipsCache(),
+                clearIgnoresCache(),
+                clearBlocksCapturedRange(),
+            ]);
+            window.location.reload();
+        }
+    };
+
     return (<>
         <button className="mb-4 text-[13px] hover:cursor-pointer hover:underline" onClick={handleGoBack}>&lt; Back</button>
         <div className="mb-4 text-[14px]">
@@ -127,7 +149,7 @@ function Settings() {
                 <div className="mb-4 flex flex-col ml-5 text-[14px]">
                     <p className="mb-1">Your Idena Address:</p>
                     <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
-                    {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled)</p>}
+                    {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled).</p>}
                     <div className="flex flex-row">
                         <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputPostersAddressApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
                         {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
@@ -202,6 +224,12 @@ function Settings() {
             <p className="mt-1 text-[11px] text-stone-400">
                 Removes idena.social overrides only. Desktop connection values are restored from the host.
             </p>
+            <button
+                className="h-9 mt-3 px-3 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10"
+                onClick={handleClearCachedContent}
+            >
+                Clear Cached Content
+            </button>
         </div>
     </>);
 }

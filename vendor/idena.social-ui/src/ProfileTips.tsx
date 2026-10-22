@@ -1,4 +1,4 @@
-import { type Post, type PostTips, type Tip } from './logic/asyncUtils';
+import { type Post, type Poster, type PostTips } from './logic/asyncUtils';
 import { useOutletContext } from 'react-router';
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment, type ProfileActivity } from './App.exports';
 import PostComponent from './components/PostComponent';
@@ -6,11 +6,13 @@ import { getSpotlightPostDetails } from './logic/utils';
 
 type ProfileTipsProps = {
     postsRef: React.RefObject<Record<string, Post>>,
+    postersRef: React.RefObject<Record<string, Poster>>,
     replyPostsTreeRef: React.RefObject<Record<string, string>>,
     deOrphanedReplyPostsTreeRef: React.RefObject<Record<string, string>>,
     discussPrefix: string,
     SET_NEW_POSTS_ADDED_DELAY: number,
     inputPostDisabled: boolean,
+    submitting: boolean,
     copyPostTxHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
     submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined, storeTextIpfs?: boolean | undefined, storeMediaIpfs?: boolean | undefined) => Promise<void>,
     submitLikeHandler: (emoji: string, location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
@@ -20,12 +22,12 @@ type ProfileTipsProps = {
     browserStateHistoryRef: React.RefObject<Record<string, BrowserStateHistorySettings>>,
     setBrowserStateHistorySettings: (pageDomSetting: Partial<BrowserStateHistorySettings>, rerender?: boolean) => void,
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
-    handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
-    handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
+    handleOpenTipsModal: (e: MouseEventLocal, likePosts: string[]) => void,
+    handleOpenSendTipModal: (e: MouseEventLocal, location: string, tipToPost: Post) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
-    handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, PostTips>>,
+    handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     activeContractAddress: string,
@@ -36,11 +38,13 @@ function ProfileTips() {
 
     const {
         postsRef,
+        postersRef,
         replyPostsTreeRef,
         deOrphanedReplyPostsTreeRef,
         discussPrefix,
         SET_NEW_POSTS_ADDED_DELAY,
         inputPostDisabled,
+        submitting,
         copyPostTxHandler,
         submitPostHandler,
         submitLikeHandler,
@@ -55,7 +59,7 @@ function ProfileTips() {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
-        tipsRef,
+        postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
         activeContractAddress,
@@ -87,11 +91,13 @@ function ProfileTips() {
                         uniqueKey={postItemKeyUnique}
                         postId={parentPost.postId}
                         postsRef={postsRef}
+                        postersRef={postersRef}
                         replyPostsTreeRef={replyPostsTreeRef}
                         deOrphanedReplyPostsTreeRef={deOrphanedReplyPostsTreeRef}
                         discussPrefix={discussPrefix}
                         SET_NEW_POSTS_ADDED_DELAY={SET_NEW_POSTS_ADDED_DELAY}
                         inputPostDisabled={inputPostDisabled}
+                        submitting={submitting}
                         copyPostTxHandler={copyPostTxHandler}
                         submitPostHandler={submitPostHandler}
                         submitLikeHandler={submitLikeHandler}
@@ -106,7 +112,7 @@ function ProfileTips() {
                         handleOpenAddMediaModal={handleOpenAddMediaModal}
                         handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
                         handleExpandImageModal={handleExpandImageModal}
-                        tipsRef={tipsRef}
+                        postTipsRef={postTipsRef}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
                         makePostsWith={makePostsWith}
                         activeContractAddress={activeContractAddress}

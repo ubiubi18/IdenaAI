@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
-import { getPoster, getPosterWithIndexerApi, type Post, type Poster, type PostTips, type RpcClient, type Tip } from "./logic/asyncUtils";
-import { getDisplayAddress, getIdentityStatus } from "./logic/utils";
-import { defaultProfileActivity, type BrowserStateHistorySettings, type PostMediaAttachment, type ProfileActivity } from "./App.exports";
+import { getPoster, getPosterWithIndexerApi, type Post, type Poster, type PostTips, type RpcClient } from "./logic/asyncUtils";
+import { getDisplayAddress, getIdentityStatus, getProfilePic } from "./logic/utils";
+import { defaultProfileActivity, type BrowserStateHistorySettings, type Conversation, type PostMediaAttachment, type ProfileActivity } from "./App.exports";
 import LdsSpinnerComponent from "./components/LdsSpinnerComponent";
+import ObjectUrlImageComponent from "./components/ObjectUrlImageComponent";
+import messagesWhiteSvg from './assets/message-square-chat-white.svg';
+import { keccak256 } from "js-sha3";
 
 type MouseEventLocal = React.MouseEvent<HTMLElement, MouseEvent>;
 
@@ -17,6 +20,7 @@ type AddressProps = {
     discussPrefix: string,
     SET_NEW_POSTS_ADDED_DELAY: number,
     inputPostDisabled: boolean,
+    submitting: boolean,
     copyPostTxHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
     submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined, storeTextIpfs?: boolean | undefined, storeMediaIpfs?: boolean | undefined) => Promise<void>,
     submitLikeHandler: (emoji: string, location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
@@ -26,12 +30,12 @@ type AddressProps = {
     browserStateHistoryRef: React.RefObject<Record<string, BrowserStateHistorySettings>>,
     setBrowserStateHistorySettings: (pageDomSetting: Partial<BrowserStateHistorySettings>, rerender?: boolean) => void,
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
-    handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
-    handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
+    handleOpenTipsModal: (e: MouseEventLocal, txHashes: string[]) => void,
+    handleOpenSendTipModal: (e: MouseEventLocal, location: string, tipToPost: Post) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
-    handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, PostTips>>,
+    handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     activeContractAddress: string,
@@ -39,6 +43,8 @@ type AddressProps = {
     findPostsWithRef: React.RefObject<string>,
     indexerApiUrlRef: React.RefObject<string>,
     profileActivityRef: React.RefObject<Record<string, ProfileActivity>>,
+    postersAddress: string,
+    conversationsRef: React.RefObject<Record<string, Conversation>>,
 };
 
 function Profile() {
@@ -60,6 +66,7 @@ function Profile() {
         submittingTip,
         SET_NEW_POSTS_ADDED_DELAY,
         inputPostDisabled,
+        submitting,
         copyPostTxHandler,
         submitPostHandler,
         submitLikeHandler,
@@ -71,7 +78,7 @@ function Profile() {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
-        tipsRef,
+        postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
         activeContractAddress,
@@ -79,6 +86,8 @@ function Profile() {
         findPostsWithRef,
         indexerApiUrlRef,
         profileActivityRef,
+        postersAddress,
+        conversationsRef,
     } = useOutletContext() as AddressProps;
 
     useEffect(() => {
@@ -120,6 +129,21 @@ function Profile() {
         navigate(-1);
     };
 
+    const handleConversationClick = () => {
+        const participants = [postersAddress, poster.address].map((item: string) => item.toLowerCase()).sort();
+        const conversationKey = keccak256(participants.join('-'));
+        const conversation = conversationsRef.current[conversationKey];
+
+        if (!conversation) {
+            conversationsRef.current = { ...conversationsRef.current, [conversationKey]: { participants: [postersAddress, poster.address], messages: [] } };
+        }
+
+        const to = `/conversation/${conversationKey}`;
+        if (to !== location.pathname) {
+            navigate(to);
+        }
+    };
+
     const handleClickAddress = (e: MouseEventLocal, to: string) => {
         e.stopPropagation();
         if (to !== location.pathname) {
@@ -132,16 +156,19 @@ function Profile() {
         {!poster.address && <div className="text-center"><LdsSpinnerComponent /></div>}
         {poster.address && <>
             <div className="flex flex-row p-3">
-                <div className="w-35 flex justify-end">
-                    <div className="-mt-1"><img className="w-27" src={`https://robohash.org/${poster.address}?set=set1`} /></div>
+                <div className="w-25 flex justify-end">
+                    <div className="-mt-1"><ObjectUrlImageComponent className="w-27" file={getProfilePic(poster)} /></div>
                 </div>
-                <div className="flex-1 overflow-hidden">
+                <div className="w-55 overflow-hidden">
                     <div className="flex flex-col">
-                        <div><a className="text-[24px] font-[600] hover:underline" href={`https://scan.idena.io/address/${poster.address}`} target="_blank" rel="noopener noreferrer">{posterDisplayAddress}</a></div>
+                        <div><a className="text-[22px] font-[600] hover:underline" href={`https://scan.idena.io/address/${poster.address}`} target="_blank" rel="noopener noreferrer">{posterDisplayAddress}</a></div>
                         <div><p className="text-[16px]">{`Age: ${poster.age}`}</p></div>
                         <div><p className="text-[16px]">{`Status: ${getIdentityStatus(poster.state)}`}</p></div>
                         <div><p className="text-[16px]">{`Stake: ${parseInt(poster.stake)}`}</p></div>
                     </div>
+                </div>
+                <div className="w-10">
+                    <img src={messagesWhiteSvg} className="w-10 p-[2px] rounded-xl hover:cursor-pointer hover:bg-gray-400/30" onClick={handleConversationClick} />
                 </div>
             </div>
             <div className="text-[14px] text-center gap-1 sm:gap-3 sm:text-[16px] h-8 mb-5 flex flex-row border-b-1 border-gray-500">
@@ -158,11 +185,13 @@ function Profile() {
                     latestPosts,
                     latestActivity,
                     postsRef,
+                    postersRef,
                     replyPostsTreeRef,
                     deOrphanedReplyPostsTreeRef,
                     discussPrefix,
                     SET_NEW_POSTS_ADDED_DELAY,
                     inputPostDisabled,
+                    submitting,
                     copyPostTxHandler,
                     submitPostHandler,
                     submitLikeHandler,
@@ -177,7 +206,7 @@ function Profile() {
                     handleOpenAddMediaModal,
                     handleOpenRpcMakePostModal,
                     handleExpandImageModal,
-                    tipsRef,
+                    postTipsRef,
                     postMediaAttachmentsRef,
                     makePostsWith,
                     activeContractAddress,
