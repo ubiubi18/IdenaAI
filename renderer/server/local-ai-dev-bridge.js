@@ -1,4 +1,3 @@
-const os = require('os')
 const path = require('path')
 const Module = require('module')
 const fs = require('fs-extra')
@@ -134,10 +133,6 @@ const DEV_LOCAL_AI_TRAINING_METHODS = new Set([
 const DEV_LOCAL_AI_CAPTURE_METHODS = new Set(['captureFlip'])
 
 function resolveDesktopUserDataDir() {
-  const {
-    productName: PRODUCT_NAME = 'IdenaAI',
-    name: PACKAGE_NAME = 'idena-ai',
-  } = nodeRequire(path.join(process.cwd(), 'package.json'))
   const explicitBaseDir = String(
     process.env.IDENA_DESKTOP_LOCAL_AI_DEV_BASE_DIR || ''
   ).trim()
@@ -146,23 +141,19 @@ function resolveDesktopUserDataDir() {
     return explicitBaseDir
   }
 
-  const appFolder = String(PRODUCT_NAME || PACKAGE_NAME || 'IdenaAI').trim()
-  const homeDir = os.homedir()
-
-  switch (process.platform) {
-    case 'darwin':
-      return path.join(homeDir, 'Library', 'Application Support', appFolder)
-    case 'win32':
-      return path.join(
-        process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'),
-        appFolder
-      )
-    default:
-      return path.join(
-        process.env.XDG_CONFIG_HOME || path.join(homeDir, '.config'),
-        appFolder
-      )
+  const desktopUserDataDir = String(
+    process.env.IDENA_DESKTOP_USER_DATA_DIR || ''
+  ).trim()
+  if (desktopUserDataDir) {
+    return desktopUserDataDir
   }
+
+  const workspaceRuntimeDir =
+    process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR ||
+    path.join(path.dirname(process.cwd()), 'IdenaAI-runtime')
+  const appUserDataName =
+    process.env.IDENA_DESKTOP_APP_USER_DATA_NAME || 'IdenaAIDev'
+  return path.join(workspaceRuntimeDir, appUserDataName)
 }
 
 function settingsPath() {
@@ -381,5 +372,6 @@ module.exports = {
   getDevLocalAiManager,
   isDevBrowserRequest,
   isTrustedDevBridgeRequest,
+  resolveDesktopUserDataDir,
   sanitizeBridgeValue,
 }

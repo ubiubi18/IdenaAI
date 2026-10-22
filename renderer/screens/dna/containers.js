@@ -32,6 +32,7 @@ import {
   DNA_SEND_CONFIRM_TRESHOLD,
   appendTxHash,
   handleCallbackUrl,
+  isValidDnaSignInUrls,
 } from './utils'
 import {
   Dialog,
@@ -70,15 +71,29 @@ export function DnaSignInDialog({
 
   const {address} = useIdentityState()
 
-  const callbackUrlObject = React.useMemo(
-    () => new URL(callbackUrl),
-    [callbackUrl]
-  )
+  const callbackUrlObject = React.useMemo(() => {
+    try {
+      return new URL(callbackUrl)
+    } catch {
+      return null
+    }
+  }, [callbackUrl])
 
   const callbackFaviconUrl = React.useMemo(
-    () => faviconUrl || new URL('favicon.ico', callbackUrlObject.origin),
-    [callbackUrlObject.origin, faviconUrl]
+    () =>
+      faviconUrl ||
+      (callbackUrlObject && new URL('favicon.ico', callbackUrlObject.origin)),
+    [callbackUrlObject, faviconUrl]
   )
+
+  if (
+    !isValidDnaSignInUrls({
+      callbackUrl,
+      nonceEndpoint,
+      authenticationEndpoint,
+    })
+  )
+    return null
 
   return (
     <DnaDialog
@@ -127,6 +142,18 @@ export function DnaSignInDialog({
           wordBreak="break-all"
           ref={initialRef}
           onClick={async () => {
+            if (
+              !isValidDnaSignInUrls({
+                callbackUrl,
+                nonceEndpoint,
+                authenticationEndpoint,
+              })
+            ) {
+              if (onSignInError) onSignInError('Invalid sign-in URL')
+              onClose()
+              return
+            }
+
             startSession(nonceEndpoint, {
               token,
               address,

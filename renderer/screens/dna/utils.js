@@ -21,7 +21,47 @@ export function isValidDnaUrl(url) {
   try {
     const parsedUrl = new URL(url)
     const endsWithVersion = /v\d{1,3}$/.test(parsedUrl.pathname)
-    return endsWithVersion
+    if (!endsWithVersion) return false
+
+    if (dnaLinkMethod(parsedUrl) === 'signin') {
+      const {
+        callback_url: callbackUrl,
+        nonce_endpoint: nonceEndpoint,
+        authentication_endpoint: authenticationEndpoint,
+      } = extractQueryParams(parsedUrl)
+
+      return isValidDnaSignInUrls({
+        callbackUrl,
+        nonceEndpoint,
+        authenticationEndpoint,
+      })
+    }
+
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function isValidDnaSignInUrls({
+  callbackUrl,
+  nonceEndpoint,
+  authenticationEndpoint,
+}) {
+  try {
+    const [callback, nonce, authentication] = [
+      callbackUrl,
+      nonceEndpoint,
+      authenticationEndpoint,
+    ].map((url) => new URL(url))
+
+    return (
+      [callback, nonce, authentication].every(
+        (url) => url.protocol === 'https:'
+      ) &&
+      callback.origin === nonce.origin &&
+      callback.origin === authentication.origin
+    )
   } catch {
     return false
   }
@@ -41,10 +81,11 @@ export function extractQueryParams(url) {
 }
 
 export async function startSession(nonceEndpoint, {token, address}) {
-  const {data} = await postJson(nonceEndpoint, {
-    token,
-    address,
-  })
+  const {data} = await postJson(
+    nonceEndpoint,
+    {token, address},
+    {redirect: 'error'}
+  )
 
   const {error} = data
 
@@ -72,12 +113,13 @@ export async function signNonce(nonce) {
 }
 
 export async function authenticate(authenticationEndpoint, {token, signature}) {
-  const {data} = await postJson(authenticationEndpoint, {
-    token,
-    signature,
-  })
+  const {data} = await postJson(
+    authenticationEndpoint,
+    {token, signature},
+    {redirect: 'error'}
+  )
 
-  const {error} = {data}
+  const {error} = data
 
   if (error) throw new Error(error)
 
