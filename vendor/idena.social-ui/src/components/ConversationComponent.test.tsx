@@ -1,11 +1,12 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
+import type { Conversation } from '../App.exports';
 import ConversationComponent from './ConversationComponent';
 import { DIRECT_V4_CONTRACT } from '../logic/directDelivery';
 
 const renderConversation = (
-    conversations: Record<string, string[]>,
+    conversations: Record<string, Conversation>,
     messages: Record<string, any> = {},
     posters: Record<string, any> = {},
     replyPostsTree: Record<string, string> = {},
@@ -24,6 +25,7 @@ const renderConversation = (
             browserStateHistoryRef={{ current: {} }}
             setBrowserStateHistorySettings={vi.fn()}
             inputPostDisabled={false}
+            submitting={false}
             messageSettingsInvalid={false}
             copyMessageTxHandler={vi.fn()}
             submitMessageHandler={vi.fn()}
@@ -55,7 +57,7 @@ describe('ConversationComponent route hydration', () => {
         const sender = '0x0000000000000000000000000000000000000001';
         const recipient = '0x0000000000000000000000000000000000000002';
         const markup = renderConversation(
-            { missing: ['1'] },
+            { missing: { participants: [sender, recipient], messages: ['1'] } },
             {
                 1: {
                     messageId: '1',
@@ -73,7 +75,7 @@ describe('ConversationComponent route hydration', () => {
         const recipient = '0x0000000000000000000000000000000000000002';
         const messageDetails = { stake: 1, state: 'Human', age: 2 };
         const markup = renderConversation(
-            { missing: ['1', '2'] },
+            { missing: { participants: [sender, recipient], messages: ['1', '2'] } },
             {
                 1: {
                     timestamp: 1,
@@ -146,14 +148,15 @@ describe('ConversationComponent route hydration', () => {
         };
         const posters = { [author]: { address: author, age: 2, pubkey: 'synthetic-key', stake: '1', state: 'Human' } };
 
-        const markup = renderConversation({ missing: ['1'] }, { 1: message }, posters);
+        const conversation = { missing: { participants: [author, currentBuyer], messages: ['1'] } };
+        const markup = renderConversation(conversation, { 1: message }, posters);
         expect(markup).toContain('Copy flip delivery');
         expect(markup).toContain('Save flip delivery');
         const savedUri = markup.match(/href="(data:application\/json;charset=utf-8,[^"]+)"/)?.[1];
         expect(savedUri).toBeDefined();
         expect(decodeURIComponent(savedUri!.split(',')[1])).toBe(message.message);
-        const otherBuyer = renderConversation({ missing: ['1'] }, { 1: { ...message, message: envelope('b'.repeat(40)) } }, posters);
-        const otherSender = renderConversation({ missing: ['1'] }, { 1: { ...message, sender: `0x${'e'.repeat(40)}` } }, posters);
+        const otherBuyer = renderConversation(conversation, { 1: { ...message, message: envelope('b'.repeat(40)) } }, posters);
+        const otherSender = renderConversation(conversation, { 1: { ...message, sender: `0x${'e'.repeat(40)}` } }, posters);
         expect(otherBuyer).not.toContain('Copy flip delivery');
         expect(otherBuyer).not.toContain('Save flip delivery');
         expect(otherSender).not.toContain('Copy flip delivery');
@@ -164,9 +167,9 @@ describe('ConversationComponent route hydration', () => {
             __IDENA_SOCIAL_DESKTOP_BOOTSTRAP__: { embeddedMode: 'desktop-onchain' },
         });
         try {
-            const v4Buyer = renderConversation({ missing: ['1'] }, { 1: { ...message, message: envelope(currentBuyer.slice(2), DIRECT_V4_CONTRACT) } }, posters);
+            const v4Buyer = renderConversation(conversation, { 1: { ...message, message: envelope(currentBuyer.slice(2), DIRECT_V4_CONTRACT) } }, posters);
             expect(v4Buyer).toContain('Save keys or confirm payment');
-            const v4OtherBuyer = renderConversation({ missing: ['1'] }, { 1: { ...message, message: envelope('b'.repeat(40), DIRECT_V4_CONTRACT) } }, posters);
+            const v4OtherBuyer = renderConversation(conversation, { 1: { ...message, message: envelope('b'.repeat(40), DIRECT_V4_CONTRACT) } }, posters);
             expect(v4OtherBuyer).not.toContain('Save keys or confirm payment');
         } finally {
             vi.unstubAllGlobals();

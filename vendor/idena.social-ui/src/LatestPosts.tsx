@@ -1,10 +1,11 @@
-import { MAX_POST_MEDIA_BYTES_RPC, type Post, type PostTips, type Tip, type RpcPostCostEstimate } from './logic/asyncUtils';
+import { MAX_POST_MEDIA_BYTES_RPC, type Post, type Poster, type PostTips, type RpcPostCostEstimate } from './logic/asyncUtils';
 import { useLocation, useOutletContext } from 'react-router';
 import PostComponent from './components/PostComponent';
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from './App.exports';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { DesktopBootstrap } from './logic/desktopBootstrap';
 import SortPostsByComponent from './components/SortPostsByComponent';
+import ObjectUrlImageComponent from './components/ObjectUrlImageComponent';
 import type { SocialContractOption } from './logic/socialContracts';
 import { isRenderableTopLevelPost } from './logic/feedVisibility';
 
@@ -14,6 +15,7 @@ type LatestPostsProps = {
     latestPosts: string[],
     latestActivity: string[],
     postsRef: React.RefObject<Record<string, Post>>,
+    postersRef: React.RefObject<Record<string, Poster>>,
     replyPostsTreeRef: React.RefObject<Record<string, string>>,
     deOrphanedReplyPostsTreeRef: React.RefObject<Record<string, string>>,
     discussPrefix: string,
@@ -23,6 +25,7 @@ type LatestPostsProps = {
     pastBlockCaptured: number,
     SET_NEW_POSTS_ADDED_DELAY: number,
     inputPostDisabled: boolean,
+    submitting: boolean,
     copyPostTxHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
     submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined, storeTextIpfs?: boolean | undefined, storeMediaIpfs?: boolean | undefined) => Promise<void>,
     submitLikeHandler: (emoji: string, location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
@@ -32,12 +35,12 @@ type LatestPostsProps = {
     browserStateHistoryRef: React.RefObject<Record<string, BrowserStateHistorySettings>>,
     setBrowserStateHistorySettings: (pageDomSetting: Partial<BrowserStateHistorySettings>, rerender?: boolean) => void,
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
-    handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
-    handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
+    handleOpenTipsModal: (e: MouseEventLocal, likePosts: string[]) => void,
+    handleOpenSendTipModal: (e: MouseEventLocal, location: string, tipToPost: Post) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
-    handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, PostTips>>,
+    handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     estimatePostCostHandler: (inputText: string, mediaFile?: File | undefined) => Promise<RpcPostCostEstimate | null>,
@@ -85,11 +88,13 @@ function LatestPosts() {
         latestPosts,
         latestActivity,
         postsRef,
+        postersRef,
         replyPostsTreeRef,
         deOrphanedReplyPostsTreeRef,
         discussPrefix,
         SET_NEW_POSTS_ADDED_DELAY,
         inputPostDisabled,
+        submitting,
         copyPostTxHandler,
         submitPostHandler,
         submitLikeHandler,
@@ -104,7 +109,7 @@ function LatestPosts() {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
-        tipsRef,
+        postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
         estimatePostCostHandler,
@@ -284,7 +289,7 @@ function LatestPosts() {
                 onChange={(event) => setMainDraftText(event.target.value)}
             />
             {mainPostMediaAttachment && <div className="mx-4 my-1">
-                <img className="max-h-[640px] w-auto max-w-full rounded-sm" src={mainPostMediaAttachment.dataUrl} />
+                <ObjectUrlImageComponent className="max-h-[640px] w-auto max-w-full rounded-sm" file={mainPostMediaAttachment.file} />
             </div>}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-stone-300">
                 <p>
@@ -350,11 +355,13 @@ function LatestPosts() {
                         uniqueKey={postId}
                         postId={postId}
                         postsRef={postsRef}
+                        postersRef={postersRef}
                         replyPostsTreeRef={replyPostsTreeRef}
                         deOrphanedReplyPostsTreeRef={deOrphanedReplyPostsTreeRef}
                         discussPrefix={discussPrefix}
                         SET_NEW_POSTS_ADDED_DELAY={SET_NEW_POSTS_ADDED_DELAY}
                         inputPostDisabled={inputPostDisabled}
+                        submitting={submitting}
                         copyPostTxHandler={copyPostTxHandler}
                         submitPostHandler={submitPostHandler}
                         submitLikeHandler={submitLikeHandler}
@@ -369,7 +376,7 @@ function LatestPosts() {
                         handleOpenAddMediaModal={handleOpenAddMediaModal}
                         handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
                         handleExpandImageModal={handleExpandImageModal}
-                        tipsRef={tipsRef}
+                        postTipsRef={postTipsRef}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
                         makePostsWith={makePostsWith}
                         activeContractAddress={activeContractAddress}
