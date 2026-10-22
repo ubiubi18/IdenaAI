@@ -6,10 +6,12 @@ import heartRedSvg from '../assets/heart-red.svg';
 import { initDomSettings, type BrowserStateHistorySettings, type Conversation, type MouseEventLocal, type PostDomSettings, type PostMediaAttachment } from "../App.exports";
 import { getChildPostIds, type Message, type Poster } from "../logic/asyncUtils";
 import { useLocation, useNavigate } from "react-router";
-import { useReducer } from "react";
+import { useReducer, useState } from "react";
 import OneOnOneConversationHeaderComponent from "./OneOnOneConversationHeaderComponent";
 import GroupConversationHeaderComponent from "./GroupConversationHeaderComponent";
 import ObjectUrlImageComponent from "./ObjectUrlImageComponent";
+import { DIRECT_V4_CONTRACT, isDirectDeliveryAuthor, isDirectDeliveryBuyer, parseDirectDelivery } from "../logic/directDelivery";
+import { createDesktopDirectCheckClient, createDesktopDirectReceiveClient, isEmbeddedDesktopFrame, readDesktopBootstrap } from "../logic/desktopBootstrap";
 
 type ConversationComponentProps = {
     conversationKey: string,
@@ -77,6 +79,7 @@ function ConversationComponent(props: ConversationComponentProps) {
     } = props as ConversationComponentProps;
 
     const [, forceUpdate] = useReducer(x => x + 1, 0);
+    const [directCheckStatus, setDirectCheckStatus] = useState<Record<string, string>>({});
 
     const { key: locationKey } = location;
 
@@ -235,6 +238,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                         const posterPic = getProfilePic(postersRef.current[message.sender], posterState);
                         const { displayDate, displayTime } = getDisplayDateTime(message.timestamp);
                         const { messageLines } = getMessageLines(message.message);
+                        const delivery = typeof message.message === 'string' ? parseDirectDelivery(message.message) : null;
                         const replyToMessage = messagesRef.current[message.replyToMessageId];
                         const replyToMessagePosterPic = getProfilePic(postersRef.current[replyToMessage?.sender], replyToMessage?.sendersDetails_atTimeOfMessage.state);
                         const awaitingReplyToMessage = message.replyToMessageId && !replyToMessage;
@@ -283,6 +287,40 @@ function ConversationComponent(props: ConversationComponentProps) {
                                             </div>
                                             <div className="max-h-[9999px] pl-1 pr-2 pt-0.5 pb-1 text-[12px] text-wrap leading-5 overflow-hidden">
                                                 <p className="[word-break:break-word]">{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
+                                                {delivery && isDirectDeliveryBuyer(delivery, postersAddress) && isDirectDeliveryAuthor(delivery, message.sender) && <div className="mt-1 flex gap-3">
+                                                    {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-blue-400 hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Waiting for local action…'} onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDirectCheckStatus((current) => ({...current, [message.messageId]: 'Checking locally…'}));
+                                                        void createDesktopDirectCheckClient()(delivery.text).then((response) => {
+                                                            const count = response.result?.usableFlips;
+                                                            const status = typeof count === 'number' && Number.isInteger(count) && count > 0
+                                                                ? `Verified ${count} original flip${count === 1 ? '' : 's'} locally.`
+                                                                : 'Could not verify locally.';
+                                                            setDirectCheckStatus((current) => ({...current, [message.messageId]: status}));
+                                                        });
+                                                    }}>Check flip keys</button>}
+                                                    {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-blue-400 hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Waiting for local action…'} onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDirectCheckStatus((current) => ({...current, [message.messageId]: 'Waiting for local action…'}));
+                                                        void createDesktopDirectReceiveClient()(delivery.text).then((response) => {
+                                                            const count = response.result?.usableFlips;
+                                                            let status = 'Could not save verified keys.';
+                                                            if (response.result?.confirmationStatus === 'settled') status = 'Payment confirmed on-chain.';
+                                                            else if (response.result?.confirmationStatus === 'pending') status = 'Payment confirmation is pending.';
+                                                            else if (response.result?.confirmationStatus === 'uncertain') status = 'Payment submission is unverified. Check status later.';
+                                                            else if (response.result?.saved === true && typeof count === 'number' && Number.isInteger(count) && count > 0) status = `Saved ${count} verified flip${count === 1 ? '' : 's'} in an encrypted vault.`;
+                                                            else if (response.error?.message === 'Vault save cancelled.') status = 'Vault save cancelled.';
+                                                            else if (response.error?.message === 'Could not confirm saved payment.') status = 'Could not confirm saved payment.';
+                                                            setDirectCheckStatus((current) => ({...current, [message.messageId]: status}));
+                                                        });
+                                                    }}>{delivery.contract === DIRECT_V4_CONTRACT ? 'Save keys or confirm payment' : 'Save verified keys'}</button>}
+                                                    <button type="button" className="text-blue-400 hover:underline cursor-pointer" onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        void navigator.clipboard.writeText(delivery.text).catch(() => alert('Unable to copy flip delivery.'));
+                                                    }}>Copy flip delivery</button>
+                                                    <a className="text-blue-400 hover:underline" href={`data:application/json;charset=utf-8,${encodeURIComponent(delivery.text)}`} download="flip-delivery.json" onClick={(e) => e.stopPropagation()}>Save flip delivery</a>
+                                                    {directCheckStatus[message.messageId] && <span className="text-stone-400">{directCheckStatus[message.messageId]}</span>}
+                                                </div>}
                                             </div>
                                             {message.image && <div className="my-1 mx-1">
                                                 <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm hover:cursor-pointer" file={message.image} onClick={(e) => handleExpandImageModal(e, message.image!, message.cid)} />

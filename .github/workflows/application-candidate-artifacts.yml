@@ -45,13 +45,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24.18.0
+          node-version: 24.22.1
           cache: npm
 
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: 1.26.8
+          go-version: 1.26.10
 
       - name: Verify native target
         env:
@@ -70,6 +70,9 @@ jobs:
 
       - name: Run release check
         run: npm run release:check
+
+      - name: Test Direct v7 desktop bridge
+        run: npm test -- --runInBand main/fod-v7.test.js
 
       - name: Build renderer
         run: npm run build

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import RpcPostMessageUIComponent from './RpcPostMessageUIComponent';
+import { parseDirectDelivery } from '../logic/directDelivery';
 
 type ModalRpcSendMessageComponentProps = {
     modalRpcSendMessageRef: React.RefObject<{ location: string; recipients: string[]; replyToMessageId?: string; }>,
@@ -15,7 +16,10 @@ function ModalRpcSendMessageComponent(props: ModalRpcSendMessageComponentProps) 
         closeModal,
     } = props;
 
-    const [storeTextIpfs, setStoreTextIpfs] = useState<boolean>(true);
+    const [storeTextIpfs, setStoreTextIpfs] = useState<boolean>(() => {
+        const textarea = document.getElementById(`message-input-${modalRpcSendMessageRef.current.location}`) as HTMLTextAreaElement | null;
+        return !parseDirectDelivery(textarea?.value ?? '');
+    });
     const [storeMediaIpfs, setStoreMediaIpfs] = useState<boolean>(true);
 
     const localSubmitMessageHandler = () => {
