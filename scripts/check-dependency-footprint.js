@@ -102,6 +102,12 @@ function runAuditSummary() {
     encoding: 'utf8',
     shell: process.platform === 'win32' && /\.cmd$/i.test(npmCommand),
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 90000,
+    env: {
+      ...process.env,
+      npm_config_fetch_retries: '1',
+      npm_config_fetch_timeout: '30000',
+    },
   })
 
   const output = result.stdout || result.stderr || ''
@@ -119,6 +125,10 @@ function runAuditSummary() {
     return {
       ok: result.status === 0,
       vulnerabilities: audit.metadata && audit.metadata.vulnerabilities,
+      error:
+        audit.metadata?.vulnerabilities || !audit.message
+          ? undefined
+          : audit.message,
     }
   } catch (_) {
     return {
