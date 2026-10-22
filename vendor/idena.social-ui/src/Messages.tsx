@@ -1,8 +1,9 @@
 import { useEffect, useReducer, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import { type Message, type Poster } from "./logic/asyncUtils";
-import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from "./App.exports";
+import { type BrowserStateHistorySettings, type Conversation, type MouseEventLocal, type PostMediaAttachment } from "./App.exports";
 import ConversationComponent from "./components/ConversationComponent";
+import ObjectUrlImageComponent from "./components/ObjectUrlImageComponent";
 import { isValidAddress } from "./logic/utils";
 import { resolveMessagingRecipient } from "./logic/messageRecipients";
 
@@ -19,16 +20,17 @@ type MessagesProps = {
     rpcClientRef: React.RefObject<((method: string, params: any[], skipStateUpdate?: boolean) => Promise<any>)>,
     latestConversationActivity: string[],
     postersAddress: string,
-    conversationsRef: React.RefObject<Record<string, string[]>>,
+    conversationsRef: React.RefObject<Record<string, Conversation>>,
     messagesRef: React.RefObject<Record<string, Message>>,
     browserStateHistoryRef: React.RefObject<Record<string, BrowserStateHistorySettings>>,
     setBrowserStateHistorySettings: (pageDomSetting: Partial<BrowserStateHistorySettings>, rerender?: boolean) => void,
     submittingMessage: string,
     submittingLike: string,
     inputPostDisabled: boolean,
+    submitting: boolean,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
-    handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
+    handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Message[]) => void,
     handleSubmitPubkeyModal: (e: MouseEventLocal, address: string) => void,
     handleOpenRpcSendMessageModal: (location: string, recipients: string[], replyToMessageId?: string | undefined) => void,
@@ -63,6 +65,7 @@ function Messages() {
         submittingMessage,
         submittingLike,
         inputPostDisabled,
+        submitting,
         postMediaAttachmentsRef,
         handleOpenAddMediaModal,
         handleExpandImageModal,
@@ -209,10 +212,10 @@ function Messages() {
                 rows={4}
                 className="w-full field-sizing-content min-h-[104px] max-h-[520px] py-1 px-2 outline-1 placeholder:text-gray-500 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500 [&::-webkit-scrollbar-corner]:bg-neutral-500"
                 placeholder="Write your message here..."
-                disabled={inputPostDisabled || messageSettingsInvalid}
+                disabled={inputPostDisabled || submitting || messageSettingsInvalid}
             />
             {mainPostMediaAttachment && <div className="mx-4 my-1">
-                <img className="max-h-120 max-w-100 size-auto rounded-sm" src={mainPostMediaAttachment.dataUrl} />
+                <ObjectUrlImageComponent className="max-h-120 max-w-100 size-auto rounded-sm" file={mainPostMediaAttachment.file} />
             </div>}
             <div className="flex flex-row gap-2">
                 <div className="flex-1 -mt-1.5">
@@ -221,7 +224,7 @@ function Messages() {
                     </> : <>
                         <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => handleOpenAddMediaModal(e, 'main', 'message')}>Add image</p>
                     </>}
-                    <p id={"message-copytx-main"} className="inline-block -mt-1 ml-2 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={() => !inputPostDisabled && !messageSettingsInvalid && localCopyMessageTxHandler('main')}>Copy tx</p>
+                    <p id={"message-copytx-main"} className="inline-block -mt-1 ml-2 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={() => !inputPostDisabled && !submitting && !messageSettingsInvalid && localCopyMessageTxHandler('main')}>Copy tx</p>
                 </div>
                 <button className="h-9 w-27 my-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => localSubmitMessageHandler('main')}>{submittingMessage === 'main' ? 'Sending...' : 'Send!'}</button>
             </div>
@@ -241,6 +244,7 @@ function Messages() {
                     browserStateHistoryRef={browserStateHistoryRef}
                     setBrowserStateHistorySettings={setBrowserStateHistorySettings}
                     inputPostDisabled={inputPostDisabled}
+                    submitting={submitting}
                     messageSettingsInvalid={messageSettingsInvalid}
                     copyMessageTxHandler={copyMessageTxHandler}
                     submitMessageHandler={submitMessageHandler}

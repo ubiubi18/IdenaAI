@@ -1,6 +1,6 @@
 import { useEffect, useReducer, type FocusEventHandler } from 'react';
-import { getChildPostIds, breakingChanges, type Post, type Tip, type PostTips } from '../logic/asyncUtils';
-import { getDisplayAddress, getDisplayAddressShort, getDisplayDateTime, getDisplayTipAmount, getIdentityStatus, getMessageLines, getShortDisplayTipAmount, likeEmoji } from '../logic/utils';
+import { getChildPostIds, breakingChanges, type Post, type PostTips, type Poster } from '../logic/asyncUtils';
+import { getDisplayAddress, getDisplayAddressShort, getDisplayDateTime, getDisplayTipAmount, getIdentityStatus, getMessageLines, getProfilePic, getShortDisplayTipAmount, likeEmoji } from '../logic/utils';
 import { initDomSettings, initPostOutletDomSettings, initProfileRepliesDomSettings, type BrowserStateHistorySettings, type MouseEventLocal, type PostDomSettings, type PostMediaAttachment } from '../App.exports';
 import { useLocation, useNavigate } from 'react-router';
 import commentGraySvg from '../assets/comment-alt-lines-gray.svg';
@@ -11,6 +11,7 @@ import cashGraySvg from '../assets/cash-gray.svg';
 import cashGreenSvg from '../assets/cash-green.svg';
 import { readDesktopBootstrap } from '../logic/desktopBootstrap';
 import PosterHeaderComponent from './PosterHeaderComponent';
+import ObjectUrlImageComponent from './ObjectUrlImageComponent';
 
 function isEmbeddedDesktopOnchainMode() {
     return readDesktopBootstrap().embeddedMode === 'desktop-onchain';
@@ -25,6 +26,7 @@ type PostComponentProps = {
     discussPrefix: string,
     SET_NEW_POSTS_ADDED_DELAY: number,
     inputPostDisabled: boolean,
+    submitting: boolean,
     copyPostTxHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
     submitPostHandler: (location: string, replyToPostId?: string | undefined, channelId?: string | undefined, storeTextIpfs?: boolean | undefined, storeMediaIpfs?: boolean | undefined) => Promise<void>,
     submitLikeHandler: (emoji: string, location: string, replyToPostId?: string | undefined, channelId?: string | undefined) => Promise<void>,
@@ -34,15 +36,16 @@ type PostComponentProps = {
     browserStateHistoryRef: React.RefObject<Record<string, BrowserStateHistorySettings>>,
     setBrowserStateHistorySettings: (pageDomSetting: Partial<BrowserStateHistorySettings>, rerender?: boolean) => void,
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Post[]) => void,
-    handleOpenTipsModal: (e: MouseEventLocal, likePosts: Tip[]) => void,
-    handleOpenSendTipModal: (e: MouseEventLocal, tipToPost: Post) => void,
+    handleOpenTipsModal: (e: MouseEventLocal, likePosts: string[]) => void,
+    handleOpenSendTipModal: (e: MouseEventLocal, location: string, tipToPost: Post) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
-    handleExpandImageModal: (e: MouseEventLocal, dataUrl: string, cid?: string) => void,
-    tipsRef: React.RefObject<Record<string, PostTips>>,
+    handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
     activeContractAddress: string,
+    postersRef: React.RefObject<Record<string, Poster>>,
     isPostOutlet?: boolean,
     spotlightReplyPostId?: string,
     spotlightDiscussionPostId?: string,
@@ -62,6 +65,7 @@ function PostComponent(props: PostComponentProps) {
         discussPrefix,
         SET_NEW_POSTS_ADDED_DELAY,
         inputPostDisabled,
+        submitting,
         copyPostTxHandler,
         submitPostHandler,
         submitLikeHandler,
@@ -76,10 +80,11 @@ function PostComponent(props: PostComponentProps) {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
-        tipsRef,
+        postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
         activeContractAddress,
+        postersRef,
         isPostOutlet,
         spotlightReplyPostId,
         spotlightDiscussionPostId,
@@ -113,13 +118,27 @@ function PostComponent(props: PostComponentProps) {
         }, 0);
     }, []);
 
+    const defaultPostDomSettings = (childPostId: string): PostDomSettings => {
+        if (childPostId === postId) {
+            return isPostOutlet ? initPostOutletDomSettings : spotlightReplyPostId ? initProfileRepliesDomSettings : initDomSettings;
+        }
+        if (childPostId === spotlightReplyPostId && spotlightDiscussionPostId) {
+            return initProfileRepliesDomSettings;
+        }
+        return initDomSettings;
+    };
+
+    const getPostDomSettings = (childPostId: string): PostDomSettings => {
+        return browserStateHistoryRef.current[locationKey]?.postDomSettings?.[uniqueKey]?.[childPostId] ?? defaultPostDomSettings(childPostId);
+    };
+
     const setPostDomSettings = (childPostId: string, postDomSettings: Partial<PostDomSettings>, rerender?: boolean) => {
         const postDomSettingsUpdated = {
             ...browserStateHistoryRef.current[locationKey]?.postDomSettings ?? {},
             [uniqueKey]: {
                 ...browserStateHistoryRef.current[locationKey]?.postDomSettings?.[uniqueKey] ?? {},
                 [childPostId]: {
-                    ...(browserStateHistoryRef.current[locationKey]?.postDomSettings?.[uniqueKey]?.[childPostId] ?? initDomSettings),
+                    ...getPostDomSettings(childPostId),
                     ...postDomSettings,
                 }
             }
@@ -128,30 +147,18 @@ function PostComponent(props: PostComponentProps) {
         setBrowserStateHistorySettings({ postDomSettings: postDomSettingsUpdated }, rerender);
     };
 
-    let mainPostDomSettings;
-    if (isPostOutlet) {
-        mainPostDomSettings = initPostOutletDomSettings;
-    } else if (spotlightReplyPostId) {
-        mainPostDomSettings = initProfileRepliesDomSettings;
-    } else {
-        mainPostDomSettings = initDomSettings;
-    }
-
-    if (!browserStateHistoryRef.current[locationKey]?.postDomSettings?.[uniqueKey]?.[postId]) {
-        setPostDomSettings(postId, mainPostDomSettings);
-    }
-
     const post = postsRef.current[postId];
-    const postTips = tipsRef.current[postId] ?? { totalAmount: 0, tips: [] };
+    const postTips = postTipsRef.current[postId] ?? { totalAmount: 0, tips: [] };
     const posterStake = post.posterDetails_atTimeOfPost.stake;
     const posterState = post.posterDetails_atTimeOfPost.state;
     const posterAge = post.posterDetails_atTimeOfPost.age;
+    const posterPic = getProfilePic(postersRef.current[post.poster], posterState);
 
     const { displayDate, displayTime } = getDisplayDateTime(post.timestamp);
-    
+
     const { messageLines, textOverflows, truncatedMessageLines } = getMessageLines(post.message, true);
 
-    const postDomSettingsItem = browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][postId];
+    const postDomSettingsItem = getPostDomSettings(postId);
 
     const showTruncatedMessageLines = textOverflows === true && postDomSettingsItem.textOverflowHidden === true;
 
@@ -167,7 +174,7 @@ function PostComponent(props: PostComponentProps) {
     const isDifferentContractTarget = !!post.contractAddress &&
         post.contractAddress.toLowerCase() !== activeContractAddress.toLowerCase();
     const isBreakingChangeDisabled = isLegacyPostWithoutContract || isDifferentContractTarget;
-    const postActionDisabled = inputPostDisabled || isBreakingChangeDisabled;
+    const postActionDisabled = inputPostDisabled || submitting || isBreakingChangeDisabled;
 
     const replyPosts = repliesToThisPost.map(replyPostId => postsRef.current[replyPostId]);
     const replyLikes = replyPosts.filter(replyPost => replyPost.isLike);
@@ -195,7 +202,7 @@ function PostComponent(props: PostComponentProps) {
     const toggleShowReplyInputHandler = (e: MouseEventLocal, post: Post) => {
         e?.stopPropagation();
 
-        const newReplyInputHidden = !browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][post.postId].replyInputHidden;
+        const newReplyInputHidden = !getPostDomSettings(post.postId).replyInputHidden;
         setPostDomSettings(post.postId, { replyInputHidden: newReplyInputHidden }, true);
 
         if (postActionDisabled) {
@@ -211,7 +218,7 @@ function PostComponent(props: PostComponentProps) {
     };
 
     const toggleShowRepliesHandler = (e: MouseEventLocal, post: Post, replyPostIds: string[]) => {
-        const newRepliesHidden = !browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][post.postId].repliesHidden;
+        const newRepliesHidden = !getPostDomSettings(post.postId).repliesHidden;
 
         if (newRepliesHidden || replyPostIds.length < 10 || isPostOutlet) {
             e.stopPropagation();
@@ -220,12 +227,12 @@ function PostComponent(props: PostComponentProps) {
     };
 
     const toggleShowDiscussionHandler = (post: Post) => {
-        const newRepliesHidden = !browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][post.postId].repliesHidden;
+        const newRepliesHidden = !getPostDomSettings(post.postId).repliesHidden;
         setPostDomSettings(post.postId, { repliesHidden: newRepliesHidden }, true);
     };
 
     const increaseShowMaxReplies = (increaseAmount: number) => {
-        const showMaxReplies = browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][post.postId].showMaxReplies;
+        const showMaxReplies = getPostDomSettings(post.postId).showMaxReplies;
         setPostDomSettings(post.postId, { showMaxReplies: showMaxReplies + increaseAmount }, true);
     };
 
@@ -234,7 +241,7 @@ function PostComponent(props: PostComponentProps) {
             return;
         }
 
-        const postDomSettings = browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][post.postId];
+        const postDomSettings = getPostDomSettings(post.postId);
 
         const newRepliesHidden = !postDomSettings.repliesHidden;
 
@@ -279,7 +286,7 @@ function PostComponent(props: PostComponentProps) {
                 navigate(to);
             }
         } else {
-            const newTextOverflowHidden = !browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][post.postId].textOverflowHidden;
+            const newTextOverflowHidden = !getPostDomSettings(post.postId).textOverflowHidden;
             setPostDomSettings(post.postId, { textOverflowHidden: newTextOverflowHidden }, true);
         }
     };
@@ -357,12 +364,12 @@ function PostComponent(props: PostComponentProps) {
 
     return (<>
         <div className={`w-full flex flex-col pt-3 bg-stone-800 ${!isPostOutlet && !embeddedDesktopOnchainMode ? 'hover:cursor-pointer' : ''}`} onMouseDown={handlePostMouseDown} onClick={handlePostClick}>
-            <PosterHeaderComponent address={post.poster} age={posterAge} state={posterState} stake={posterStake} />
+            <PosterHeaderComponent address={post.poster} age={posterAge} state={posterState} stake={posterStake} pic={posterPic} />
             <div id={`post-text-${post.postId}`} className="flex-1 px-4 py-2 text-[17px] text-wrap leading-5">
                 <p className="[word-break:break-word]">{messageLinesDisplay.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}{showTruncatedMessageLines && <span> <a className="hover:underline cursor-pointer text-blue-400 whitespace-nowrap" onClick={(e) => toggleViewMoreHandler(post, e)}>view more</a></span>}</p>
             </div>
             {post.image && <div className="mx-4 my-2">
-                <img className="max-h-120 max-w-full sm:max-w-100 size-auto rounded-sm hover:cursor-pointer" src={post.image} onClick={(e) => handleExpandImageModal(e, post.image!, post.cid)} />
+                <ObjectUrlImageComponent className="max-h-120 max-w-full sm:max-w-100 size-auto rounded-sm hover:cursor-pointer" file={post.image} onClick={(e) => handleExpandImageModal(e, post.image!, post.cid)} />
             </div>}
             <div className="flex flex-row ml-2 mr-3 mb-1.5 text-[12px]">
                 <div className="w-22">
@@ -374,16 +381,16 @@ function PostComponent(props: PostComponentProps) {
                 </div>
                 <div className="w-20">
                     {replyLikes.length ?
-                        <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === post.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, post.postId, post.postId)} /><a className="block sm:inline text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, replyLikes)}>{ replyLikes.length} likes</a></div>
+                        <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === `${uniqueKey}-${post.postId}` ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, `${uniqueKey}-${post.postId}`, post.postId)} /><a className="block sm:inline text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, replyLikes)}>{ replyLikes.length} likes</a></div>
                         :
-                        <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === post.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, post.postId, post.postId)} /><p className="block sm:inline align-[-0.5px]">0 likes</p></div>
+                        <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === `${uniqueKey}-${post.postId}` ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, `${uniqueKey}-${post.postId}`, post.postId)} /><p className="block sm:inline align-[-0.5px]">0 likes</p></div>
                     }
                 </div>
                 <div className="flex-1 min-w-20">
                     {postTips.totalAmount ?
-                        <div className="text-green-400"><img src={cashGreenSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === post.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, post)} /><a className="block sm:inline text-green-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getDisplayTipAmount(postTips.totalAmount)} idna</a></div>
+                        <div className="text-green-400"><img src={cashGreenSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === `${uniqueKey}-${post.postId}` ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, `${uniqueKey}-${post.postId}`, post)} /><a className="block sm:inline text-green-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getDisplayTipAmount(postTips.totalAmount)} idna</a></div>
                         :
-                        <div className="text-gray-500"><img src={cashGraySvg} onMouseOver={(e) => { e.currentTarget.src = cashGreenSvg; }} onMouseOut={(e) => { e.currentTarget.src = cashGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === post.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, post)} /><p className="block sm:inline align-[-0.5px]">0 idna</p></div>
+                        <div className="text-gray-500"><img src={cashGraySvg} onMouseOver={(e) => { e.currentTarget.src = cashGreenSvg; }} onMouseOut={(e) => { e.currentTarget.src = cashGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === `${uniqueKey}-${post.postId}` ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, `${uniqueKey}-${post.postId}`, post)} /><p className="block sm:inline align-[-0.5px]">0 idna</p></div>
                     }
                 </div>
                 <div className="w-35 flex items-end justify-end">
@@ -406,11 +413,11 @@ function PostComponent(props: PostComponentProps) {
                             />
                         </div>
                         <div>
-                            <button className="h-8 w-17 mb-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={postActionDisabled} onClick={(e) => localSubmitPostHandler(e, post.postId, post.postId)}>{submittingPost === post.postId ? '...' : 'Post!'}</button>
+                            <button className="h-8 w-17 mb-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={postActionDisabled} onClick={(e) => localSubmitPostHandler(e, `${uniqueKey}-${post.postId}`, post.postId)}>{submittingPost ===`${uniqueKey}-${post.postId}` ? '...' : 'Post!'}</button>
                         </div>
                     </div>
                     {postMediaAttachment && <div className="my-1">
-                        <img className="max-h-100 max-w-full sm:max-w-92 size-auto rounded-sm" src={postMediaAttachment.dataUrl} />
+                        <ObjectUrlImageComponent className="max-h-100 max-w-full sm:max-w-92 size-auto rounded-sm" file={postMediaAttachment.file} />
                     </div>}
                     <div className="leading-[12px]">
                         {postMediaAttachment ? <>
@@ -427,19 +434,15 @@ function PostComponent(props: PostComponentProps) {
             <ul>
                 {replyComments.slice(0, showMaxReplies).map((replyPost, index) => {
 
-                    if (!browserStateHistoryRef.current[locationKey]?.postDomSettings?.[uniqueKey]?.[replyPost.postId]) {
-                        const settings = replyPost.postId === spotlightReplyPostId && spotlightDiscussionPostId ? initProfileRepliesDomSettings : initDomSettings;
-                        setPostDomSettings(replyPost.postId, settings);
-                    }
-
-                    const postTips = tipsRef.current[replyPost.postId] ?? { totalAmount: 0, tips: [] };
+                    const postTips = postTipsRef.current[replyPost.postId] ?? { totalAmount: 0, tips: [] };
                     const posterDisplayAddress = getDisplayAddress(replyPost.poster);
                     const posterStake = replyPost.posterDetails_atTimeOfPost.stake;
                     const posterState = replyPost.posterDetails_atTimeOfPost.state;
                     const posterAge = replyPost.posterDetails_atTimeOfPost.age;
+                    const posterPic = getProfilePic(postersRef.current[replyPost.poster], posterState);
                     const { displayDate, displayTime } = getDisplayDateTime(replyPost.timestamp);
                     const { messageLines, textOverflows, truncatedMessageLines } = getMessageLines(replyPost.message, true, 3);
-                    const postDomSettingsItem = browserStateHistoryRef.current[locationKey].postDomSettings?.[uniqueKey][replyPost.postId];
+                    const postDomSettingsItem = getPostDomSettings(replyPost.postId);
 
                     const showTruncatedMessageLines = textOverflows === true && postDomSettingsItem.textOverflowHidden === true;
 
@@ -471,7 +474,7 @@ function PostComponent(props: PostComponentProps) {
                                 <div className="flex flex-row">
                                     <div className="w-11 flex-none flex flex-col">
                                         <div className="h-13 flex-none">
-                                            <img src={`https://robohash.org/${replyPost.poster}?set=set1`} />
+                                            <ObjectUrlImageComponent file={posterPic} />
                                         </div>
                                         <div className="flex-1"></div>
                                     </div>
@@ -489,7 +492,7 @@ function PostComponent(props: PostComponentProps) {
                                     <p className="[word-break:break-word]">{messageLinesDisplay.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}{showTruncatedMessageLines && <span> <a className="hover:underline cursor-pointer text-[12px] text-blue-400 whitespace-nowrap" onClick={(e) => toggleViewMoreHandler(replyPost, e)}>view more</a></span>}</p>
                                 </div>
                                 {replyPost.image && <div className="ml-12 mr-4 my-1">
-                                    <img className="max-h-100 max-w-full sm:max-w-92 size-auto rounded-sm hover:cursor-pointer" src={replyPost.image} onClick={(e) => handleExpandImageModal(e, replyPost.image!, replyPost.cid)} />
+                                    <ObjectUrlImageComponent className="max-h-100 max-w-full sm:max-w-92 size-auto rounded-sm hover:cursor-pointer" file={replyPost.image} onClick={(e) => handleExpandImageModal(e, replyPost.image!, replyPost.cid)} />
                                 </div>}
                                 <div className="w-full pt-2 px-4 flex flex-row text-[12px]">
                                     <div className="w-26">
@@ -501,16 +504,16 @@ function PostComponent(props: PostComponentProps) {
                                     </div>
                                     <div className="w-19">
                                         {likesForReplyPost.length ?
-                                            <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === replyPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, replyPost.postId, replyPost.postId, discussParentId)} /><a className="block sm:inline text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForReplyPost)}>{likesForReplyPost.length} likes</a></div>
+                                            <div className="text-red-400"><img src={heartRedSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === `${uniqueKey}-${replyPost.postId}` ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, `${uniqueKey}-${replyPost.postId}`, replyPost.postId, discussParentId)} /><a className="block sm:inline text-red-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForReplyPost)}>{likesForReplyPost.length} likes</a></div>
                                             :
-                                            <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === replyPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, replyPost.postId, replyPost.postId, discussParentId)} /><p className="block sm:inline align-[-0.5px]">0 likes</p></div>
+                                            <div className="text-gray-500"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === `${uniqueKey}-${replyPost.postId}` ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, `${uniqueKey}-${replyPost.postId}`, replyPost.postId, discussParentId)} /><p className="block sm:inline align-[-0.5px]">0 likes</p></div>
                                         }
                                     </div>
                                     <div className="flex-1 min-w-19">
                                         {postTips.totalAmount ?
-                                            <div className="text-green-400"><img src={cashGreenSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === replyPost.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, replyPost)} /><a className="block sm:inline text-green-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getDisplayTipAmount(postTips.totalAmount)} idna</a></div>
+                                            <div className="text-green-400"><img src={cashGreenSvg} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === `${uniqueKey}-${replyPost.postId}` ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, `${uniqueKey}-${replyPost.postId}`, replyPost)} /><a className="block sm:inline text-green-400 align-[-0.5px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getDisplayTipAmount(postTips.totalAmount)} idna</a></div>
                                             :
-                                            <div className="text-gray-500"><img src={cashGraySvg} onMouseOver={(e) => { e.currentTarget.src = cashGreenSvg; }} onMouseOut={(e) => { e.currentTarget.src = cashGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === replyPost.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, replyPost)} /><p className="block sm:inline align-[-0.5px]">0 idna</p></div>
+                                            <div className="text-gray-500"><img src={cashGraySvg} onMouseOver={(e) => { e.currentTarget.src = cashGreenSvg; }} onMouseOut={(e) => { e.currentTarget.src = cashGraySvg; }} className={'h-6 p-[3px] mr-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === `${uniqueKey}-${replyPost.postId}` ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, `${uniqueKey}-${replyPost.postId}`, replyPost)} /><p className="block sm:inline align-[-0.5px]">0 idna</p></div>
                                         }
                                     </div>
                                     <div>
@@ -521,14 +524,17 @@ function PostComponent(props: PostComponentProps) {
                                     <ul {...addAttrs} id={`spotlight-discussion-${uniqueKey}-${spotlightReplyPostId}-${spotlightDiscussionPostId}`} className="relative flex flex-col flex-col-reverse max-h-100 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500">
                                         {discussionPostComments.length === 0 && <li className="mb-1"><p className="italic text-center text-[12px] text-gray-500">no comments yet</p></li>}
                                         {discussionPostComments.map((discussionPost) => {
-                                            const postTips = tipsRef.current[discussionPost.postId] ?? { totalAmount: 0, tips: [] };
+                                            const postTips = postTipsRef.current[discussionPost.postId] ?? { totalAmount: 0, tips: [] };
                                             const posterDisplayAddress = getDisplayAddressShort(discussionPost.poster);
                                             const posterStake = discussionPost.posterDetails_atTimeOfPost.stake;
                                             const posterState = discussionPost.posterDetails_atTimeOfPost.state;
                                             const posterAge = discussionPost.posterDetails_atTimeOfPost.age;
+                                            const posterPic = getProfilePic(postersRef.current[discussionPost.poster], posterState);
                                             const { displayDate, displayTime } = getDisplayDateTime(discussionPost.timestamp);
                                             const { messageLines } = getMessageLines(discussionPost.message);
                                             const replyToPost = postsRef.current[discussionPost.replyToPostId];
+                                            const replyToPostPosterState = replyToPost?.posterDetails_atTimeOfPost.state;
+                                            const replyToPostPosterPic = getProfilePic(postersRef.current[replyToPost?.poster], replyToPostPosterState);
                                             const likesForDiscussionPost = discussionPostLikes.filter(like => like.replyToPostId === discussionPost.postId);
 
                                             const isSpotlightDiscussionPost = discussionPost.postId === spotlightDiscussionPostId;
@@ -545,7 +551,7 @@ function PostComponent(props: PostComponentProps) {
                                                                 <div className="h-2.5 w-4 border-t-1 border-l-1 border-gray-500"></div>
                                                             </div>
                                                             <div className="flex-1 flex flex-row mr-3">
-                                                                <div className="w-5"><img src={`https://robohash.org/${replyToPost.poster}?set=set1`} /></div>
+                                                                <div className="w-5"><ObjectUrlImageComponent file={replyToPostPosterPic} /></div>
                                                                 <div className="flex-1 text-nowrap overflow-hidden">
                                                                     <p className="max-w-[120px] text-[12px] text-gray-500">{getMessageLines(replyToPost.message).messageLines[0]}</p>
                                                                 </div>
@@ -554,7 +560,7 @@ function PostComponent(props: PostComponentProps) {
                                                         <div className="flex flex-row">
                                                             <div className="w-9 flex-none flex flex-col">
                                                                 <div className="h-11 flex-none">
-                                                                    <img src={`https://robohash.org/${discussionPost.poster}?set=set1`} />
+                                                                    <ObjectUrlImageComponent file={posterPic} />
                                                                 </div>
                                                                 <div className="flex-1"></div>
                                                             </div>
@@ -572,20 +578,20 @@ function PostComponent(props: PostComponentProps) {
                                                                     <p className="[word-break:break-word]">{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
                                                                 </div>
                                                                 {discussionPost.image && <div className="my-1 mx-1">
-                                                                    <img className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm hover:cursor-pointer" src={discussionPost.image} onClick={(e) => handleExpandImageModal(e, discussionPost.image!, discussionPost.cid)} />
+                                                                    <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm hover:cursor-pointer" file={discussionPost.image} onClick={(e) => handleExpandImageModal(e, discussionPost.image!, discussionPost.cid)} />
                                                                 </div>}
                                                             </div>
                                                             <div className="pt-0.5 mr-1 text-[12px] flex flex-col gap-0.5">
                                                                 <div className=""><img src={commentGraySvg} onMouseOver={(e) => { e.currentTarget.src = commentBlueSvg; }} onMouseOut={(e) => { e.currentTarget.src = commentGraySvg; }} className={'h-6 p-[0px] -ml-0.5 mr-0.5 inline-block rounded-md hover:bg-blue-400/30 hover:cursor-pointer'} onClick={() => setDiscussReplyToPostIdHandler(replyPost, discussionPost.postId)} /></div>
                                                                 {likesForDiscussionPost.length ?
-                                                                    <div className="text-red-400 text-left whitespace-nowrap"><img src={heartRedSvg} className={'h-5 p-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === discussionPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, discussionPost.postId, discussionPost.postId, discussParentId)} /><a className="text-red-400 ml-[1px] align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForDiscussionPost)}>{likesForDiscussionPost.length}</a></div>
+                                                                    <div className="text-red-400 text-left whitespace-nowrap"><img src={heartRedSvg} className={'h-5 p-0.5 inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === `${uniqueKey}-${discussionPost.postId}` ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, `${uniqueKey}-${discussionPost.postId}`, discussionPost.postId, discussParentId)} /><a className="text-red-400 ml-[1px] align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenLikesModal(e, likesForDiscussionPost)}>{likesForDiscussionPost.length}</a></div>
                                                                     :
-                                                                    <div className="text-gray-500 text-left"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-5 p-[2px] inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === discussionPost.postId ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, discussionPost.postId, discussionPost.postId, discussParentId)} /></div>
+                                                                    <div className="text-gray-500 text-left"><img src={heartGraySvg} onMouseOver={(e) => { e.currentTarget.src = heartRedSvg; }} onMouseOut={(e) => { e.currentTarget.src = heartGraySvg; }} className={'h-5 p-[2px] inline-block rounded-md hover:bg-red-400/30 hover:cursor-pointer' + (submittingLike === `${uniqueKey}-${discussionPost.postId}` ? ' bg-red-400/30' : '')} onClick={(e) => localSubmitLikeHandler(e, `${uniqueKey}-${discussionPost.postId}`, discussionPost.postId, discussParentId)} /></div>
                                                                 }
                                                                 {postTips.totalAmount ?
-                                                                    <div className="text-green-400 text-left whitespace-nowrap"><img src={cashGreenSvg} className={'h-5 p-0.5 -ml-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === discussionPost.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, discussionPost)} /><a className="text-green-400 ml-0.5 align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getShortDisplayTipAmount(postTips.totalAmount)}</a></div>
+                                                                    <div className="text-green-400 text-left whitespace-nowrap"><img src={cashGreenSvg} className={'h-5 p-0.5 -ml-0.5 inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === `${uniqueKey}-${discussionPost.postId}` ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, `${uniqueKey}-${discussionPost.postId}`, discussionPost)} /><a className="text-green-400 ml-0.5 align-[-1px] hover:underline cursor-pointer" onClick={(e) => handleOpenTipsModal(e, postTips.tips)}>{getShortDisplayTipAmount(postTips.totalAmount)}</a></div>
                                                                     :
-                                                                    <div className="text-gray-500 text-left"><img src={cashGraySvg} onMouseOver={(e) => { e.currentTarget.src = cashGreenSvg; }} onMouseOut={(e) => { e.currentTarget.src = cashGraySvg; }} className={'h-5 p-[2px] inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === discussionPost.postId ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, discussionPost)} /></div>
+                                                                    <div className="text-gray-500 text-left"><img src={cashGraySvg} onMouseOver={(e) => { e.currentTarget.src = cashGreenSvg; }} onMouseOut={(e) => { e.currentTarget.src = cashGraySvg; }} className={'h-5 p-[2px] inline-block rounded-md hover:bg-green-400/30 hover:cursor-pointer' + (submittingTip === `${uniqueKey}-${discussionPost.postId}` ? ' bg-green-400/30' : '')} onClick={(e) => handleOpenSendTipModal(e, `${uniqueKey}-${discussionPost.postId}`, discussionPost)} /></div>
                                                                 }
                                                             </div>
                                                         </div>
@@ -613,12 +619,12 @@ function PostComponent(props: PostComponentProps) {
                                                     />
                                                 </div>
                                                 <div>
-                                                    <button className="h-7 w-16 mb-1 px-4 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={postActionDisabled} onClick={(e) => localSubmitPostHandler(e, replyPost.postId, discussReplyToPostId, discussParentId)}>{submittingPost === replyPost.postId ? '...' : 'Post!'}</button>
+                                                    <button className="h-7 w-16 mb-1 px-4 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" disabled={postActionDisabled} onClick={(e) => localSubmitPostHandler(e, `${uniqueKey}-${replyPost.postId}`, discussReplyToPostId, discussParentId)}>{submittingPost === `${uniqueKey}-${replyPost.postId}` ? '...' : 'Post!'}</button>
                                                 </div>
                                             </div>
                                         </div>
                                         {postMediaAttachment && <div className="my-1">
-                                            <img className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm" src={postMediaAttachment.dataUrl} />
+                                            <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-sm" file={postMediaAttachment.file} />
                                         </div>}
                                         <div className="leading-[12px]">
                                             {postMediaAttachment ? <>

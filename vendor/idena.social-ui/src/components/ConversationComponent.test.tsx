@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
+import type { Conversation } from '../App.exports';
 import ConversationComponent from './ConversationComponent';
 
 const renderConversation = (
-    conversations: Record<string, string[]>,
+    conversations: Record<string, Conversation>,
     messages: Record<string, any> = {},
     posters: Record<string, any> = {},
     replyPostsTree: Record<string, string> = {},
@@ -23,6 +24,7 @@ const renderConversation = (
             browserStateHistoryRef={{ current: {} }}
             setBrowserStateHistorySettings={vi.fn()}
             inputPostDisabled={false}
+            submitting={false}
             messageSettingsInvalid={false}
             copyMessageTxHandler={vi.fn()}
             submitMessageHandler={vi.fn()}
@@ -54,7 +56,7 @@ describe('ConversationComponent route hydration', () => {
         const sender = '0x0000000000000000000000000000000000000001';
         const recipient = '0x0000000000000000000000000000000000000002';
         const markup = renderConversation(
-            { missing: ['1'] },
+            { missing: { participants: [sender, recipient], messages: ['1'] } },
             {
                 1: {
                     messageId: '1',
@@ -72,7 +74,7 @@ describe('ConversationComponent route hydration', () => {
         const recipient = '0x0000000000000000000000000000000000000002';
         const messageDetails = { stake: 1, state: 'Human', age: 2 };
         const markup = renderConversation(
-            { missing: ['1', '2'] },
+            { missing: { participants: [sender, recipient], messages: ['1', '2'] } },
             {
                 1: {
                     timestamp: 1,

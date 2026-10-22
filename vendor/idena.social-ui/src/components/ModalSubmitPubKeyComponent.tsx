@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { extractSenderInfoFromRawTx } from "../logic/utils";
-import type { Poster } from "../logic/asyncUtils";
+import { type Poster } from "../logic/asyncUtils";
 
 type ModalSubmitPubkeyComponentProps = {
     modalSubmitPubkeyRef: React.RefObject<{ address: string; }>,
@@ -37,7 +37,7 @@ function ModalSubmitPubkeyComponent(props: ModalSubmitPubkeyComponentProps) {
             setRawTransactionError('Address details are not loaded.');
             return;
         }
-        sender.pubkey = senderInfo.pubkey;
+        postersRef.current = { ...postersRef.current, [modalSubmitPubkeyRef.current.address]: { ...sender, pubkey: senderInfo.pubkey } };
 
         setRawTransactionError('');
         closeModal();
