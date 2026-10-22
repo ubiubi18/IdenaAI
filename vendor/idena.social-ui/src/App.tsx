@@ -1756,7 +1756,9 @@ function App() {
             const postTextareaElement = document.getElementById(`post-input-${location}`) as HTMLTextAreaElement;
             const postMediaAttachment = postMediaAttachmentsRef.current[`post-${location}`];
 
-            let { inputText, media, mediaType } = await getTextAndMediaForPost(postTextareaElement, postMediaAttachment);
+            const postContent = await getTextAndMediaForPost(postTextareaElement, postMediaAttachment);
+            const { inputText } = postContent;
+            let { media, mediaType } = postContent;
 
             if (!inputText && !postMediaAttachment) {
                 showFlashNotice('warning', 'No text or media provided.');
