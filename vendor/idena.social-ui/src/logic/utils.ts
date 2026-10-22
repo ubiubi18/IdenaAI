@@ -2,8 +2,8 @@ import Decimal from "decimal.js";
 import * as secp256k1 from "@noble/secp256k1";
 import { keccak_256 } from "js-sha3";
 import { CallContractAttachment, contractArgumentFormat, hexToUint8Array, privateKeyToPublicKey, publicKeyToAddress, toHexString, Transaction, transactionType } from "idena-sdk-js-lite";
-import type { PostMediaAttachment } from "../App.exports";
-import { type Post } from "./asyncUtils";
+import type { PostFinderTransaction, PostMediaAttachment } from "../App.exports";
+import { type Post, type Poster } from "./asyncUtils";
 
 export const likeEmoji = '❤️';
 export const dnaBase = 1e18;
@@ -189,6 +189,18 @@ export function getIdentityStatus(state: string) {
     return state === 'Undefined' ? 'Not validated' : state;
 }
 
+export const fileToDataUrl = (file: File | Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onloadend = () => resolve(reader.result as string);
+
+        reader.onerror = () => reject(reader.error);
+
+        reader.readAsDataURL(file);
+    });
+};
+
 export function getBase64FromDataUrl(dataUrl: string) {
     const dataUrlSplit = dataUrl.split(',');
     const base64Media = dataUrlSplit[1];
@@ -197,10 +209,10 @@ export function getBase64FromDataUrl(dataUrl: string) {
     return { base64Media, base64MediaType };
 }
 
-export function getTextAndMediaForPost(postTextareaElement: HTMLTextAreaElement, postMediaAttachment?: PostMediaAttachment) {
+export async function getTextAndMediaForPost(postTextareaElement: HTMLTextAreaElement, postMediaAttachment?: PostMediaAttachment) {
     const inputText = postTextareaElement.value ?? '';
 
-    const { base64Media, base64MediaType } = postMediaAttachment ? getBase64FromDataUrl(postMediaAttachment.dataUrl) : {};
+    const { base64Media, base64MediaType } = postMediaAttachment ? getBase64FromDataUrl(await fileToDataUrl(postMediaAttachment.file)) : {};
 
     const media = base64Media ? [base64Media] : [];
     const mediaType = base64MediaType ? [base64MediaType] : [];
@@ -468,4 +480,54 @@ export function getPostActivities(post: Post | undefined, postersAddress: string
     }
 
     return newPostActivities;
+}
+
+export function filterIndexerApiBalanceUpdates(balanceUpdates: any[], methods: string[]) {
+    const filtered = balanceUpdates.filter((balanceUpdate: any) =>
+        balanceUpdate.type === 'CallContract' &&
+        methods.includes(balanceUpdate.txReceipt.method) &&
+        balanceUpdate.from === balanceUpdate.address &&
+        balanceUpdate.txReceipt.success === true
+    );
+    return filtered.map((balanceUpdate: any) => ({ txHash: balanceUpdate.hash, timestamp: getTimestampFromIndexerApi(balanceUpdate.timestamp) }));
+}
+
+export function filterTransactionsByCutoffTimestamp(currentContract: string, transactions: PostFinderTransaction[], contractCutoffs: { contract: string, timestamp: number }[]) {
+    let filteredTransactions;
+
+    for (let index = 0; index < contractCutoffs.length; index++) {
+        const element = contractCutoffs[index];
+
+        if (currentContract === element.contract) {
+            filteredTransactions = transactions.filter((balanceUpdate: any) => balanceUpdate.timestamp < element.timestamp);
+            break;
+        }
+    }
+
+    if (!filteredTransactions) {
+        return transactions;
+    } else {
+        return filteredTransactions;
+    }
+}
+
+export function getNextContract(currentContract: string, allContracts: string[]) {
+    let nextContract;
+
+    for (let index = 0; index < allContracts.length; index++) {
+        const contract = allContracts[index];
+
+        if (currentContract === contract) {
+            nextContract = allContracts[index + 1];
+            break;
+        }
+    }
+
+    return nextContract;
+}
+
+export function getProfilePic(profile: Poster, stateOverride?: string) {
+    if (!profile) return;
+    const state = stateOverride ?? profile.state;
+    return state === 'Human' ? profile.robohash5 : profile.robohash1;
 }
