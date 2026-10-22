@@ -3,13 +3,27 @@ set -Eeuo pipefail
 
 umask 077
 
-readonly profile_name=idena-ai-electron
-readonly profile_target=/etc/apparmor.d/idena-ai-electron
-readonly electron_path=/opt/idena-ai/source/node_modules/electron/dist/electron
-readonly service_user="${IDENA_AI_SERVICE_USER:-idenaai}"
+case "${IDENA_AI_APP_INSTANCE:-1}" in
+  1)
+    profile_name=idena-ai-electron
+    electron_path=/opt/idena-ai/source/node_modules/electron/dist/electron
+    service_user="${IDENA_AI_SERVICE_USER:-idenaai}"
+    ;;
+  3)
+    profile_name=idena-ai-3-electron
+    electron_path=/opt/idena-ai-3/source/node_modules/electron/dist/electron
+    service_user=idenaai3
+    ;;
+  *)
+    echo "Unsupported IdenaAI instance. Use 1 or 3." >&2
+    exit 2
+    ;;
+esac
+readonly profile_name electron_path service_user
+readonly profile_target="/etc/apparmor.d/${profile_name}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly script_dir
-readonly profile_source="${script_dir}/apparmor/idena-ai-electron"
+readonly profile_source="${script_dir}/apparmor/${profile_name}"
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run this installer as root." >&2
@@ -53,6 +67,21 @@ if runuser -u "${service_user}" -- test -w "${electron_path}"; then
   echo "The IdenaAI service user must not be able to modify Electron." >&2
   exit 4
 fi
+path_to_check="$(dirname -- "${electron_path}")"
+while [[ ${path_to_check} != / ]]; do
+  if [[ $(realpath -e -- "${path_to_check}") != "${path_to_check}" ]] ||
+    [[ $(stat -c '%U' -- "${path_to_check}") != root ]]; then
+    echo "Electron's parent directories must be real paths owned by root." >&2
+    exit 4
+  fi
+  directory_mode="$(stat -c '%a' -- "${path_to_check}")"
+  if (( (8#${directory_mode} & 8#022) != 0 )) ||
+    runuser -u "${service_user}" -- test -w "${path_to_check}"; then
+    echo "Electron's parent directories must not be writable by the service user or other users." >&2
+    exit 4
+  fi
+  path_to_check="$(dirname -- "${path_to_check}")"
+done
 
 # Validate before changing the loaded policy or its persistent source.
 apparmor_parser -Q "${profile_source}"
@@ -82,7 +111,7 @@ trap rollback ERR
 
 install -o root -g root -m 0644 "${profile_source}" "${profile_target}"
 apparmor_parser -r "${profile_target}"
-if ! aa-status 2>/dev/null | grep -Fq "${profile_name}"; then
+if ! aa-status 2>/dev/null | grep -F "${profile_name}" >/dev/null; then
   echo "The IdenaAI Electron AppArmor profile did not load." >&2
   false
 fi
@@ -90,4 +119,4 @@ fi
 trap - ERR
 rm -f -- "${backup}"
 echo "Installed and loaded ${profile_name}."
-echo "Restart idena-ai-console.service separately after checking session timing."
+echo "Restart the corresponding IdenaAI console service separately after checking session timing."

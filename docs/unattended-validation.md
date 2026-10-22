@@ -51,6 +51,14 @@ running, open **AI settings**, load the key, and select **Keep after restart**.
 Then use **Test fast path** to test the exact GPT-5.5 request used by short
 session: Priority service tier with low reasoning effort.
 
+For the separately managed IdenaAI 3 console, install its own path-specific
+profile from the reviewed source checkout with
+`sudo IDENA_AI_APP_INSTANCE=3 /opt/idena-ai-3/source/deploy/install-electron-userns-apparmor.sh`.
+The installer checks the fixed `idenaai3` service user and every parent of its
+Electron binary. With this profile loaded, leave `CHROME_DEVEL_SANDBOX` unset
+and the bundled `chrome-sandbox` at its ordinary root-owned mode 0755. Restart
+that console separately after checking session timing.
+
 ### Store the key from a terminal
 
 The operator can store the key from a shell instead of the settings UI. The
