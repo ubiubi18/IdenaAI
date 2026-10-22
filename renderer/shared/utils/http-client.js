@@ -37,7 +37,7 @@ async function parseResponse(response) {
 
 export async function requestJson(
   url,
-  {method = 'GET', data, params, timeout} = {}
+  {method = 'GET', data, params, timeout, redirect} = {}
 ) {
   const timeoutSignal = createTimeoutSignal(timeout)
 
@@ -52,6 +52,7 @@ export async function requestJson(
             },
       body: data === undefined ? undefined : JSON.stringify(data),
       signal: timeoutSignal.signal,
+      redirect,
     })
     const responseData = await parseResponse(response)
 

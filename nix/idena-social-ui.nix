@@ -11,7 +11,7 @@ buildNpmPackage {
   inherit src;
 
   nodejs = nodejs_24;
-  npmDepsHash = "sha256-5Fp21g4XKdC7PSFb7Zbi+LyOBcMmjjgSrWDeAAHWbWA=";
+  npmDepsHash = "sha256-lRFzNdIn6UWInrXvn9bHxMp2lDgNq/8AutYIR58/h1k=";
   npmBuildScript = "build";
 
   env = {

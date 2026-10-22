@@ -43,6 +43,11 @@ export function useDnaLink({onInvalidLink}) {
         callbackUrl,
         callbackFormat,
       })
+    } else {
+      setMethod(undefined)
+      setParams((currentParams) =>
+        Object.keys(currentParams).length ? {} : currentParams
+      )
     }
   }, [url])
 
