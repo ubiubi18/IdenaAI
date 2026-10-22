@@ -95,48 +95,47 @@ function countProductionLockPackages(packageLockInput) {
   ).length
 }
 
-function runAuditSummary() {
+function runAuditSummary(run = spawnSync) {
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const result = spawnSync(npmCommand, ['audit', '--omit=dev', '--json'], {
-    cwd: rootDir,
-    encoding: 'utf8',
-    shell: process.platform === 'win32' && /\.cmd$/i.test(npmCommand),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 90000,
-    env: {
-      ...process.env,
-      npm_config_fetch_retries: '1',
-      npm_config_fetch_timeout: '30000',
-    },
-  })
+  let error = 'npm audit did not return a vulnerability summary'
 
-  const output = result.stdout || result.stderr || ''
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = run(npmCommand, ['audit', '--omit=dev', '--json'], {
+      cwd: rootDir,
+      encoding: 'utf8',
+      shell: process.platform === 'win32' && /\.cmd$/i.test(npmCommand),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15000,
+      env: {
+        ...process.env,
+        npm_config_fetch_retries: '0',
+        npm_config_fetch_timeout: '10000',
+      },
+    })
 
-  if (result.error) {
-    return {
-      ok: false,
-      vulnerabilities: null,
-      error: result.error.message,
+    if (result.error) {
+      error = result.error.message
+    } else {
+      const output = result.stdout || result.stderr || ''
+      try {
+        const audit = JSON.parse(output)
+        if (audit.metadata?.vulnerabilities && !audit.error) {
+          return {
+            ok: result.status === 0,
+            vulnerabilities: audit.metadata.vulnerabilities,
+          }
+        }
+        error =
+          audit.error?.message ||
+          audit.message ||
+          'npm audit did not return a vulnerability summary'
+      } catch (_) {
+        error = output.trim() || 'npm audit did not return JSON'
+      }
     }
   }
 
-  try {
-    const audit = JSON.parse(output)
-    return {
-      ok: result.status === 0,
-      vulnerabilities: audit.metadata && audit.metadata.vulnerabilities,
-      error:
-        audit.metadata?.vulnerabilities || !audit.message
-          ? undefined
-          : audit.message,
-    }
-  } catch (_) {
-    return {
-      ok: false,
-      vulnerabilities: null,
-      error: output.trim() || 'npm audit did not return JSON',
-    }
-  }
+  return {ok: false, vulnerabilities: null, error}
 }
 
 function auditPolicyFailures(auditSummary = {}) {
@@ -284,4 +283,4 @@ function main() {
 
 if (require.main === module) main()
 
-module.exports = {auditPolicyFailures}
+module.exports = {auditPolicyFailures, runAuditSummary}
