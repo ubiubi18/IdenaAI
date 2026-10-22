@@ -3,7 +3,10 @@ const {
   SOCIAL_EMBED_DOCUMENT_PATH,
   SOCIAL_EMBED_ORIGIN,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
+  SOCIAL_DIRECT_V4_CONTRACT,
+  parseSocialV4DeliveryOrder,
   validateSocialCryptoRequest,
+  validateSocialDirectCheckRequest,
   validateSocialRpcRequest,
   isTrustedSocialFrameMessage,
 } = require('./social-desktop-rpc-policy')
@@ -111,6 +114,55 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
         ciphertexts: Array(17).fill(groupCiphertexts[0]),
       })
     ).toBe('invalid_crypto_request')
+  })
+
+  it('passes only one bounded delivery text to the local checker', () => {
+    const valid = {
+      requestId: 'check-1',
+      message: '{"format":"fod.direct-delivery","version":2}',
+    }
+    expect(validateSocialDirectCheckRequest(valid)).toBeNull()
+    expect(
+      validateSocialDirectCheckRequest({...valid, binaryPath: '/tmp/other'})
+    ).toBe('invalid_direct_check_request')
+    expect(
+      validateSocialDirectCheckRequest({...valid, message: 'ordinary message'})
+    ).toBe('invalid_direct_check_request')
+    expect(
+      validateSocialDirectCheckRequest({...valid, message: 'x'.repeat(2049)})
+    ).toBe('invalid_direct_check_request')
+  })
+
+  it('keeps the exact v4 order ID for a trusted saved-payment action', () => {
+    const message = `{"format":"fod.direct-delivery","version":2,"network":"idena","contract":"${SOCIAL_DIRECT_V4_CONTRACT}","author":"${'a'.repeat(
+      40
+    )}","offerId":"${'d'.repeat(
+      64
+    )}","orderId":18446744073709551615,"orderNonce":1,"buyer":"${'b'.repeat(
+      40
+    )}","deliveryKey":"04${'e'.repeat(128)}","ciphertext":"${'c'.repeat(438)}"}`
+    expect(parseSocialV4DeliveryOrder(message)).toEqual({
+      orderId: '18446744073709551615',
+      contract: `0x${SOCIAL_DIRECT_V4_CONTRACT}`,
+    })
+    expect(
+      parseSocialV4DeliveryOrder(
+        message.replace(
+          '"orderId":18446744073709551615',
+          '"orderId":18446744073709551616'
+        )
+      )
+    ).toBeNull()
+    expect(
+      parseSocialV4DeliveryOrder(
+        message.replace(SOCIAL_DIRECT_V4_CONTRACT, 'a'.repeat(40))
+      )
+    ).toBeNull()
+    expect(
+      parseSocialV4DeliveryOrder(
+        message.replace('"orderNonce":1', '"orderNonce":1,"orderId":1')
+      )
+    ).toBeNull()
   })
 
   it('allows the bounded transaction-history lookup required for messaging', () => {
@@ -222,7 +274,7 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
     ).toBe('invalid_social_contract_call')
     expect(
       validateSocialRpcRequest('excess-fee-estimate', 'contract_estimateCall', [
-        {...messageCall, maxFee: '10.000000000000000001'},
+        {...messageCall, maxFee: '20.000000000000000001'},
       ])
     ).toBe('invalid_social_contract_call')
     const messageArgument = JSON.parse(messageCall.args[0].value)
@@ -240,9 +292,9 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
       ],
     })
     for (const [count, limit] of [
-      [2, 10],
-      [6, 30],
-      [16, 80],
+      [2, 20],
+      [6, 20],
+      [16, 20],
     ]) {
       for (const rpcMethod of ['contract_call', 'contract_estimateCall']) {
         expect(

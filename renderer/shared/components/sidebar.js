@@ -361,6 +361,9 @@ function Navbar() {
         <NavItem href="/social" icon={GlobeIcon} featured badge={t('Live')}>
           {t('idena.social')}
         </NavItem>
+        <NavItem href="/flip-market" icon={GalleryIcon}>
+          {t('Flips on Demand')}
+        </NavItem>
       </Box>
       <Box mt={5}>
         <NavSectionTitle mt={0}>{t('Workspace')}</NavSectionTitle>

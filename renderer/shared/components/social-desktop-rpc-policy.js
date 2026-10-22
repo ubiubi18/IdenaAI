@@ -12,7 +12,7 @@ const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
 const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
 const SOCIAL_MAX_TIP_AMOUNT = 1000n * SOCIAL_IDNA_SCALE
 const SOCIAL_MAX_FEE = 10n * SOCIAL_IDNA_SCALE
-const SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT = 5n * SOCIAL_IDNA_SCALE
+const SOCIAL_MESSAGE_MAX_FEE = 20n * SOCIAL_IDNA_SCALE
 
 export const SOCIAL_CONTRACT_ADDRESS =
   '0x840e092e31e9656fF15E541505039ed77585338E'
@@ -20,6 +20,8 @@ export const SOCIAL_OFFICIAL_INDEXER_URL = 'https://api.idena.io'
 export const SOCIAL_EMBED_DOCUMENT_PATH = 'idena-social://app/index.html#/'
 export const SOCIAL_EMBED_ORIGIN = 'idena-social://app'
 export const SOCIAL_MESSAGE_CRYPTO_VERSION = 'host-v1'
+export const SOCIAL_DIRECT_V4_CONTRACT =
+  '3730be2217b0de1fdfe73098d37f3174dd9748cb'
 export const SOCIAL_MAX_IMAGE_BYTES = 1024 * 1024
 export const SOCIAL_IMAGE_FORMATS = [
   'PNG',
@@ -181,8 +183,7 @@ function validateSocialContractCall(call) {
     if (ciphertextCount < 2 || ciphertextCount > 16) {
       return 'invalid_social_contract_call'
     }
-    maxFeeLimit =
-      BigInt(ciphertextCount) * SOCIAL_MESSAGE_MAX_FEE_PER_CIPHERTEXT
+    maxFeeLimit = SOCIAL_MESSAGE_MAX_FEE
   }
   if (maxFee > maxFeeLimit) return 'invalid_social_contract_call'
 
@@ -338,4 +339,45 @@ export function validateSocialCryptoRequest(requestId, payload) {
   }
 
   return 'unsupported_crypto_operation'
+}
+
+export function validateSocialDirectCheckRequest(payload) {
+  if (
+    !isPlainObject(payload) ||
+    Object.keys(payload).sort().join(',') !== 'message,requestId' ||
+    typeof payload.requestId !== 'string' ||
+    payload.requestId.length < 1 ||
+    payload.requestId.length > SOCIAL_RPC_MAX_REQUEST_ID_LENGTH ||
+    typeof payload.message !== 'string' ||
+    payload.message.length < 1 ||
+    payload.message.length > 2048 ||
+    !payload.message.startsWith('{"format":"fod.direct-delivery"')
+  ) {
+    return 'invalid_direct_check_request'
+  }
+  return null
+}
+
+const SOCIAL_DIRECT_V4_DELIVERY_PATTERN = new RegExp(
+  [
+    '^\\{"format":"fod\\.direct-delivery","version":2,"network":"idena",',
+    `"contract":"${SOCIAL_DIRECT_V4_CONTRACT}",`,
+    '"author":"[0-9a-f]{40}","offerId":"[0-9a-f]{64}",',
+    '"orderId":([1-9][0-9]{0,19}),"orderNonce":([1-9][0-9]{0,19}),',
+    '"buyer":"[0-9a-f]{40}","deliveryKey":"04[0-9a-f]{128}",',
+    '"ciphertext":"[0-9a-f]{438}"\\}$',
+  ].join('')
+)
+
+export function parseSocialV4DeliveryOrder(message) {
+  if (typeof message !== 'string' || message.length > 2048) return null
+  const match = SOCIAL_DIRECT_V4_DELIVERY_PATTERN.exec(message)
+  if (
+    !match ||
+    BigInt(match[1]) > 18446744073709551615n ||
+    BigInt(match[2]) > 18446744073709551615n
+  ) {
+    return null
+  }
+  return {orderId: match[1], contract: `0x${SOCIAL_DIRECT_V4_CONTRACT}`}
 }

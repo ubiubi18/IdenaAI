@@ -18,6 +18,7 @@ type SendOptions = {
     rpcClient: RpcClient;
     prepare: () => Promise<PreparedMessage>;
     confirmFee: (maxFee: string, remainingUploads: number) => Promise<boolean>;
+    assertBeforeSubmission?: () => void;
 };
 
 const inFlight = new Map<string, Promise<string>>();
@@ -51,7 +52,7 @@ function readPending(storage: PendingStorage, key: string): PendingMessage | nul
     return record;
 }
 
-async function sendPending({key, storage, from, contract, method, rpcClient, prepare, confirmFee}: SendOptions): Promise<string> {
+async function sendPending({key, storage, from, contract, method, rpcClient, prepare, confirmFee, assertBeforeSubmission}: SendOptions): Promise<string> {
     const save = (record: PendingMessage) => {
         try {
             storage.setItem(key, JSON.stringify(record));
@@ -79,6 +80,7 @@ async function sendPending({key, storage, from, contract, method, rpcClient, pre
     for (const upload of pending.uploads) {
         if (upload.txHash) continue;
         const {nonce, epoch} = await getNonceAndEpoch(rpcClient, from);
+        assertBeforeSubmission?.();
         upload.submitting = true;
         save(pending);
         let response;
@@ -106,6 +108,7 @@ async function sendPending({key, storage, from, contract, method, rpcClient, pre
         throw new Error('The fee increased. Please review the new estimate and retry; completed storage is saved.');
     }
     call.maxFee = approvedCall.maxFee;
+    assertBeforeSubmission?.();
     pending.submitting = true;
     save(pending);
     let response;
