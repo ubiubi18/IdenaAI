@@ -271,4 +271,4 @@ replace github.com/ipfs/fs-repo-migrations/fs-repo-11-to-12 => github.com/idena-
 // Dependency replacements are not inherited from idena-go.
 replace github.com/libp2p/go-libp2p-kad-dht => github.com/ubiubi18/go-libp2p-kad-dht v0.41.1-0.20260924080750-83f1403bcb17
 
-go 1.26.8
+go 1.26.10

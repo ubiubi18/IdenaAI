@@ -59,12 +59,12 @@ GUI session such as VNC or RDP to run Electron.
 
 | Requirement          | Version or purpose                                                           |
 | -------------------- | ---------------------------------------------------------------------------- |
-| Node.js              | `24.18.0` or newer within Node 24; Node 25+ is rejected                      |
+| Node.js              | `24.22.1` or newer within Node 24; Node 25+ is rejected                      |
 | npm                  | `11.16.0` or newer                                                           |
 | Git                  | Clone this repository and the pinned node sources                            |
 | Python               | `3.11+` for helper pipelines and native dependency builds                    |
 | Platform build tools | Required for Electron's native dependencies; see below                       |
-| Go                   | Needed for managed-node builds and rehearsal; the builder selects `go1.26.8` |
+| Go                   | Needed for managed-node builds and rehearsal; the builder selects `go1.26.10` |
 
 [`.nvmrc`](.nvmrc) pins Node for version-manager users. Dependency versions and
 commands live in [`package.json`](package.json); the exact dependency tree is
