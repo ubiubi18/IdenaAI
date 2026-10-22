@@ -40,6 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_REF_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           tag="${RELEASE_REF_NAME#refs/tags/}"
@@ -53,6 +54,16 @@ jobs:
           fi
           if [[ "$(git rev-list -n 1 "refs/tags/${tag}")" != "$(git rev-parse HEAD)" ]]; then
             echo "Checked-out commit does not match release tag: ${tag}" >&2
+            exit 1
+          fi
+          if [[ -z "${RELEASE_DEFAULT_BRANCH}" ]]; then
+            echo "Repository default branch is missing" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin \
+            "+refs/heads/${RELEASE_DEFAULT_BRANCH}:refs/remotes/origin/${RELEASE_DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor HEAD "refs/remotes/origin/${RELEASE_DEFAULT_BRANCH}"; then
+            echo "Release tag is not on the repository default branch: ${tag}" >&2
             exit 1
           fi
 
