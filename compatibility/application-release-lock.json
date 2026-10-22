@@ -6,7 +6,7 @@
   "consensusChangesAllowed": false,
   "protectedFiles": {
     ".github/workflows/application-candidate-artifacts.yml": "445f7587e78d5b06ddd79de3167ec8f6913d8939afc181ed593d65a700a9776b",
-    ".github/workflows/release.yml": "627c4ce821dc4025ce1d5d7d0ca5b22d48f9858dc204463116792e5b3cf08f22",
+    ".github/workflows/release.yml": "7dff17fdbb27c85094b5aa01675e3fcb5541ac3e14598f5657473f5e9e99df07",
     ".node-version": "d9f318747a126ce2247661af67852b185def7789492eabfad7bba322be087c33",
     ".nvmrc": "d9f318747a126ce2247661af67852b185def7789492eabfad7bba322be087c33",
     "compatibility/stack-lock.json": "68ec28c889cea1a97b3f83c898f7308e78a67b9403d426a0042a518e4128fd8b",
