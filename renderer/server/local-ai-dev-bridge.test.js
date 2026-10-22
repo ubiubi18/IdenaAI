@@ -7,6 +7,7 @@ const {
   DEV_LOCAL_AI_BRIDGE_HEADER_VALUE,
   assertDevBridgeMethodAllowed,
   isTrustedDevBridgeRequest,
+  resolveDesktopUserDataDir,
   sanitizeBridgeValue,
 } = require('./local-ai-dev-bridge')
 
@@ -25,6 +26,35 @@ describe('local-ai dev bridge', () => {
   afterEach(() => {
     delete process.env.IDENA_DESKTOP_LOCAL_AI_DEV_BASE_DIR
     fs.removeSync(tempDir)
+  })
+
+  it('uses the active desktop profile and defaults to the practice profile', () => {
+    const previous = {
+      userDataDir: process.env.IDENA_DESKTOP_USER_DATA_DIR,
+      workspaceRuntimeDir: process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR,
+      appUserDataName: process.env.IDENA_DESKTOP_APP_USER_DATA_NAME,
+    }
+    try {
+      expect(resolveDesktopUserDataDir()).toBe(tempDir)
+      delete process.env.IDENA_DESKTOP_LOCAL_AI_DEV_BASE_DIR
+      process.env.IDENA_DESKTOP_USER_DATA_DIR = tempDir
+      expect(resolveDesktopUserDataDir()).toBe(tempDir)
+      delete process.env.IDENA_DESKTOP_USER_DATA_DIR
+      delete process.env.IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR
+      delete process.env.IDENA_DESKTOP_APP_USER_DATA_NAME
+      expect(resolveDesktopUserDataDir()).toBe(
+        path.join(path.dirname(process.cwd()), 'IdenaAI-runtime', 'IdenaAIDev')
+      )
+    } finally {
+      for (const [key, value] of Object.entries({
+        IDENA_DESKTOP_USER_DATA_DIR: previous.userDataDir,
+        IDENA_DESKTOP_WORKSPACE_RUNTIME_DIR: previous.workspaceRuntimeDir,
+        IDENA_DESKTOP_APP_USER_DATA_NAME: previous.appUserDataName,
+      })) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
   })
 
   it('trusts only signed same-origin localhost requests', () => {

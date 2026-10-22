@@ -1,6 +1,34 @@
-const {auditPolicyFailures} = require('./check-dependency-footprint')
+const {
+  auditPolicyFailures,
+  runAuditSummary,
+} = require('./check-dependency-footprint')
 
 describe('dependency audit policy', () => {
+  it('retries a timed-out request and accepts a complete vulnerability report', () => {
+    const run = jest
+      .fn()
+      .mockReturnValueOnce({error: new Error('network timeout')})
+      .mockReturnValueOnce({
+        status: 0,
+        stdout: JSON.stringify({metadata: {vulnerabilities: {total: 0}}}),
+      })
+
+    expect(runAuditSummary(run).vulnerabilities).toEqual({total: 0})
+    expect(run).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails closed after two incomplete audit responses', () => {
+    const run = jest.fn().mockReturnValue({
+      status: 1,
+      stdout: JSON.stringify({error: {message: 'registry unavailable'}}),
+    })
+
+    expect(auditPolicyFailures(runAuditSummary(run))).toEqual([
+      'npm audit --omit=dev unavailable: registry unavailable',
+    ])
+    expect(run).toHaveBeenCalledTimes(2)
+  })
+
   it('fails closed when npm audit cannot be evaluated', () => {
     expect(auditPolicyFailures({error: 'network unavailable'})).toEqual([
       'npm audit --omit=dev unavailable: network unavailable',

@@ -70,6 +70,20 @@ describe('desktop message submission', () => {
         await expect(send(rpcClient, message)).resolves.toBe(txHash);
     });
 
+    it('accepts the approved direct-message fee through both desktop gates', async () => {
+        const message = [btoa('a'.repeat(1568)), btoa('b'.repeat(1568))];
+        const rpcClient = vi.fn(async (method: string, params: any[]) => {
+            expect(validateSocialRpcRequest('approved-direct-message', method, params)).toBeNull();
+            expect(mainPolicy.validateSocialContractCall(params[0])).toBeNull();
+            if (method === 'contract_estimateCall') return {result: {
+                success: true, gasCost: '6.2081666666641834', txFee: '2.824166666665537',
+            }};
+            expect(params[0].maxFee).toBe('10.83879999999566448');
+            return {result: txHash};
+        });
+        await expect(send(rpcClient, message)).resolves.toBe(txHash);
+    });
+
     it.each([0, 1, 17])('rejects %i message ciphertexts at preflight without submitting', async (count) => {
         const rpcClient = vi.fn(async (method: string, params: any[]) => {
             const rendererError = validateSocialRpcRequest('message-test', method, params);
@@ -104,8 +118,8 @@ describe('desktop message submission', () => {
     });
 
     it('does not submit a message whose estimated fee exceeds the desktop cap', async () => {
-        const rpcClient = vi.fn().mockResolvedValue({result: {success: true, gasCost: '8.5', txFee: '0.1'}});
-        await expect(send(rpcClient)).rejects.toThrow('The message exceeds the desktop fee limit of 10 IDNA.');
+        const rpcClient = vi.fn().mockResolvedValue({result: {success: true, gasCost: '17', txFee: '0.1'}});
+        await expect(send(rpcClient)).rejects.toThrow('The message exceeds the desktop fee limit of 20 IDNA.');
         expect(rpcClient.mock.calls.map(([method]) => method)).toEqual(['contract_estimateCall']);
     });
 });

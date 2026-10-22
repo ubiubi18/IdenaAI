@@ -7,11 +7,27 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
-      go1268For = pkgs: pkgs.go_1_26.overrideAttrs (_: {
-        version = "1.26.8";
+      node24221For = pkgs: pkgs.nodejs_24.overrideAttrs (_: {
+        version = "24.22.1";
         src = pkgs.fetchurl {
-          url = "https://go.dev/dl/go1.26.8.src.tar.gz";
-          hash = "sha256-Tjm5jkL5RvoFrIvFtxh335fb23y7Gnd7VBZnrXEX/S4=";
+          url = "https://nodejs.org/dist/v24.22.1/node-v24.22.1.tar.xz";
+          hash = "sha256-T1N5eWKAza6wwvNY/QS2oWzE+336g7WoyRqdljtDUjE=";
+        };
+      });
+      electron4383For = pkgs:
+        (pkgs.callPackage (pkgs.path + "/pkgs/development/tools/electron/binary/generic.nix") {})
+          "43.8.3" {
+            headers = "sha256-cTJbrdyp9H4jd5sS3et2ZBsYFC0ZxdO7xN0dyrlvccw=";
+            aarch64-darwin = "sha256-COaTrjbP0jAQWqvnDGJrGiQ8E1NKUpw1qAwbh8uNp7Q=";
+            aarch64-linux = "sha256-uBSrIqvwvOkP0v/8FJDvyU84g1O82y90SVB0SZj9l7E=";
+            armv7l-linux = "sha256-zmW0ulLavhz46Ykz0FfLZWubnHRawOHIWdMxvHpdoa4=";
+            x86_64-linux = "sha256-c9fW/hIMmY23WDTCPIznzoOQYHwZiy4Weiis15N77yI=";
+          };
+      go12610For = pkgs: pkgs.go_1_26.overrideAttrs (_: {
+        version = "1.26.10";
+        src = pkgs.fetchurl {
+          url = "https://go.dev/dl/go1.26.10.src.tar.gz";
+          hash = "sha256-/WPog7ovK/ypPBZGsx6+9j4rHk0rMXyXidl2po2B828=";
         };
       });
     in
@@ -19,8 +35,10 @@
       packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
-          go1268 = go1268For pkgs;
-          buildGo1268Module = pkgs.buildGoModule.override { go = go1268; };
+          node24221 = node24221For pkgs;
+          electron4383 = electron4383For pkgs;
+          go12610 = go12610For pkgs;
+          buildGo12610Module = pkgs.buildGoModule.override { go = go12610; };
           idenaWasmBinding = pkgs.fetchFromGitHub {
             owner = "ubiubi18";
             repo = "idena-wasm-binding";
@@ -28,15 +46,18 @@
             hash = "sha256-3mrpSd7yVxY+SanZBdXNC3qljHZmV2BpbhkyRQZgS0w=";
           };
           idenaGo = pkgs.callPackage ./nix/idena-go.nix {
-            buildGoModule = buildGo1268Module;
+            buildGoModule = buildGo12610Module;
             inherit idenaWasmBinding;
           };
           idenaSocialUi = pkgs.callPackage ./nix/idena-social-ui.nix {
             src = self + "/vendor/idena.social-ui";
+            nodejs_24 = node24221;
           };
           idenaai = pkgs.callPackage ./nix/idenaai.nix {
             src = self;
             inherit idenaGo idenaSocialUi;
+            nodejs_24 = node24221;
+            electron_43 = electron4383;
           };
         in
         {
@@ -71,7 +92,8 @@
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
-          go1268 = go1268For pkgs;
+          node24221 = node24221For pkgs;
+          go12610 = go12610For pkgs;
         in
         {
           default = pkgs.mkShell {
@@ -80,8 +102,8 @@
               gcc
               git
               gnumake
-              go1268
-              nodejs_24
+              go12610
+              node24221
               pkg-config
               python3
             ];

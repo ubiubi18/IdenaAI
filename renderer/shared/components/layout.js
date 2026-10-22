@@ -99,6 +99,7 @@ import {TroubleshootingScreen} from '../../screens/troubleshooting'
 import {getAppBridge} from '../utils/app-bridge'
 import {syncSharedGlobal} from '../utils/shared-global'
 import {navigateRendererRoute} from '../utils/navigation'
+import {isValidDnaSignInUrls} from '../../screens/dna/utils'
 
 global.getZoomLevel = global.getZoomLevel || (() => 0)
 global.setZoomLevel = global.setZoomLevel || (() => {})
@@ -271,7 +272,11 @@ export default function Layout({
         <NormalApp {...props} />
       )}
 
-      {Boolean(authenticationEndpoint) && (
+      {isValidDnaSignInUrls({
+        callbackUrl: dnaSignInParams.callbackUrl,
+        nonceEndpoint,
+        authenticationEndpoint,
+      }) && (
         <DnaSignInDialog
           authenticationEndpoint={authenticationEndpoint}
           nonceEndpoint={nonceEndpoint}
