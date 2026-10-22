@@ -37,8 +37,8 @@
     "vendor/idena.social-contract/test-contract-runner/go.mod": "c0b3ef714cf395269e1e17779091667914eb5eec8d45c82e94e509e50f541959",
     "vendor/idena.social-contract/test-contract-runner/go.sum": "eb3617996003910f48fc8e8003be44784a008a8cd72b2cb9daba3d46e314ade1",
     "vendor/idena.social-contract/yarn.lock": "93698049fdb7774bc878c6ec4460721bd428ab9c1dbba2195d724640f119e090",
-    "vendor/idena.social-ui/package-lock.json": "ddc2abd37d52082cbd2a6ea58e943f8e3ad97815ff639ec967d66237970e18d4",
-    "vendor/idena.social-ui/package.json": "c968e89ea7cc8bb6e675a6b1a8ebcd8d5b22bb6824999aa34d304bf85a520a35"
+    "vendor/idena.social-ui/package-lock.json": "8bd60ba93cbbfd7a3d6a90243f0df0c08b9c4344d8074c9309e0e59723c3eaef",
+    "vendor/idena.social-ui/package.json": "5b9e5bd84ce904214f355ab2c07eb5cb7a0c86ea3d778e376b32f1312dca350f"
   },
   "requiredTargets": [
     "darwin-arm64",
