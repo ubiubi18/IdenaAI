@@ -14,7 +14,7 @@
     "main/ai-providers/url-policy.js": "1ad2148fd47186952f51dc3c5d0ba6792b0f7ae305234b5b3be9dda0ec3e4035",
     "main/application-release-policy.js": "58f375447eae9cfb15f44ea563f1b69699665471adf9478e185d3f878ac76aca",
     "main/idena-node.js": "a576c501757a1e33debfa2e925b47ed9bb4ee39d5fe005337895061016ea4881",
-    "main/index.js": "16ae632b29f44bad8ed82125a3fbf023e3202ec7066846ca5c618b9142a10a18",
+    "main/index.js": "841351f2bdc9afe9844720670f2c10d46850ced2e41c0cb221440b281ebc4a58",
     "main/node-artifact-policy.js": "b70bbbb2f717c6f44f9a5ba621ec10da38e7e24b01b0271a4bb11c3b4b38246b",
     "main/utils/fetch-client.js": "09db5ae64b17b9e882078c873deb708ab10313aecf965d2cacfb33d379764071",
     "package-lock.json": "351b6663cb441771bb229ff2f08d1896cef848048b9f6c62eeb0905f3a939355",
