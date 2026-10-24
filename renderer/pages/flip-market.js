@@ -20,6 +20,7 @@ import {useChainState} from '../shared/providers/chain-context'
 import {useIdentityState} from '../shared/providers/identity-context'
 import {useSettingsState} from '../shared/providers/settings-context'
 import FlipMarketV7 from '../shared/components/flip-market-v7'
+import FlipMarketV8 from '../shared/components/flip-market-v8'
 
 const DIRECT_VERSION = 4
 const OFFER_ID = /^[0-9a-f]{64}$/
@@ -133,12 +134,13 @@ function sameAddress(left, right) {
 }
 
 export default function FlipMarketPage() {
-  const [version, setVersion] = React.useState(7)
-  return version === 7 ? (
-    <FlipMarketV7 onSelectV4={() => setVersion(4)} />
-  ) : (
-    <FlipMarketV4 onSelectV7={() => setVersion(7)} />
-  )
+  const [version, setVersion] = React.useState(9)
+  if (version === 9)
+    return <FlipMarketV8 key="v9" version={9} onLegacy={() => setVersion(8)} />
+  if (version === 8)
+    return <FlipMarketV8 key="v8" onLegacy={() => setVersion(7)} />
+  if (version === 7) return <FlipMarketV7 onSelectV4={() => setVersion(4)} />
+  return <FlipMarketV4 onSelectV7={() => setVersion(7)} />
 }
 
 function FlipMarketV4({onSelectV7}) {
