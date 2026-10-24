@@ -895,6 +895,20 @@ const fodV7Service = createFodV7Service({
   openFolder: async (directory) => (await shell.openPath(directory)) === '',
 })
 
+const fodV8Service = createFodV7Service({
+  ...fodDirectServiceOptions,
+  root: join(app.getPath('userData'), 'fod-v7'),
+  marketVersion: 8,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+
+const fodV9Service = createFodV7Service({
+  ...fodDirectServiceOptions,
+  root: join(app.getPath('userData'), 'fod-v7'),
+  marketVersion: 9,
+  rpcCall: (connection, payload) => sendNodeRpcRequest(payload, connection),
+})
+
 function normalizeLocalAiPayload(payload = {}) {
   const MAX_LOCAL_AI_PAYLOAD_DEPTH = 8
   const MAX_LOCAL_AI_OBJECT_KEYS = 128
@@ -3752,6 +3766,40 @@ handleTrusted('social.v7', async (_event, payload) => {
         message: /^[A-Za-z0-9 .,!?'-]{1,180}$/.test(message)
           ? message
           : 'The market action was refused. Check local pins, node state and selected files.',
+      },
+    }
+  }
+})
+
+handleTrusted('social.v8', async (_event, payload) => {
+  try {
+    if (!payload || typeof payload.method !== 'string')
+      throw new Error('Invalid market request.')
+    return {result: await fodV8Service(payload.method, payload.data)}
+  } catch (error) {
+    const message = error?.message || ''
+    return {
+      error: {
+        message: /^[A-Za-z0-9 .,!?'-]{1,180}$/.test(message)
+          ? message
+          : 'The market action could not be verified. Refresh the node state and try again.',
+      },
+    }
+  }
+})
+
+handleTrusted('social.v9', async (_event, payload) => {
+  try {
+    if (!payload || typeof payload.method !== 'string')
+      throw new Error('Invalid market request.')
+    return {result: await fodV9Service(payload.method, payload.data)}
+  } catch (error) {
+    const message = error?.message || ''
+    return {
+      error: {
+        message: /^[A-Za-z0-9 .,!?'-]{1,180}$/.test(message)
+          ? message
+          : 'The market action could not be verified. Refresh the node state and try again.',
       },
     }
   }
