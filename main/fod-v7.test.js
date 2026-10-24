@@ -95,7 +95,61 @@ function fakeSpawn(calls) {
     child.stderr = new PassThrough()
     child.kill = jest.fn()
     child.stdin.on('finish', () => {
-      if (args[0] === 'direct-v7-prepare') {
+      if (args[0] === 'v8' || args[0] === 'v9') {
+        const command = args[args.indexOf('-command') + 1]
+        const out = args[args.indexOf('-out') + 1]
+        if (command === 'status')
+          fs.writeFileSync(
+            out,
+            JSON.stringify({
+              version: args[0] === 'v9' ? 9 : 8,
+              contract: CONTRACT,
+              codeHash: CODE_HASH,
+              identity: ADDRESS,
+              height: 100,
+              buyQuote: '100',
+              sellQuote: '90',
+              poolCanAcquire: false,
+              account: {
+                balance: '1000',
+                reserved: '0',
+                target: '1000',
+                needsTopup: false,
+              },
+              buys: [],
+              sells: [],
+              bundles: [],
+              trades: [],
+            }),
+            {mode: 0o600}
+          )
+        if (command === 'listing') {
+          const request = JSON.parse(
+            fs.readFileSync(args[args.indexOf('-request') + 1], 'utf8')
+          )
+          fs.writeFileSync(out, JSON.stringify(request), {mode: 0o600})
+        }
+        if (command === 'prepare') {
+          const request = JSON.parse(
+            fs.readFileSync(args[args.indexOf('-request') + 1], 'utf8')
+          )
+          fs.writeFileSync(
+            out,
+            JSON.stringify({
+              format: `fod.prepared-bonded-${args[0]}-${request.operation}`,
+              version: 1,
+              operation: request.operation,
+              network: 'idena',
+              contract: CONTRACT,
+              codeHash: CODE_HASH,
+              amount: request.operation === 'queueBuy' ? request.maximum : '1',
+              estimatedMaxFee: '1000',
+              bondedV8: request,
+            }),
+            {mode: 0o600}
+          )
+        }
+      } else if (args[0] === 'direct-v7-prepare') {
         const operation = args[args.indexOf('-operation') + 1]
         const contract = args[args.indexOf('-contract') + 1]
         fs.writeFileSync(
@@ -157,6 +211,10 @@ function fakeSpawn(calls) {
         )
       } else if (args[0] === 'submit') {
         const contract = args[args.indexOf('-contract') + 1]
+        const prepared = JSON.parse(
+          fs.readFileSync(args[args.indexOf('-prepared') + 1], 'utf8')
+        )
+        const bonded = /^fod\.prepared-bonded-v[89]-/.test(prepared.format)
         fs.writeFileSync(
           args[args.indexOf('-signed') + 1],
           JSON.stringify({
@@ -164,9 +222,9 @@ function fakeSpawn(calls) {
             version: 1,
             network: 'idena',
             contract,
-            operation: 'challenge',
-            amount: '0',
-            maxFee: '1000000000000000000',
+            operation: bonded ? prepared.operation : 'challenge',
+            amount: bonded ? prepared.amount : '0',
+            maxFee: bonded ? prepared.estimatedMaxFee : '1000000000000000000',
             sender: ADDRESS,
             broadcast: true,
             txHash: TX_HASH,
@@ -213,8 +271,10 @@ describe('direct v7 desktop bridge', () => {
     onRpc,
     openFolder,
     getExplorer,
+    marketVersion = 7,
   } = {}) {
     return createFodV7Service({
+      marketVersion,
       fs: fsImpl,
       dialog,
       spawn: fakeSpawn(calls),
@@ -242,7 +302,11 @@ describe('direct v7 desktop bridge', () => {
             mempoolNonce: getNonce(),
           },
           dna_epoch: {epoch: 230},
-          bcn_txReceipt: {success: true},
+          bcn_txReceipt: {
+            success: true,
+            txHash: TX_HASH,
+            contract: `0x${CONTRACT}`,
+          },
         }
         return {result: results[method]}
       },
@@ -255,6 +319,90 @@ describe('direct v7 desktop bridge', () => {
     binaryPath: process.execPath,
     binarySha256: BINARY_HASH,
   }
+
+  it.each([8, 9])(
+    'v%s enforces purchase budgets at the real signing boundary',
+    async (version) => {
+      fs.mkdirSync(path.join(root, 'v7'), {recursive: true, mode: 0o700})
+      fs.writeFileSync(
+        path.join(root, 'v7', `bonded-v${version}.json`),
+        JSON.stringify(pins),
+        {mode: 0o600}
+      )
+      const v8 = service({
+        marketVersion: version,
+        onRpc: (method) => {
+          if (method === 'bcn_feePerGas') return '1'
+          if (method === 'dna_identity') return {flips: []}
+          return undefined
+        },
+      })
+      await v8('unlock', {
+        passphrase: 'a test vault passphrase',
+        perTrade: '200',
+        purchaseBudget: '105',
+      })
+      const dialogs = dialog.showMessageBox.mock.calls.length
+      await v8('tick')
+      expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(0)
+      const result = await v8('trade', {side: 'buy', quote: '100'})
+      expect(result.status).toBe('included')
+      expect(dialog.showMessageBox).toHaveBeenCalledTimes(dialogs)
+      expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(1)
+      expect((await v8('status')).trading.purchaseRemaining).toBe('0')
+      await expect(v8('trade', {side: 'buy', quote: '100'})).rejects.toThrow(
+        'budget'
+      )
+      expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(1)
+      await v8('stop')
+      await expect(v8('trade', {side: 'buy', quote: '100'})).rejects.toThrow(
+        'Enable one-click'
+      )
+    }
+  )
+
+  it('v9 retains the vault passphrase through the real sale signing boundary', async () => {
+    const bundle = 'd'.repeat(64)
+    const base = path.join(root, 'v7', 'bonded', CONTRACT, ADDRESS)
+    fs.mkdirSync(base, {recursive: true, mode: 0o700})
+    fs.writeFileSync(
+      path.join(root, 'v7', 'bonded-v9.json'),
+      JSON.stringify(pins),
+      {mode: 0o600}
+    )
+    const journal = Buffer.alloc(273)
+    Buffer.from(CONTRACT, 'hex').copy(journal, 36)
+    Buffer.from(ADDRESS, 'hex').copy(journal, 56)
+    journal.writeUInt16BE(233, 76)
+    journal.writeUInt16BE(5, 78)
+    fs.writeFileSync(
+      path.join(base, `package-${bundle}.json`),
+      JSON.stringify({
+        protocolVersion: 9,
+        caller: ADDRESS,
+        bundle,
+        journal: journal.toString('hex'),
+        vaultFile: keyFile,
+        sessionFile: keyFile,
+      }),
+      {mode: 0o600}
+    )
+    const v9 = service({
+      marketVersion: 9,
+      onRpc: (method) => (method === 'bcn_feePerGas' ? '1' : undefined),
+    })
+    await v9('unlock', {
+      passphrase: 'a test vault passphrase',
+      perTrade: '200',
+      purchaseBudget: '1000',
+    })
+    const result = await v9('trade', {side: 'sell', bundle, quote: '90'})
+    expect(result.status).toBe('included')
+    expect(calls.find((c) => c.args[0] === 'submit').hasPassphrase).toBe(true)
+    expect(calls.find((c) => c.args.includes('listing')).hasPassphrase).toBe(
+      true
+    )
+  })
 
   it('lets the user choose a tool path without treating it as verified', async () => {
     const v7 = service()
@@ -299,6 +447,44 @@ describe('direct v7 desktop bridge', () => {
       txHash: TX_HASH,
       status: 'included',
     })
+  })
+
+  it('refreshes pending receipts without rewriting signed records or allowing a second signature', async () => {
+    let receipt = null
+    const v7 = service({
+      onRpc: (method) => (method === 'bcn_txReceipt' ? receipt : undefined),
+    })
+    await v7('configure', pins)
+    const prepared = await v7('prepare', {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    })
+    await v7('submit', {actionId: prepared.actionId})
+    const file = path.join(
+      root,
+      'v7',
+      'actions',
+      ADDRESS,
+      prepared.actionId,
+      'signed.json'
+    )
+    const signed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    signed.outcome = {included: false}
+    fs.writeFileSync(file, JSON.stringify(signed))
+    const original = fs.readFileSync(file)
+    expect((await v7('status')).actions[0].submitted.status).toBe('uncertain')
+    receipt = {success: true, txHash: TX_HASH, contract: `0x${CONTRACT}`}
+    expect((await v7('status')).actions[0].submitted.status).toBe('included')
+    receipt = {...receipt, success: false}
+    expect((await v7('status')).actions[0].submitted.status).toBe('failed')
+    receipt = {...receipt, txHash: `0x${'f'.repeat(64)}`}
+    expect((await v7('status')).actions[0].submitted.status).toBe('uncertain')
+    expect(fs.readFileSync(file).equals(original)).toBe(true)
+    await expect(v7('submit', {actionId: prepared.actionId})).rejects.toThrow(
+      'already'
+    )
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(1)
   })
 
   it('requires user review before signing or broadcasting', async () => {
@@ -372,7 +558,7 @@ describe('direct v7 desktop bridge', () => {
     expect(detail).toContain('no private delivery or dispute')
   })
 
-  it('shows only matching public explorer images for a verified saved purchase', async () => {
+  it('fetches matching public images only when explicitly requested', async () => {
     const jpeg = '0xffd8ffdb00000000ffd9'
     const getExplorer = jest.fn(async (route) => {
       if (route.startsWith('Epoch/')) {
@@ -396,7 +582,14 @@ describe('direct v7 desktop bridge', () => {
       maxFee: '1000000000000000000',
     })
 
-    const preview = await v7('preview', {actionId: prepared.actionId})
+    const metadata = await v7('preview', {actionId: prepared.actionId})
+    expect(metadata.flips.every((flip) => flip.images.length === 0)).toBe(true)
+    expect(getExplorer).not.toHaveBeenCalled()
+
+    const preview = await v7('preview', {
+      actionId: prepared.actionId,
+      includeImages: true,
+    })
     expect(preview.count).toBe(2)
     const image = `data:image/jpeg;base64,${Buffer.from(
       jpeg.slice(2),
@@ -421,6 +614,7 @@ describe('direct v7 desktop bridge', () => {
       epoch: 230,
       count: 2,
       publicSeed: false,
+      saleType: 'first-sale',
       price: price.toString(),
       buyerBond: (5n * 10n ** 18n).toString(),
       total: (price + 5n * 10n ** 18n).toString(),
@@ -616,7 +810,10 @@ describe('direct v7 desktop bridge', () => {
     })
     await v7('configure', pins)
 
-    const preview = await v7('preview', {offerId: CHAIN_OFFER_ID})
+    const preview = await v7('preview', {
+      offerId: CHAIN_OFFER_ID,
+      includeImages: true,
+    })
     expect(preview.count).toBe(2)
     expect(preview.flips).toHaveLength(2)
     expect(preview.flips[0].images[0]).toMatch(/^data:image\/jpeg;base64,/)
@@ -624,9 +821,9 @@ describe('direct v7 desktop bridge', () => {
     expect(getExplorer).toHaveBeenCalledTimes(3)
 
     inventory[inventory.length - 1] = 'd'.charCodeAt(0)
-    await expect(v7('preview', {offerId: CHAIN_OFFER_ID})).rejects.toThrow(
-      'offer commitment'
-    )
+    await expect(
+      v7('preview', {offerId: CHAIN_OFFER_ID, includeImages: true})
+    ).rejects.toThrow('offer commitment')
     expect(getExplorer).toHaveBeenCalledTimes(3)
   })
 
@@ -651,9 +848,9 @@ describe('direct v7 desktop bridge', () => {
     saved.directSession.manifest = [PREVIEW_CIDS[1]]
     fs.writeFileSync(file, JSON.stringify(saved), {mode: 0o600})
 
-    await expect(v7('preview', {actionId: prepared.actionId})).rejects.toThrow(
-      'verified public flip inventory'
-    )
+    await expect(
+      v7('preview', {actionId: prepared.actionId, includeImages: true})
+    ).rejects.toThrow('verified public flip inventory')
     expect(getExplorer).not.toHaveBeenCalled()
   })
 
@@ -828,6 +1025,47 @@ describe('direct v7 desktop bridge', () => {
     await expect(
       reconfigured('submit', {actionId: fourth.actionId})
     ).rejects.toThrow('already have a v7 signing attempt')
+  })
+
+  it('preserves a reconciled native-transfer nonce reservation across restart', async () => {
+    const v7 = service({getNonce: () => 2})
+    await v7('configure', pins)
+    const journal = path.join(root, 'v7', 'nonce-journal.jsonl')
+    const transfer = {
+      coinbase: ADDRESS,
+      accountNonce: 3,
+      actionId: `v7-${'9'.repeat(32)}`,
+      contract: 'f'.repeat(40),
+      codeHash: '',
+      kind: 'native-transfer',
+      txHash: TX_HASH.slice(2),
+    }
+    fs.appendFileSync(journal, `${JSON.stringify(transfer)}\n`)
+    const restarted = service({getNonce: () => 2})
+    expect((await restarted('status')).configured).toBe(true)
+    const prepared = await restarted('prepare', {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    })
+    await expect(
+      restarted('submit', {actionId: prepared.actionId})
+    ).rejects.toThrow('already have a v7 signing attempt')
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(0)
+    for (const invalid of [
+      {...transfer, kind: undefined, txHash: undefined},
+      {...transfer, txHash: ''},
+      {...transfer, kind: 'unknown'},
+      {...transfer, codeHash: CODE_HASH},
+    ]) {
+      fs.writeFileSync(
+        journal,
+        `fod.v7.nonce-journal/1\n${JSON.stringify(invalid)}\n`
+      )
+      await expect(restarted('status')).rejects.toThrow(
+        'nonce journal is invalid'
+      )
+    }
   })
 
   it('fails closed when the durable nonce journal is missing or damaged', async () => {
