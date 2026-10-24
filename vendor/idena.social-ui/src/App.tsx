@@ -2661,6 +2661,7 @@ function App() {
                             handleExpandImageModal,
                             handleSubmitPubkeyModal,
                             tipsRef,
+                            postTipsRef,
                             setPostMediaAttachmentHandler,
                             postMediaAttachmentsRef,
                             makePostsWith: inputSendingTxs,

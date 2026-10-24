@@ -14,6 +14,7 @@ const {
 } = require('./fod-direct-check')
 const {privateKeyToAddress} = require('./utils/idena-crypto')
 const {createFetchClient} = require('./utils/fetch-client')
+const {createBondedMarket} = require('./fod-v8')
 
 const HEX20 = /^(?:0x)?[0-9a-f]{40}$/
 const HEX32 = /^(?:0x)?[0-9a-f]{64}$/
@@ -354,6 +355,8 @@ function validNonceRecord(record) {
       'actionId',
       'contract',
       'codeHash',
+      'kind',
+      'txHash',
     ]) &&
     typeof record.coinbase === 'string' &&
     HEX20.test(record.coinbase) &&
@@ -365,9 +368,18 @@ function validNonceRecord(record) {
     typeof record.contract === 'string' &&
     HEX20.test(record.contract) &&
     record.contract.length === 40 &&
-    typeof record.codeHash === 'string' &&
-    HEX32.test(record.codeHash) &&
-    record.codeHash.length === 64
+    // Native transfers share the identity's nonce space with market calls.
+    // Explicitly typed, canonically reconciled imports retain that reservation.
+    (record.kind === 'native-transfer'
+      ? record.codeHash === '' &&
+        typeof record.txHash === 'string' &&
+        HEX32.test(record.txHash) &&
+        record.txHash.length === 64
+      : record.kind === undefined &&
+        record.txHash === undefined &&
+        typeof record.codeHash === 'string' &&
+        HEX32.test(record.codeHash) &&
+        record.codeHash.length === 64)
   )
 }
 
@@ -578,10 +590,18 @@ async function checkNonceReservations(fs, root, coinbase, nonce) {
   }
 }
 
-async function saveConfig(fs, root, config) {
+async function saveConfig(fs, root, config, marketVersion = 7) {
   const temp = path.join(root, `config-${randomBytes(8).toString('hex')}.json`)
   await writePrivateFile(fs, temp, JSON.stringify(config))
-  await fs.promises.rename(temp, path.join(root, 'config.json'))
+  await fs.promises.rename(
+    temp,
+    path.join(
+      root,
+      [8, 9].includes(marketVersion)
+        ? `bonded-v${marketVersion}.json`
+        : 'config.json'
+    )
+  )
   if (process.platform !== 'win32') await syncDirectory(fs, root)
 }
 
@@ -632,7 +652,34 @@ function safePassphrase(value) {
   return value
 }
 
-function preparedSummary(prepared, config, operation) {
+function preparedSummary(prepared, config, operation, marketVersion = 8) {
+  if (/^fod\.prepared-bonded-v[89]-/.test(prepared?.format || '')) {
+    if (
+      prepared.format !==
+        `fod.prepared-bonded-v${marketVersion}-${operation}` ||
+      prepared.operation !== operation ||
+      prepared.network !== 'idena' ||
+      prepared.version !== 1 ||
+      prepared.contract !== config.contract ||
+      prepared.codeHash !== config.codeHash ||
+      !DECIMAL.test(prepared.amount) ||
+      prepared.bondedV8?.operation !== operation ||
+      (prepared.bondedV8?.protocolVersion || 8) !== marketVersion
+    )
+      fail('The prepared bonded action does not match this market.')
+    return {
+      operation,
+      amount: prepared.amount,
+      terms: {
+        id: prepared.bondedV8.id,
+        minimum: prepared.bondedV8.minimum,
+        maximum: prepared.bondedV8.maximum,
+        capacity: prepared.bondedV8.capacity,
+        target: prepared.bondedV8.target,
+      },
+    }
+  }
+
   const expected = OPERATIONS[operation]
   if (
     !expected ||
@@ -726,7 +773,13 @@ async function readPublicMapValue(rpc, contract, prefix, offerId) {
       }
     }
     const next = page.continuationToken
-    if (next === null || next === undefined || next === '') return null
+    if (
+      next === null ||
+      next === undefined ||
+      next === '' ||
+      /^0x$/i.test(next)
+    )
+      return null
     if (typeof next !== 'string' || page.items.length === 0 || seen.has(next)) {
       fail('The public offer inventory pagination is invalid.')
     }
@@ -850,6 +903,7 @@ function createFodV7Service({
   getActiveCoinbase,
   rpcCall,
   openFolder,
+  marketVersion = 7,
   getExplorer = async (route) => (await explorer.get(route)).data,
 }) {
   let busy = false
@@ -868,7 +922,15 @@ function createFodV7Service({
     await privateDirectory(fs, root)
     let config
     try {
-      config = await privateJSON(fs, path.join(root, 'config.json'))
+      config = await privateJSON(
+        fs,
+        path.join(
+          root,
+          [8, 9].includes(marketVersion)
+            ? `bonded-v${marketVersion}.json`
+            : 'config.json'
+        )
+      )
     } catch (error) {
       if (error.code === 'ENOENT') return null
       throw error
@@ -891,7 +953,7 @@ function createFodV7Service({
     if (config.nonceGuardVersion === undefined) {
       await ensureNonceJournal(fs, root)
       config.nonceGuardVersion = 1
-      await saveConfig(fs, root, config)
+      await saveConfig(fs, root, config, marketVersion)
     } else if (config.nonceGuardVersion === 1) {
       await readNonceJournal(fs, root)
     } else {
@@ -1028,7 +1090,12 @@ function createFodV7Service({
     const savedConfig = historical
       ? {contract: meta.contract, codeHash: meta.codeHash}
       : config
-    const summary = preparedSummary(prepared, savedConfig, meta.operation)
+    const summary = preparedSummary(
+      prepared,
+      savedConfig,
+      meta.operation,
+      marketVersion
+    )
     const attempted = await signingAttempted(fs, directory)
     return {
       directory,
@@ -1042,7 +1109,22 @@ function createFodV7Service({
     }
   }
 
-  async function listActions(config, coinbase) {
+  async function confirmedSubmission(summary, rpc, contract) {
+    try {
+      const receipt = await rpc('bcn_txReceipt', [summary.txHash])
+      if (
+        receipt?.txHash?.toLowerCase() !== summary.txHash ||
+        receipt?.contract?.toLowerCase().replace(/^0x/, '') !== contract ||
+        typeof receipt?.success !== 'boolean'
+      )
+        return {...summary, status: 'uncertain'}
+      return {...summary, status: receipt.success ? 'included' : 'failed'}
+    } catch {
+      return {...summary, status: 'uncertain'}
+    }
+  }
+
+  async function listActions(config, coinbase, rpc) {
     const directory = await actionDirectory(coinbase)
     const entries = await fs.promises.readdir(directory, {withFileTypes: true})
     const actions = []
@@ -1060,6 +1142,20 @@ function createFodV7Service({
             saved,
             coinbase
           )
+          if (submission.status === 'uncertain') {
+            let readRpc = rpc
+            if (!readRpc) {
+              const current = await context(config)
+              if (current.coinbase !== coinbase)
+                fail('The active identity changed.')
+              readRpc = current.rpc
+            }
+            submission = await confirmedSubmission(
+              submission,
+              readRpc,
+              saved.savedConfig.contract
+            )
+          }
         } catch (error) {
           if (error.code !== 'ENOENT') submission = {status: 'uncertain'}
         }
@@ -1189,12 +1285,124 @@ function createFodV7Service({
       epoch: session.epoch,
       count: session.cids.length,
       publicSeed,
+      saleType: expectedStatus === 1 ? 'first-sale' : 'resale',
       price: price.toString(),
       buyerBond: buyerBond.toString(),
       total: (price + buyerBond).toString(),
       bondTopUp: bondTopUp.toString(),
       blockHeight: initial.blockHeight,
     }
+  }
+
+  async function sellerQuote() {
+    const config = await configOrNull()
+    if (!config) fail('Set the local market deployment pin first.')
+    const initial = await context(config)
+    const [primary, secondary, reserve, insurance] = await Promise.all([
+      readPublicField(initial.rpc, config.contract, 'pool/primary-units', 8),
+      readPublicField(initial.rpc, config.contract, 'pool/secondary-units', 8),
+      readPublicField(initial.rpc, config.contract, 'pool/reserve', 16),
+      readPublicField(initial.rpc, config.contract, 'pool/insurance', 16),
+    ])
+    const queued = primary.readBigUInt64BE() + secondary.readBigUInt64BE()
+    const pricingReserve =
+      BigInt(`0x${reserve.toString('hex')}`) -
+      BigInt(`0x${insurance.toString('hex')}`)
+    if (queued > (1n << 64n) - 11n || pricingReserve < 1n)
+      fail('The market has no valid current quote.')
+    const unitsAfterListing = queued + 1n
+    const currentRawPrice = (pricingReserve + queued + 8n) / (queued + 9n)
+    const currentPrice =
+      currentRawPrice > PRICE_CAP ? PRICE_CAP : currentRawPrice
+    const rawPrice =
+      (pricingReserve + unitsAfterListing + 8n) / (unitsAfterListing + 9n)
+    const price = rawPrice > PRICE_CAP ? PRICE_CAP : rawPrice
+    const rate = feeRate(await initial.rpc('bcn_feePerGas', []))
+    const sellerBond = rate * BOND_GAS
+    const sync = await initial.rpc('bcn_syncing', [])
+    if (
+      sync?.syncing !== false ||
+      sync.wrongTime !== false ||
+      sync.currentBlock !== initial.blockHeight ||
+      sync.highestBlock !== sync.currentBlock
+    )
+      fail('The market changed while the seller quote was read. Refresh it.')
+    return {
+      blockHeight: initial.blockHeight,
+      queuedBundles: queued.toString(),
+      listedFirstSalePayout: currentPrice.toString(),
+      listedResalePayout: (currentPrice / 2n).toString(),
+      firstSalePayout: price.toString(),
+      resalePayout: (price / 2n).toString(),
+      sellerBond: sellerBond.toString(),
+    }
+  }
+
+  async function myOffers() {
+    const config = await configOrNull()
+    if (!config) fail('Set the local market deployment pin first.')
+    const initial = await context(config)
+    const currentEpoch = await initial.rpc('dna_epoch', [])
+    if (
+      !Number.isSafeInteger(currentEpoch?.epoch) ||
+      currentEpoch.epoch < 1 ||
+      currentEpoch.epoch > 65535
+    )
+      fail('The current epoch could not be verified.')
+    const {epoch: latestEpoch} = currentEpoch
+    const offers = []
+    const firstEpoch = Math.max(1, latestEpoch - 7)
+    for (let epoch = latestEpoch; epoch >= firstEpoch; epoch -= 1) {
+      const epochBytes = Buffer.alloc(2)
+      epochBytes.writeUInt16BE(epoch)
+      const offerId = createHash('sha256')
+        .update('fod:pool-offer:v7')
+        .update(Buffer.from(initial.coinbase, 'hex'))
+        .update(epochBytes)
+        .digest('hex')
+      // The contract records one bundle per author and epoch.
+      // eslint-disable-next-line no-await-in-loop
+      const record = await readPublicMapValue(
+        initial.rpc,
+        config.contract,
+        'pool/offer/',
+        offerId
+      )
+      if (record) {
+        if (
+          record.length !== 222 ||
+          record.subarray(0, 20).toString('hex') !== initial.coinbase ||
+          record.readUInt16BE(20) !== epoch ||
+          record[122] > 6 ||
+          record[204] > 1 ||
+          record[221] > 1
+        )
+          fail('Your public bundle record is invalid.')
+        // eslint-disable-next-line no-await-in-loop
+        const session = await publicOfferSession(
+          initial.rpc,
+          config.contract,
+          offerId
+        )
+        offers.push({
+          offerId,
+          epoch,
+          count: session.cids.length,
+          status: record[122],
+          contentProven: record[204] === 1,
+          publicSeed: record[221] === 1,
+        })
+      }
+    }
+    const sync = await initial.rpc('bcn_syncing', [])
+    if (
+      sync?.syncing !== false ||
+      sync.wrongTime !== false ||
+      sync.currentBlock !== initial.blockHeight ||
+      sync.highestBlock !== sync.currentBlock
+    )
+      fail('The market changed while your bundles were read. Refresh it.')
+    return {offers, blockHeight: initial.blockHeight}
   }
 
   async function purchaseOrder(payload) {
@@ -1298,8 +1506,10 @@ function createFodV7Service({
 
   async function preview(payload) {
     if (
-      !plainObject(payload, ['actionId', 'offerId']) ||
-      Boolean(payload.actionId) === Boolean(payload.offerId)
+      !plainObject(payload, ['actionId', 'offerId', 'includeImages']) ||
+      Boolean(payload.actionId) === Boolean(payload.offerId) ||
+      (payload.includeImages !== undefined &&
+        typeof payload.includeImages !== 'boolean')
     )
       fail('Invalid market preview request.')
     const config = await configOrNull()
@@ -1318,6 +1528,12 @@ function createFodV7Service({
     }
     const {author, epoch, cids} = session
     const selected = cids.slice(0, PREVIEW_FLIPS)
+    if (payload.includeImages !== true) {
+      return {
+        count: cids.length,
+        flips: selected.map((cid) => ({cid, images: []})),
+      }
+    }
     let records
     try {
       const page = await getExplorer(
@@ -1409,7 +1625,7 @@ function createFodV7Service({
     await configOrNull()
     await ensureNonceJournal(fs, root)
     config.nonceGuardVersion = 1
-    await saveConfig(fs, root, config)
+    await saveConfig(fs, root, config, marketVersion)
     return status()
   }
 
@@ -1538,7 +1754,12 @@ function createFodV7Service({
       }
     )
     const prepared = await privateJSON(fs, preparedPath, MAX_PREPARED_BYTES)
-    const summary = preparedSummary(prepared, config, payload.operation)
+    const summary = preparedSummary(
+      prepared,
+      config,
+      payload.operation,
+      marketVersion
+    )
     await writePrivateFile(
       fs,
       path.join(directory, 'meta.json'),
@@ -1555,8 +1776,13 @@ function createFodV7Service({
     return {actionId, ...summary, maxFee}
   }
 
-  async function submit(payload) {
-    if (!plainObject(payload, ['actionId']))
+  async function submit(payload, automatic = null) {
+    if (
+      !plainObject(
+        payload,
+        marketVersion === 9 ? ['actionId', 'passphrase'] : ['actionId']
+      )
+    )
       fail('Invalid v7 submission request.')
     const config = await configOrNull()
     if (!config) fail('Set the local v7 deployment pin first.')
@@ -1567,7 +1793,32 @@ function createFodV7Service({
         'This v7 action has already had a signing attempt. Check its transaction before preparing a new action.'
       )
     }
+    const signingPassphrase =
+      marketVersion === 9 && action.meta.operation === 'queueSell'
+        ? safePassphrase(automatic?.passphrase || payload.passphrase)
+        : ''
     const attached = action.summary.amount
+    const isOrder =
+      [8, 9].includes(marketVersion) &&
+      ['queueBuy', 'queueSell'].includes(action.meta.operation)
+    const checkOrderPermission = () => {
+      if (!automatic || !isOrder) return
+      const limits = automatic.orderLimits
+      const value =
+        action.meta.operation === 'queueBuy'
+          ? action.summary.terms.maximum
+          : action.summary.terms.capacity
+      if (
+        !limits ||
+        automatic.requestedOrderId !== payload.actionId ||
+        !/^[1-9][0-9]*$/.test(value || '') ||
+        BigInt(value) > limits.perTrade ||
+        (action.meta.operation === 'queueBuy' &&
+          (attached !== value || BigInt(value) > limits.purchaseRemaining))
+      )
+        fail('This order exceeds the approved one-click trading limits.')
+    }
+    checkOrderPermission()
     if (
       BigInt(attached) + BigInt(action.meta.maxFee) >
       idnaAtoms(initial.account.balance)
@@ -1575,7 +1826,12 @@ function createFodV7Service({
       fail('The active identity has insufficient spendable balance.')
     }
     let effect = 'Check the current state before confirming.'
-    if (OPERATIONS[action.meta.operation].disclosure) {
+    if ([8, 9].includes(marketVersion)) {
+      effect =
+        action.meta.operation === 'addReserve'
+          ? 'This adds a permanent reserve contribution without a withdrawal share.'
+          : 'Both stakes cover the full trade volume. Seller proceeds stay pending until verified delivery. A failed dispute can reduce stake and pause new trades.'
+    } else if (OPERATIONS[action.meta.operation].disclosure) {
       effect = 'This action publishes the bundle keys on-chain.'
     } else if (action.meta.operation === 'activate') {
       effect =
@@ -1611,21 +1867,40 @@ function createFodV7Service({
       `Exact base units: attached ${attached}; fee cap ${action.meta.maxFee}`
     )
     details.push(effect)
-    const confirmation = await dialog.showMessageBox({
-      type: 'warning',
-      title: 'Flips on Demand · Review transaction',
-      message: `Sign and broadcast ${OPERATION_LABELS[action.meta.operation]}?`,
-      detail: details.join('\n'),
-      buttons: ['Cancel', 'Sign and broadcast'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-    })
+    if (
+      automatic &&
+      (![8, 9].includes(marketVersion) ||
+        automatic.coinbase !== initial.coinbase ||
+        automatic.contract !== config.contract ||
+        automatic.codeHash !== config.codeHash ||
+        automatic.expires < Date.now() ||
+        !automatic.operations.has(action.meta.operation) ||
+        BigInt(action.meta.maxFee) > automatic.remainingFee)
+    )
+      fail(
+        'Automatic trading permission expired or does not cover this action.'
+      )
+    const confirmation = automatic
+      ? {response: 1}
+      : await dialog.showMessageBox({
+          type: 'warning',
+          title: 'Flips on Demand · Review transaction',
+          message: `Sign and broadcast ${
+            OPERATION_LABELS[action.meta.operation] || action.meta.operation
+          }?`,
+          detail: details.join('\n'),
+          buttons: ['Cancel', 'Sign and broadcast'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        })
     if (confirmation.response !== 1) return {status: 'cancelled'}
-    const nodeKey = await dialog.showOpenDialog({
-      title: 'Choose the active Idena nodekey',
-      properties: ['openFile'],
-    })
+    const nodeKey = automatic
+      ? {filePaths: [automatic.keyPath]}
+      : await dialog.showOpenDialog({
+          title: 'Choose the active Idena nodekey',
+          properties: ['openFile'],
+        })
     if (nodeKey?.canceled || nodeKey?.filePaths?.length !== 1)
       return {status: 'cancelled'}
     const keyPath = nodeKey.filePaths[0]
@@ -1661,6 +1936,17 @@ function createFodV7Service({
       ) {
         fail('The active identity has insufficient spendable balance.')
       }
+      if (automatic) {
+        if (
+          automatic.expires < Date.now() ||
+          BigInt(action.meta.maxFee) > automatic.remainingFee
+        )
+          fail('Automatic trading budget exhausted.')
+        checkOrderPermission()
+        if (isOrder && action.meta.operation === 'queueBuy')
+          automatic.orderLimits.purchaseRemaining -= BigInt(attached)
+        automatic.remainingFee -= BigInt(action.meta.maxFee)
+      }
       const accountNonce = fresh.account.nonce + 1
       await checkNonceReservations(fs, root, fresh.coinbase, accountNonce)
       await appendNonceJournal(fs, root, {
@@ -1683,45 +1969,50 @@ function createFodV7Service({
     })
     let error
     try {
-      await withCLI(config, fresh, '', async ({tempDir, rpcFlags}) => {
-        const {data} = await readPrivateSelectedFile(
-          fs,
-          keyPath,
-          1024,
-          true,
-          true
-        )
-        const copiedKey = path.join(tempDir, 'nodekey')
-        try {
-          if (nodekeyAddress(data) !== fresh.coinbase) {
-            fail('The selected nodekey changed before signing.')
+      await withCLI(
+        config,
+        fresh,
+        signingPassphrase,
+        async ({tempDir, rpcFlags}) => {
+          const {data} = await readPrivateSelectedFile(
+            fs,
+            keyPath,
+            1024,
+            true,
+            true
+          )
+          const copiedKey = path.join(tempDir, 'nodekey')
+          try {
+            if (nodekeyAddress(data) !== fresh.coinbase) {
+              fail('The selected nodekey changed before signing.')
+            }
+            await writePrivateFile(fs, copiedKey, data)
+          } finally {
+            data.fill(0)
           }
-          await writePrivateFile(fs, copiedKey, data)
-        } finally {
-          data.fill(0)
+          return [
+            'submit',
+            '-prepared',
+            path.join(action.directory, 'prepared.json'),
+            '-nodekey',
+            copiedKey,
+            '-nonce',
+            String(fresh.account.nonce + 1),
+            '-tx-epoch',
+            String(fresh.epoch.epoch),
+            '-max-fee',
+            action.meta.maxFee,
+            '-contract',
+            config.contract,
+            '-code-hash',
+            config.codeHash,
+            ...rpcFlags,
+            '-signed',
+            path.join(action.directory, 'signed.json'),
+            '-broadcast',
+          ]
         }
-        return [
-          'submit',
-          '-prepared',
-          path.join(action.directory, 'prepared.json'),
-          '-nodekey',
-          copiedKey,
-          '-nonce',
-          String(fresh.account.nonce + 1),
-          '-tx-epoch',
-          String(fresh.epoch.epoch),
-          '-max-fee',
-          action.meta.maxFee,
-          '-contract',
-          config.contract,
-          '-code-hash',
-          config.codeHash,
-          ...rpcFlags,
-          '-signed',
-          path.join(action.directory, 'signed.json'),
-          '-broadcast',
-        ]
-      })
+      )
     } catch (cause) {
       error = cause
     }
@@ -1766,18 +2057,11 @@ function createFodV7Service({
       action,
       initial.coinbase
     )
-    let receipt
-    try {
-      receipt = await initial.rpc('bcn_txReceipt', [summary.txHash])
-    } catch {
-      return {...summary, status: 'uncertain'}
-    }
-    if (typeof receipt?.success !== 'boolean')
-      return {...summary, status: 'uncertain'}
-    return {
-      ...summary,
-      status: receipt.success === true ? 'included' : 'failed',
-    }
+    return confirmedSubmission(
+      summary,
+      initial.rpc,
+      action.savedConfig.contract
+    )
   }
 
   async function privateMessage(payload) {
@@ -1914,11 +2198,41 @@ function createFodV7Service({
     }
   }
 
+  const bonded = [8, 9].includes(marketVersion)
+    ? createBondedMarket({
+        marketVersion,
+        fs,
+        root,
+        dialog,
+        configOrNull,
+        configure,
+        context,
+        withCLI,
+        actionDirectory,
+        privateDirectory,
+        privateJSON,
+        writePrivateFile,
+        syncActionDirectories,
+        preparedSummary: (p, c, op) => preparedSummary(p, c, op, marketVersion),
+        submit,
+        check,
+        listActions,
+        nodekeyAddress,
+        readPrivateSelectedFile,
+        readAction,
+      })
+    : null
+
   async function perform(method, payload) {
     if (method === 'preview') return preview(payload)
+    if (!bonded && method === 'status') return status()
+    if (!bonded && method === 'nextOffer') return nextOffer()
+    if (!bonded && method === 'sellerQuote') return sellerQuote()
+    if (!bonded && method === 'myOffers') return myOffers()
     if (busy) fail('A v7 action is already in progress.')
     busy = true
     try {
+      if (bonded) return await bonded(method, payload)
       switch (method) {
         case 'chooseBinary':
           return await chooseBinary()
@@ -1950,6 +2264,14 @@ function createFodV7Service({
     }
   }
 
+  // Keep an explicitly enabled grant running when the user leaves the market
+  // page. The same busy guard serializes background and interactive actions.
+  if (bonded) {
+    const timer = setInterval(() => {
+      if (!busy) perform('tick').catch(() => {})
+    }, 30000)
+    timer.unref?.()
+  }
   return perform
 }
 
