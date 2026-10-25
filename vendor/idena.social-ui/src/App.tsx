@@ -15,7 +15,7 @@ import ModalAddMediaComponent from './components/ModalAddMediaComponent';
 import ModalRpcMakePostComponent from './components/ModalRpcMakePostComponent';
 import ModalExpandImageComponent from './components/ModalExpandImageComponent';
 import MenuComponent from './components/MenuComponent';
-import menuWhiteSvg from './assets/menu-8-white.svg';
+import { CloseIcon } from './components/icons';
 import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSocialPostIdForContract, SOCIAL_CONTRACTS, SOCIAL_CONTRACT_CURRENT, type SocialContractId } from './logic/socialContracts';
 import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageComponent';
 import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
@@ -141,22 +141,9 @@ if (!DEBUG) {
     console.error = () => {};
 }
 
-const customModalStyles = {
-    overlay: {
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    },
-    content: {
-        border: 'none',
-        borderRadius: 'none',
-        backgroundColor: 'rgb(41, 37, 38)',
-        top: '50%',
-        left: '50%',
-        right: 'auto',
-        bottom: 'auto',
-        marginRight: '-50%',
-        transform: 'translate(-50%, -50%)',
-        padding: '5px 0px 5px 0px',
-    },
+const modalClassNames = {
+    overlay: 'fixed inset-0 z-50 bg-[rgba(91,112,131,0.4)]',
+    content: 'absolute inset-0 overflow-y-auto overscroll-contain scrollbar-thin bg-canvas outline-none sm:inset-auto sm:top-1/2 sm:left-1/2 sm:max-h-[90vh] sm:max-w-[calc(100vw-2rem)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl',
 };
 
 type FlashNotice = {
@@ -1155,7 +1142,7 @@ function App() {
                         profileActivity.tips = isRecurseForward ? [`${newTip!.postId}|${newTip!.txHash}`, ...profileActivity.tips] : [...profileActivity.tips, `${newTip!.postId}|${newTip!.txHash}`];
                         profileActivityRef.current[newTip!.tipper] = profileActivity;
 
-                        if (postsRef.current[newTip!.postId!]?.poster === postersAddress) {
+                        if (postsRef.current[newTip!.postId!]?.poster === postersAddress.toLowerCase()) {
                             postActivityRef.current = [ ...postActivityRef.current, `${newTip!.timestamp}-${newTip!.postId}|${newTip!.txHash}-tip` ];
                         }
 
@@ -1336,7 +1323,7 @@ function App() {
 
                     let newPostActivities: string[] = [];
 
-                    if (newPost!.poster === postersAddress) {
+                    if (newPost!.poster === postersAddress.toLowerCase()) {
                         const postTips = postTipsRef.current[newPost!.postId];
 
                         if (postTips) {
@@ -2374,38 +2361,38 @@ function App() {
                         <div className="text-[28px] mb-3">
                             <Link to="/">idena.social</Link>
                         </div>
-                        <MenuComponent postersAddress={postersAddress} />
+                        <MenuComponent postersAddress={postersAddress} variant="sidebar" />
                         <div className="mb-4" />
                         <div className="mb-4 text-[14px]">
                             <div className="flex flex-col">
                                 <div className="flex flex-row mb-2 gap-1">
                                     <p className="w-13 flex-none text-right">Rpc url:</p>
-                                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeUrl} onChange={e => setInputNodeUrl(e.target.value)} />
+                                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputNodeApplied} value={inputNodeUrl} onChange={e => setInputNodeUrl(e.target.value)} />
                                 </div>
                                 <div className="flex flex-row mb-1 gap-1">
                                     <p className="w-13 flex-none text-right">Api key:</p>
-                                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeKey} onChange={e => setInputNodeKey(e.target.value)} />
+                                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputNodeApplied} value={inputNodeKey} onChange={e => setInputNodeKey(e.target.value)} />
                                 </div>
-                                {!nodeAvailable && <p className="ml-14 text-[11px] text-red-400">Node Unavailable. Please try again.</p>}
+                                {!nodeAvailable && <p className="ml-14 text-[11px] text-danger">Node Unavailable. Please try again.</p>}
                             </div>
                             <div className="flex flex-row">
-                                <button className={`h-7 w-16 ml-14 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputNodeApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputNodeApplied(!inputNodeApplied)}>{inputNodeApplied ? 'Change' : 'Apply!'}</button>
-                                {!inputNodeApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                                <button className={`h-7 w-16 ml-14 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputNodeApplied ? 'bg-surface' : 'bg-line'}`} onClick={() => setInputNodeApplied(!inputNodeApplied)}>{inputNodeApplied ? 'Change' : 'Apply!'}</button>
+                                {!inputNodeApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
                             </div>
                             {isDesktopOnchainMode && (
-                                <p className="ml-14 mt-1 text-[11px] text-stone-400">
+                                <p className="ml-14 mt-1 text-[11px] text-ink-muted">
                                 Embedded in idena-desktop. Uses your current node settings and defaults to on-chain RPC only.
                                 </p>
                             )}
                         </div>
-                        <hr className="mb-3 text-gray-500" />
+                        <hr className="mb-3 text-ink-muted" />
                         <div className="flex flex-col mb-6">
                             <p>Make posts with:</p>
                             <div className="flex flex-row gap-2">
                                 <input id="useRpc" type="radio" name="useRpc" value="rpc" checked={inputSendingTxs === 'rpc'} onChange={handleInputSendingTxsToggle} />
                                 <label htmlFor="useRpc" className="flex-none text-right">RPC</label>
                             </div>
-                            {inputSendingTxs === 'rpc' && viewOnlyNode && <p className="ml-4.5 text-[11px] text-red-400">Your RPC is View-Only. Posting, liking, and tipping are disabled until the node exposes a writable account.</p>}
+                            {inputSendingTxs === 'rpc' && viewOnlyNode && <p className="ml-4.5 text-[11px] text-danger">Your RPC is View-Only. Posting, liking, and tipping are disabled until the node exposes a writable account.</p>}
                             {!isDesktopOnchainMode && (
                                 <div className="flex flex-row gap-2">
                                     <input id="notUseRpc" type="radio" name="useRpc" value="idena-app" checked={inputSendingTxs === 'idena-app'} onChange={handleInputSendingTxsToggle} />
@@ -2415,16 +2402,16 @@ function App() {
                             {!isDesktopOnchainMode && inputSendingTxs === 'idena-app' && (
                                 <div className="flex flex-col ml-5 text-[14px]">
                                     <p className="mb-1">Your Idena Address:</p>
-                                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
-                                    {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled)</p>}
+                                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
+                                    {postersAddressInvalid && <p className="text-[11px] text-danger">Invalid address. (Posting, liking, tipping is disabled)</p>}
                                     <div className="flex flex-row">
-                                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputPostersAddressApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
-                                        {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputPostersAddressApplied ? 'bg-surface' : 'bg-line'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
+                                        {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
                                     </div>
                                 </div>
                             )}
                         </div>
-                        <hr className="mb-3 text-gray-500" />
+                        <hr className="mb-3 text-ink-muted" />
                         <div className="flex flex-col mb-6">
                             <p>Find posts with:</p>
                             <div className="flex flex-row gap-2">
@@ -2435,7 +2422,7 @@ function App() {
                                 <input id="notUseFindPastBlocksWithTxsApi" type="radio" name="inputFindingPastPosts" value="indexer-api" checked={inputFindingPastPosts === 'indexer-api'} onChange={handleInputFindingPastPostsToggle} />
                                 <label htmlFor="notUseFindPastBlocksWithTxsApi" className="flex-none text-right">Use official Idena indexer fallback</label>
                                 <span
-                                    className="mt-[1px] text-[11px] text-gray-400 hover:cursor-help"
+                                    className="mt-[1px] text-[11px] text-ink-muted hover:cursor-help"
                                     title="This option only helps read older history. It calls the official Idena indexer at https://api.idena.io when your own node RPC does not return enough past posts. Posting, liking, tipping and image uploads still use your own node RPC."
                                 >
                                 ⓘ
@@ -2443,16 +2430,16 @@ function App() {
                             </div>
                             {isDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
                                 <div className="flex flex-col ml-5 text-[14px]">
-                                    <p className="text-[11px] text-stone-400">
+                                    <p className="text-[11px] text-ink-muted">
                                     Official fallback reader:
                                     </p>
                                     <input
-                                        className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500"
+                                        className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted"
                                         disabled={true}
                                         value={officialIndexerApiUrl}
                                         readOnly={true}
                                     />
-                                    <p className="text-[11px] text-stone-400">
+                                    <p className="text-[11px] text-ink-muted">
                                     Read-only fallback for older posts. Posting still uses your node RPC.
                                     </p>
                                 </div>
@@ -2461,17 +2448,17 @@ function App() {
                                 <div className="flex flex-col ml-5 text-[14px]">
                                     <div className="flex flex-row gap-1">
                                         <p className="mb-1 w-13 flex-none text-right">Api Url:</p>
-                                        <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputIdenaIndexerApiUrlApplied} value={inputIdenaIndexerApiUrl} onChange={e => setInputIdenaIndexerApiUrl(e.target.value)} />
+                                        <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputIdenaIndexerApiUrlApplied} value={inputIdenaIndexerApiUrl} onChange={e => setInputIdenaIndexerApiUrl(e.target.value)} />
                                     </div>
-                                    {indexerApiUrlInvalid && <p className="ml-14 text-[11px] text-red-400">Invalid Api Url.</p>}
+                                    {indexerApiUrlInvalid && <p className="ml-14 text-[11px] text-danger">Invalid Api Url.</p>}
                                     <div className="flex flex-row">
-                                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputIdenaIndexerApiUrlApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputIdenaIndexerApiUrlApplied(!inputIdenaIndexerApiUrlApplied)}>{inputIdenaIndexerApiUrlApplied ? 'Change' : 'Apply'}</button>
-                                        {!inputIdenaIndexerApiUrlApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputIdenaIndexerApiUrlApplied ? 'bg-surface' : 'bg-line'}`} onClick={() => setInputIdenaIndexerApiUrlApplied(!inputIdenaIndexerApiUrlApplied)}>{inputIdenaIndexerApiUrlApplied ? 'Change' : 'Apply'}</button>
+                                        {!inputIdenaIndexerApiUrlApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
                                     </div>
                                 </div>
                             )}
                         </div>
-                        <div className="mb-3 text-gray-500">
+                        <div className="mb-3 text-ink-muted">
                             <hr />
                             <div className="flex flex-row gap-1">
                                 <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
@@ -2497,11 +2484,7 @@ function App() {
                             </div>
                             <div className="flex flex-row gap-3">
                                 <div className="min-w-8">
-                                    <img
-                                        src={menuWhiteSvg}
-                                        className={'h-8 p-[5px] mr-0.5 inline-block rounded-md hover:bg-gray-400/30 hover:cursor-pointer' + (mobileMenuOpen ? ' bg-gray-400/30' : '')}
-                                        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                                    />
+                                    <button type="button" aria-label="Toggle menu" aria-expanded={mobileMenuOpen} className="rounded-full px-3 py-2 hover:bg-surface-hover" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>Menu</button>
                                 </div>
                                 <div className="flex flex-row gap-1 whitespace-nowrap">
                                     <p className="my-1 text-[14px]"><a className="hover:underline" href={termsOfServiceUrl} target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
@@ -2511,7 +2494,7 @@ function App() {
                             </div>
                             {mobileMenuOpen && (
                                 <div className="mt-2 mb-4">
-                                    <MenuComponent postersAddress={postersAddress} />
+                                    <MenuComponent postersAddress={postersAddress} variant="sidebar" />
                                 </div>
                             )}
                         </div>
@@ -2520,10 +2503,10 @@ function App() {
                         <div
                             className={`mb-3 flex items-start justify-between gap-3 rounded-md border px-4 py-3 text-[14px] ${
                                 flashNotice.type === 'error'
-                                    ? 'border-red-400/40 bg-red-500/10 text-red-100'
+                                    ? 'border-red-400/40 bg-red-500/10 text-danger'
                                     : flashNotice.type === 'success'
-                                        ? 'border-green-400/40 bg-green-500/10 text-green-100'
-                                        : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
+                                        ? 'border-green-400/40 bg-green-500/10 text-tip'
+                                        : 'border-amber-400/40 bg-amber-500/10 text-amber-800'
                             }`}
                             role="status"
                             aria-live="polite"
@@ -2537,13 +2520,13 @@ function App() {
                             </button>
                         </div>
                     )}
-                    <div className={`mb-3 rounded-md border px-4 py-3 text-[13px] ${activeSocialContract.legacy ? 'border-amber-400/40 bg-amber-500/10 text-amber-100' : 'border-stone-700 bg-stone-900/70 text-stone-200'}`}>
+                    <div className={`mb-3 rounded-md border px-4 py-3 text-[13px] ${activeSocialContract.legacy ? 'border-amber-400/40 bg-amber-500/10 text-amber-800' : 'border-line bg-surface text-ink'}`}>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             <p>
                                 <strong>Contract target:</strong> {activeSocialContract.label}
                             </p>
                             <a
-                                className="text-blue-400 hover:underline"
+                                className="text-accent hover:underline"
                                 href={`https://scan.idena.io/contract/${activeSocialContract.address}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
@@ -2551,7 +2534,7 @@ function App() {
                             scan
                             </a>
                             <button
-                                className="rounded-sm bg-white/10 px-2 py-1 text-[12px] hover:bg-white/20"
+                                className="rounded-sm bg-surface px-2 py-1 text-[12px] hover:bg-surface-hover"
                                 onClick={() => setAdvancedContractControlsOpen(!advancedContractControlsOpen)}
                             >
                                 {advancedContractControlsOpen ? 'Hide advanced contract target' : 'Advanced contract target'}
@@ -2563,8 +2546,8 @@ function App() {
                             </p>
                         )}
                         {advancedContractControlsOpen && (
-                            <div className="mt-3 border-t border-stone-700 pt-3">
-                                <p className="text-[12px] text-stone-300">
+                            <div className="mt-3 border-t border-line pt-3">
+                                <p className="text-[12px] text-ink-muted">
                                 Use this only when you deliberately want to call an old idena.social contract. Old contracts can have different behavior and may not be where normal users expect new posts.
                                 </p>
                                 <label className="mt-2 flex items-start gap-2 text-[12px]">
@@ -2578,7 +2561,7 @@ function App() {
                                 </label>
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                     <select
-                                        className="min-w-[260px] rounded-sm border border-stone-600 bg-stone-950 px-2 py-1 text-[12px] text-stone-100"
+                                        className="min-w-[260px] rounded-sm border border-line-strong bg-surface px-2 py-1 text-[12px] text-ink"
                                         value={inputSocialContractId}
                                         onChange={(event) => setInputSocialContractId(event.target.value as SocialContractId)}
                                     >
@@ -2589,7 +2572,7 @@ function App() {
                                         ))}
                                     </select>
                                     <button
-                                        className="rounded-sm bg-white/10 px-3 py-1 text-[12px] hover:bg-white/20"
+                                        className="rounded-sm bg-surface px-3 py-1 text-[12px] hover:bg-surface-hover"
                                         onClick={handleApplySocialContract}
                                     >
                                     Apply contract target
@@ -2705,13 +2688,13 @@ function App() {
                                 noMorePastBlocks={noMorePastBlocks}
                                 pastBlockCaptured={pastBlockCaptured}
                                 nodeAvailable={nodeAvailable}
-                                displayCurrentBlock={false}
+                                variant="row"
                             />
                         </div>
                     )}
                     {pathname !== '/settings' && (
                         <div className="sticky bottom-4 text-right">
-                            <ScrollToTopButtonComponent width="w-14" />
+                            <ScrollToTopButtonComponent />
                         </div>
                     )}
                 </div>
@@ -2720,14 +2703,16 @@ function App() {
                 <Modal
                     isOpen={!!modalOpen} 
                     onRequestClose={() => finishMessageFeeConfirmation(false)}
-                    style={customModalStyles}
+                    overlayClassName={modalClassNames.overlay}
+                    className={modalClassNames.content}
                 >
-                    {modalOpen === 'messageFee' && messageFeeQuote && (
+                    <button type="button" aria-label="Close" title="Close" className="sticky top-2 z-10 mt-2 ml-2 -mb-11 flex size-9 cursor-pointer items-center justify-center rounded-full hover:bg-ink/10" onClick={() => finishMessageFeeConfirmation(false)}><CloseIcon className="size-5" /></button>
+                    {modalOpen === 'messageFee'  && messageFeeQuote && (
                         <div className="w-full sm:w-[500px] px-3 text-center">
                             <p className="mb-2">Confirm message fee</p>
                             <p>Maximum message fee: {messageFeeQuote.maxFee} IDNA</p>
                             {messageFeeQuote.remainingUploads > 0 && <p className="mt-2">Plus storage fees for {messageFeeQuote.remainingUploads} encrypted {messageFeeQuote.remainingUploads === 1 ? 'file' : 'files'}.</p>}
-                            <button className="my-3 px-3 py-1 bg-white/10 hover:bg-white/20 cursor-pointer" onClick={() => finishMessageFeeConfirmation(true)}>Send message</button>
+                            <button className="my-3 px-3 py-1 bg-surface hover:bg-surface-hover cursor-pointer" onClick={() => finishMessageFeeConfirmation(true)}>Send message</button>
                         </div>
                     )}
                     {modalOpen === 'likes' && <ModalLikesTipsComponent heading={'Likes'} modalItemsRef={modalLikePostsRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
@@ -2738,7 +2723,6 @@ function App() {
                     {modalOpen === 'rpcSendMessage' && <ModalRpcSendMessageComponent modalRpcSendMessageRef={modalRpcSendMessageRef} submitMessageHandler={submitMessageHandler} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'expandImage' && <ModalExpandImageComponent modalExpandImageRef={modalExpandImageRef} />}
                     {modalOpen === 'submitPubKey' && <ModalSubmitPubKeyComponent modalSubmitPubkeyRef={modalSubmitPubKeyRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
-                    <div className="text-center"><button className="h-7 w-15 my-1 px-2 text-[13px] bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer" onClick={() => finishMessageFeeConfirmation(false)}>Close</button></div>
                 </Modal>
             </div>
         </main>

@@ -1066,7 +1066,7 @@ export const processMessage = async (
         return { continued: true };
     }
 
-    const iAmSender = sender === postersAddress;
+    const iAmSender = sender === postersAddress.toLowerCase();
     let messageDecoded: string | undefined;
     let decryptSuccesses: number[] = [];
 
