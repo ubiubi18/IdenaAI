@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import Messages from './Messages';
+import ComposerToolbarComponent from './components/ComposerToolbarComponent';
 
 const state = vi.hoisted(() => ({
     hookIndex: 0,
@@ -36,7 +37,8 @@ const findSendButton = (node: any): any => {
             if (found) return found;
         }
     } else if (node && typeof node === 'object') {
-        if (node.type === 'button' && node.props?.children === 'Send!') return node;
+        if (node.type === ComposerToolbarComponent) return findSendButton(ComposerToolbarComponent(node.props));
+        if (node.type === 'button' && node.props?.children === 'Send') return node;
         return findSendButton(node.props?.children);
     }
 };
