@@ -25,7 +25,7 @@ function DesktopNavigation({ messagesReady }: DesktopNavigationProps) {
     return (
         <nav
             aria-label="idena.social sections"
-            className="mb-3 flex min-h-11 items-stretch gap-1 border-b border-stone-700"
+            className="mb-3 flex min-h-11 items-stretch gap-1 border-b border-line"
         >
             {navigationItems.map(({ label, path }) => {
                 const active = routeIsActive(pathname, path);
@@ -37,13 +37,13 @@ function DesktopNavigation({ messagesReady }: DesktopNavigationProps) {
                         aria-current={active ? 'page' : undefined}
                         className={`flex min-w-0 items-center gap-2 border-b-2 px-4 py-2 text-[14px] font-semibold ${
                             active
-                                ? 'border-blue-400 text-white'
-                                : 'border-transparent text-stone-300 hover:border-stone-500 hover:text-white'
+                                ? 'border-accent text-ink'
+                                : 'border-transparent text-ink-muted hover:border-stone-500 hover:text-ink'
                         }`}
                     >
                         <span>{label}</span>
                         {path === '/messages' && messagesReady && (
-                            <span className="text-[11px] font-normal text-green-400">Ready</span>
+                            <span className="text-[11px] font-normal text-tip">Ready</span>
                         )}
                     </Link>
                 );
