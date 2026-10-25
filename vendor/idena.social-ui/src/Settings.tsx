@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate, useOutletContext } from "react-router";
+import PageHeaderComponent from "./components/PageHeaderComponent";
 import { clearMessagesCache } from "./logic/messagesStore";
 import { clearPostersCache } from "./logic/postersStore";
 import { clearPostsCache } from "./logic/postsStore";
@@ -20,6 +21,7 @@ type SettingsProps = {
     viewOnlyNode: boolean,
     inputPostersAddressApplied: boolean,
     inputPostersAddress: string,
+    postersAddress: string,
     setInputPostersAddress: React.Dispatch<React.SetStateAction<string>>,
     postersAddressInvalid: boolean,
     setInputPostersAddressApplied: React.Dispatch<React.SetStateAction<boolean>>,
@@ -59,6 +61,7 @@ function Settings() {
         viewOnlyNode,
         inputPostersAddressApplied,
         inputPostersAddress,
+        postersAddress,
         setInputPostersAddress,
         postersAddressInvalid,
         setInputPostersAddressApplied,
@@ -82,8 +85,22 @@ function Settings() {
         restoreDefaultSettings,
     } = useOutletContext() as SettingsProps;
 
-    const handleGoBack = () => {
-        navigate(-1);
+    const initialNodeRef = useRef({url: inputNodeUrl, key: inputNodeKey});
+
+    const applyNodeSettings = (applied: boolean) => {
+        setInputNodeApplied(applied);
+        if (applied && (inputNodeUrl !== initialNodeRef.current.url || inputNodeKey !== initialNodeRef.current.key)) {
+            void clearBlocksCapturedRange().then(() => navigate(0));
+        }
+    };
+
+    const applyAddressSettings = (applied: boolean) => {
+        setInputPostersAddressApplied(applied);
+        if (applied && inputPostersAddress.toLowerCase() !== postersAddress.toLowerCase()) {
+            setEncryptedPrivateKey('');
+            setPassword('');
+            void clearBlocksCapturedRange().then(() => navigate(0));
+        }
     };
 
     useEffect(() => {
@@ -113,32 +130,32 @@ function Settings() {
     };
 
     return (<>
-        <button className="mb-4 text-[13px] hover:cursor-pointer hover:underline" onClick={handleGoBack}>&lt; Back</button>
-        <div className="mb-4 text-[14px]">
+        <PageHeaderComponent title="Settings" />
+        <div className="border-b border-line px-4 py-4 text-[15px]">
             <div className="flex flex-col">
                 <div className="flex flex-row mb-2 gap-1">
                     <p className="w-13 flex-none text-right">Rpc url:</p>
-                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeUrl} onChange={e => setInputNodeUrl(e.target.value)} />
+                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputNodeApplied} value={inputNodeUrl} onChange={e => setInputNodeUrl(e.target.value)} />
                 </div>
                 <div className="flex flex-row mb-1 gap-1">
                     <p className="w-13 flex-none text-right">Api key:</p>
-                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputNodeApplied} value={inputNodeKey} onChange={e => setInputNodeKey(e.target.value)} />
+                    <input className="flex-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputNodeApplied} value={inputNodeKey} onChange={e => setInputNodeKey(e.target.value)} />
                 </div>
-                {!nodeAvailable && <p className="ml-14 text-[11px] text-red-400">Node Unavailable. Please try again.</p>}
+                {!nodeAvailable && <p className="ml-14 text-[11px] text-danger">Node Unavailable. Please try again.</p>}
             </div>
             <div className="flex flex-row">
-                <button className={`h-7 w-16 ml-14 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputNodeApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputNodeApplied(!inputNodeApplied)}>{inputNodeApplied ? 'Change' : 'Apply!'}</button>
-                {!inputNodeApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                <button className={`h-7 w-16 ml-14 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputNodeApplied ? 'bg-surface' : 'bg-line'}`} aria-label={inputNodeApplied ? 'Change node settings' : 'Apply node settings'} onClick={() => applyNodeSettings(!inputNodeApplied)}>{inputNodeApplied ? 'Change' : 'Apply!'}</button>
+                {!inputNodeApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
             </div>
         </div>
-        <hr className="mb-3 text-gray-500" />
-        <div className="flex flex-col mb-6">
+        <hr className="mb-3 text-ink-muted" />
+        <div className="flex flex-col gap-2 border-b border-line px-4 py-4">
             <p>Make posts with:</p>
             <div className="flex flex-row gap-2">
                 <input id="useRpc" type="radio" name="useRpc" value="rpc" checked={inputSendingTxs === 'rpc'} onChange={handleInputSendingTxsToggle} />
                 <label htmlFor="useRpc" className="flex-none text-right">RPC</label>
             </div>
-            {inputSendingTxs === 'rpc' && viewOnlyNode && <p className="ml-4.5 text-[11px] text-red-400">Your RPC is View-Only. Posting, liking, and tipping are disabled until the node exposes a writable account.</p>}
+            {inputSendingTxs === 'rpc' && viewOnlyNode && <p className="ml-4.5 text-[11px] text-danger">Your RPC is View-Only. Posting, liking, and tipping are disabled until the node exposes a writable account.</p>}
             {!embeddedDesktopOnchainMode && (
                 <div className="flex flex-row gap-2">
                     <input id="notUseRpc" type="radio" name="useRpc" value="idena-app" checked={inputSendingTxs === 'idena-app'} onChange={handleInputSendingTxsToggle} />
@@ -148,41 +165,41 @@ function Settings() {
             {!embeddedDesktopOnchainMode && inputSendingTxs === 'idena-app' && (
                 <div className="mb-4 flex flex-col ml-5 text-[14px]">
                     <p className="mb-1">Your Idena Address:</p>
-                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
-                    {postersAddressInvalid && <p className="text-[11px] text-red-400">Invalid address. (Posting, liking, tipping is disabled).</p>}
+                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
+                    {postersAddressInvalid && <p className="text-[11px] text-danger">Invalid address. (Posting, liking, tipping is disabled).</p>}
                     <div className="flex flex-row">
-                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputPostersAddressApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputPostersAddressApplied(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
-                        {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputPostersAddressApplied ? 'bg-surface' : 'bg-line'}`} aria-label={inputPostersAddressApplied ? 'Change address' : 'Apply address'} onClick={() => applyAddressSettings(!inputPostersAddressApplied)}>{inputPostersAddressApplied ? 'Change' : 'Apply'}</button>
+                        {!inputPostersAddressApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
                     </div>
                 </div>
             )}
             {hostMessageCryptoEnabled ? (
                 <div className="mt-4 flex flex-col ml-5 text-[14px]">
                     <p className="mb-1">Direct-message encryption:</p>
-                    <p className="text-[11px] text-stone-400">The desktop host uses your connected node for bounded message encryption and verified on-chain message decryption. Your identity key never enters this embedded page.</p>
+                    <p className="text-[11px] text-ink-muted">The desktop host uses your connected node for bounded message encryption and verified on-chain message decryption. Your identity key never enters this embedded page.</p>
                     {credentialsInvalid
-                        ? <p className="mt-1 text-[11px] text-red-400">Unavailable: {credentialsInvalid}. Messaging is disabled.</p>
-                        : <p className="mt-1 text-[11px] text-green-400">Ready. Encrypted direct messages are enabled.</p>}
+                        ? <p className="mt-1 text-[11px] text-danger">Unavailable: {credentialsInvalid}. Messaging is disabled.</p>
+                        : <p className="mt-1 text-[11px] text-tip">Ready. Encrypted direct messages are enabled.</p>}
                 </div>
             ) : (
                 <div className="mt-4 flex flex-col ml-5 text-[14px]">
                     <p className="mb-1">Messaging credentials:</p>
-                    <p className="mb-2 text-[11px] text-stone-400">Enter these manually only if you want encrypted direct messages. The desktop never exports your node key into this page.</p>
+                    <p className="mb-2 text-[11px] text-ink-muted">Enter these manually only if you want encrypted direct messages. The desktop never exports your node key into this page.</p>
                     <p className="mb-1">Encrypted private key:</p>
-                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputCredentialsApplied} value={encryptedPrivateKey} onChange={e => setEncryptedPrivateKey(e.target.value)} />
+                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputCredentialsApplied} value={encryptedPrivateKey} onChange={e => setEncryptedPrivateKey(e.target.value)} />
                     <p className="mb-1">Password:</p>
-                    <input type="password" className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputCredentialsApplied} value={password} onChange={e => setPassword(e.target.value)} />
+                    <input type="password" className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputCredentialsApplied} value={password} onChange={e => setPassword(e.target.value)} />
                     <div className="flex flex-row">
-                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputCredentialsApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => handleSetInputCredentialsApplied(!inputCredentialsApplied)}>{inputCredentialsApplied ? 'Change' : 'Apply'}</button>
-                        {!inputCredentialsApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputCredentialsApplied ? 'bg-surface' : 'bg-line'}`} onClick={() => handleSetInputCredentialsApplied(!inputCredentialsApplied)}>{inputCredentialsApplied ? 'Change' : 'Apply'}</button>
+                        {!inputCredentialsApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
                     </div>
-                    {credentialsInvalid && inputCredentialsApplied && <p className="mt-1 text-[11px] text-red-400">Invalid credentials: {credentialsInvalid}. (Messaging is disabled)</p>}
-                    <p className="mt-2 text-[12px] text-stone-400">Credentials stay in memory for this browser session and are never written to browser storage.</p>
+                    {credentialsInvalid && inputCredentialsApplied && <p className="mt-1 text-[11px] text-danger">Invalid credentials: {credentialsInvalid}. (Messaging is disabled)</p>}
+                    <p className="mt-2 text-[12px] text-ink-muted">Credentials stay in memory for this browser session and are never written to browser storage.</p>
                 </div>
             )}
         </div>
-        <hr className="mb-3 text-gray-500" />
-        <div className="flex flex-col mb-6">
+        <hr className="mb-3 text-ink-muted" />
+        <div className="flex flex-col gap-2 border-b border-line px-4 py-4">
             <p>Find posts with:</p>
             <div className="flex flex-row gap-2">
                 <input id="findPostsWith" type="radio" name="findPostsWith" value="rpc" checked={inputFindingPastPosts === 'rpc'} onChange={handleInputFindingPastPostsToggle} />
@@ -194,38 +211,38 @@ function Settings() {
             </div>
             {embeddedDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
                 <div className="flex flex-col ml-5 text-[14px]">
-                    <p className="text-[11px] text-stone-400">Official fallback reader:</p>
-                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={true} value={officialIndexerApiUrl || ''} readOnly={true} />
-                    <p className="text-[11px] text-stone-400">Read-only fallback for older posts. Posting still uses your node RPC.</p>
+                    <p className="text-[11px] text-ink-muted">Official fallback reader:</p>
+                    <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={true} value={officialIndexerApiUrl || ''} readOnly={true} />
+                    <p className="text-[11px] text-ink-muted">Read-only fallback for older posts. Posting still uses your node RPC.</p>
                 </div>
             )}
             {!embeddedDesktopOnchainMode && inputFindingPastPosts === 'indexer-api' && (
                 <div className="flex flex-col ml-5 text-[14px]">
                     <div className="flex flex-row gap-1">
                         <p className="mb-1 w-13 flex-none text-right">Api Url:</p>
-                        <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-gray-500" disabled={inputIdenaIndexerApiUrlApplied} value={inputIdenaIndexerApiUrl} onChange={e => setInputIdenaIndexerApiUrl(e.target.value)} />
+                        <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputIdenaIndexerApiUrlApplied} value={inputIdenaIndexerApiUrl} onChange={e => setInputIdenaIndexerApiUrl(e.target.value)} />
                     </div>
-                    {indexerApiUrlInvalid && <p className="ml-14 text-[11px] text-red-400">Invalid Api Url.</p>}
+                    {indexerApiUrlInvalid && <p className="ml-14 text-[11px] text-danger">Invalid Api Url.</p>}
                     <div className="flex flex-row">
-                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer ${inputIdenaIndexerApiUrlApplied ? 'bg-white/10' : 'bg-white/30'}`} onClick={() => setInputIdenaIndexerApiUrlApplied(!inputIdenaIndexerApiUrlApplied)}>{inputIdenaIndexerApiUrlApplied ? 'Change' : 'Apply'}</button>
-                        {!inputIdenaIndexerApiUrlApplied && <p className="w-18 ml-1.5 mt-1 text-gray-400 text-[11px]/3.5">Apply changes to take effect</p>}
+                        <button className={`h-7 w-16 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer ${inputIdenaIndexerApiUrlApplied ? 'bg-surface' : 'bg-line'}`} onClick={() => setInputIdenaIndexerApiUrlApplied(!inputIdenaIndexerApiUrlApplied)}>{inputIdenaIndexerApiUrlApplied ? 'Change' : 'Apply'}</button>
+                        {!inputIdenaIndexerApiUrlApplied && <p className="w-18 ml-1.5 mt-1 text-ink-muted text-[11px]/3.5">Apply changes to take effect</p>}
                     </div>
                 </div>
             )}
         </div>
-        <hr className="mb-3 text-gray-500" />
+        <hr className="mb-3 text-ink-muted" />
         <div className="mb-6">
             <button
-                className="h-9 w-36 mt-1 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10"
+                className="h-9 w-36 mt-1 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer bg-surface"
                 onClick={handleRestoreDefaults}
             >
                 Restore Defaults
             </button>
-            <p className="mt-1 text-[11px] text-stone-400">
+            <p className="mt-1 text-[11px] text-ink-muted">
                 Removes idena.social overrides only. Desktop connection values are restored from the host.
             </p>
             <button
-                className="h-9 mt-3 px-3 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer bg-white/10"
+                className="h-9 mt-3 px-3 inset-ring inset-ring-line hover:bg-surface-hover cursor-pointer bg-surface"
                 onClick={handleClearCachedContent}
             >
                 Clear Cached Content

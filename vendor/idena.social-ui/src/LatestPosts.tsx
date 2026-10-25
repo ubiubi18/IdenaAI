@@ -8,6 +8,8 @@ import SortPostsByComponent from './components/SortPostsByComponent';
 import ObjectUrlImageComponent from './components/ObjectUrlImageComponent';
 import type { SocialContractOption } from './logic/socialContracts';
 import { isRenderableTopLevelPost } from './logic/feedVisibility';
+import PageHeaderComponent from './components/PageHeaderComponent';
+import ComposerToolbarComponent from './components/ComposerToolbarComponent';
 
 type LatestPostsProps = {
     currentBlockCaptured: number,
@@ -66,9 +68,9 @@ function HoverInfo({ label, widthClass = 'w-72' }: { label: string, widthClass?:
             onMouseEnter={() => setOpen(true)}
             onMouseLeave={() => setOpen(false)}
         >
-            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-stone-500 text-[10px] font-[700] text-stone-300 hover:cursor-help">i</span>
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-stone-500 text-[10px] font-[700] text-ink-muted hover:cursor-help">i</span>
             <span
-                className={`pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 rounded-md border border-stone-700 bg-stone-950 px-3 py-2 text-left text-[11px] leading-4 text-stone-200 shadow-2xl ${widthClass}`}
+                className={`pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 rounded-md border border-line bg-surface px-3 py-2 text-left text-[11px] leading-4 text-ink shadow-2xl ${widthClass}`}
                 style={{ display: open ? 'block' : 'none' }}
             >
                 {label}
@@ -269,11 +271,11 @@ function LatestPosts() {
             style={embeddedDesktopOnchainMode ? { width: '100%', maxWidth: '1360px' } : undefined}
         >
             {proposalMode && (
-                <div className="mb-3 rounded-md border border-blue-400/30 bg-blue-500/10 px-4 py-3 text-[13px] text-stone-100">
+                <div className="mb-3 rounded-md border border-accent/30 bg-blue-500/10 px-4 py-3 text-[13px] text-ink">
                     <p className="font-[700]">IdenaDAO proposal mode</p>
-                    <p className="mt-1 text-stone-300">{proposalComposerHint}</p>
+                    <p className="mt-1 text-ink-muted">{proposalComposerHint}</p>
                     {!proposalPublishingEnabled && (
-                        <p className="mt-2 text-amber-300">
+                        <p className="mt-2 text-amber-700">
                             Validation is required before this governance composer can publish a new proposal.
                         </p>
                     )}
@@ -281,8 +283,8 @@ function LatestPosts() {
             )}
             <textarea
                 id='post-input-main'
-                rows={6}
-                className="w-full field-sizing-content min-h-[160px] max-h-[520px] py-2 px-3 mt-5 text-[15px] leading-6 outline-1 placeholder:text-gray-500 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-track]:bg-neutral-700 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-500 [&::-webkit-scrollbar-corner]:bg-neutral-500"
+                rows={4}
+                className="block w-full resize-none bg-transparent outline-none text-xl/6 py-3 px-4 placeholder:text-ink-muted field-sizing-content min-h-[104px] max-h-[520px] scrollbar-thin"
                 placeholder={proposalMode ? proposalComposerPlaceholder : 'Write your post here...'}
                 disabled={mainComposerDisabled}
                 value={mainDraftText}
@@ -291,7 +293,7 @@ function LatestPosts() {
             {mainPostMediaAttachment && <div className="mx-4 my-1">
                 <ObjectUrlImageComponent className="max-h-[640px] w-auto max-w-full rounded-sm" file={mainPostMediaAttachment.file} />
             </div>}
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-stone-300">
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-ink-muted">
                 <p>
                     <strong>Image limit:</strong> {(MAX_POST_MEDIA_BYTES_RPC / (1024 * 1024)).toFixed(0)} MB
                     <HoverInfo label="Supported formats: PNG, JPEG, GIF, WebP, AVIF, APNG, SVG. The current embedded RPC limit is 1 MB. In desktop RPC mode the file is stored through your own node IPFS path first and then referenced on-chain by CID." />
@@ -300,7 +302,7 @@ function LatestPosts() {
                     <strong>Posting model:</strong> RPC + on-chain reference
                     <HoverInfo label="When enabled in the RPC posting dialog, text and local images add dna_storeToIpfs transactions before the contract call. Existing IPFS images are referenced directly." />
                 </p>
-                <p className={activeSocialContract.legacy ? 'text-amber-300' : ''}>
+                <p className={activeSocialContract.legacy ? 'text-amber-700' : ''}>
                     <strong>Contract:</strong> {activeSocialContract.shortLabel}
                     <HoverInfo label={`Calls are sent to ${activeSocialContract.address}. Use the advanced contract target control above to switch back to the current contract.`} widthClass="w-80" />
                 </p>
@@ -314,43 +316,39 @@ function LatestPosts() {
                     <HoverInfo label={mainFeeTooltipText} widthClass="w-80" />
                 </p>
                 {mainComposerCostEstimateError && !mainComposerCostEstimateLoading && (
-                    <p className="text-red-400">{mainComposerCostEstimateError}</p>
+                    <p className="text-danger">{mainComposerCostEstimateError}</p>
                 )}
             </div>
-            <div className="flex flex-row gap-2">
-                <div className="flex-1 -mt-1.5">
-                    {mainPostMediaAttachment ? <>
-                        <p className="inline-block -mt-1 text-blue-400 text-[12px] hover:cursor-pointer hover:underline" onClick={(e) => !mainComposerDisabled && removeMediaHandler(e, 'main')}>Remove image</p>
-                    </> : <>
-                        <p className={`inline-block -mt-1 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, 'main', 'post')}>Add image</p>
-                    </>}
-                    {proposalMode && proposalPrefillText && (
-                        <p
-                            className={`inline-block -mt-1 ml-2 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`}
-                            onClick={() => !mainComposerDisabled && setMainDraftText(proposalPrefillText)}
-                        >
-                            Restore template
-                        </p>
-                    )}
-                    <p id="post-copytx-main" className={`inline-block -mt-1 ml-2 text-[12px] ${mainComposerDisabled ? 'text-stone-500' : 'text-blue-400 hover:cursor-pointer hover:underline'}`} onClick={() => !mainComposerDisabled && copyPostTxHandler('main')}>Copy tx</p>
-                </div>
-                <p className="hidden sm:block text-right w-50 mt-0.5 text-gray-400 text-[12px]">Your post will take time to display due to blockchain acceptance.</p>
-                <button className="h-9 w-27 my-1 px-4 py-1 bg-white/10 inset-ring inset-ring-white/5 hover:bg-white/20 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50" disabled={mainComposerDisabled} onClick={(e) => makePostsWith === 'rpc' ? handleOpenRpcMakePostModal(e, 'main') : submitPostHandler('main')}>{submittingPost === 'main' ? 'Posting...' : 'Post!'}</button>
+            <div className="mt-3 border-t border-line pt-2">
+                <ComposerToolbarComponent
+                    hasAttachment={!!mainPostMediaAttachment}
+                    onAddImage={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, 'main', 'post')}
+                    onRemoveImage={(e) => !mainComposerDisabled && removeMediaHandler(e, 'main')}
+                    copyTxId="post-copytx-main"
+                    onCopyTx={() => !mainComposerDisabled && copyPostTxHandler('main')}
+                    submitText={submittingPost === 'main' ? 'Posting...' : 'Post'}
+                    onSubmit={(e) => makePostsWith === 'rpc' ? handleOpenRpcMakePostModal(e, 'main') : submitPostHandler('main')}
+                    submitDisabled={mainComposerDisabled}
+                    hint="Your post will take time to display due to blockchain acceptance."
+                />
+                {proposalMode && proposalPrefillText && <button type="button" className="mt-2 text-[13px] text-accent hover:underline" disabled={mainComposerDisabled} onClick={() => setMainDraftText(proposalPrefillText)}>Restore template</button>}
             </div>
         </div>
         {proposalMode && visiblePostIds.length === 0 && (
-            <div className="my-4 rounded-md border border-stone-700 bg-stone-900/80 px-4 py-3 text-[13px] text-stone-300">
+            <div className="my-4 rounded-md border border-line bg-surface px-4 py-3 text-[13px] text-ink-muted">
                 No tagged IdenaDAO proposals are visible yet. Publish a post that includes {proposalTag} to seed this governance feed.
             </div>
         )}
         <div className="text-center my-3">
             <p>Current Block: #{currentBlockCaptured ? currentBlockCaptured : (nodeAvailable ? 'Loading...' : '')}</p>
-            {!nodeAvailable && <p className="text-[11px] text-red-400">Blocks are not being captured. Please update your node.</p>}
+            {!nodeAvailable && <p className="text-[11px] text-danger">Blocks are not being captured. Please update your node.</p>}
         </div>
-        <SortPostsByComponent sortPostsBy={sortPostsBy} setBrowserStateHistorySettings={setBrowserStateHistorySettings} />
-        <ul className="w-full">
+        <PageHeaderComponent sticky={false}>
+            <SortPostsByComponent sortPostsBy={sortPostsBy} setBrowserStateHistorySettings={setBrowserStateHistorySettings} />
+        </PageHeaderComponent>
+        <ul>
             {visiblePostIds.map((postId) => (
-                <li key={postId} className="w-full">
+                <li key={postId}>
                     <PostComponent
                         uniqueKey={postId}
                         postId={postId}
