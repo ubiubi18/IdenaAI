@@ -128,7 +128,7 @@ describe('ConversationComponent route hydration', () => {
         expect(markup).toContain('visible parent message');
         expect(markup).toContain('visible-message-transaction');
         expect(markup).not.toContain('reaction-only-transaction');
-        expect(markup).toContain('cursor-pointer">1</a>');
+        expect(markup).toMatch(/<button[^>]*>1<\/button>/);
     });
 
     it('shows the flip delivery copy action only to the addressed buyer', () => {

@@ -1,6 +1,6 @@
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {Transaction, privateKeyToAddress, privateKeyToPublicKey, toHexString} from 'idena-sdk-js-lite';
-import {decodeBlockBodyTransactions, extractSenderInfoFromRawTx, getMessageLines, getPostActivities, getSpotlightPostDetails} from './utils';
+import {decodeBlockBodyTransactions, extractSenderInfoFromRawTx, getDisplayTimeAgo, getMessageLines, getPostActivities, getSpotlightPostDetails} from './utils';
 import type {Post} from './asyncUtils';
 
 describe('post activity across contract generations', () => {
@@ -87,5 +87,27 @@ describe('pinned SDK compatibility helpers', () => {
     it('fails closed for malformed transaction and block protobuf data', () => {
         expect(extractSenderInfoFromRawTx('0x0a02ff').error).toBeInstanceOf(Error);
         expect(() => decodeBlockBodyTransactions('0x0a02ff')).toThrow('Truncated protobuf field');
+    });
+});
+
+
+describe('v14 display and account normalization', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('formats recent posts and clamps future timestamps', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-25T12:00:00Z'));
+        const now = Date.now() / 1000;
+        expect(getDisplayTimeAgo(now + 30)).toBe('0s');
+        expect(getDisplayTimeAgo(now - 59)).toBe('59s');
+        expect(getDisplayTimeAgo(now - 120)).toBe('2m');
+        expect(getDisplayTimeAgo(now - 7200)).toBe('2h');
+    });
+
+    it('matches activity against a mixed-case wallet address', () => {
+        const address = `0x${'ab'.repeat(20)}`;
+        const parent = {postId: 'parent', postLevel: 'Post', poster: address} as Post;
+        const reply = {postId: 'reply', postLevel: 'Reply', replyToPostId: 'parent', timestamp: 42} as Post;
+        expect(getPostActivities(reply, address.toUpperCase(), {current: {parent}})).toEqual(['42-reply-reply']);
     });
 });
