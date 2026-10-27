@@ -7,7 +7,16 @@ import {
   clearRemoteClipboard,
   pasteRemoteClipboard,
   sendClipboardFromInput,
+  sendClipboardText,
 } from './idena-vnc-clipboard.mjs'
+
+test('sends multiline browser clipboard text without changing it', () => {
+  const calls = []
+  const text = 'First line\n\nOrder 6: https://example.test/transaction/6\nOrder 7: https://example.test/transaction/7'
+
+  assert.equal(sendClipboardText({clipboardPasteFrom: (value) => calls.push(value)}, text), true)
+  assert.deepEqual(calls, [text])
+})
 
 test('sends clipboard text once and immediately clears the masked input', () => {
   const calls = []
@@ -82,6 +91,9 @@ test('page uses a masked non-persistent clipboard control', async () => {
   assert.match(html, /autocomplete="off"/)
   assert.match(html, /spellcheck="false"/)
   assert.match(html, /sendClipboardFromInput\(rfb, clipboardInput\)/)
+  assert.match(html, /id="send-browser-clipboard-button"/)
+  assert.match(html, /navigator\.clipboard\.readText\(\)/)
+  assert.match(html, /sendClipboardText\(rfb, text\)/)
   assert.match(html, /clearRemoteClipboard\(rfb\)/)
   assert.match(html, /pasteRemoteClipboard\(rfb\)/)
   assert.match(html, /new URL\('\/websockify', window\.location\.href\)/)

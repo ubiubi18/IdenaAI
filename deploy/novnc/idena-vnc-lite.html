@@ -106,7 +106,8 @@
         clearRemoteClipboard,
         pasteRemoteClipboard,
         sendClipboardFromInput,
-      } from './idena-vnc-clipboard.mjs'
+        sendClipboardText,
+      } from './idena-vnc-clipboard.mjs?v=20261027'
 
       let rfb = null
       let desktopName = 'Pi'
@@ -117,6 +118,9 @@
       const clipboardInput = document.querySelector('#clipboard-input')
       const sendClipboardButton = document.querySelector(
         '#send-clipboard-button'
+      )
+      const sendBrowserClipboardButton = document.querySelector(
+        '#send-browser-clipboard-button'
       )
       const clearClipboardButton = document.querySelector(
         '#clear-clipboard-button'
@@ -135,6 +139,7 @@
       function setClipboardControlsEnabled(enabled) {
         clipboardInput.disabled = !enabled
         sendClipboardButton.disabled = !enabled
+        sendBrowserClipboardButton.disabled = !enabled || !navigator.clipboard?.readText
         clearClipboardButton.disabled = !enabled
         pasteClipboardButton.disabled = !enabled
       }
@@ -183,6 +188,23 @@
           )
         } catch {
           setStatus('Clipboard transfer failed; reconnect and try again')
+        }
+      })
+
+      sendBrowserClipboardButton.addEventListener('click', async () => {
+        try {
+          if (!isConnected) throw new Error('VNC is disconnected')
+          const text = await navigator.clipboard.readText()
+          if (!isConnected) throw new Error('VNC is disconnected')
+          if (!sendClipboardText(rfb, text)) {
+            setStatus('Browser clipboard is empty')
+            return
+          }
+          setStatus(
+            'Browser clipboard send requested — focus the remote field, then select Paste into focused field'
+          )
+        } catch {
+          setStatus('Could not read browser clipboard; use the masked box')
         }
       })
 
@@ -249,6 +271,9 @@
           Send clipboard
         </button>
       </form>
+      <button id="send-browser-clipboard-button" type="button" disabled>
+        Send browser clipboard
+      </button>
       <button id="clear-clipboard-button" type="button" disabled>
         Clear Pi clipboard
       </button>

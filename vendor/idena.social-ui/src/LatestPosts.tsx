@@ -284,7 +284,7 @@ function LatestPosts() {
             <textarea
                 id='post-input-main'
                 rows={4}
-                className="block w-full resize-none bg-transparent outline-none text-xl/6 py-3 px-4 placeholder:text-ink-muted field-sizing-content min-h-[104px] max-h-[520px] scrollbar-thin"
+                className={`block w-full resize-none bg-transparent outline-none text-xl/6 py-3 px-4 placeholder:text-ink-muted scrollbar-thin ${embeddedDesktopOnchainMode ? 'h-[120px] overflow-y-auto' : 'field-sizing-content min-h-[104px] max-h-[520px]'}`}
                 placeholder={proposalMode ? proposalComposerPlaceholder : 'Write your post here...'}
                 disabled={mainComposerDisabled}
                 value={mainDraftText}
