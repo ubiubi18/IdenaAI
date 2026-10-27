@@ -13,18 +13,24 @@ function assertClipboardRfb(rfb) {
 
 export const CLEARED_CLIPBOARD_TEXT = 'IDENAAI-CLIPBOARD-CLEARED'
 
+export function sendClipboardText(rfb, text) {
+  if (typeof text !== 'string') {
+    throw new TypeError('Clipboard text is required')
+  }
+  if (!text) return false
+
+  assertClipboardRfb(rfb)
+  rfb.clipboardPasteFrom(text)
+  return true
+}
+
 export function sendClipboardFromInput(rfb, input) {
   if (!input || typeof input.value !== 'string') {
     throw new TypeError('A clipboard input is required')
   }
 
-  const text = input.value
-  if (!text) return false
-
   try {
-    assertClipboardRfb(rfb)
-    rfb.clipboardPasteFrom(text)
-    return true
+    return sendClipboardText(rfb, input.value)
   } finally {
     // Do not retain credentials in the browser DOM after transmission.
     input.value = ''
