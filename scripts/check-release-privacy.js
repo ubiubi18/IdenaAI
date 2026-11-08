@@ -7,6 +7,7 @@ const {execFileSync} = require('child_process')
 const SCANNED_PREFIXES = [
   '.github/',
   'compatibility/',
+  'deploy/',
   'docs/',
   'main/',
   'renderer/',
@@ -17,6 +18,7 @@ const SCANNED_PREFIXES = [
 const SCANNED_FILES = new Set([
   '.gitleaks.toml',
   '.env.example',
+  '.env.e2e',
   'package.json',
   'README.md',
   'THIRD_PARTY_NOTICES.md',
@@ -50,6 +52,15 @@ const CHECKS = [
     name: 'Linux home path',
     regex:
       /(?<![A-Za-z0-9._@/-])\/home\/(?!\$USER\b|\$HOME\b|runner\b|ubuntu\b)[A-Za-z0-9._-]+/g,
+  },
+  {
+    name: 'instance-specific IdenaAI name',
+    regex: /\b(?:idena[-_ ]?ai)[-_ ]?[1-9](?=\b|[-_])/gi,
+  },
+  {
+    name: 'host-specific IdenaAI path',
+    regex:
+      /\/(?:srv\/[A-Za-z0-9._/-]*idena-ai|opt\/idena-ai(?:-[1-9])?|mnt\/ssd\/idena-ai|var\/lib\/idena-ai|usr\/local\/libexec\/idena-ai)(?:\/[^\s`'"]*)?/gi,
   },
   {
     name: 'OpenAI-like secret key',
