@@ -27,6 +27,10 @@ To try an off-chain benchmark, open **Settings → AI → Open off-chain benchma
 
 [Dataset import](docs/flip-challenge-import.md) and [flip format](docs/flip-format-reference.md) document the reproducible inputs. Local training, federated work, and other research plans remain experimental.
 
+## Source Mirrors and Smaller Checkouts
+
+`npm run setup:sources` fetches pinned node and Wasm sources into ignored directories. Keep source mirrors, model weights, runtime profiles, and build output out of commits; use Git LFS or release artifacts for large files.
+
 ## Security and legacy-chain compatibility
 
 - Start with a separate app profile and off-chain data. Autosolve can submit real answers on-chain. Back up any identity before changing its runtime, and never use a valuable identity for an initial experiment.
