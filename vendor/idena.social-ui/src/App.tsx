@@ -5,10 +5,10 @@ import { hexToUint8Array } from 'idena-sdk-js-lite';
 import { keccak256, sha3_256 } from 'js-sha3';
 import { encrypt } from 'eciesjs';
 import { type Message, type Post, type Poster, type PostTips, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPost, getPastTxsWithIdenaIndexerApi, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getRpcClient, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewTextForPosts, resolveNewMediaForPosts, resolveNewTextForMessages, resolveNewMediaForMessages, saveReplyPostId, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, getTxEventsWithIdenaIndexerApi, getMedia, getMessage, getPosterPromise, getTxWithIdenaIndexerApi, type RpcClient } from './logic/asyncUtils';
-import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, filterIndexerApiBalanceUpdates, filterTransactionsByCutoffTimestamp, getNextContract, getPostActivities, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
+import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, filterIndexerApiBalanceUpdates, filterTransactionsByCutoffTimestamp, getNextContract, getPostActivities, getPostActivityKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
 import { createDesktopMessageCryptoClient, createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
-import { defaultProfileActivity, type BrowserStateHistorySettings, type Conversation, type EventTransaction, type MouseEventLocal, type PostFinderTransaction, type PostMediaAttachment, type ProfileActivity, type TransactionCached } from './App.exports';
+import { defaultProfileActivity, type BrowserStateHistorySettings, type Conversation, type EventTransaction, type MouseEventLocal, type PostActivityItem, type PostFinderTransaction, type PostMediaAttachment, type ProfileActivity, type TransactionCached } from './App.exports';
 import ModalLikesTipsComponent from './components/ModalLikesTipsComponent';
 import ModalSendTipComponent from './components/ModalSendTipComponent';
 import ModalAddMediaComponent from './components/ModalAddMediaComponent';
@@ -27,6 +27,10 @@ import { loadPostsCache } from './logic/postsStore';
 import { loadTipsCache } from './logic/tipsStore';
 import { loadMessagesCache } from './logic/messagesStore';
 import { loadPostersCache } from './logic/postersStore';
+import { cachePostActivity } from './logic/postActivityStore';
+import { cacheMessageReadStatus } from './logic/messageReadStatusStore';
+import { persistentCacheEnabled } from './logic/contentCachePolicy';
+import { defaultWebAppUrl, normalizeWebAppUrl } from './logic/webAppUrl';
 import { cacheIgnore, loadIgnoresCache, type IgnoreItem } from './logic/ignoreStore';
 import { addBlocksCapturedRange, clearBlocksCapturedRange, getBlocksCapturedRange, getBlocksCapturedRangeOverlapping } from './logic/blocksCapturedStore';
 import { BLOCKS_CAPTURED_RANGE_STORE, getDb, IGNORES_STORE, MESSAGES_STORE, POSTERS_STORE, POSTS_STORE, TIPS_STORE } from './logic/db';
@@ -110,6 +114,8 @@ const resettableBrowserStorageKeys = [
     'findPostsWith',
     'findPastPostsWith',
     'indexerApiUrl',
+    'webAppUrl',
+    'theme',
     ...sensitiveBrowserStorageKeys,
 ];
 
@@ -125,7 +131,8 @@ sensitiveBrowserStorageKeys.forEach(key => {
 const initSettings = {
     nodeUrl: initialDesktopBootstrap.nodeUrl || readLocalStorage('nodeUrl') || defaultNodeUrl,
     nodeKey: defaultNodeApiKey,
-    sendingTxs: initialDesktopBootstrap.sendingTxs || readLocalStorage('makePostsWith') || 'rpc',
+    sendingTxs: initialDesktopBootstrap.embeddedMode === 'desktop-onchain' ? 'rpc' : readLocalStorage('makePostsWith') || 'rpc',
+    webAppUrl: initialDesktopBootstrap.embeddedMode === 'desktop-onchain' ? defaultWebAppUrl : normalizeWebAppUrl(readLocalStorage('webAppUrl') || '') || defaultWebAppUrl,
     postersAddress: readLocalStorage('postersAddress') || zeroAddress,
     findingPastPosts: initialDesktopBootstrap.findingPastPosts || readLocalStorage('findPostsWith') || readLocalStorage('findPastPostsWith') || 'rpc',
     indexerApiUrl: initialDesktopBootstrap.indexerApiUrl || readLocalStorage('indexerApiUrl') || initIndexerApiUrl,
@@ -206,6 +213,7 @@ function App() {
     const [postersAddressInvalid, setPostersAddressInvalid] = useState<boolean>(false);
     const postersAddressInvalidRef = useRef<boolean>(postersAddressInvalid);
     const [inputSendingTxs, setInputSendingTxs] = useState<string>(initSettings.sendingTxs);
+    const [webAppUrl, setWebAppUrl] = useState<string>(initSettings.webAppUrl);
     const [inputCredentialsApplied, setInputCredentialsApplied] = useState<boolean>(true);
     const [credentialsInvalid, setCredentialsInvalid] = useState<string>('Invalid key or password');
     const [messageSettingsInvalid, setMessageSettingsInvalid] = useState<boolean>(true);
@@ -219,7 +227,6 @@ function App() {
     const activeContractAddress = activeSocialContract.address;
     // v13 cache entries lack chain/reorg provenance and can mis-tag historical
     // contract transactions. Keep persisted content out of the IdenaAI bundle.
-    const persistentCacheEnabled = false;
     const [latestPosts, setLatestPosts] = useState<string[]>([]);
     const [latestActivity, setLatestActivity] = useState<string[]>([]);
     const postsRef = useRef({} as Record<string, Post>);
@@ -268,7 +275,14 @@ function App() {
     const conversationsRef = useRef<Record<string, Conversation>>({});
     const messagesRef = useRef<Record<string, Message>>({});
     const profileActivityRef = useRef<Record<string, ProfileActivity>>({});
-    const postActivityRef = useRef<string[]>([]);
+    const postActivityRef = useRef<Map<string, PostActivityItem>>(new Map());
+    const activityOwnerRef = useRef(postersAddress.toLowerCase());
+    const [unreadPostActivities, setUnreadPostActivities] = useState(0);
+    const unreadPostActivityThisVisitRef = useRef<Set<string>>(new Set());
+    const messageReadStatusRef = useRef<Map<string, boolean>>(new Map());
+    const [unreadMessages, setUnreadMessages] = useState(0);
+    const unreadMessagesThisVisitRef = useRef<Map<string, string>>(new Map());
+    const prevPathnameRef = useRef(pathname);
 
     // indexeddb cache of posts, posters, tips, messages
     const [cacheLoaded, setCacheLoaded] = useState<boolean>(false);
@@ -396,7 +410,7 @@ function App() {
 
         setInputNodeUrl(desktopBootstrap.nodeUrl || defaultNodeUrl);
         setInputNodeKey(defaultNodeApiKey);
-        setInputSendingTxs(desktopBootstrap.sendingTxs || 'rpc');
+        setInputSendingTxs('rpc');
         setInputFindingPastPosts(desktopBootstrap.findingPastPosts || 'rpc');
         setInputIdenaIndexerApiUrl(desktopBootstrap.indexerApiUrl || officialIndexerApiUrl);
         setInputIdenaIndexerApiUrlApplied(true);
@@ -446,6 +460,51 @@ function App() {
         rerender && forceUpdate();
     };
 
+    const addPostActivity = async (activity: PostActivityItem, owner: string) => {
+        if (owner.toLowerCase() !== postersAddressRef.current.toLowerCase()) return false;
+        const key = getPostActivityKey(activity);
+        if (postActivityRef.current.has(key)) return false;
+        postActivityRef.current.set(key, activity);
+        await cachePostActivity(activity, owner);
+        return true;
+    };
+
+    const addUnreadMessage = async (messageId: string, owner: string) => {
+        if (owner.toLowerCase() !== postersAddressRef.current.toLowerCase()) return false;
+        if (messageReadStatusRef.current.has(messageId)) return false;
+        messageReadStatusRef.current.set(messageId, false);
+        await cacheMessageReadStatus(messageId, false, owner);
+        return true;
+    };
+
+    useEffect(() => {
+        const owner = postersAddress.toLowerCase();
+        if (activityOwnerRef.current === owner) return;
+        activityOwnerRef.current = owner;
+        postActivityRef.current.clear();
+        messageReadStatusRef.current.clear();
+        unreadPostActivityThisVisitRef.current.clear();
+        unreadMessagesThisVisitRef.current.clear();
+        setUnreadPostActivities(0);
+        setUnreadMessages(0);
+    }, [postersAddress]);
+
+    useEffect(() => {
+        if (prevPathnameRef.current === '/postactivity' && pathname !== '/postactivity') {
+            setUnreadPostActivities(count => Math.max(0, count - unreadPostActivityThisVisitRef.current.size));
+            unreadPostActivityThisVisitRef.current.clear();
+        }
+        let readMessages = 0;
+        unreadMessagesThisVisitRef.current.forEach((readOnPathname, messageId) => {
+            if (readOnPathname !== pathname) {
+                unreadMessagesThisVisitRef.current.delete(messageId);
+                readMessages++;
+            }
+        });
+        if (readMessages) setUnreadMessages(count => Math.max(0, count - readMessages));
+        prevPathnameRef.current = pathname;
+    }, [pathname]);
+
     const setRpcClient = (idenaNodeUrl: string, idenaNodeApiKey: string, setNodeAvailable: React.Dispatch<React.SetStateAction<boolean>>) => {
         const changingNode = appliedNodeUrl !== idenaNodeUrl;
         if (changingNode) {
@@ -462,7 +521,12 @@ function App() {
             latestMessagesForwardQueueRef.current = [];
             latestMessagesBackwardQueueRef.current = [];
             profileActivityRef.current = {};
-            postActivityRef.current = [];
+            postActivityRef.current = new Map();
+            messageReadStatusRef.current = new Map();
+            unreadPostActivityThisVisitRef.current.clear();
+            unreadMessagesThisVisitRef.current.clear();
+            setUnreadPostActivities(0);
+            setUnreadMessages(0);
             setLatestPosts([]);
             setLatestActivity([]);
             setLatestConversationActivity([]);
@@ -751,6 +815,7 @@ function App() {
     }, [inputNodeApplied, scanningPastBlocks, initialBlock, initialBlockTimestamp, nodeAvailable, cacheLoaded]);
 
     const handleInputSendingTxsToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (isDesktopOnchainMode) return;
         setInputSendingTxs(event.target.value);
 
         writeLocalStorage('makePostsWith', event.target.value);
@@ -1143,7 +1208,8 @@ function App() {
                         profileActivityRef.current[newTip!.tipper] = profileActivity;
 
                         if (postsRef.current[newTip!.postId!]?.poster === postersAddress.toLowerCase()) {
-                            postActivityRef.current = [ ...postActivityRef.current, `${newTip!.timestamp}-${newTip!.postId}|${newTip!.txHash}-tip` ];
+                            const activity: PostActivityItem = { timestamp: newTip!.timestamp, postId: newTip!.postId, type: 'tip', read: !isRecurseForward, tipTxHash: newTip!.txHash };
+                            if (await addPostActivity(activity, postersAddress) && isRecurseForward) setUnreadPostActivities(count => count + 1);
                         }
 
                         continue;
@@ -1321,7 +1387,7 @@ function App() {
                     profileActivityRef.current[newPost!.poster] = profileActivity;
 
 
-                    let newPostActivities: string[] = [];
+                    let newPostActivities: PostActivityItem[] = [];
 
                     if (newPost!.poster === postersAddress.toLowerCase()) {
                         const postTips = postTipsRef.current[newPost!.postId];
@@ -1331,7 +1397,7 @@ function App() {
 
                             for (let index = 0; index < tips.length; index++) {
                                 const tip = tipsRef.current[tips[index]];
-                                newPostActivities = [ ...newPostActivities, `${tip.timestamp}-${tip.postId}|${tip.txHash}-tip` ];
+                                newPostActivities = [ ...newPostActivities, { timestamp: tip.timestamp, postId: tip.postId, type: 'tip', read: false, tipTxHash: tip.txHash } ];
                             }
                         }
                     }
@@ -1346,7 +1412,11 @@ function App() {
                         newPostActivities = post ? [ ...newPostActivities, ...getPostActivities(post, postersAddress, postsRef) ] : newPostActivities;
                     }
 
-                    postActivityRef.current = [ ...postActivityRef.current, ...newPostActivities ];
+                    for (const activity of newPostActivities) {
+                        if (await addPostActivity({ ...activity, read: !isRecurseForward }, postersAddress) && isRecurseForward) {
+                            setUnreadPostActivities(count => count + 1);
+                        }
+                    }
                 }
 
                 await Promise.all(posterPromises);
@@ -1640,6 +1710,9 @@ function App() {
                     conversationsRef.current = { ...conversationsRef.current, [conversationKey]: conversation };
 
                     conversationKeys.push(conversationKey);
+                    if (isRecurseForward && newMessage.sender !== postersAddress.toLowerCase() && !newMessage.isLike) {
+                        if (await addUnreadMessage(newMessage.messageId, postersAddress)) setUnreadMessages(count => count + 1);
+                    }
                 }
 
                 setLatestConversationActivity((currentValue) => {
@@ -1849,7 +1922,7 @@ function App() {
 
         setSubmittingPost(location);
 
-        await submitPost(postersAddress, activeContractAddress, makePostMethod, inputText, media, mediaType, normalizePostIdForActiveContract(replyToPostId), normalizeChannelIdForActiveContract(channelId), inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        await submitPost(postersAddress, activeContractAddress, makePostMethod, inputText, media, mediaType, normalizePostIdForActiveContract(replyToPostId), normalizeChannelIdForActiveContract(channelId), inputSendingTxs, rpcClientRef.current!, callbackUrl, webAppUrl);
     };
 
     const submitLikeHandler = async (emoji: string, location: string, replyToPostId?: string, channelId?: string) => {
@@ -1860,7 +1933,7 @@ function App() {
 
         setSubmittingLike(location);
 
-        await submitPost(postersAddress, activeContractAddress, makePostMethod, emoji, [], [], normalizePostIdForActiveContract(replyToPostId), normalizeChannelIdForActiveContract(channelId), inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        await submitPost(postersAddress, activeContractAddress, makePostMethod, emoji, [], [], normalizePostIdForActiveContract(replyToPostId), normalizeChannelIdForActiveContract(channelId), inputSendingTxs, rpcClientRef.current!, callbackUrl, webAppUrl);
     };
 
     const submitSendTipHandler = async (location: string, tipToPostId: string, tipAmount: string) => {
@@ -1871,7 +1944,7 @@ function App() {
 
         setSubmittingTip(location);
 
-        await submitSendTip(postersAddress, activeContractAddress, sendTipMethod, normalizePostIdForActiveContract(tipToPostId) || '', tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+        await submitSendTip(postersAddress, activeContractAddress, sendTipMethod, normalizePostIdForActiveContract(tipToPostId) || '', tipAmount, inputSendingTxs, rpcClientRef.current!, callbackUrl, webAppUrl);
     };
 
     const encryptDirectMessage = async (rawMessage: string, recipientPublicKey: string) => {
@@ -2127,7 +2200,7 @@ function App() {
             } else {
                 const prepared = await prepare();
                 assertCurrentDirectDelivery();
-                await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, prepared.message, prepared.messageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+                await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, prepared.message, prepared.messageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl, webAppUrl);
             }
             if (messageTextareaElement.value === originalText) messageTextareaElement.value = '';
             if (postMediaAttachmentsRef.current[`message-${location}`] === postMediaAttachment) {
@@ -2173,7 +2246,7 @@ function App() {
         setSubmittingLike(replyToMessageId);
 
         try {
-            await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl);
+            await submitMessage(postersAddress, contractAddressCurrent, sendMessageMethod, message, rawMessageHash, inputSendingTxs, rpcClientRef.current!, callbackUrl, webAppUrl);
         } catch (error) {
             setSubmittingLike('');
             showFlashNotice('error', `Message reaction was not sent: ${error instanceof Error ? error.message : 'unknown error'}`);
@@ -2361,7 +2434,7 @@ function App() {
                         <div className="text-[28px] mb-3">
                             <Link to="/">idena.social</Link>
                         </div>
-                        <MenuComponent postersAddress={postersAddress} variant="sidebar" />
+                        <MenuComponent postersAddress={postersAddress} unreadPostActivities={unreadPostActivities} unreadMessages={unreadMessages} variant="sidebar" />
                         <div className="mb-4" />
                         <div className="mb-4 text-[14px]">
                             <div className="flex flex-col">
@@ -2475,7 +2548,7 @@ function App() {
                     style={isDesktopOnchainMode ? { width: '100%', maxWidth: '1480px' } : undefined}
                 >
                     {isDesktopOnchainMode && (
-                        <DesktopNavigation messagesReady={hostMessageCryptoEnabled && !messageSettingsInvalid} />
+                        <DesktopNavigation messagesReady={hostMessageCryptoEnabled && !messageSettingsInvalid} unreadPostActivities={unreadPostActivities} unreadMessages={unreadMessages} />
                     )}
                     {!isDesktopOnchainMode && (
                         <div className="lg:hidden mb-3">
@@ -2494,7 +2567,7 @@ function App() {
                             </div>
                             {mobileMenuOpen && (
                                 <div className="mt-2 mb-4">
-                                    <MenuComponent postersAddress={postersAddress} variant="sidebar" />
+                                    <MenuComponent postersAddress={postersAddress} unreadPostActivities={unreadPostActivities} unreadMessages={unreadMessages} variant="sidebar" />
                                 </div>
                             )}
                         </div>
@@ -2591,6 +2664,8 @@ function App() {
                             setInputNodeKey,
                             setInputNodeApplied,
                             inputSendingTxs,
+                            webAppUrl,
+                            setWebAppUrl,
                             handleInputSendingTxsToggle,
                             viewOnlyNode,
                             inputPostersAddressApplied,
@@ -2677,6 +2752,9 @@ function App() {
                             indexerApiUrlRef,
                             profileActivityRef,
                             postActivityRef,
+                            unreadPostActivityThisVisitRef,
+                            messageReadStatusRef,
+                            unreadMessagesThisVisitRef,
                         }}
                     />
                     {pathname !== '/settings' && (

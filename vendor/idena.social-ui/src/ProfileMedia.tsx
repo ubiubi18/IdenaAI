@@ -1,8 +1,9 @@
 import { type Post, type Poster, type PostTips } from './logic/asyncUtils';
-import { useOutletContext } from 'react-router';
+import { useLocation, useOutletContext } from 'react-router';
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment, type ProfileActivity } from './App.exports';
 import PostComponent from './components/PostComponent';
 import { getSpotlightPostDetails } from './logic/utils';
+import { useInfiniteScroll } from './logic/useInfiniteScroll';
 
 type ProfileMediaProps = {
     postsRef: React.RefObject<Record<string, Post>>,
@@ -66,9 +67,16 @@ function ProfileMedia() {
         profileActivity,
     } = useOutletContext() as ProfileMediaProps;
 
+    const { key: locationKey } = useLocation();
+
+    const { visibleItems: visibleMediaPostIds, hasMore, sentinelRef } = useInfiniteScroll(
+        profileActivity.media,
+        locationKey,
+    );
+
     return (<>
         <ul>
-            {profileActivity.media.map((mediaPostId: string) => {
+            {visibleMediaPostIds.map((mediaPostId: string) => {
                 const mediaPost = postsRef.current[mediaPostId];
 
                 const {
@@ -119,6 +127,7 @@ function ProfileMedia() {
                 </li>;
             })}
         </ul>
+        {hasMore && <div ref={sentinelRef} className="h-px" aria-hidden="true" />}
     </>);
 }
 

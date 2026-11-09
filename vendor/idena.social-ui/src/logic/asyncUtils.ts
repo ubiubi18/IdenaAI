@@ -4,6 +4,7 @@ import imageType from 'image-type';
 import isSvg from 'is-svg';
 import { decrypt, encrypt } from "eciesjs";
 import { calculateMaxFee, decodeBlockBodyTransactions, decryptAESGCM, dna2num, dnaBase, extractPubKeyAddressFromPrivateKey, extractSenderInfoFromRawTx, getCallTransaction, getMakePostTransactionPayload, getSendMessageTransactionPayload, hex2str, hexToDecimal, isValidLowerCaseAddress, likeEmoji, sanitizeStr, str2bytes } from "./utils";
+import { normalizeWebAppUrl } from './webAppUrl';
 import { CallContractAttachment, ProtoStoreToIpfsAttachmentSchema, contractArgumentFormat, hexToUint8Array, toHexString, Transaction, transactionType, type ContractArgumentFormatValue, type TransactionTypeValue } from "idena-sdk-js-lite";
 import ErrorLoadingMedia from '../assets/error-loading-media.png';
 import type { EventTransaction } from "../App.exports";
@@ -1393,6 +1394,7 @@ export const submitPost = async (
     makePostsWith: string,
     rpcClient: RpcClient,
     callbackUrl: string,
+    webAppUrl: string,
 ) => {
     const { txAmount, args, payload } = getMakePostTransactionPayload(makePostMethod, inputPost, replyToPostId, channelId, media, mediaType);
     const inputPostLength = inputPost.length + JSON.stringify(media).length;
@@ -1404,6 +1406,7 @@ export const submitPost = async (
         makePostsWith,
         rpcClient,
         callbackUrl,
+        webAppUrl,
         txAmount,
         args,
         payload,
@@ -1420,6 +1423,7 @@ export const submitSendTip = async (
     makePostsWith: string,
     rpcClient: RpcClient,
     callbackUrl: string,
+    webAppUrl: string,
 ) => {
     const txAmount = new Decimal(amount);
     const args = [
@@ -1440,6 +1444,7 @@ export const submitSendTip = async (
         makePostsWith,
         rpcClient,
         callbackUrl,
+        webAppUrl,
         txAmount,
         args,
         payload,
@@ -1509,6 +1514,7 @@ export const submitMessage = async (
     makePostsWith: string,
     rpcClient: RpcClient,
     callbackUrl: string,
+    webAppUrl: string,
 ) => {
     if (makePostsWith === 'rpc') {
         const call = await prepareRpcMessageCall(postersAddress, contractAddress, sendMessageMethod, inputMessage, inputMessageHash, rpcClient);
@@ -1528,6 +1534,7 @@ export const submitMessage = async (
         makePostsWith,
         rpcClient,
         callbackUrl,
+        webAppUrl,
         txAmount,
         args,
         payload,
@@ -1548,11 +1555,14 @@ export const makeCallTransaction = async (
     makePostsWith: string,
     rpcClient: RpcClient,
     callbackUrl: string,
+    webAppUrl: string,
     txAmount: Decimal,
     args: CallContractArg[],
     payload: CallContractAttachment,
     inputPostLength = 0,
 ) => {
+    const appUrl = makePostsWith === 'idena-app' ? normalizeWebAppUrl(webAppUrl) : null;
+    if (makePostsWith === 'idena-app' && !appUrl) throw new Error('Invalid Idena Web App URL');
     const maxFeeResult = await getMaxFee(rpcClient, {
         from,
         to,
@@ -1581,8 +1591,11 @@ export const makeCallTransaction = async (
 
         const txHex = getCallTransaction(to, txAmount, nonce, epoch, maxFeeDna, payload);
 
-        const dnaLink = `https://app.idena.io/dna/raw?tx=${txHex}&callback_format=html&callback_url=${callbackUrl}?method=${method}`;
-        window.open(dnaLink, '_blank');
+        const dnaLink = new URL(`${appUrl}/dna/raw`);
+        dnaLink.searchParams.set('tx', txHex);
+        dnaLink.searchParams.set('callback_format', 'html');
+        dnaLink.searchParams.set('callback_url', `${callbackUrl}?method=${method}`);
+        window.open(dnaLink.toString(), '_blank', 'noopener');
     }
 };
 
