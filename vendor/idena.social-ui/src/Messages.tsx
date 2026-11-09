@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { useOutletContext } from "react-router";
+import { useLocation, useOutletContext } from "react-router";
 import { type Message, type Poster } from "./logic/asyncUtils";
 import { type BrowserStateHistorySettings, type Conversation, type MouseEventLocal, type PostMediaAttachment } from "./App.exports";
 import ConversationComponent from "./components/ConversationComponent";
@@ -10,6 +10,7 @@ import { isDirectDeliveryAuthor, parseDirectDelivery } from "./logic/directDeliv
 import PageHeaderComponent from "./components/PageHeaderComponent";
 import ComposerToolbarComponent from "./components/ComposerToolbarComponent";
 import { CloseIcon, UserPlusIcon } from "./components/icons";
+import { useInfiniteScroll } from "./logic/useInfiniteScroll";
 
 type MessagesProps = {
     copyMessageTxHandler: (location: string, recipients: string[], replyToMessageId?: string | undefined) => Promise<void>,
@@ -47,6 +48,8 @@ type MessagesProps = {
     deOrphanedReplyPostsTreeRef: React.RefObject<Record<string, string>>,
     SET_NEW_POSTS_ADDED_DELAY: number,
     messagePrefix: string,
+    messageReadStatusRef: React.RefObject<Map<string, boolean>>,
+    unreadMessagesThisVisitRef: React.RefObject<Map<string, string>>,
 };
 
 function Messages() {
@@ -84,6 +87,8 @@ function Messages() {
         deOrphanedReplyPostsTreeRef,
         SET_NEW_POSTS_ADDED_DELAY,
         messagePrefix,
+        messageReadStatusRef,
+        unreadMessagesThisVisitRef,
     } = useOutletContext() as MessagesProps;
 
     const [addNewRecipient, setAddNewRecipient] = useState<string>('');
@@ -101,6 +106,10 @@ function Messages() {
     postersAddressRef.current = postersAddress;
 
     const [, forceUpdate] = useReducer(x => x + 1, 0);
+
+    const { key: locationKey } = useLocation();
+
+    const { visibleItems: visibleConversationKeys, hasMore, sentinelRef } = useInfiniteScroll(latestConversationActivity, locationKey);
 
     const mainPostMediaAttachment = postMediaAttachmentsRef.current['message-main'];
 
@@ -310,7 +319,7 @@ function Messages() {
             />
         </div>
         <div>
-            {!!latestConversationActivity.length && latestConversationActivity.map(conversationKey => {
+            {visibleConversationKeys.map(conversationKey => {
                 return <ConversationComponent
                     key={conversationKey}
                     conversationKey={conversationKey}
@@ -339,9 +348,12 @@ function Messages() {
                     submittingMessage={submittingMessage}
                     submittingLike={submittingLike}
                     messagePrefix={messagePrefix}
+                    messageReadStatusRef={messageReadStatusRef}
+                    unreadMessagesThisVisitRef={unreadMessagesThisVisitRef}
                 />;
             })}
         </div>
+        {hasMore && <div ref={sentinelRef} className="h-px" aria-hidden="true" />}
     </>);
 }
 

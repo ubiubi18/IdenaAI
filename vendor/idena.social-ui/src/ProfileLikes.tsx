@@ -1,8 +1,9 @@
 import { type Post, type Poster, type PostTips } from './logic/asyncUtils';
-import { useOutletContext } from 'react-router';
+import { useLocation, useOutletContext } from 'react-router';
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment, type ProfileActivity } from './App.exports';
 import PostComponent from './components/PostComponent';
 import { getSpotlightPostDetails } from './logic/utils';
+import { useInfiniteScroll } from './logic/useInfiniteScroll';
 
 type ProfileLikesProps = {
     postsRef: React.RefObject<Record<string, Post>>,
@@ -66,9 +67,16 @@ function ProfileLikes() {
         profileActivity,
     } = useOutletContext() as ProfileLikesProps;
 
+    const { key: locationKey } = useLocation();
+
+    const { visibleItems: visibleLikePostIds, hasMore, sentinelRef } = useInfiniteScroll(
+        profileActivity.likes,
+        locationKey,
+    );
+
     return (<>
         <ul>
-            {profileActivity.likes.map((likePostId: string) => {
+            {visibleLikePostIds.map((likePostId: string) => {
                 const likePost = postsRef.current[likePostId];
                 const likedPost = postsRef.current[likePost.replyToPostId];
 
@@ -122,6 +130,7 @@ function ProfileLikes() {
                 </li>;
             })}
         </ul>
+        {hasMore && <div ref={sentinelRef} className="h-px" aria-hidden="true" />}
     </>);
 }
 

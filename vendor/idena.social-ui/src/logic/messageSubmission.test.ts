@@ -17,7 +17,7 @@ const txHash = `0x${'22'.repeat(32)}`;
 const estimateResult = {success: true, gasCost: '3.93125', txFee: '0.449038461538246'};
 
 const send = (rpcClient: RpcClient, message = ciphertexts) => submitMessage(
-    sender, contract, 'sendMessage', message, messageHash, 'rpc', rpcClient, '',
+    sender, contract, 'sendMessage', message, messageHash, 'rpc', rpcClient, '', 'https://app.idena.io',
 );
 
 describe('desktop message submission', () => {

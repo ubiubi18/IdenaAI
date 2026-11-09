@@ -16,7 +16,7 @@ describe('post activity across contract generations', () => {
             replyPostId: 'preV12:2',
             parentPost: parent,
         });
-        expect(getPostActivities(comment, ownAddress, postsRef)).toEqual(['100-preV12:3-comment']);
+        expect(getPostActivities(comment, ownAddress, postsRef)).toEqual([{timestamp: 100, postId: 'preV12:3', type: 'comment', read: false}]);
     });
 
     it('skips deleted or not-yet-scanned posts without breaking the activity scan', () => {
@@ -108,6 +108,6 @@ describe('v14 display and account normalization', () => {
         const address = `0x${'ab'.repeat(20)}`;
         const parent = {postId: 'parent', postLevel: 'Post', poster: address} as Post;
         const reply = {postId: 'reply', postLevel: 'Reply', replyToPostId: 'parent', timestamp: 42} as Post;
-        expect(getPostActivities(reply, address.toUpperCase(), {current: {parent}})).toEqual(['42-reply-reply']);
+        expect(getPostActivities(reply, address.toUpperCase(), {current: {parent}})).toEqual([{timestamp: 42, postId: 'reply', type: 'reply', read: false}]);
     });
 });
