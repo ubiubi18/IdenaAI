@@ -27,6 +27,7 @@ vi.mock('react', async importOriginal => {
 
 vi.mock('react-router', () => ({
     useNavigate: () => () => {},
+    useLocation: () => ({ key: 'message-retry', pathname: '/messages' }),
     useOutletContext: () => state.context,
 }));
 

@@ -12,6 +12,7 @@ vi.mock('react', async importOriginal => ({
     ...await importOriginal<typeof import('react')>(),
     useEffect: () => {},
     useRef: () => ({current: state.initialNode}),
+    useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, vi.fn()],
 }));
 vi.mock('react-router', () => ({
     useNavigate: () => state.navigate,
@@ -41,6 +42,7 @@ describe('social settings account changes', () => {
             inputNodeKey: '',
             inputNodeApplied: false,
             inputSendingTxs: 'idena-app',
+            webAppUrl: 'https://app.idena.io',
             inputPostersAddressApplied: false,
             postersAddress: `0x${'ab'.repeat(20)}`,
             inputPostersAddress: `0x${'cd'.repeat(20)}`,

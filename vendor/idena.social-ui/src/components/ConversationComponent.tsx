@@ -10,6 +10,7 @@ import { DIRECT_V4_CONTRACT, isDirectDeliveryAuthor, isDirectDeliveryBuyer, pars
 import { createDesktopDirectCheckClient, createDesktopDirectReceiveClient, isEmbeddedDesktopFrame, readDesktopBootstrap } from "../logic/desktopBootstrap";
 import ComposerToolbarComponent from "./ComposerToolbarComponent";
 import { CloseIcon, HeartIcon, ReplyIcon } from "./icons";
+import { cacheMessageReadStatus } from "../logic/messageReadStatusStore";
 
 type ConversationComponentProps = {
     conversationKey: string,
@@ -38,6 +39,8 @@ type ConversationComponentProps = {
     submittingMessage: string,
     submittingLike: string,
     messagePrefix: string,
+    messageReadStatusRef: React.RefObject<Map<string, boolean>>,
+    unreadMessagesThisVisitRef: React.RefObject<Map<string, string>>,
     isConversationOutlet?: boolean,
 };
 
@@ -73,6 +76,8 @@ function ConversationComponent(props: ConversationComponentProps) {
         submittingMessage,
         submittingLike,
         messagePrefix,
+        messageReadStatusRef,
+        unreadMessagesThisVisitRef,
         isConversationOutlet,
     } = props as ConversationComponentProps;
 
@@ -194,6 +199,9 @@ function ConversationComponent(props: ConversationComponentProps) {
         .filter((message): message is Message => Boolean(message) && !message.isLike);
     const participants = conversation.participants;
 
+    const newMessagesCount = messages.filter(message => messageReadStatusRef.current.get(message.messageId) === false || unreadMessagesThisVisitRef.current.get(message.messageId) === location.pathname).length;
+    const showNewMessages = !isConversationOutlet && !!newMessagesCount;
+
     const participantsExcludingSelf = participants.filter(item => item.toLowerCase() !== postersAddress.toLowerCase());
     if (!participantsExcludingSelf.length) {
         participantsExcludingSelf.push(postersAddress.toLowerCase());
@@ -217,11 +225,16 @@ function ConversationComponent(props: ConversationComponentProps) {
     const postMediaAttachment = postMediaAttachmentsRef.current[`message-${conversationKey}`];
 
     return <>
-        <div className={`flex flex-col gap-1 border-b border-line px-4 py-3 ${!isConversationOutlet ? 'cursor-pointer hover:bg-ink/[0.03]' : ''}`} onClick={() => handleConversationClick(conversationKey)}>
+        <div className={`flex flex-col gap-1 border-b border-line px-4 py-3 ${showNewMessages ? 'bg-btn/50' : ''} ${!isConversationOutlet ? 'cursor-pointer' : ''}`} onClick={() => handleConversationClick(conversationKey)}>
             {conversationPartners.length === 1
                 ? <OneOnOneConversationHeaderComponent conversationPartner={conversationPartners[0]} handleSubmitPubkeyModal={handleSubmitPubkeyModal} />
                 : <GroupConversationHeaderComponent conversationPartners={conversationPartners} handleSubmitPubkeyModal={handleSubmitPubkeyModal} />}
-            <button type="button" className={`self-start cursor-pointer text-[13px] text-accent hover:underline ${conversationPartners.length === 1 ? 'ml-[52px]' : ''}`} onClick={(e) => toggleShowConversationHandler(e, conversationKey)}>Messages ({messages.length})</button>
+            <div className={`flex items-center gap-2 ${conversationPartners.length === 1 ? 'ml-[52px]' : ''}`}>
+                <button type="button" className="cursor-pointer text-[13px] text-link hover:underline" onClick={(e) => toggleShowConversationHandler(e, conversationKey)}>Messages ({messages.length})</button>
+                {showNewMessages && <span className="flex h-[18px] items-center rounded-full bg-btn-hover px-1.5 text-[11px]/none font-bold text-btn-ink">
+                    <span className="[text-box:trim-both_cap_alphabetic]">{newMessagesCount} new</span>
+                </span>}
+            </div>
         </div>
         {showReplies && <div className="border-b border-line">
             <ul className="flex flex-col flex-col-reverse gap-3 max-h-100 overflow-y-auto scrollbar-thin px-4 py-3">
@@ -245,6 +258,12 @@ function ConversationComponent(props: ConversationComponentProps) {
 
                     const isOwnMessage = message.sender === postersAddress.toLowerCase();
 
+                    if (messageReadStatusRef.current.get(message.messageId) === false) {
+                        unreadMessagesThisVisitRef.current.set(message.messageId, location.pathname);
+                        messageReadStatusRef.current.set(message.messageId, true);
+                        cacheMessageReadStatus(message.messageId, true, postersAddress);
+                    }
+
                     return (
                         <li key={message.messageId} className={`flex items-end gap-2 ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
                             {!isOwnMessage && <ObjectUrlImageComponent className="mb-8 size-8 flex-none rounded-full bg-surface object-cover" file={posterPic} />}
@@ -258,7 +277,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                                         <p className="min-w-0 truncate">{getMessageLines(replyToMessage.message).messageLines[0]}</p>
                                     }
                                 </div>}
-                                <p className={`max-w-full rounded-3xl px-4 py-2.5 text-[15px]/5 [word-break:break-word] empty:hidden ${isOwnMessage ? 'rounded-br-md bg-accent text-white' : 'rounded-bl-md bg-field text-ink'}`}>{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
+                                <p className={`max-w-full rounded-3xl px-4 py-2.5 text-[15px]/5 [word-break:break-word] empty:hidden ${isOwnMessage ? 'rounded-br-md bg-bubble-own text-white' : 'rounded-bl-md bg-field text-ink'}`}>{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
                                 {delivery && isDirectDeliveryBuyer(delivery, postersAddress) && isDirectDeliveryAuthor(delivery, message.sender) && <div className="mt-1 flex gap-3">
                                     {isEmbeddedDesktopFrame() && readDesktopBootstrap().embeddedMode === 'desktop-onchain' && <button type="button" className="text-accent hover:underline cursor-pointer" disabled={directCheckStatus[message.messageId] === 'Checking locally…' || directCheckStatus[message.messageId] === 'Waiting for local action…'} onClick={(e) => {
                                         e.stopPropagation();
@@ -296,7 +315,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                                 {message.image && <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto cursor-pointer rounded-2xl border border-line" file={message.image} onClick={(e) => handleExpandImageModal(e, message.image!, message.cid)} />}
                                 <div className={`flex items-center gap-1 text-[13px] text-ink-muted ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
                                     <a className="whitespace-nowrap hover:underline" href={`https://scan.idena.io/transaction/${message.txHash}`} target="_blank" rel="noopener noreferrer">{`${displayDate}, ${displayTime}`}</a>
-                                    <button type="button" aria-label="Reply" title="Reply" className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-accent/20 hover:text-accent" onClick={() => setDiscussReplyToPostIdHandler(conversationKey, message.messageId)}>
+                                    <button type="button" aria-label="Reply" title="Reply" className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-comment/20 hover:text-comment" onClick={() => setDiscussReplyToPostIdHandler(conversationKey, message.messageId)}>
                                         <ReplyIcon className="size-4" />
                                     </button>
                                     <div className={`flex items-center ${replyLikes.length ? 'text-like' : ''}`}>

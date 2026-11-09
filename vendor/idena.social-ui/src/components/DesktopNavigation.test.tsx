@@ -41,4 +41,15 @@ describe('DesktopNavigation', () => {
         expect(markup.match(/aria-current="page"/g)).toHaveLength(1);
         expect(markup).toContain('Ready');
     });
+
+    it('shows unread counts in the embedded navigation', () => {
+        const markup = renderToStaticMarkup(
+            <MemoryRouter initialEntries={['/']}>
+                <DesktopNavigation messagesReady={true} unreadPostActivities={4} unreadMessages={2} />
+            </MemoryRouter>,
+        );
+
+        expect(markup).toContain('aria-label="Post activity (4 unread)"');
+        expect(markup).toContain('aria-label="Direct messages (2 unread)"');
+    });
 });
