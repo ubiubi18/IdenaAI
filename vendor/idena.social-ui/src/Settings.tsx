@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router";
 import PageHeaderComponent from "./components/PageHeaderComponent";
 import { clearMessagesCache } from "./logic/messagesStore";
@@ -7,6 +7,10 @@ import { clearPostsCache } from "./logic/postsStore";
 import { clearTipsCache } from "./logic/tipsStore";
 import { clearIgnoresCache } from "./logic/ignoreStore";
 import { clearBlocksCapturedRange } from "./logic/blocksCapturedStore";
+import { clearPostActivityCache } from "./logic/postActivityStore";
+import { clearMessageReadStatusCache } from "./logic/messageReadStatusStore";
+import { type Theme, getTheme, saveTheme } from "./logic/theme";
+import { normalizeWebAppUrl } from "./logic/webAppUrl";
 
 type SettingsProps = {
     inputNodeApplied: boolean,
@@ -17,6 +21,8 @@ type SettingsProps = {
     setInputNodeKey: React.Dispatch<React.SetStateAction<string>>,
     setInputNodeApplied: React.Dispatch<React.SetStateAction<boolean>>,
     inputSendingTxs: string,
+    webAppUrl: string,
+    setWebAppUrl: React.Dispatch<React.SetStateAction<string>>,
     handleInputSendingTxsToggle: (event: React.ChangeEvent<HTMLInputElement, Element>) => void,
     viewOnlyNode: boolean,
     inputPostersAddressApplied: boolean,
@@ -57,6 +63,8 @@ function Settings() {
         setInputNodeKey,
         setInputNodeApplied,
         inputSendingTxs,
+        webAppUrl,
+        setWebAppUrl,
         handleInputSendingTxsToggle,
         viewOnlyNode,
         inputPostersAddressApplied,
@@ -86,6 +94,21 @@ function Settings() {
     } = useOutletContext() as SettingsProps;
 
     const initialNodeRef = useRef({url: inputNodeUrl, key: inputNodeKey});
+    const [inputWebAppUrl, setInputWebAppUrl] = useState(webAppUrl);
+    const [webAppUrlInvalid, setWebAppUrlInvalid] = useState(false);
+    const [theme, setTheme] = useState<Theme>(getTheme);
+
+    const applyWebAppUrl = () => {
+        const normalized = normalizeWebAppUrl(inputWebAppUrl);
+        if (normalized) {
+            setWebAppUrl(normalized);
+            setInputWebAppUrl(normalized);
+            try { window.localStorage.setItem('webAppUrl', normalized); } catch { /* Sandboxed frame storage may be unavailable. */ }
+            setWebAppUrlInvalid(false);
+        } else {
+            setWebAppUrlInvalid(true);
+        }
+    };
 
     const applyNodeSettings = (applied: boolean) => {
         setInputNodeApplied(applied);
@@ -123,6 +146,8 @@ function Settings() {
                 clearPostsCache(),
                 clearTipsCache(),
                 clearIgnoresCache(),
+                clearPostActivityCache(),
+                clearMessageReadStatusCache(),
                 clearBlocksCapturedRange(),
             ]);
             window.location.reload();
@@ -164,6 +189,13 @@ function Settings() {
             )}
             {!embeddedDesktopOnchainMode && inputSendingTxs === 'idena-app' && (
                 <div className="mb-4 flex flex-col ml-5 text-[14px]">
+                    <label htmlFor="webAppUrl" className="mb-1">Idena Web App URL:</label>
+                    <div className="mb-2 flex gap-2">
+                        <input id="webAppUrl" className="min-w-0 flex-1 py-0.5 px-1 outline-1 text-[11px]" value={inputWebAppUrl} onChange={event => { setInputWebAppUrl(event.target.value); setWebAppUrlInvalid(false); }} />
+                        <button type="button" className="rounded-sm bg-surface px-2 text-[12px] hover:bg-surface-hover" onClick={applyWebAppUrl}>Apply</button>
+                    </div>
+                    {webAppUrlInvalid && <p className="mb-2 text-[11px] text-danger">Use an HTTPS URL, or HTTP on localhost.</p>}
+                    <p className="mb-2 text-[11px] text-ink-muted">The selected site receives the transaction for signing. Use a site you trust.</p>
                     <p className="mb-1">Your Idena Address:</p>
                     <input className="flex-1 mb-1 py-0.5 px-1 outline-1 text-[11px] placeholder:text-ink-muted" disabled={inputPostersAddressApplied} value={inputPostersAddress} onChange={e => setInputPostersAddress(e.target.value)} />
                     {postersAddressInvalid && <p className="text-[11px] text-danger">Invalid address. (Posting, liking, tipping is disabled).</p>}
@@ -197,6 +229,19 @@ function Settings() {
                     <p className="mt-2 text-[12px] text-ink-muted">Credentials stay in memory for this browser session and are never written to browser storage.</p>
                 </div>
             )}
+        </div>
+        <hr className="mb-3 text-ink-muted" />
+        <div className="flex flex-col gap-2 border-b border-line px-4 py-4">
+            <label htmlFor="appearance">Appearance:</label>
+            <select id="appearance" className="max-w-48 rounded-sm border border-line-strong bg-surface px-2 py-1 text-[12px] text-ink" value={theme} onChange={event => {
+                const selected = event.target.value as Theme;
+                setTheme(selected);
+                saveTheme(selected);
+            }}>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="system">Match device</option>
+            </select>
         </div>
         <hr className="mb-3 text-ink-muted" />
         <div className="flex flex-col gap-2 border-b border-line px-4 py-4">

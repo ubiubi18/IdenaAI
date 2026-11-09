@@ -10,6 +10,7 @@ import type { SocialContractOption } from './logic/socialContracts';
 import { isRenderableTopLevelPost } from './logic/feedVisibility';
 import PageHeaderComponent from './components/PageHeaderComponent';
 import ComposerToolbarComponent from './components/ComposerToolbarComponent';
+import { useInfiniteScroll } from './logic/useInfiniteScroll';
 
 type LatestPostsProps = {
     currentBlockCaptured: number,
@@ -163,6 +164,11 @@ function LatestPosts() {
             return !post?.replyToPostId && !!post?.message?.toLowerCase().includes(normalizedProposalTag);
         })
         : renderablePostIds;
+
+    const { visibleItems: pagedPostIds, hasMore, sentinelRef } = useInfiniteScroll(
+        visiblePostIds,
+        `${locationKey}-${sortPostsBy}-${proposalMode}`,
+    );
 
     useEffect(() => {
         if (!proposalMode) {
@@ -347,7 +353,7 @@ function LatestPosts() {
             <SortPostsByComponent sortPostsBy={sortPostsBy} setBrowserStateHistorySettings={setBrowserStateHistorySettings} />
         </PageHeaderComponent>
         <ul>
-            {visiblePostIds.map((postId) => (
+            {pagedPostIds.map((postId) => (
                 <li key={postId}>
                     <PostComponent
                         uniqueKey={postId}
@@ -382,6 +388,7 @@ function LatestPosts() {
                 </li>
             ))}
         </ul>
+        {hasMore && <div ref={sentinelRef} className="h-px" aria-hidden="true" />}
     </>);
 }
 
