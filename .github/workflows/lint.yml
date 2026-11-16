@@ -9,6 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.22.1
+      - name: Audit application dependencies
+        run: npm audit --package-lock-only --ignore-scripts --audit-level=moderate
+      - name: Audit embedded social dependencies
+        run: npm audit --package-lock-only --ignore-scripts --audit-level=moderate --prefix vendor/idena.social-ui
+
   lint-test:
     runs-on: ubuntu-latest
 
