@@ -34,6 +34,7 @@ type PostActivityProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryPostMediaHandler: (id: string) => Promise<boolean>,
     postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
@@ -69,6 +70,7 @@ function PostActivity() {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
+        retryPostMediaHandler,
         postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
@@ -156,7 +158,7 @@ function PostActivity() {
                             <div className="w-10 flex-none flex justify-end">
                                 {notificationIcon}
                             </div>
-                            <p className="min-w-0 flex-1 pt-1 text-[15px]/5 text-ink [word-break:break-word]">{notificationMessage} from <Link to={`/profile/${notificationFrom}`} className="group inline-flex items-center gap-1 align-top"><ObjectUrlImageComponent file={notificationFromPic} className="size-5 flex-none rounded-full bg-surface object-cover group-hover:opacity-85" /><span className="group-hover:underline">{getDisplayAddressShort(notificationFrom)}</span></Link></p>
+                            <p className="min-w-0 flex-1 pt-1 text-[15px]/5 text-ink [word-break:break-word]">{notificationMessage} from <Link to={`/profile/${notificationFrom}`} className="group inline-flex items-center gap-1 align-top"><ObjectUrlImageComponent file={notificationFromPic} className="size-5 flex-none rounded-full bg-surface object-cover group-hover:opacity-85" /><span className="group-hover:underline">{getDisplayAddressShort(notificationFrom, postersRef.current[notificationFrom])}</span></Link></p>
                         </div>
                         <PostComponent
                             uniqueKey={postItemKeyUnique}
@@ -183,6 +185,7 @@ function PostActivity() {
                             handleOpenAddMediaModal={handleOpenAddMediaModal}
                             handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
                             handleExpandImageModal={handleExpandImageModal}
+                            retryPostMediaHandler={retryPostMediaHandler}
                             postTipsRef={postTipsRef}
                             postMediaAttachmentsRef={postMediaAttachmentsRef}
                             makePostsWith={makePostsWith}

@@ -30,6 +30,7 @@ type PostOutletProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryPostMediaHandler: (id: string) => Promise<boolean>,
     postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
@@ -65,6 +66,7 @@ function PostOutlet() {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
+        retryPostMediaHandler,
         postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
@@ -113,6 +115,7 @@ function PostOutlet() {
             handleOpenAddMediaModal={handleOpenAddMediaModal}
             handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
             handleExpandImageModal={handleExpandImageModal}
+            retryPostMediaHandler={retryPostMediaHandler}
             postTipsRef={postTipsRef}
             postMediaAttachmentsRef={postMediaAttachmentsRef}
             makePostsWith={makePostsWith}

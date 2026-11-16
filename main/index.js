@@ -55,8 +55,13 @@ const {
   confirmDestructiveNodeAction,
 } = require('./destructive-node-confirmation')
 const {
+  SOCIAL_PROFILE_CONTRACT_ADDRESS,
+  SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES,
   socialContractCallRequiresConfirmation,
   validateSocialContractCall,
+  validateSocialProfileCall,
+  validateSocialProfilePictureCid,
+  validateSocialProfileReadMap,
 } = require('./social-contract-call-policy')
 
 applyPrivateFileCreationMask()
@@ -244,6 +249,7 @@ const VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 4000
 const SOCIAL_ALLOWED_RPC_METHODS = new Set([
   'bcn_block',
   'bcn_blockAt',
+  'bcn_feePerGas',
   'bcn_getRawTx',
   'bcn_lastBlock',
   'bcn_syncing',
@@ -251,6 +257,7 @@ const SOCIAL_ALLOWED_RPC_METHODS = new Set([
   'bcn_txReceipt',
   'contract_call',
   'contract_estimateCall',
+  'contract_readMap',
   'dna_epoch',
   'dna_getBalance',
   'dna_getCoinbaseAddr',
@@ -258,6 +265,7 @@ const SOCIAL_ALLOWED_RPC_METHODS = new Set([
   'dna_storeToIpfs',
   'ipfs_add',
   'ipfs_get',
+  'ipfs_getProfilePicture',
 ])
 
 let mainWindow
@@ -486,6 +494,7 @@ function validateSocialRpcRequest(payload = {}) {
   switch (method) {
     case 'bcn_syncing':
     case 'bcn_lastBlock':
+    case 'bcn_feePerGas':
     case 'dna_epoch':
     case 'dna_getCoinbaseAddr':
       return params.length === 0 ? null : 'invalid_rpc_params'
@@ -504,6 +513,9 @@ function validateSocialRpcRequest(payload = {}) {
       return params.length === 1 && isShortString(params[0], 256)
         ? null
         : 'invalid_rpc_params'
+
+    case 'ipfs_getProfilePicture':
+      return validateSocialProfilePictureCid(params)
 
     case 'ipfs_add':
       return params.length === 2 &&
@@ -526,15 +538,19 @@ function validateSocialRpcRequest(payload = {}) {
         ? null
         : 'invalid_rpc_params'
 
+    case 'contract_readMap':
+      return validateSocialProfileReadMap(params)
+
     case 'contract_estimateCall':
       return params.length === 1 && params[0]?.method === 'sendMessage'
         ? validateSocialContractCall(params[0])
         : 'invalid_social_contract_call'
 
     case 'contract_call':
-      return params.length === 1
-        ? validateSocialContractCall(params[0])
-        : 'invalid_rpc_params'
+      if (params.length !== 1) return 'invalid_rpc_params'
+      return params[0]?.contract === SOCIAL_PROFILE_CONTRACT_ADDRESS
+        ? validateSocialProfileCall(params[0])
+        : validateSocialContractCall(params[0])
 
     default:
       return 'unsupported_rpc_method'
@@ -696,6 +712,16 @@ async function performSocialRpc(payload = {}) {
     return {error: {message: validationError}}
   }
 
+  if (payload.method === 'ipfs_getProfilePicture') {
+    return sendNodeRpcRequest(
+      {...payload, method: 'ipfs_get'},
+      getNodeRpcConnection(),
+      {
+        maxResponseBytes: SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES,
+      }
+    )
+  }
+
   if (!['contract_call', 'contract_estimateCall'].includes(payload.method)) {
     return performNodeRpc(payload)
   }
@@ -718,20 +744,40 @@ async function performSocialRpc(payload = {}) {
   }
 
   if (socialContractCallRequiresConfirmation(call)) {
+    const profileActions = {
+      claimName: ['Claim name', 'Claim your idena.social name?'],
+      dropName: ['Remove name', 'Remove your idena.social name?'],
+      setProfile: ['Save profile', 'Publish your idena.social profile?'],
+    }
+    const profileAction =
+      call.contract === SOCIAL_PROFILE_CONTRACT_ADDRESS
+        ? profileActions[call.method]
+        : null
     const confirmation = await dialog.showMessageBox(mainWindow, {
       type: 'question',
-      title: 'Confirm idena.social tip',
-      message: `Send an idena.social tip of ${call.amount} IDNA?`,
-      detail:
-        'This transfers real mainnet IDNA through the pinned idena.social contract.',
-      buttons: ['Cancel', 'Send tip'],
+      title: profileAction
+        ? 'Confirm profile change'
+        : 'Confirm idena.social tip',
+      message: profileAction
+        ? profileAction[1]
+        : `Send an idena.social tip of ${call.amount} IDNA?`,
+      detail: profileAction
+        ? `This writes to the public mainnet profile contract. The node can charge up to ${call.maxFee} IDNA in fees.`
+        : 'This transfers real mainnet IDNA through the pinned idena.social contract.',
+      buttons: ['Cancel', profileAction ? profileAction[0] : 'Send tip'],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
     })
 
     if (!confirmation || confirmation.response !== 1) {
-      return {error: {message: 'social_tip_cancelled'}}
+      return {
+        error: {
+          message: profileAction
+            ? 'social_profile_cancelled'
+            : 'social_tip_cancelled',
+        },
+      }
     }
   }
 
@@ -766,7 +812,8 @@ async function performExportKeyRpc(payload = {}) {
 
 async function sendNodeRpcRequest(
   payload = {},
-  connection = getNodeRpcConnection()
+  connection = getNodeRpcConnection(),
+  options = {}
 ) {
   const {url, key} = connection
   const requestBody = {
@@ -783,6 +830,7 @@ async function sendNodeRpcRequest(
     const response = await httpClient.post(url, requestBody, {
       headers: {'Content-Type': 'application/json'},
       timeout: getNodeRpcTimeoutMs(requestBody.method),
+      ...options,
     })
 
     return response && response.data ? response.data : {}

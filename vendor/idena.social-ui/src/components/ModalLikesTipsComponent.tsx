@@ -1,7 +1,7 @@
 
 import type { MouseEventLocal } from '../App.exports';
 import type { Message, Post, Poster, Tip } from '../logic/asyncUtils';
-import { getDisplayAddressShort, getDisplayDateTime, getDisplayTipAmount, getIdentityStatus, getProfilePic } from '../logic/utils';
+import { getDisplayAddressShort, getDisplayDateTime, getDisplayTimeAgo, getDisplayTipAmount, getIdentityStatus, getProfilePic } from '../logic/utils';
 import { useNavigate } from 'react-router';
 import ObjectUrlImageComponent from './ObjectUrlImageComponent';
 
@@ -40,7 +40,7 @@ function ModalLikesTipsComponent(props: ModalLikesTipsComponentProps) {
                 {modalItemsRef!.current.map((item) => {
                     const address = (item as Post).poster ?? (item as Message).sender ?? (item as Tip).tipper;
                     const posterDetails = (item as Post).posterDetails_atTimeOfPost ?? (item as Message).sendersDetails_atTimeOfMessage ?? (item as Tip).tipperDetails_atTimeOfTip;
-                    const posterDisplayAddress = getDisplayAddressShort(address);
+                    const posterDisplayAddress = getDisplayAddressShort(address, postersRef.current[address]);
                     const posterStake = posterDetails.stake;
                     const posterState = posterDetails.state;
                     const posterAge = posterDetails.age;
@@ -58,7 +58,7 @@ function ModalLikesTipsComponent(props: ModalLikesTipsComponentProps) {
                             </div>
                             <div className="min-w-0 max-w-[45%] flex-none text-right">
                                 <p className="truncate text-[15px]/5 font-bold text-ink" title={detail}>{detail}</p>
-                                <p className="truncate text-[13px]/4 text-ink-muted"><a className="hover:underline" href={`https://scan.idena.io/transaction/${item.txHash}`} target="_blank" rel="noopener noreferrer">{`${displayDate}, ${displayTime}`}</a></p>
+                                <p className="truncate text-[13px]/4 text-ink-muted"><a className="hover:underline" href={`https://scan.idena.io/transaction/${item.txHash}`} target="_blank" rel="noopener noreferrer" title={`${displayDate}, ${displayTime}`}>{getDisplayTimeAgo(item.timestamp)}</a></p>
                             </div>
                         </li>
                     );

@@ -39,6 +39,7 @@ const renderConversation = (
             handleSubmitPubkeyModal={vi.fn()}
             handleOpenAddMediaModal={vi.fn()}
             handleExpandImageModal={vi.fn()}
+            retryMessageMediaHandler={vi.fn()}
             submittingMessage=""
             submittingLike=""
             messagePrefix="message:"

@@ -1,5 +1,19 @@
 const SOCIAL_CONTRACT_ADDRESS = '0x840e092e31e9656ff15e541505039ed77585338e'
 const SOCIAL_CONTRACT_METHODS = new Set(['makePost', 'sendMessage', 'sendTip'])
+const SOCIAL_PROFILE_CONTRACT_ADDRESS =
+  '0xd558483330925f169bbe692d8ea15b2faa83c17f'
+const SOCIAL_PROFILE_METHODS = new Set(['claimName', 'dropName', 'setProfile'])
+const SOCIAL_PROFILE_ADDRESS_MAPS = new Set([
+  'a:',
+  'b:',
+  'p:',
+  'i:',
+  'v:',
+  'r:',
+])
+const SOCIAL_PROFILE_NAME_MAPS = new Set(['n:', 'x:'])
+// A 32 KiB picture is hex encoded in JSON, so 128 KiB leaves ample envelope room.
+const SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES = 128 * 1024
 const IDNA_SCALE = 10n ** 18n
 const SOCIAL_BASE_CALL_AMOUNT = 10n ** 13n
 const SOCIAL_MESSAGE_CALL_AMOUNT = 2n * SOCIAL_BASE_CALL_AMOUNT
@@ -83,6 +97,108 @@ function parseContractArgument(call) {
   } catch {
     return null
   }
+}
+
+function validateSocialProfileReadMap(params) {
+  if (
+    !Array.isArray(params) ||
+    params.length !== 4 ||
+    params[0] !== SOCIAL_PROFILE_CONTRACT_ADDRESS ||
+    params[3] !== 'string' ||
+    typeof params[2] !== 'string' ||
+    params[2].length > 86 ||
+    !/^0x(?:[0-9a-f]{2})+$/u.test(params[2])
+  ) {
+    return 'invalid_rpc_params'
+  }
+
+  const key = Buffer.from(params[2].slice(2), 'hex').toString('utf8')
+  if (`0x${Buffer.from(key, 'utf8').toString('hex')}` !== params[2]) {
+    return 'invalid_rpc_params'
+  }
+
+  return (SOCIAL_PROFILE_ADDRESS_MAPS.has(params[1]) &&
+    /^0x[0-9a-f]{40}$/u.test(key)) ||
+    (SOCIAL_PROFILE_NAME_MAPS.has(params[1]) && /^[a-z0-9_]{3,20}$/u.test(key))
+    ? null
+    : 'invalid_rpc_params'
+}
+
+function validateSocialProfilePictureCid(params) {
+  return Array.isArray(params) &&
+    params.length === 1 &&
+    typeof params[0] === 'string' &&
+    /^[a-zA-Z0-9]{10,120}$/u.test(params[0])
+    ? null
+    : 'invalid_rpc_params'
+}
+
+function validateSocialProfileCall(call) {
+  if (
+    !isPlainObject(call) ||
+    !hasOnlyKeys(
+      call,
+      new Set(['from', 'contract', 'method', 'amount', 'args', 'maxFee'])
+    ) ||
+    !/^0x[0-9a-fA-F]{40}$/u.test(call.from) ||
+    call.contract !== SOCIAL_PROFILE_CONTRACT_ADDRESS ||
+    !SOCIAL_PROFILE_METHODS.has(call.method) ||
+    decimalToAtoms(call.amount) !== 0n
+  ) {
+    return 'invalid_social_contract_call'
+  }
+
+  const maxFee = decimalToAtoms(call.maxFee)
+  if (maxFee === null || maxFee <= 0n || maxFee > SOCIAL_MAX_FEE) {
+    return 'invalid_social_contract_call'
+  }
+
+  if (call.method === 'dropName') {
+    return Array.isArray(call.args) && call.args.length === 0
+      ? null
+      : 'invalid_social_contract_call'
+  }
+
+  if (
+    !Array.isArray(call.args) ||
+    call.args.length !== 1 ||
+    !isPlainObject(call.args[0]) ||
+    typeof call.args[0].value !== 'string' ||
+    Buffer.byteLength(call.args[0].value) > 1024
+  ) {
+    return 'invalid_social_contract_call'
+  }
+
+  const argument = parseContractArgument(call)
+  if (
+    !argument ||
+    argument._gas !== 3_000_000 ||
+    argument._keepGas !== 1_000_000
+  ) {
+    return 'invalid_social_contract_call'
+  }
+
+  if (call.method === 'claimName') {
+    return hasOnlyKeys(argument, new Set(['name', '_gas', '_keepGas'])) &&
+      typeof argument.name === 'string' &&
+      /^[a-z0-9_]{3,20}$/u.test(argument.name)
+      ? null
+      : 'invalid_social_contract_call'
+  }
+
+  return hasOnlyKeys(
+    argument,
+    new Set(['bio', 'picture', '_gas', '_keepGas'])
+  ) &&
+    typeof argument.bio === 'string' &&
+    argument.bio.length <= 160 &&
+    Buffer.byteLength(argument.bio) <= 640 &&
+    typeof argument.picture === 'string' &&
+    (argument.picture === '' ||
+      (argument.picture.length <= 120 &&
+        /^ipfs:\/\/[a-zA-Z0-9]{10,}$/u.test(argument.picture)))
+    ? null
+    : 'invalid_social_contract_call'
 }
 
 function validateMethodArgument(method, argument, amountAtoms) {
@@ -179,13 +295,23 @@ function validateSocialContractCall(call) {
 }
 
 function socialContractCallRequiresConfirmation(call) {
-  return Boolean(call && call.method === 'sendTip')
+  return Boolean(
+    call &&
+      (call.method === 'sendTip' ||
+        (call.contract === SOCIAL_PROFILE_CONTRACT_ADDRESS &&
+          SOCIAL_PROFILE_METHODS.has(call.method)))
+  )
 }
 
 module.exports = {
   SOCIAL_CONTRACT_ADDRESS,
+  SOCIAL_PROFILE_CONTRACT_ADDRESS,
+  SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES,
   decimalToAtoms,
   parseContractArgument,
   socialContractCallRequiresConfirmation,
   validateSocialContractCall,
+  validateSocialProfileCall,
+  validateSocialProfilePictureCid,
+  validateSocialProfileReadMap,
 }

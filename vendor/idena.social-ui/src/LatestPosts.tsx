@@ -1,5 +1,5 @@
 import { MAX_POST_MEDIA_BYTES_RPC, type Post, type Poster, type PostTips, type RpcPostCostEstimate } from './logic/asyncUtils';
-import { useLocation, useOutletContext } from 'react-router';
+import { Navigate, useLocation, useNavigate, useOutletContext, useParams } from 'react-router';
 import PostComponent from './components/PostComponent';
 import { type BrowserStateHistorySettings, type MouseEventLocal, type PostMediaAttachment } from './App.exports';
 import { useEffect, useReducer, useRef, useState } from 'react';
@@ -11,6 +11,7 @@ import { isRenderableTopLevelPost } from './logic/feedVisibility';
 import PageHeaderComponent from './components/PageHeaderComponent';
 import ComposerToolbarComponent from './components/ComposerToolbarComponent';
 import { useInfiniteScroll } from './logic/useInfiniteScroll';
+import { getDisplayTopic, getTopicChannelId, getTopicFromChannelId, isValidTopicName } from './logic/topics';
 
 type LatestPostsProps = {
     currentBlockCaptured: number,
@@ -43,6 +44,7 @@ type LatestPostsProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryPostMediaHandler: (id: string) => Promise<boolean>,
     postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
@@ -82,6 +84,12 @@ function HoverInfo({ label, widthClass = 'w-72' }: { label: string, widthClass?:
 
 function LatestPosts() {
     const location = useLocation();
+    const navigate = useNavigate();
+    const { topic: topicParam } = useParams();
+    const topic = topicParam?.toLowerCase();
+    const topicValid = !topic || isValidTopicName(topic);
+    const composerLocation = topic ? `topic-${topic}` : 'main';
+    const composerChannelId = topic ? getTopicChannelId(topic) : undefined;
 
     const { key: locationKey } = location;
 
@@ -112,6 +120,7 @@ function LatestPosts() {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
+        retryPostMediaHandler,
         postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
@@ -132,6 +141,7 @@ function LatestPosts() {
     const [, forceUpdate] = useReducer(x => x + 1, 0);
     const [mainDraftText, setMainDraftText] = useState('');
     const lastAppliedPrefillRef = useRef('');
+    const previousComposerLocationRef = useRef(composerLocation);
     const proposalMode = desktopBootstrap?.proposalMode === true;
     const proposalPublishingEnabled = proposalMode
         ? desktopBootstrap?.proposalPublishingEnabled !== false
@@ -151,12 +161,13 @@ function LatestPosts() {
 
     const sortPostsBy = browserStateHistoryRef.current[locationKey].sortPostsBy;
     const sortedPostIds = sortPostsBy === 'latest-posts' ? latestPosts : latestActivity;
-    const mainPostMediaAttachment = postMediaAttachmentsRef.current['post-main'];
+    const mainPostMediaAttachment = postMediaAttachmentsRef.current[`post-${composerLocation}`];
     const mainFeeTooltipText = mainComposerCostEstimate
         ? `Current conservative max-fee cap from your own node RPC: about ${mainComposerCostEstimate.totalMaxFeeDna} iDNA. Breakdown: contract call ${mainComposerCostEstimate.contractCallMaxFeeDna} iDNA${mainComposerCostEstimate.imageStoredToIpfs ? `, image storage ${mainComposerCostEstimate.imageStoreMaxFeeDna} iDNA` : ''}${mainComposerCostEstimate.textStoredToIpfs ? `, long-text storage ${mainComposerCostEstimate.textStoreMaxFeeDna} iDNA` : ''}. The actual charged fee can be lower.`
         : 'Start typing or attach an image to request a conservative max-fee estimate from your own node RPC.';
     const renderablePostIds = sortedPostIds.filter((postId) =>
-        isRenderableTopLevelPost(postsRef.current[postId])
+        isRenderableTopLevelPost(postsRef.current[postId]) &&
+        (!topic || (topicValid && getTopicFromChannelId(postsRef.current[postId]?.channelId ?? '') === topic))
     );
     const visiblePostIds = proposalMode
         ? renderablePostIds.filter((postId) => {
@@ -167,8 +178,16 @@ function LatestPosts() {
 
     const { visibleItems: pagedPostIds, hasMore, sentinelRef } = useInfiniteScroll(
         visiblePostIds,
-        `${locationKey}-${sortPostsBy}-${proposalMode}`,
+        `${locationKey}-${sortPostsBy}-${proposalMode}-${topic ?? ''}`,
     );
+
+    useEffect(() => {
+        if (previousComposerLocationRef.current === composerLocation) return;
+        previousComposerLocationRef.current = composerLocation;
+        setMainDraftText('');
+        setMainComposerCostEstimate(null);
+        setMainComposerCostEstimateError('');
+    }, [composerLocation, setMainComposerCostEstimate, setMainComposerCostEstimateError]);
 
     useEffect(() => {
         if (!proposalMode) {
@@ -193,7 +212,7 @@ function LatestPosts() {
     }, [proposalMode, proposalPrefillText]);
 
     useEffect(() => {
-        if (submittingPost !== 'main') {
+        if (submittingPost !== composerLocation) {
             return undefined;
         }
 
@@ -208,6 +227,7 @@ function LatestPosts() {
         setMainComposerCostEstimate,
         setMainComposerCostEstimateError,
         submittingPost,
+        composerLocation,
     ]);
 
     useEffect(() => {
@@ -271,7 +291,16 @@ function LatestPosts() {
         forceUpdate();
     };
 
+    if (topicParam && topicParam !== topic) {
+        return <Navigate to={`/topics/${topic}`} replace />;
+    }
+
+    if (!topicValid) {
+        return <p className="px-8 py-6 text-center text-[15px] text-ink-muted">Invalid topic name. Use 3 to 21 lowercase letters, digits or underscores.</p>;
+    }
+
     return (<>
+        {topic && <PageHeaderComponent title={getDisplayTopic(topic)} subtitle={`${visiblePostIds.length} ${visiblePostIds.length === 1 ? 'post' : 'posts'}`} onBack={() => navigate(-1)} />}
         <div
             className={`mt-3 mb-6 ${embeddedDesktopOnchainMode ? 'mx-auto w-full max-w-[1360px]' : 'w-full'}`}
             style={embeddedDesktopOnchainMode ? { width: '100%', maxWidth: '1360px' } : undefined}
@@ -288,10 +317,11 @@ function LatestPosts() {
                 </div>
             )}
             <textarea
-                id='post-input-main'
+                key={composerLocation}
+                id={`post-input-${composerLocation}`}
                 rows={4}
                 className={`block w-full resize-none bg-transparent outline-none text-xl/6 py-3 px-4 placeholder:text-ink-muted scrollbar-thin ${embeddedDesktopOnchainMode ? 'h-[120px] overflow-y-auto' : 'field-sizing-content min-h-[104px] max-h-[520px]'}`}
-                placeholder={proposalMode ? proposalComposerPlaceholder : 'Write your post here...'}
+                placeholder={proposalMode ? proposalComposerPlaceholder : topic ? `Post in ${getDisplayTopic(topic)}` : 'Write your post here...'}
                 disabled={mainComposerDisabled}
                 value={mainDraftText}
                 onChange={(event) => setMainDraftText(event.target.value)}
@@ -328,12 +358,12 @@ function LatestPosts() {
             <div className="mt-3 border-t border-line pt-2">
                 <ComposerToolbarComponent
                     hasAttachment={!!mainPostMediaAttachment}
-                    onAddImage={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, 'main', 'post')}
-                    onRemoveImage={(e) => !mainComposerDisabled && removeMediaHandler(e, 'main')}
-                    copyTxId="post-copytx-main"
-                    onCopyTx={() => !mainComposerDisabled && copyPostTxHandler('main')}
-                    submitText={submittingPost === 'main' ? 'Posting...' : 'Post'}
-                    onSubmit={(e) => makePostsWith === 'rpc' ? handleOpenRpcMakePostModal(e, 'main') : submitPostHandler('main')}
+                    onAddImage={(e) => !mainComposerDisabled && handleOpenAddMediaModal(e, composerLocation, 'post')}
+                    onRemoveImage={(e) => !mainComposerDisabled && removeMediaHandler(e, composerLocation)}
+                    copyTxId={`post-copytx-${composerLocation}`}
+                    onCopyTx={() => !mainComposerDisabled && copyPostTxHandler(composerLocation, undefined, composerChannelId)}
+                    submitText={submittingPost === composerLocation ? 'Posting...' : 'Post'}
+                    onSubmit={(e) => makePostsWith === 'rpc' ? handleOpenRpcMakePostModal(e, composerLocation, undefined, composerChannelId) : submitPostHandler(composerLocation, undefined, composerChannelId)}
                     submitDisabled={mainComposerDisabled}
                     hint="Your post will take time to display due to blockchain acceptance."
                 />
@@ -344,6 +374,9 @@ function LatestPosts() {
             <div className="my-4 rounded-md border border-line bg-surface px-4 py-3 text-[13px] text-ink-muted">
                 No tagged IdenaDAO proposals are visible yet. Publish a post that includes {proposalTag} to seed this governance feed.
             </div>
+        )}
+        {topic && visiblePostIds.length === 0 && (
+            <p className="px-8 py-6 text-center text-[15px] text-ink-muted">No posts found in {getDisplayTopic(topic)} yet. Write the first one or scan more past blocks.</p>
         )}
         <div className="text-center my-3">
             <p>Current Block: #{currentBlockCaptured ? currentBlockCaptured : (nodeAvailable ? 'Loading...' : '')}</p>
@@ -380,6 +413,7 @@ function LatestPosts() {
                         handleOpenAddMediaModal={handleOpenAddMediaModal}
                         handleOpenRpcMakePostModal={handleOpenRpcMakePostModal}
                         handleExpandImageModal={handleExpandImageModal}
+                        retryPostMediaHandler={retryPostMediaHandler}
                         postTipsRef={postTipsRef}
                         postMediaAttachmentsRef={postMediaAttachmentsRef}
                         makePostsWith={makePostsWith}

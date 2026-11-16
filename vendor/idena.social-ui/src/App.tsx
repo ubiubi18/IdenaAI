@@ -4,7 +4,7 @@ import { sendPendingMessage, stageMessageFile, type PreparedMessage } from './lo
 import { hexToUint8Array } from 'idena-sdk-js-lite';
 import { keccak256, sha3_256 } from 'js-sha3';
 import { encrypt } from 'eciesjs';
-import { type Message, type Post, type Poster, type PostTips, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPost, getPastTxsWithIdenaIndexerApi, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getRpcClient, getblockTxsWithIdenaIndexerApi, processMessage, processTip, resolveNewTextForPosts, resolveNewMediaForPosts, resolveNewTextForMessages, resolveNewMediaForMessages, saveReplyPostId, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, getTxEventsWithIdenaIndexerApi, getMedia, getMessage, getPosterPromise, getTxWithIdenaIndexerApi, type RpcClient } from './logic/asyncUtils';
+import { type Message, type Post, type Poster, type PostTips, type Tip, type RpcPostCostEstimate, breakingChanges, copyMessageTx, copyPostTx, deOrphanReplyPosts, estimateRpcPostCost, getBlockAtWithIdenaIndexerApi, getLastBlockWithIdenaIndexerApi, getNewPostLatestActivity, getNewPost, getPastTxsWithIdenaIndexerApi, getPubKeyWithIdenaIndexerApi, getPubKeyWithRpc, getRpcClient, getblockTxsWithIdenaIndexerApi, hasRetryableMediaError, processMessage, processTip, resolveNewTextForPosts, resolveNewMediaForPosts, resolveNewTextForMessages, resolveNewMediaForMessages, saveReplyPostId, storeFileToIpfs, submitMessage, submitPost, submitSendTip, supportedImageTypes, getTxEventsWithIdenaIndexerApi, getMedia, getMessage, getPosterPromise, getTxWithIdenaIndexerApi, type RpcClient } from './logic/asyncUtils';
 import { decryptAESGCM, encryptAESGCM, extractPubKeyAddressFromPrivateKey, filterIndexerApiBalanceUpdates, filterTransactionsByCutoffTimestamp, getNextContract, getPostActivities, getPostActivityKey, getTextAndMediaForPost, getTimestampFromIndexerApi, isObjectEmpty, isValidLowerCaseAddress, str2bytes } from './logic/utils';
 import { createDesktopMessageCryptoClient, createDesktopRpcClient, installDesktopBootstrapListener, isEmbeddedDesktopFrame, readDesktopBootstrap, type DesktopBootstrap } from './logic/desktopBootstrap';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
@@ -19,6 +19,8 @@ import { CloseIcon } from './components/icons';
 import { getSocialContractById, normalizeSocialChannelIdForContract, normalizeSocialPostIdForContract, SOCIAL_CONTRACTS, SOCIAL_CONTRACT_CURRENT, type SocialContractId } from './logic/socialContracts';
 import ModalRpcSendMessageComponent from './components/ModalRpcSendMessageComponent';
 import ModalSubmitPubKeyComponent from './components/ModalSubmitPubKeyComponent';
+import ModalEditProfileComponent from './components/ModalEditProfileComponent';
+import { sendProfileCall, type PreparedProfileCall } from './logic/profileEdit';
 import DesktopNavigation from './components/DesktopNavigation';
 import { getDirectDeliverySendError, parseDirectDelivery } from './logic/directDelivery';
 import ScanBlocksComponent from './components/ScanBlocksComponent';
@@ -772,8 +774,9 @@ function App() {
                 setCurrentBlockCaptured(initialBlock);
                 return undefined;
             }
+            let cancelled = false;
             (async function recurseForward() {
-                if (nodeAvailableRef.current) {
+                if (!cancelled && nodeAvailableRef.current) {
                     const recurseDirection = 'forward';
                     const contentSource = inputFindingPastPostsRef.current === 'rpc' ? 'rpc' : 'indexer-api';
                     const pendingBlock = currentBlockCapturedRef.current ? currentBlockCapturedRef.current + 1 : initialBlock;
@@ -782,7 +785,10 @@ function App() {
                 }
             } as RecurseForward)();
 
-            return () => recurseForwardIntervalId && clearTimeout(recurseForwardIntervalId);
+            return () => {
+                cancelled = true;
+                if (recurseForwardIntervalId) clearTimeout(recurseForwardIntervalId);
+            };
         } else {
             recurseForwardIntervalId && clearTimeout(recurseForwardIntervalId);
         }
@@ -795,8 +801,10 @@ function App() {
         if (inputNodeApplied && scanningPastBlocks && initialBlock && initialBlockTimestamp && nodeAvailable && cacheLoaded) {
             const timeNow = Math.floor(Date.now() / 1000);
             const ttl = timeNow + SCAN_PAST_POSTS_TTL;
+            let cancelled = false;
 
             (async function recurseBackward(time: number) {
+                if (cancelled) return;
                 if (scanningPastBlocksRef.current && nodeAvailableRef.current && time < ttl) {
                     const recurseDirection = 'backward';
                     const contentSource = inputFindingPastPostsRef.current === 'rpc' ? 'rpc' : 'indexer-api';
@@ -808,7 +816,10 @@ function App() {
                 }
             } as RecurseBackward)(timeNow);
 
-            return () => clearInterval(recurseBackwardIntervalId);
+            return () => {
+                cancelled = true;
+                if (recurseBackwardIntervalId) clearTimeout(recurseBackwardIntervalId);
+            };
         } else {
             recurseBackwardIntervalId && clearInterval(recurseBackwardIntervalId);
         }
@@ -1533,14 +1544,18 @@ function App() {
         let recurseForwardIntervalId: NodeJS.Timeout | undefined;
 
         if (inputNodeApplied && initialBlock && nodeAvailable && canProcessMessages) {
+            let cancelled = false;
             (async function recurseForwardMessages() {
-                if (nodeAvailableRef.current) {
+                if (!cancelled && nodeAvailableRef.current) {
                     const recurseDirection = 'forward';
                     recurseForwardIntervalId = setTimeout(messagesProcessorFactory(recurseDirection, recurseForwardMessages, latestMessagesForwardQueueRef), POLLING_INTERVAL);
                 }
             } as RecurseForwardMessages)();
 
-            return () => clearInterval(recurseForwardIntervalId);
+            return () => {
+                cancelled = true;
+                if (recurseForwardIntervalId) clearTimeout(recurseForwardIntervalId);
+            };
         } else {
             recurseForwardIntervalId && clearInterval(recurseForwardIntervalId);
         }
@@ -1553,14 +1568,18 @@ function App() {
         let recurseBackwardIntervalId: NodeJS.Timeout | undefined;
 
         if (inputNodeApplied && initialBlock && nodeAvailable && canProcessMessages && messagesCacheLoaded) {
+            let cancelled = false;
             (async function recurseBackwardMessages() {
-                if (nodeAvailableRef.current && (scanningPastBlocks || latestMessagesBackwardQueueRef.current.length)) {
+                if (!cancelled && nodeAvailableRef.current && (scanningPastBlocks || latestMessagesBackwardQueueRef.current.length)) {
                     const recurseDirection = 'backward';
                     recurseBackwardIntervalId = setTimeout(messagesProcessorFactory(recurseDirection, recurseBackwardMessages, latestMessagesBackwardQueueRef), SCANNING_INTERVAL_MESSAGES);
                 }
             } as RecurseBackwardMessages)();
 
-            return () => clearInterval(recurseBackwardIntervalId);
+            return () => {
+                cancelled = true;
+                if (recurseBackwardIntervalId) clearTimeout(recurseBackwardIntervalId);
+            };
         } else {
             recurseBackwardIntervalId && clearInterval(recurseBackwardIntervalId);
         }
@@ -2358,6 +2377,49 @@ function App() {
         setModalOpen('submitPubKey');
     };
 
+    const handleOpenEditProfileModal = (e: MouseEventLocal) => {
+        e.stopPropagation();
+        if (rpcClientRef.current && !inputPostDisabled) setModalOpen('editProfile');
+    };
+
+    const sendProfileCallHandler = (prepared: PreparedProfileCall) => {
+        if (isDesktopOnchainMode && !prepared.amount.isZero()) {
+            return Promise.resolve({ error: 'Profile edits requiring a vouched-member payment are unavailable in desktop mode.' });
+        }
+        return sendProfileCall(rpcClientRef.current!, postersAddress, prepared, inputSendingTxs, callbackUrl, webAppUrl);
+    };
+
+    const profileUpdatedHandler = async () => {
+        const address = postersAddress.toLowerCase();
+        const poster = postersRef.current[address];
+        if (poster) postersRef.current = { ...postersRef.current, [address]: { ...poster, fetchedAt: 0 } };
+        await getPosterPromise(address, postersRef, inputFindingPastPostsRef.current === 'indexer-api', rpcClientRef.current, indexerApiUrlRef, canUseCache());
+        forceUpdate();
+    };
+
+    const retryPostMediaHandler = async (postId: string) => {
+        const post = postsRef.current[postId];
+        if (!post || !rpcClientRef.current || !hasRetryableMediaError(post)) return false;
+        await resolveNewMediaForPosts([getMedia(postId, post.media, rpcClientRef.current)], postsRef, canUseCache());
+        forceUpdate();
+        return !hasRetryableMediaError(postsRef.current[postId]);
+    };
+
+    const retryMessageMediaHandler = async (messageId: string) => {
+        const message = messagesRef.current[messageId];
+        if (!message || !rpcClientRef.current || !hasRetryableMediaError(message)) return false;
+        await resolveNewMediaForMessages(
+            [getMedia(messageId, message.media, rpcClientRef.current, message.mediaPassword)],
+            postersAddress,
+            encryptedPrivateKey,
+            password,
+            messagesRef,
+            canUseCache(),
+        );
+        forceUpdate();
+        return !hasRetryableMediaError(messagesRef.current[messageId]);
+    };
+
     const addMediaHandler = async (attachmentId: string, file: File, ipfsUrl?: string) => {
         await setPostMediaAttachmentHandler(attachmentId, file, ipfsUrl);
         forceUpdate();
@@ -2686,6 +2748,7 @@ function App() {
                             currentBlockCaptured,
                             latestPosts,
                             latestActivity,
+                            postLatestActivityRef,
                             postsRef,
                             postersRef,
                             replyPostsTreeRef,
@@ -2716,6 +2779,9 @@ function App() {
                             handleOpenAddMediaModal,
                             handleOpenRpcMakePostModal,
                             handleOpenRpcSendMessageModal,
+                            handleOpenEditProfileModal,
+                            retryPostMediaHandler,
+                            retryMessageMediaHandler,
                             handleExpandImageModal,
                             handleSubmitPubkeyModal,
                             tipsRef,
@@ -2801,6 +2867,7 @@ function App() {
                     {modalOpen === 'rpcSendMessage' && <ModalRpcSendMessageComponent modalRpcSendMessageRef={modalRpcSendMessageRef} submitMessageHandler={submitMessageHandler} closeModal={() => setModalOpen('')} />}
                     {modalOpen === 'expandImage' && <ModalExpandImageComponent modalExpandImageRef={modalExpandImageRef} />}
                     {modalOpen === 'submitPubKey' && <ModalSubmitPubKeyComponent modalSubmitPubkeyRef={modalSubmitPubKeyRef} postersRef={postersRef} closeModal={() => setModalOpen('')} />}
+                    {modalOpen === 'editProfile' && rpcClientRef.current && <ModalEditProfileComponent rpcClient={rpcClientRef.current} postersAddress={postersAddress} makePostsWith={inputSendingTxs} sendProfileCallHandler={sendProfileCallHandler} profileUpdatedHandler={profileUpdatedHandler} />}
                 </Modal>
             </div>
         </main>
