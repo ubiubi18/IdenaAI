@@ -111,9 +111,9 @@ describe('release workflow source boundary', () => {
   it('cannot select different release source through a manual dispatch', () => {
     expect(workflow).not.toMatch(/workflow_dispatch|inputs\.tag/u)
     expect(workflow).not.toContain('needs.release-preflight.outputs.commit')
-    expect(workflow).toContain('ref: ${{ github.ref }}')
+    expect(workflow).toContain(`ref: \${{ github.ref }}`)
     if (workflow.includes('  release-preflight:')) {
-      expect(workflow).toContain('ref: ${{ github.sha }}')
+      expect(workflow).toContain(`ref: \${{ github.sha }}`)
     }
   })
 })
