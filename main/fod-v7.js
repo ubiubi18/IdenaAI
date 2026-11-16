@@ -357,6 +357,7 @@ function validNonceRecord(record) {
       'codeHash',
       'kind',
       'txHash',
+      'epoch',
     ]) &&
     typeof record.coinbase === 'string' &&
     HEX20.test(record.coinbase) &&
@@ -364,6 +365,10 @@ function validNonceRecord(record) {
     Number.isSafeInteger(record.accountNonce) &&
     record.accountNonce > 0 &&
     record.accountNonce < 2 ** 32 &&
+    (record.epoch === undefined ||
+      (Number.isSafeInteger(record.epoch) &&
+        record.epoch >= 0 &&
+        record.epoch <= 65535)) &&
     ACTION_ID.test(record.actionId) &&
     typeof record.contract === 'string' &&
     HEX20.test(record.contract) &&
@@ -409,7 +414,7 @@ async function readNonceJournal(fs, root) {
     })
     const reserved = new Set()
     for (const record of records) {
-      const key = `${record.coinbase}:${record.accountNonce}`
+      const key = `${record.coinbase}:${record.epoch}:${record.accountNonce}`
       if (reserved.has(key)) fail('The v7 nonce journal is invalid.')
       reserved.add(key)
     }
@@ -523,6 +528,7 @@ async function attemptedActions(fs, root, selectedCoinbase) {
         const record = {
           coinbase: identity.name,
           accountNonce: attempt?.accountNonce,
+          epoch: attempt?.epoch,
           actionId: entry.name,
           contract: meta?.contract,
           codeHash: meta?.codeHash,
@@ -550,7 +556,7 @@ async function ensureNonceJournal(fs, root) {
   const records = await attemptedActions(fs, root)
   const seen = new Set()
   for (const record of records) {
-    const key = `${record.coinbase}:${record.accountNonce}`
+    const key = `${record.coinbase}:${record.epoch}:${record.accountNonce}`
     if (seen.has(key)) fail('Saved v7 attempts reuse a nonce.')
     seen.add(key)
   }
@@ -565,7 +571,58 @@ async function ensureNonceJournal(fs, root) {
   return records
 }
 
-async function checkNonceReservations(fs, root, coinbase, nonce) {
+async function legacyNonceExpired(fs, root, record, epoch, rpc) {
+  let txHash = record.txHash && `0x${record.txHash.replace(/^0x/, '')}`
+  if (record.kind !== 'native-transfer') {
+    let signed
+    try {
+      signed = await privateJSON(
+        fs,
+        path.join(
+          root,
+          'actions',
+          record.coinbase,
+          record.actionId,
+          'signed.json'
+        ),
+        MAX_SIGNED_BYTES
+      )
+    } catch (error) {
+      if (error.code === 'ENOENT') return false
+      throw error
+    }
+    if (
+      signed?.format !== 'fod.submitted-transaction' ||
+      signed.version !== 1 ||
+      signed.network !== 'idena' ||
+      signed.sender !== record.coinbase ||
+      signed.contract !== record.contract ||
+      signed.accountNonce !== record.accountNonce ||
+      signed.broadcast !== true ||
+      !/^0x[0-9a-f]{64}$/.test(signed.txHash || '')
+    ) {
+      return false
+    }
+    txHash = signed.txHash
+  }
+  // Legacy reservations have no epoch. Only a matching mined transaction
+  // can establish that their nonce belongs to an expired epoch.
+  const tx = await rpc('bcn_transaction', [txHash])
+  return (
+    tx?.hash?.toLowerCase() === txHash &&
+    tx.from?.toLowerCase().replace(/^0x/, '') === record.coinbase &&
+    tx.to?.toLowerCase().replace(/^0x/, '') === record.contract &&
+    tx.type === (record.kind === 'native-transfer' ? 'send' : 'callContract') &&
+    tx.nonce === record.accountNonce &&
+    Number.isSafeInteger(tx.epoch) &&
+    tx.epoch >= 0 &&
+    tx.epoch < epoch &&
+    /^0x[0-9a-f]{64}$/i.test(tx.blockHash || '') &&
+    !/^0x0{64}$/.test(tx.blockHash)
+  )
+}
+
+async function checkNonceReservations(fs, root, coinbase, nonce, epoch, rpc) {
   const records = await readNonceJournal(fs, root)
   const byAction = new Map(
     records.map((record) => [`${record.coinbase}:${record.actionId}`, record])
@@ -575,18 +632,23 @@ async function checkNonceReservations(fs, root, coinbase, nonce) {
     if (
       !journaled ||
       journaled.accountNonce !== legacy.accountNonce ||
+      journaled.epoch !== legacy.epoch ||
       journaled.contract !== legacy.contract ||
       journaled.codeHash !== legacy.codeHash
     ) {
       fail('A saved v7 signing attempt is absent from the nonce journal.')
     }
   }
-  if (
-    records.some(
-      (record) => record.coinbase === coinbase && record.accountNonce === nonce
-    )
-  ) {
-    fail('This identity and nonce already have a v7 signing attempt.')
+  const matching = records.filter(
+    (record) => record.coinbase === coinbase && record.accountNonce === nonce
+  )
+  for (const record of matching) {
+    const expired =
+      record.epoch === undefined
+        ? await legacyNonceExpired(fs, root, record, epoch, rpc)
+        : record.epoch < epoch
+    if (!expired)
+      fail('This identity and nonce already have a v7 signing attempt.')
   }
 }
 
@@ -1948,10 +2010,18 @@ function createFodV7Service({
         automatic.remainingFee -= BigInt(action.meta.maxFee)
       }
       const accountNonce = fresh.account.nonce + 1
-      await checkNonceReservations(fs, root, fresh.coinbase, accountNonce)
+      await checkNonceReservations(
+        fs,
+        root,
+        fresh.coinbase,
+        accountNonce,
+        fresh.epoch.epoch,
+        fresh.rpc
+      )
       await appendNonceJournal(fs, root, {
         coinbase: fresh.coinbase,
         accountNonce,
+        epoch: fresh.epoch.epoch,
         actionId: payload.actionId,
         contract: config.contract,
         codeHash: config.codeHash,
@@ -1959,7 +2029,11 @@ function createFodV7Service({
       await writePrivateFile(
         fs,
         path.join(action.directory, 'attempt.json'),
-        JSON.stringify({at: new Date().toISOString(), accountNonce})
+        JSON.stringify({
+          at: new Date().toISOString(),
+          accountNonce,
+          epoch: fresh.epoch.epoch,
+        })
       )
       if (process.platform === 'win32') {
         await markWindowsSigningAttempt(fs, action.directory)

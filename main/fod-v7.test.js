@@ -226,6 +226,7 @@ function fakeSpawn(calls) {
             amount: bonded ? prepared.amount : '0',
             maxFee: bonded ? prepared.estimatedMaxFee : '1000000000000000000',
             sender: ADDRESS,
+            accountNonce: Number(args[args.indexOf('-nonce') + 1]),
             broadcast: true,
             txHash: TX_HASH,
             outcome: {included: true, success: true},
@@ -267,6 +268,7 @@ describe('direct v7 desktop bridge', () => {
     stakeHash,
     fsImpl = fs,
     getNonce = () => 2,
+    getEpoch = () => 230,
     identity = ADDRESS,
     onRpc,
     openFolder,
@@ -301,7 +303,7 @@ describe('direct v7 desktop bridge', () => {
             nonce: getNonce(),
             mempoolNonce: getNonce(),
           },
-          dna_epoch: {epoch: 230},
+          dna_epoch: {epoch: getEpoch()},
           bcn_txReceipt: {
             success: true,
             txHash: TX_HASH,
@@ -318,6 +320,41 @@ describe('direct v7 desktop bridge', () => {
     codeHash: CODE_HASH,
     binaryPath: process.execPath,
     binarySha256: BINARY_HASH,
+  }
+
+  function makeLegacyReservation(actionId) {
+    const journal = path.join(root, 'v7', 'nonce-journal.jsonl')
+    const lines = fs.readFileSync(journal, 'utf8').trimEnd().split('\n')
+    const records = lines.slice(1).map((line) => {
+      const record = JSON.parse(line)
+      delete record.epoch
+      return JSON.stringify(record)
+    })
+    fs.writeFileSync(journal, `${lines[0]}\n${records.join('\n')}\n`)
+    const marker = path.join(
+      root,
+      'v7',
+      'actions',
+      ADDRESS,
+      actionId,
+      'attempt.json'
+    )
+    const attempt = JSON.parse(fs.readFileSync(marker, 'utf8'))
+    delete attempt.epoch
+    fs.writeFileSync(marker, JSON.stringify(attempt))
+  }
+
+  function minedReservation(overrides = {}) {
+    return {
+      hash: TX_HASH,
+      type: 'callContract',
+      from: `0x${ADDRESS}`,
+      to: `0x${CONTRACT}`,
+      nonce: 3,
+      epoch: 230,
+      blockHash: `0x${'f'.repeat(64)}`,
+      ...overrides,
+    }
   }
 
   it.each([8, 9])(
@@ -1041,7 +1078,13 @@ describe('direct v7 desktop bridge', () => {
       txHash: TX_HASH.slice(2),
     }
     fs.appendFileSync(journal, `${JSON.stringify(transfer)}\n`)
-    const restarted = service({getNonce: () => 2})
+    const restarted = service({
+      getNonce: () => 2,
+      onRpc: (method) =>
+        method === 'bcn_transaction'
+          ? minedReservation({type: 'send', to: `0x${transfer.contract}`})
+          : undefined,
+    })
     expect((await restarted('status')).configured).toBe(true)
     const prepared = await restarted('prepare', {
       operation: 'challenge',
@@ -1057,6 +1100,10 @@ describe('direct v7 desktop bridge', () => {
       {...transfer, txHash: ''},
       {...transfer, kind: 'unknown'},
       {...transfer, codeHash: CODE_HASH},
+      {...transfer, epoch: null},
+      {...transfer, epoch: -1},
+      {...transfer, epoch: 65536},
+      {...transfer, epoch: '230'},
     ]) {
       fs.writeFileSync(
         journal,
@@ -1066,6 +1113,150 @@ describe('direct v7 desktop bridge', () => {
         'nonce journal is invalid'
       )
     }
+  })
+
+  it('allows nonce reuse after epoch rollover and blocks same-epoch reuse after restart', async () => {
+    let epoch = 230
+    const getEpoch = () => epoch
+    const v7 = service({getEpoch})
+    await v7('configure', pins)
+    const request = {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    }
+    const first = await v7('prepare', request)
+    await v7('submit', {actionId: first.actionId})
+    epoch = 231
+    const restarted = service({getEpoch})
+    const second = await restarted('prepare', request)
+    await expect(
+      restarted('submit', {actionId: second.actionId})
+    ).resolves.toMatchObject({status: 'included'})
+    const again = service({getEpoch})
+    const third = await again('prepare', request)
+    await expect(again('submit', {actionId: third.actionId})).rejects.toThrow(
+      'already have a v7 signing attempt'
+    )
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(2)
+  })
+
+  it('reconciles a legacy reservation against its mined earlier-epoch transaction without discarding it', async () => {
+    const v7 = service()
+    await v7('configure', pins)
+    const request = {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    }
+    const first = await v7('prepare', request)
+    await v7('submit', {actionId: first.actionId})
+    makeLegacyReservation(first.actionId)
+    const restarted = service({
+      getEpoch: () => 237,
+      onRpc: (method) =>
+        method === 'bcn_transaction' ? minedReservation() : undefined,
+    })
+    const second = await restarted('prepare', request)
+    await expect(
+      restarted('submit', {actionId: second.actionId})
+    ).resolves.toMatchObject({status: 'included'})
+    const third = await restarted('prepare', request)
+    await expect(
+      restarted('submit', {actionId: third.actionId})
+    ).rejects.toThrow('already have a v7 signing attempt')
+    expect(
+      fs.readFileSync(path.join(root, 'v7', 'nonce-journal.jsonl'), 'utf8')
+    ).toContain(first.actionId)
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(2)
+  })
+
+  it.each([
+    ['different sender', {from: `0x${'f'.repeat(40)}`}],
+    ['different destination', {to: `0x${'f'.repeat(40)}`}],
+    ['different nonce', {nonce: 4}],
+    ['different transaction', {hash: `0x${'a'.repeat(64)}`}],
+    ['different type', {type: 'send'}],
+    ['pending transaction', {blockHash: `0x${'0'.repeat(64)}`}],
+    ['missing epoch', {epoch: undefined}],
+    ['current epoch', {epoch: 237}],
+    ['future epoch', {epoch: 238}],
+  ])('keeps a legacy reservation blocked for %s', async (_, overrides) => {
+    const v7 = service()
+    await v7('configure', pins)
+    const request = {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    }
+    const first = await v7('prepare', request)
+    await v7('submit', {actionId: first.actionId})
+    makeLegacyReservation(first.actionId)
+    const restarted = service({
+      getEpoch: () => 237,
+      onRpc: (method) =>
+        method === 'bcn_transaction' ? minedReservation(overrides) : undefined,
+    })
+    const second = await restarted('prepare', request)
+    await expect(
+      restarted('submit', {actionId: second.actionId})
+    ).rejects.toThrow('already have a v7 signing attempt')
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(1)
+  })
+
+  it('keeps a legacy reservation blocked when its signed transaction is missing', async () => {
+    const v7 = service()
+    await v7('configure', pins)
+    const request = {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    }
+    const first = await v7('prepare', request)
+    await v7('submit', {actionId: first.actionId})
+    makeLegacyReservation(first.actionId)
+    fs.unlinkSync(
+      path.join(root, 'v7', 'actions', ADDRESS, first.actionId, 'signed.json')
+    )
+    const restarted = service({getEpoch: () => 237})
+    const second = await restarted('prepare', request)
+    await expect(
+      restarted('submit', {actionId: second.actionId})
+    ).rejects.toThrow('already have a v7 signing attempt')
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(1)
+  })
+
+  it('reconciles a legacy native-transfer reservation only against its earlier-epoch transaction', async () => {
+    const v7 = service()
+    await v7('configure', pins)
+    fs.appendFileSync(
+      path.join(root, 'v7', 'nonce-journal.jsonl'),
+      `${JSON.stringify({
+        coinbase: ADDRESS,
+        accountNonce: 3,
+        actionId: `v7-${'9'.repeat(32)}`,
+        contract: CONTRACT,
+        codeHash: '',
+        kind: 'native-transfer',
+        txHash: TX_HASH.slice(2),
+      })}\n`
+    )
+    const restarted = service({
+      getEpoch: () => 237,
+      onRpc: (method) =>
+        method === 'bcn_transaction'
+          ? minedReservation({type: 'send'})
+          : undefined,
+    })
+    const prepared = await restarted('prepare', {
+      operation: 'challenge',
+      orderId: '17',
+      maxFee: '1000000000000000000',
+    })
+    await expect(
+      restarted('submit', {actionId: prepared.actionId})
+    ).resolves.toMatchObject({status: 'included'})
+    expect(calls.filter(({args}) => args[0] === 'submit')).toHaveLength(1)
   })
 
   it('fails closed when the durable nonce journal is missing or damaged', async () => {
