@@ -1,5 +1,12 @@
 const {ReadableStream} = require('stream/web')
-const {createFetchClient, readBufferedResponse} = require('./fetch-client')
+const {
+  createFetchClient,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  readBufferedResponse,
+} = require('./fetch-client')
+const {
+  SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES,
+} = require('../social-contract-call-policy')
 
 function headers(values = {}) {
   const normalized = Object.fromEntries(
@@ -50,6 +57,27 @@ describe('bounded fetch client responses', () => {
     await expect(
       readBufferedResponse(responseFromChunks(['1234', '5678']), 7)
     ).rejects.toMatchObject({code: 'ERR_RESPONSE_TOO_LARGE'})
+  })
+
+  it('enforces the profile picture limit before buffering and keeps the general limit', async () => {
+    const profileLimit = SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES
+    const oversized = Buffer.alloc(profileLimit + 1)
+
+    await expect(
+      readBufferedResponse(
+        responseFromChunks([], {'content-length': String(oversized.length)}),
+        profileLimit
+      )
+    ).rejects.toMatchObject({code: 'ERR_RESPONSE_TOO_LARGE'})
+    await expect(
+      readBufferedResponse(responseFromChunks([oversized]), profileLimit)
+    ).rejects.toMatchObject({code: 'ERR_RESPONSE_TOO_LARGE'})
+    await expect(
+      readBufferedResponse(
+        responseFromChunks([oversized]),
+        DEFAULT_MAX_RESPONSE_BYTES
+      )
+    ).resolves.toHaveLength(oversized.length)
   })
 
   it('passes redirect policy and returns bounded JSON', async () => {

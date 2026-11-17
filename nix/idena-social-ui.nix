@@ -7,11 +7,11 @@
 
 buildNpmPackage {
   pname = "idena-social-ui";
-  version = "14.5.0";
+  version = "14.7.3";
   inherit src;
 
   nodejs = nodejs_24;
-  npmDepsHash = "sha256-SqidsR8hj9hdS+LXrWDfeY1HGL2/+xF38sH4oIcbSG8=";
+  npmDepsHash = "sha256-ge9iBBY8PQArIHo9LGx+t7DC0XoCefidzsOSt/qf5ys=";
   npmBuildScript = "build";
 
   env = {

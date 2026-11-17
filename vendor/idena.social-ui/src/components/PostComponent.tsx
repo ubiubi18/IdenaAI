@@ -1,11 +1,12 @@
 import { useEffect, useReducer, type FocusEventHandler } from 'react';
-import { getChildPostIds, breakingChanges, type Post, type PostTips, type Poster } from '../logic/asyncUtils';
+import { getChildPostIds, breakingChanges, hasRetryableMediaError, type Post, type PostTips, type Poster } from '../logic/asyncUtils';
 import { getDisplayAddress, getDisplayAddressShort, getDisplayDateTime, getDisplayFullDate, getDisplayTimeAgo, getDisplayTipAmount, getIdentityStatus, getMessageLines, getProfilePic, getShortDisplayTipAmount, likeEmoji } from '../logic/utils';
 import { initDomSettings, initPostOutletDomSettings, initProfileRepliesDomSettings, type BrowserStateHistorySettings, type MouseEventLocal, type PostDomSettings, type PostMediaAttachment } from '../App.exports';
 import { useLocation, useNavigate } from 'react-router';
 import { readDesktopBootstrap } from '../logic/desktopBootstrap';
 import { useInfiniteScroll } from '../logic/useInfiniteScroll';
 import ObjectUrlImageComponent from './ObjectUrlImageComponent';
+import MediaRetryButtonComponent from './MediaRetryButtonComponent';
 import ComposerToolbarComponent from './ComposerToolbarComponent';
 import { CloseIcon, HeartIcon, ReplyIcon, TipIcon } from './icons';
 
@@ -42,6 +43,7 @@ type PostComponentProps = {
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleOpenRpcMakePostModal: (e: MouseEventLocal, location: string, replyToPostId?: string, channelId?: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryPostMediaHandler: (postId: string) => Promise<boolean>,
     postTipsRef: React.RefObject<Record<string, PostTips>>,
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     makePostsWith: string,
@@ -81,6 +83,7 @@ function PostComponent(props: PostComponentProps) {
         handleOpenAddMediaModal,
         handleOpenRpcMakePostModal,
         handleExpandImageModal,
+        retryPostMediaHandler,
         postTipsRef,
         postMediaAttachmentsRef,
         makePostsWith,
@@ -372,6 +375,9 @@ function PostComponent(props: PostComponentProps) {
         }
     };
 
+    const getMediaWrapperClassName = (mediaPost: Post) => hasRetryableMediaError(mediaPost) ? 'flex flex-wrap items-center gap-x-3 gap-y-2' : '';
+    const renderMediaRetry = (mediaPost: Post) => hasRetryableMediaError(mediaPost) && <MediaRetryButtonComponent onRetry={() => retryPostMediaHandler(mediaPost.postId)} />;
+
     return (<>
         <div className="border-b border-line">
             <div className={`flex px-4 pt-3 ${isPostOutlet ? 'flex-wrap items-center gap-x-3' : 'gap-3 hover:bg-ink/[0.03]'} ${!isPostOutlet && !embeddedDesktopOnchainMode ? 'hover:cursor-pointer' : ''}`} onMouseDown={handlePostMouseDown} onClick={handlePostClick}>
@@ -381,7 +387,7 @@ function PostComponent(props: PostComponentProps) {
                 </div>
                 <div className={isPostOutlet ? 'contents' : 'min-w-0 flex-1 pb-1'}>
                     <div className={`mb-1 min-w-0 text-[15px]/5 ${isPostOutlet ? 'flex-1' : 'flex flex-wrap items-center gap-x-1 sm:flex-nowrap'}`}>
-                        <span className={`cursor-pointer font-bold text-ink hover:underline ${isPostOutlet ? 'block w-fit max-w-full truncate' : 'whitespace-nowrap'}`} onClick={(e) => handleClickAddress(e, `/profile/${post.poster}`)}>{getDisplayAddress(post.poster)}</span>
+                        <span className={`cursor-pointer font-bold text-ink hover:underline ${isPostOutlet ? 'block w-fit max-w-full truncate' : 'whitespace-nowrap'}`} onClick={(e) => handleClickAddress(e, `/profile/${post.poster}`)}>{getDisplayAddress(post.poster, postersRef.current[post.poster])}</span>
                         <span className={`truncate text-ink-muted ${isPostOutlet ? 'block' : 'min-w-0 max-sm:order-last max-sm:basis-full max-sm:text-[13px]/4'}`}>{`Age ${posterAge} · ${getIdentityStatus(posterState)} · Stake ${posterStake}`}</span>
                         {!isPostOutlet && <>
                             <span className="text-ink-muted" aria-hidden="true">·</span>
@@ -389,8 +395,9 @@ function PostComponent(props: PostComponentProps) {
                         </>}
                     </div>
                     <p className={`min-w-0 basis-full text-ink [word-break:break-word] ${isPostOutlet ? 'mt-3 text-[17px]/6' : 'text-[15px]/5'}`}>{messageLinesDisplay.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}{showTruncatedMessageLines && <span> <a className="cursor-pointer whitespace-nowrap text-link hover:underline" onClick={(e) => toggleViewMoreHandler(post, e)}>Show more</a></span>}</p>
-                    {post.image ? <div className="mt-3 min-w-0 basis-full">
+                    {post.image ? <div className={`mt-3 min-w-0 basis-full ${getMediaWrapperClassName(post)}`}>
                         <ObjectUrlImageComponent className="max-h-120 max-w-full sm:max-w-100 size-auto rounded-2xl border border-line hover:cursor-pointer" file={post.image} onClick={(e) => handleExpandImageModal(e, post.image!, post.cid)} />
+                        {renderMediaRetry(post)}
                     </div> : null}
                     {isPostOutlet && <div className="basis-full py-4 text-[15px] text-ink-muted">
                         <a className="hover:underline" href={`https://scan.idena.io/transaction/${post.txHash}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{`${displayTime} · ${getDisplayFullDate(post.timestamp)}`}</a>
@@ -450,7 +457,7 @@ function PostComponent(props: PostComponentProps) {
                     {visibleReplyComments.map((replyPost, index) => {
 
                         const postTips = postTipsRef.current[replyPost.postId] ?? { totalAmount: 0, tips: [] };
-                        const posterDisplayAddress = getDisplayAddress(replyPost.poster);
+                        const posterDisplayAddress = getDisplayAddress(replyPost.poster, postersRef.current[replyPost.poster]);
                         const posterStake = replyPost.posterDetails_atTimeOfPost.stake;
                         const posterState = replyPost.posterDetails_atTimeOfPost.state;
                         const posterAge = replyPost.posterDetails_atTimeOfPost.age;
@@ -497,8 +504,9 @@ function PostComponent(props: PostComponentProps) {
                                             <a className="whitespace-nowrap text-ink-muted hover:underline" href={`https://scan.idena.io/transaction/${replyPost.txHash}`} target="_blank" rel="noopener noreferrer" title={`${displayDate}, ${displayTime}`}>{getDisplayTimeAgo(replyPost.timestamp)}</a>
                                         </div>
                                         <p className="text-[15px]/5 text-ink [word-break:break-word]">{messageLinesDisplay.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}{showTruncatedMessageLines && <span> <a className="cursor-pointer whitespace-nowrap text-link hover:underline" onClick={(e) => toggleViewMoreHandler(replyPost, e)}>Show more</a></span>}</p>
-                                        {replyPost.image && <div className="mt-3">
+                                        {replyPost.image && <div className={`mt-3 ${getMediaWrapperClassName(replyPost)}`}>
                                             <ObjectUrlImageComponent className="max-h-100 max-w-full sm:max-w-92 size-auto rounded-2xl border border-line hover:cursor-pointer" file={replyPost.image} onClick={(e) => handleExpandImageModal(e, replyPost.image!, replyPost.cid)} />
+                                            {renderMediaRetry(replyPost)}
                                         </div>}
                                         <div className="mt-1 -ml-2 flex max-w-[425px] text-[13px] text-ink-muted">
                                             <div className={`flex flex-1 items-center ${discussionPostComments.length || showDiscussion ? 'text-comment' : ''}`}>
@@ -525,7 +533,7 @@ function PostComponent(props: PostComponentProps) {
                                                 {discussionPostComments.length === 0 && <li className="py-3"><p className="text-center text-[13px] text-ink-muted">No comments yet</p></li>}
                                                 {discussionPostComments.map((discussionPost) => {
                                                     const postTips = postTipsRef.current[discussionPost.postId] ?? { totalAmount: 0, tips: [] };
-                                                    const posterDisplayAddress = getDisplayAddressShort(discussionPost.poster);
+                                                    const posterDisplayAddress = getDisplayAddressShort(discussionPost.poster, postersRef.current[discussionPost.poster]);
                                                     const posterStake = discussionPost.posterDetails_atTimeOfPost.stake;
                                                     const posterState = discussionPost.posterDetails_atTimeOfPost.state;
                                                     const posterAge = discussionPost.posterDetails_atTimeOfPost.age;
@@ -562,8 +570,9 @@ function PostComponent(props: PostComponentProps) {
                                                                     <div className="max-h-[9999px] text-[14px]/5 text-ink">
                                                                         <p className="[word-break:break-word]">{messageLines.map((line, i, arr) => <>{line}{arr.length - 1 !== i && <br />}</>)}</p>
                                                                     </div>
-                                                                    {discussionPost.image && <div className="mt-2">
+                                                                    {discussionPost.image && <div className={`mt-2 ${getMediaWrapperClassName(discussionPost)}`}>
                                                                         <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto rounded-2xl border border-line hover:cursor-pointer" file={discussionPost.image} onClick={(e) => handleExpandImageModal(e, discussionPost.image!, discussionPost.cid)} />
+                                                                        {renderMediaRetry(discussionPost)}
                                                                     </div>}
                                                                     <div className="-ml-1.5 flex gap-4 text-[13px] text-ink-muted">
                                                                         <button type="button" aria-label="Reply" title="Reply" className={`${commentActionButtonClassName} hover:bg-comment/20 hover:text-comment`} onClick={() => setDiscussReplyToPostIdHandler(replyPost, discussionPost.postId)}>
@@ -590,7 +599,7 @@ function PostComponent(props: PostComponentProps) {
                                             </ul>
                                             {!isBreakingChangeDisabled && <>
                                                 {discussReplyToPost && <div className="flex items-center gap-2 border-t border-line px-3 py-1.5 text-[13px] text-ink-muted">
-                                                    <p className="min-w-0 flex-1 truncate">Replying to <span className="text-link">{getDisplayAddressShort(discussReplyToPost!.poster)}</span>: {getMessageLines(discussReplyToPost!.message).messageLines[0]}</p>
+                                                    <p className="min-w-0 flex-1 truncate">Replying to <span className="text-link">{getDisplayAddressShort(discussReplyToPost!.poster, postersRef.current[discussReplyToPost!.poster])}</span>: {getMessageLines(discussReplyToPost!.message).messageLines[0]}</p>
                                                     <button type="button" aria-label="Cancel reply" title="Cancel reply" className="inline-flex size-6 flex-none cursor-pointer items-center justify-center rounded-full text-ink hover:bg-ink/10" onClick={() => setDiscussReplyToPostIdHandler(replyPost)}>
                                                         <CloseIcon className="size-3.5" />
                                                     </button>

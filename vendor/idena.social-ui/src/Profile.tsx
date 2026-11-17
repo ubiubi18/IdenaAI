@@ -8,6 +8,8 @@ import ObjectUrlImageComponent from "./components/ObjectUrlImageComponent";
 import PageHeaderComponent from "./components/PageHeaderComponent";
 import { ExternalLinkIcon, MessagesIcon } from "./components/icons";
 import { keccak256 } from "js-sha3";
+import { CANNOT_EDIT_PROFILE, getEditStanding } from "./logic/profileEdit";
+import { SpinnerIcon } from "./components/icons";
 
 type MouseEventLocal = React.MouseEvent<HTMLElement, MouseEvent>;
 
@@ -46,12 +48,16 @@ type AddressProps = {
     profileActivityRef: React.RefObject<Record<string, ProfileActivity>>,
     postersAddress: string,
     conversationsRef: React.RefObject<Record<string, Conversation>>,
+    handleOpenEditProfileModal: (e: MouseEventLocal) => void,
+    retryPostMediaHandler: (postId: string) => Promise<boolean>,
 };
 
 type ProfileIdentityComponentProps = {
     poster: Poster,
     posterDisplayAddress: string,
     handleConversationClick: () => void,
+    handleOpenEditProfileModal?: (e: MouseEventLocal) => void,
+    editProfileLoading: boolean,
 };
 
 function ProfileIdentityComponent(props: ProfileIdentityComponentProps) {
@@ -59,6 +65,8 @@ function ProfileIdentityComponent(props: ProfileIdentityComponentProps) {
         poster,
         posterDisplayAddress,
         handleConversationClick,
+        handleOpenEditProfileModal,
+        editProfileLoading,
     } = props;
 
     return (<>
@@ -66,6 +74,10 @@ function ProfileIdentityComponent(props: ProfileIdentityComponentProps) {
         <div className="flex flex-row items-start justify-between gap-3 px-4">
             <ObjectUrlImageComponent className="-mt-[45px] sm:-mt-[67px] size-[90px] sm:size-[134px] flex-none rounded-full border-4 border-canvas bg-surface object-cover" file={getProfilePic(poster)} />
             <div className="flex flex-row gap-2 pt-3">
+                {handleOpenEditProfileModal && <button type="button" className="btn-outline h-9 px-4 text-[15px]" disabled={editProfileLoading} aria-busy={editProfileLoading} onClick={handleOpenEditProfileModal}>
+                    {editProfileLoading && <SpinnerIcon className="size-4" />}
+                    Edit profile
+                </button>}
                 <button type="button" aria-label="Message" title="Message" className="size-9 flex flex-none items-center justify-center rounded-full border border-line-strong cursor-pointer hover:bg-ink/10" onClick={handleConversationClick}>
                     <MessagesIcon className="size-5" />
                 </button>
@@ -78,6 +90,7 @@ function ProfileIdentityComponent(props: ProfileIdentityComponentProps) {
         <div className="px-4 pt-2 pb-3">
             <div className="text-xl/6 font-extrabold">{posterDisplayAddress}</div>
             <div className="text-[14px] sm:text-[15px] text-ink-muted break-all">{poster.address}</div>
+            {poster.bio && <p className="mt-3 whitespace-pre-line text-[15px]/5 text-ink [word-break:break-word]">{poster.bio}</p>}
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[15px]">
                 <span><span className="font-bold text-ink">{poster.age}</span> <span className="text-ink-muted">Age</span></span>
                 <span><span className="font-bold text-ink">{getIdentityStatus(poster.state)}</span> <span className="text-ink-muted">Status</span></span>
@@ -116,6 +129,7 @@ function Profile() {
     const location = useLocation();
     const subTab = useMatch('/profile/:address/:subTab')?.params.subTab;
     const [, setPosterLoadNonce] = useState(0);
+    const [editProfileLoading, setEditProfileLoading] = useState(false);
 
     const {
         latestPosts,
@@ -152,6 +166,8 @@ function Profile() {
         profileActivityRef,
         postersAddress,
         conversationsRef,
+        handleOpenEditProfileModal,
+        retryPostMediaHandler,
     } = useOutletContext() as AddressProps;
 
     useEffect(() => {
@@ -169,7 +185,7 @@ function Profile() {
         let cancelled = false;
         const posterPromise = findPostsWith === 'rpc'
             ? getPoster(rpcClientRef.current!, address, true)
-            : getPosterWithIndexerApi(indexerApiUrl, address);
+            : getPosterWithIndexerApi(indexerApiUrl, address, rpcClientRef.current);
 
         posterPromise.then((result) => {
             if (cancelled || !result) {
@@ -191,7 +207,27 @@ function Profile() {
     const poster = postersRef.current[address!] ?? {};
     const profileActivity = profileActivityRef.current[address!] ?? defaultProfileActivity;
 
-    const posterDisplayAddress = poster.address ? getDisplayAddress(poster.address) : '';
+    const posterDisplayAddress = poster.address ? getDisplayAddress(poster.address, poster) : '';
+    const isOwnProfile = !!poster.address && poster.address.toLowerCase() === postersAddress.toLowerCase() && postersAddress !== '0x0000000000000000000000000000000000000000';
+    const canEditProfile = isOwnProfile && !inputPostDisabled;
+
+    const handleEditProfileClick = async (e: MouseEventLocal) => {
+        e.stopPropagation();
+        if (editProfileLoading || !rpcClientRef.current) return;
+        setEditProfileLoading(true);
+        try {
+            const validated = ['Newbie', 'Verified', 'Human'].includes(poster.state);
+            if (!validated && (await getEditStanding(rpcClientRef.current, poster.address)).standing === 'none') {
+                window.alert(CANNOT_EDIT_PROFILE);
+                return;
+            }
+            handleOpenEditProfileModal(e);
+        } catch {
+            window.alert('Could not check profile eligibility. Please try again when your node is available.');
+        } finally {
+            setEditProfileLoading(false);
+        }
+    };
 
     const handleGoBack = () => {
         navigate(-1);
@@ -223,7 +259,7 @@ function Profile() {
         <PageHeaderComponent title={posterDisplayAddress || 'Profile'} subtitle={poster.address ? getIdentityStatus(poster.state) : undefined} onBack={handleGoBack} />
         {!poster.address && <LdsSpinnerComponent />}
         {poster.address && <>
-            <ProfileIdentityComponent poster={poster} posterDisplayAddress={posterDisplayAddress} handleConversationClick={handleConversationClick} />
+            <ProfileIdentityComponent poster={poster} posterDisplayAddress={posterDisplayAddress} handleConversationClick={handleConversationClick} handleOpenEditProfileModal={canEditProfile ? handleEditProfileClick : undefined} editProfileLoading={editProfileLoading} />
             <div className="flex flex-row px-2 sm:px-0 border-b border-line overflow-x-auto no-scrollbar" role="tablist">
                 <ProfileTabComponent label="Posts" isActive={location.pathname === profilePath} onClick={(e) => handleClickAddress(e, profilePath)} />
                 <ProfileTabComponent label="Replies" isActive={location.pathname === `${profilePath}/replies`} onClick={(e) => handleClickAddress(e, `${profilePath}/replies`)} />
@@ -259,6 +295,7 @@ function Profile() {
                     handleOpenAddMediaModal,
                     handleOpenRpcMakePostModal,
                     handleExpandImageModal,
+                    retryPostMediaHandler,
                     postTipsRef,
                     postMediaAttachmentsRef,
                     makePostsWith,

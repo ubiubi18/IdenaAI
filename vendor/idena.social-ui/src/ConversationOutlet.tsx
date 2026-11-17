@@ -26,6 +26,7 @@ type ConversationOutletProps = {
     handleSubmitPubkeyModal: (e: MouseEventLocal, address: string) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryMessageMediaHandler: (id: string) => Promise<boolean>,
     submittingMessage: string,
     submittingLike: string,
     replyPostsTreeRef: React.RefObject<Record<string, string>>,
@@ -61,6 +62,7 @@ function ConversationOutlet() {
         handleSubmitPubkeyModal,
         handleOpenAddMediaModal,
         handleExpandImageModal,
+        retryMessageMediaHandler,
         submittingMessage,
         submittingLike,
         replyPostsTreeRef,
@@ -112,6 +114,7 @@ function ConversationOutlet() {
             handleSubmitPubkeyModal={handleSubmitPubkeyModal}
             handleOpenAddMediaModal={handleOpenAddMediaModal}
             handleExpandImageModal={handleExpandImageModal}
+            retryMessageMediaHandler={retryMessageMediaHandler}
             submittingMessage={submittingMessage}
             submittingLike={submittingLike}
             messagePrefix={messagePrefix}

@@ -59,6 +59,14 @@ export function SettingsIcon({ className, filled }: IconProps) {
     );
 }
 
+export function TopicsIcon({ className, filled }: IconProps) {
+    return (
+        <svg {...svgProps} className={className} strokeWidth={filled ? 2.75 : svgProps.strokeWidth}>
+            <path d="M9.5 3.75 7.5 20.25M16.5 3.75l-2 16.5M4.25 8.75h16M3.75 15.25h16" />
+        </svg>
+    );
+}
+
 export function ReplyIcon({ className }: IconProps) {
     return (
         <svg {...svgProps} className={className}>
@@ -158,6 +166,15 @@ export function ArrowUpIcon({ className }: IconProps) {
     );
 }
 
+export function RetryIcon({ className }: IconProps) {
+    return (
+        <svg {...svgProps} className={className}>
+            <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" />
+            <path d="M19.75 4.25v4.5h-4.5" />
+        </svg>
+    );
+}
+
 export function CloseIcon({ className }: IconProps) {
     return (
         <svg {...svgProps} className={className}>
@@ -196,6 +213,15 @@ export function ClockIcon({ className }: IconProps) {
         <svg {...svgProps} className={className}>
             <circle cx="12" cy="12" r="8.75" />
             <path d="M12 7.5V12l3 1.75" />
+        </svg>
+    );
+}
+
+export function SpinnerIcon({ className }: IconProps) {
+    return (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={`animate-spin ${className ?? ''}`}>
+            <circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+            <path d="M21.5 12A9.5 9.5 0 0 0 12 2.5" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
         </svg>
     );
 }

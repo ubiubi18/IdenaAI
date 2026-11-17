@@ -1,5 +1,6 @@
 const {
   SOCIAL_CONTRACT_ADDRESS,
+  SOCIAL_PROFILE_CONTRACT_ADDRESS,
   SOCIAL_EMBED_DOCUMENT_PATH,
   SOCIAL_EMBED_ORIGIN,
   SOCIAL_MESSAGE_CRYPTO_VERSION,
@@ -174,6 +175,154 @@ describe('idena.social v12.9 desktop RPC boundary', () => {
         },
       ])
     ).toBeNull()
+  })
+
+  it('allows only the pinned profile reads and dedicated picture fetch', () => {
+    const address = '0x0000000000000000000000000000000000000001'
+    const addressKey = `0x${Buffer.from(address).toString('hex')}`
+    const nameKey = `0x${Buffer.from('alice_1').toString('hex')}`
+
+    expect(
+      validateSocialRpcRequest('profile-fee', 'bcn_feePerGas', [])
+    ).toBeNull()
+    expect(
+      validateSocialRpcRequest('profile-fee-extra', 'bcn_feePerGas', [1])
+    ).toBe('invalid_rpc_params')
+    for (const [map, key] of [
+      ['a:', addressKey],
+      ['b:', addressKey],
+      ['p:', addressKey],
+      ['i:', addressKey],
+      ['v:', addressKey],
+      ['r:', addressKey],
+      ['n:', nameKey],
+      ['x:', nameKey],
+    ]) {
+      expect(
+        validateSocialRpcRequest('profile-map', 'contract_readMap', [
+          SOCIAL_PROFILE_CONTRACT_ADDRESS,
+          map,
+          key,
+          'string',
+        ])
+      ).toBeNull()
+    }
+    for (const params of [
+      [SOCIAL_CONTRACT_ADDRESS, 'a:', addressKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'other:', addressKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'a:', nameKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'n:', addressKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'a:', addressKey, 'hex'],
+    ]) {
+      expect(
+        validateSocialRpcRequest('profile-map-bad', 'contract_readMap', params)
+      ).toBe('invalid_rpc_params')
+    }
+    const cid = 'bafybeigdyrzt5z4jj7f26dx3e6nqoeqcn2xyv4lrfjltx3dyx47n56lcfi'
+    expect(
+      validateSocialRpcRequest('profile-picture', 'ipfs_getProfilePicture', [
+        cid,
+      ])
+    ).toBeNull()
+    expect(
+      validateSocialRpcRequest(
+        'profile-picture-bad',
+        'ipfs_getProfilePicture',
+        ['cid/../other']
+      )
+    ).toBe('invalid_rpc_params')
+  })
+
+  it('accepts only exact zero-value profile writes', () => {
+    const makeProfileCall = (method, argument) => ({
+      from: '0x0000000000000000000000000000000000000001',
+      contract: SOCIAL_PROFILE_CONTRACT_ADDRESS,
+      method,
+      amount: 0,
+      args: argument
+        ? [{format: 'string', index: 0, value: JSON.stringify(argument)}]
+        : [],
+      maxFee: '1.5',
+    })
+    const gas = {_gas: 3_000_000, _keepGas: 1_000_000}
+    const nameCall = makeProfileCall('claimName', {name: 'alice_1', ...gas})
+    const dropCall = makeProfileCall('dropName')
+    const bioCall = makeProfileCall('setProfile', {
+      bio: 'Hello',
+      picture:
+        'ipfs://bafybeigdyrzt5z4jj7f26dx3e6nqoeqcn2xyv4lrfjltx3dyx47n56lcfi',
+      ...gas,
+    })
+
+    for (const call of [nameCall, dropCall, bioCall]) {
+      expect(
+        validateSocialRpcRequest('profile-write', 'contract_call', [call])
+      ).toBeNull()
+      expect(
+        validateSocialRpcRequest('profile-value', 'contract_call', [
+          {...call, amount: '0.1'},
+        ])
+      ).toBe('invalid_social_contract_call')
+      expect(
+        validateSocialRpcRequest('profile-fee', 'contract_call', [
+          {...call, maxFee: '10.000000000000000001'},
+        ])
+      ).toBe('invalid_social_contract_call')
+      expect(
+        validateSocialRpcRequest('profile-estimate', 'contract_estimateCall', [
+          call,
+        ])
+      ).toBe('invalid_social_contract_call')
+    }
+    for (const call of [
+      {...nameCall, method: 'terminate'},
+      {
+        ...nameCall,
+        args: [
+          {...nameCall.args[0], value: JSON.stringify({name: 'Alice', ...gas})},
+        ],
+      },
+      {
+        ...nameCall,
+        args: [
+          {
+            ...nameCall.args[0],
+            value: JSON.stringify({
+              name: 'alice_1',
+              _gas: 4_000_000,
+              _keepGas: 1_000_000,
+            }),
+          },
+        ],
+      },
+      {...dropCall, args: [{}]},
+      {
+        ...bioCall,
+        args: [
+          {
+            ...bioCall.args[0],
+            value: JSON.stringify({bio: 'x'.repeat(161), picture: '', ...gas}),
+          },
+        ],
+      },
+      {
+        ...bioCall,
+        args: [
+          {
+            ...bioCall.args[0],
+            value: JSON.stringify({
+              bio: '',
+              picture: 'https://example.test',
+              ...gas,
+            }),
+          },
+        ],
+      },
+    ]) {
+      expect(
+        validateSocialRpcRequest('profile-invalid', 'contract_call', [call])
+      ).toBe('invalid_social_contract_call')
+    }
   })
 
   it.each([

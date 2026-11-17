@@ -1,7 +1,12 @@
 const {
+  SOCIAL_PROFILE_CONTRACT_ADDRESS,
+  SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES,
   decimalToAtoms,
   socialContractCallRequiresConfirmation,
   validateSocialContractCall,
+  validateSocialProfileCall,
+  validateSocialProfilePictureCid,
+  validateSocialProfileReadMap,
 } = require('./social-contract-call-policy')
 
 function makeCall(overrides = {}) {
@@ -196,5 +201,194 @@ describe('social contract-call policy', () => {
     expect(
       socialContractCallRequiresConfirmation(makeCall({method: 'sendTip'}))
     ).toBe(true)
+  })
+})
+
+function makeProfileCall(method, overrides = {}) {
+  const argument =
+    method === 'claimName'
+      ? {name: 'alice_1', _gas: 3_000_000, _keepGas: 1_000_000}
+      : {
+          bio: 'Hello',
+          picture:
+            'ipfs://bafybeigdyrzt5z4jj7f26dx3e6nqoeqcn2xyv4lrfjltx3dyx47n56lcfi',
+          _gas: 3_000_000,
+          _keepGas: 1_000_000,
+        }
+
+  return {
+    from: '0x0000000000000000000000000000000000000001',
+    contract: SOCIAL_PROFILE_CONTRACT_ADDRESS,
+    method,
+    amount: 0,
+    args:
+      method === 'dropName'
+        ? []
+        : [{format: 'string', index: 0, value: JSON.stringify(argument)}],
+    maxFee: '1.5',
+    ...overrides,
+  }
+}
+
+describe('pinned social profile RPC policy', () => {
+  it('limits map reads to the official contract, known maps, and canonical keys', () => {
+    const address = '0x0000000000000000000000000000000000000001'
+    const addressKey = `0x${Buffer.from(address).toString('hex')}`
+    const nameKey = `0x${Buffer.from('alice_1').toString('hex')}`
+
+    for (const map of ['a:', 'b:', 'p:', 'i:', 'v:', 'r:']) {
+      expect(
+        validateSocialProfileReadMap([
+          SOCIAL_PROFILE_CONTRACT_ADDRESS,
+          map,
+          addressKey,
+          'string',
+        ])
+      ).toBeNull()
+    }
+    for (const map of ['n:', 'x:']) {
+      expect(
+        validateSocialProfileReadMap([
+          SOCIAL_PROFILE_CONTRACT_ADDRESS,
+          map,
+          nameKey,
+          'string',
+        ])
+      ).toBeNull()
+    }
+
+    for (const invalid of [
+      [
+        '0x0000000000000000000000000000000000000002',
+        'a:',
+        addressKey,
+        'string',
+      ],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'owner:', addressKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'a:', nameKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'n:', addressKey, 'string'],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'a:', addressKey, 'hex'],
+      [
+        SOCIAL_PROFILE_CONTRACT_ADDRESS,
+        'a:',
+        addressKey.toUpperCase(),
+        'string',
+      ],
+      [SOCIAL_PROFILE_CONTRACT_ADDRESS, 'a:', addressKey, 'string', 'extra'],
+    ]) {
+      expect(validateSocialProfileReadMap(invalid)).toBe('invalid_rpc_params')
+    }
+  })
+
+  it('accepts only zero-value profile writes with bounded exact arguments', () => {
+    for (const method of ['claimName', 'dropName', 'setProfile']) {
+      const call = makeProfileCall(method)
+      expect(validateSocialProfileCall(call)).toBeNull()
+      expect(socialContractCallRequiresConfirmation(call)).toBe(true)
+      expect(validateSocialProfileCall({...call, amount: '0.000001'})).toBe(
+        'invalid_social_contract_call'
+      )
+      expect(
+        validateSocialProfileCall({...call, maxFee: '10.000000000000000001'})
+      ).toBe('invalid_social_contract_call')
+      expect(validateSocialProfileCall({...call, method: 'terminate'})).toBe(
+        'invalid_social_contract_call'
+      )
+      expect(
+        validateSocialProfileCall({...call, contract: makeCall().contract})
+      ).toBe('invalid_social_contract_call')
+    }
+
+    expect(
+      validateSocialProfileCall(makeProfileCall('dropName', {args: [{}]}))
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialProfileCall(
+        makeProfileCall('claimName', {
+          args: [
+            {
+              format: 'string',
+              index: 0,
+              value: JSON.stringify({
+                name: 'Alice',
+                _gas: 3_000_000,
+                _keepGas: 1_000_000,
+              }),
+            },
+          ],
+        })
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialProfileCall(
+        makeProfileCall('claimName', {
+          args: [
+            {
+              format: 'string',
+              index: 0,
+              value: JSON.stringify({
+                name: 123,
+                _gas: 3_000_000,
+                _keepGas: 1_000_000,
+              }),
+            },
+          ],
+        })
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialProfileCall(
+        makeProfileCall('setProfile', {
+          args: [
+            {
+              format: 'string',
+              index: 0,
+              value: JSON.stringify({
+                bio: 'x'.repeat(161),
+                picture: '',
+                _gas: 3_000_000,
+                _keepGas: 1_000_000,
+              }),
+            },
+          ],
+        })
+      )
+    ).toBe('invalid_social_contract_call')
+    expect(
+      validateSocialProfileCall(
+        makeProfileCall('setProfile', {
+          args: [
+            {
+              format: 'string',
+              index: 0,
+              value: JSON.stringify({
+                bio: '',
+                picture: 'https://example.test/image',
+                _gas: 3_000_000,
+                _keepGas: 1_000_000,
+              }),
+            },
+          ],
+        })
+      )
+    ).toBe('invalid_social_contract_call')
+  })
+
+  it('bounds the dedicated profile picture request', () => {
+    expect(SOCIAL_PROFILE_PICTURE_MAX_RESPONSE_BYTES).toBe(128 * 1024)
+    expect(
+      validateSocialProfilePictureCid([
+        'bafybeigdyrzt5z4jj7f26dx3e6nqoeqcn2xyv4lrfjltx3dyx47n56lcfi',
+      ])
+    ).toBeNull()
+    for (const params of [
+      [],
+      ['short'],
+      ['cid/../other'],
+      ['b'.repeat(121)],
+      ['b'.repeat(59), 'extra'],
+    ]) {
+      expect(validateSocialProfilePictureCid(params)).toBe('invalid_rpc_params')
+    }
   })
 })

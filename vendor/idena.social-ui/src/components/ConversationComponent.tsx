@@ -1,11 +1,12 @@
-import { getDisplayAddressShort, getDisplayDateTime, getIdentityStatus, getMessageLines, getProfilePic, likeEmoji } from "../logic/utils";
+import { getDisplayAddressShort, getDisplayDateTime, getDisplayTimeAgo, getIdentityStatus, getMessageLines, getProfilePic, likeEmoji } from "../logic/utils";
 import { initDomSettings, type BrowserStateHistorySettings, type Conversation, type MouseEventLocal, type PostDomSettings, type PostMediaAttachment } from "../App.exports";
-import { getChildPostIds, type Message, type Poster } from "../logic/asyncUtils";
+import { getChildPostIds, hasRetryableMediaError, type Message, type Poster } from "../logic/asyncUtils";
 import { useLocation, useNavigate } from "react-router";
 import { useReducer, useState } from "react";
 import OneOnOneConversationHeaderComponent from "./OneOnOneConversationHeaderComponent";
 import GroupConversationHeaderComponent from "./GroupConversationHeaderComponent";
 import ObjectUrlImageComponent from "./ObjectUrlImageComponent";
+import MediaRetryButtonComponent from "./MediaRetryButtonComponent";
 import { DIRECT_V4_CONTRACT, isDirectDeliveryAuthor, isDirectDeliveryBuyer, parseDirectDelivery } from "../logic/directDelivery";
 import { createDesktopDirectCheckClient, createDesktopDirectReceiveClient, isEmbeddedDesktopFrame, readDesktopBootstrap } from "../logic/desktopBootstrap";
 import ComposerToolbarComponent from "./ComposerToolbarComponent";
@@ -36,6 +37,7 @@ type ConversationComponentProps = {
     handleSubmitPubkeyModal: (e: MouseEventLocal, address: string) => void,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryMessageMediaHandler: (messageId: string) => Promise<boolean>,
     submittingMessage: string,
     submittingLike: string,
     messagePrefix: string,
@@ -73,6 +75,7 @@ function ConversationComponent(props: ConversationComponentProps) {
         handleSubmitPubkeyModal,
         handleOpenAddMediaModal,
         handleExpandImageModal,
+        retryMessageMediaHandler,
         submittingMessage,
         submittingLike,
         messagePrefix,
@@ -239,7 +242,7 @@ function ConversationComponent(props: ConversationComponentProps) {
         {showReplies && <div className="border-b border-line">
             <ul className="flex flex-col flex-col-reverse gap-3 max-h-100 overflow-y-auto scrollbar-thin px-4 py-3">
                 {messages.map((message) => {
-                    const posterDisplayAddress = getDisplayAddressShort(message.sender);
+                    const posterDisplayAddress = getDisplayAddressShort(message.sender, postersRef.current[message.sender]);
                     const posterStake = message.sendersDetails_atTimeOfMessage.stake;
                     const posterState = message.sendersDetails_atTimeOfMessage.state;
                     const posterAge = message.sendersDetails_atTimeOfMessage.age;
@@ -257,6 +260,7 @@ function ConversationComponent(props: ConversationComponentProps) {
                     const replyLikes = replyMessages.filter(replyMessage => replyMessage.isLike);
 
                     const isOwnMessage = message.sender === postersAddress.toLowerCase();
+                    const messageImage = message.image && <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto cursor-pointer rounded-2xl border border-line" file={message.image} onClick={(e) => handleExpandImageModal(e, message.image!, message.cid)} />;
 
                     if (messageReadStatusRef.current.get(message.messageId) === false) {
                         unreadMessagesThisVisitRef.current.set(message.messageId, location.pathname);
@@ -312,9 +316,12 @@ function ConversationComponent(props: ConversationComponentProps) {
                                     <a className="text-accent hover:underline" href={`data:application/json;charset=utf-8,${encodeURIComponent(delivery.text)}`} download="flip-delivery.json" onClick={(e) => e.stopPropagation()}>Save flip delivery</a>
                                     {directCheckStatus[message.messageId] && <span className="text-ink-muted">{directCheckStatus[message.messageId]}</span>}
                                 </div>}
-                                {message.image && <ObjectUrlImageComponent className="max-h-80 max-w-full sm:max-w-74 size-auto cursor-pointer rounded-2xl border border-line" file={message.image} onClick={(e) => handleExpandImageModal(e, message.image!, message.cid)} />}
+                                {messageImage && (hasRetryableMediaError(message) ? <div className={`flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
+                                    {messageImage}
+                                    <MediaRetryButtonComponent onRetry={() => retryMessageMediaHandler(message.messageId)} />
+                                </div> : messageImage)}
                                 <div className={`flex items-center gap-1 text-[13px] text-ink-muted ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
-                                    <a className="whitespace-nowrap hover:underline" href={`https://scan.idena.io/transaction/${message.txHash}`} target="_blank" rel="noopener noreferrer">{`${displayDate}, ${displayTime}`}</a>
+                                    <a className="whitespace-nowrap hover:underline" href={`https://scan.idena.io/transaction/${message.txHash}`} target="_blank" rel="noopener noreferrer" title={`${displayDate}, ${displayTime}`}>{getDisplayTimeAgo(message.timestamp)}</a>
                                     <button type="button" aria-label="Reply" title="Reply" className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full hover:bg-comment/20 hover:text-comment" onClick={() => setDiscussReplyToPostIdHandler(conversationKey, message.messageId)}>
                                         <ReplyIcon className="size-4" />
                                     </button>
@@ -332,7 +339,7 @@ function ConversationComponent(props: ConversationComponentProps) {
             </ul>
             <div className="flex flex-col gap-2 border-t border-line px-4 py-3">
                 {discussReplyToPost && <div className="flex items-center gap-2 text-[13px] text-ink-muted">
-                    <p className="min-w-0 flex-1 truncate">Replying to {getDisplayAddressShort(discussReplyToPost!.sender)}: {getMessageLines(discussReplyToPost!.message).messageLines[0]}</p>
+                    <p className="min-w-0 flex-1 truncate">Replying to {getDisplayAddressShort(discussReplyToPost!.sender, postersRef.current[discussReplyToPost!.sender])}: {getMessageLines(discussReplyToPost!.message).messageLines[0]}</p>
                     <button type="button" aria-label="Cancel reply" title="Cancel reply" className="inline-flex size-6 flex-none cursor-pointer items-center justify-center rounded-full hover:bg-ink/10" onClick={() => setDiscussReplyToPostIdHandler(conversationKey)}>
                         <CloseIcon className="size-3.5" />
                     </button>

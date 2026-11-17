@@ -36,6 +36,7 @@ type MessagesProps = {
     postMediaAttachmentsRef: React.RefObject<Record<string, PostMediaAttachment | undefined>>,
     handleOpenAddMediaModal: (e: MouseEventLocal, location: string, source: string) => void,
     handleExpandImageModal: (e: MouseEventLocal, image: File, cid?: string) => void,
+    retryMessageMediaHandler: (id: string) => Promise<boolean>,
     handleOpenLikesModal: (e: MouseEventLocal, likePosts: Message[]) => void,
     handleSubmitPubkeyModal: (e: MouseEventLocal, address: string) => void,
     handleOpenRpcSendMessageModal: (location: string, recipients: string[], replyToMessageId?: string | undefined) => void,
@@ -75,6 +76,7 @@ function Messages() {
         postMediaAttachmentsRef,
         handleOpenAddMediaModal,
         handleExpandImageModal,
+        retryMessageMediaHandler,
         handleOpenLikesModal,
         handleSubmitPubkeyModal,
         handleOpenRpcSendMessageModal,
@@ -345,6 +347,7 @@ function Messages() {
                     handleSubmitPubkeyModal={handleSubmitPubkeyModal}
                     handleOpenAddMediaModal={handleOpenAddMediaModal}
                     handleExpandImageModal={handleExpandImageModal}
+                    retryMessageMediaHandler={retryMessageMediaHandler}
                     submittingMessage={submittingMessage}
                     submittingLike={submittingLike}
                     messagePrefix={messagePrefix}
