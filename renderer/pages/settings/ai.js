@@ -5729,9 +5729,8 @@ export default function AiSettingsPage() {
                         onClick={async () => {
                           setIsRefreshingModels(true)
                           try {
-                            const result = await refreshModelsForProvider(
-                              activeProvider
-                            )
+                            const result =
+                              await refreshModelsForProvider(activeProvider)
 
                             notify(
                               t('Latest models loaded'),
@@ -5772,9 +5771,8 @@ export default function AiSettingsPage() {
                             for (const provider of providers) {
                               try {
                                 // eslint-disable-next-line no-await-in-loop
-                                const hasKey = await hasSessionKeyForProvider(
-                                  provider
-                                )
+                                const hasKey =
+                                  await hasSessionKeyForProvider(provider)
                                 if (!hasKey) {
                                   skipped += 1
                                   // eslint-disable-next-line no-continue

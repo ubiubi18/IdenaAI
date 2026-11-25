@@ -74,9 +74,8 @@ export function useHardFork() {
                   `node/${version}/forkchangelog`
                 )
 
-                const [{upgrade: highestUpgrade}] = await fetchJsonResult(
-                  'upgrades?limit=1'
-                )
+                const [{upgrade: highestUpgrade}] =
+                  await fetchJsonResult('upgrades?limit=1')
 
                 const nextTiming =
                   forkChangelog &&

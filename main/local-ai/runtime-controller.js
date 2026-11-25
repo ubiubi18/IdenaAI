@@ -623,9 +623,8 @@ async function stopManagedSnapshotDownloads(baseDir, payload = {}) {
       ...stoppedActiveCommands.map((item) => ({...item, snapshotDir}))
     )
 
-    const stoppedForDir = await stopStaleManagedSnapshotDownloadProcesses(
-      snapshotDir
-    )
+    const stoppedForDir =
+      await stopStaleManagedSnapshotDownloadProcesses(snapshotDir)
     stopped.push(...stoppedForDir.map((item) => ({...item, snapshotDir})))
   }
 

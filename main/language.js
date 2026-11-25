@@ -82,6 +82,7 @@ const getI18nConfig = (isDev) => ({
   lng: getCurrentLang(),
   fallbackLng: 'en',
   keySeparator: false,
+  missingInterpolationHandler: () => '',
   interpolation: {
     escapeValue: false,
   },

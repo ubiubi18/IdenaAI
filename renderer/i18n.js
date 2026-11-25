@@ -833,6 +833,7 @@ i18n.use(initReactI18next).init({
   lng: loadPersistentStateValue('settings', 'lng') || 'en',
   fallbackLng: 'en',
   keySeparator: false,
+  missingInterpolationHandler: () => '',
   interpolation: {
     escapeValue: false,
   },
