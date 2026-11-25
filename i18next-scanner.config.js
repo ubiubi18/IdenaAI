@@ -35,6 +35,7 @@ module.exports = {
   output: './',
   options: {
     debug: true,
+    compatibilityJSON: 'v4',
     trans: false,
     func: {
       list: ['t'],
