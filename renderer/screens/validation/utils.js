@@ -1236,6 +1236,14 @@ export function loadValidationStateByIdentityScope(scope = null) {
   }
 }
 
+// Older saved sessions contain the node's {txHash} response object. Only
+// canonical transaction hashes may be passed to bcn_transaction for tracking.
+export function getValidationTransactionHash(value) {
+  const candidate = typeof value === 'string' ? value : value?.txHash
+  const hash = typeof candidate === 'string' ? candidate.trim() : ''
+  return /^0x[0-9a-f]{64}$/i.test(hash) ? hash : ''
+}
+
 export function hasSubmittedLongSessionAnswers(validationState) {
   return Boolean(
     String(validationState?.context?.submitLongAnswersHash || '').trim()

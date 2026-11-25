@@ -29,6 +29,7 @@ import {
   canOpenValidationCeremonyLocalResults,
   canValidate,
   hasSubmittedLongSessionAnswers,
+  getValidationTransactionHash,
 } from '../../screens/validation/utils'
 import {
   computeRehearsalBenchmarkSummary,
@@ -178,9 +179,9 @@ export default function AfterValidationPage() {
     () => computeValidationAiCostBreakdown(validationAiCostLedger),
     [validationAiCostLedger]
   )
-  const submitLongAnswersHash = String(
-    validationState?.context?.submitLongAnswersHash || ''
-  ).trim()
+  const submitLongAnswersHash = getValidationTransactionHash(
+    validationState?.context?.submitLongAnswersHash
+  )
   const {data: submitLongAnswersTx} = useTrackTx(submitLongAnswersHash)
   const hasSubmittedLongAnswers = React.useMemo(
     () => hasSubmittedLongSessionAnswers(validationState),
