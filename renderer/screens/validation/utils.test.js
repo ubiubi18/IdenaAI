@@ -21,6 +21,7 @@ import {
   loadValidationStateByIdentityScope,
   canOpenValidationCeremonyLocalResults,
   hasSubmittedLongSessionAnswers,
+  getValidationTransactionHash,
   pendingDecodeHashes,
   persistValidationState,
   persistValidationSucceededState,
@@ -1024,6 +1025,20 @@ describe('scoped validation state persistence', () => {
     })
   })
 
+  it('tracks a restored legacy submission object by its transaction hash', () => {
+    const txHash = `0x${'ab'.repeat(32)}`
+    persistValidationSucceededState({
+      epoch: 1,
+      reports: new Set(),
+      submitLongAnswersHash: {txHash},
+    })
+    const restored = loadValidationState()
+    expect(restored.matches('validationSucceeded')).toBe(true)
+    expect(
+      getValidationTransactionHash(restored.context.submitLongAnswersHash)
+    ).toBe(txHash)
+  })
+
   it('persists validation success before navigating away from the live machine', () => {
     const scope = buildValidationStateScope({
       epoch: 1,
@@ -1903,5 +1918,24 @@ describe('short-session long-session transition hold', () => {
         shortSessionSubmittedAt: submittedAt,
       })
     ).toBe(0)
+  })
+})
+
+describe('validation transaction tracking', () => {
+  it.each([
+    null,
+    undefined,
+    {},
+    {txHash: null},
+    '[object Object]',
+    '0x1234',
+    'ab'.repeat(32),
+    `0x${'zz'.repeat(32)}`,
+  ])('disables tracking for malformed persisted input %j', (value) => {
+    expect(getValidationTransactionHash(value)).toBe('')
+  })
+  it('accepts a canonical hash string with surrounding whitespace', () => {
+    const hash = `0x${'AB'.repeat(32)}`
+    expect(getValidationTransactionHash(` ${hash} `)).toBe(hash)
   })
 })

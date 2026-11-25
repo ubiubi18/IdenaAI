@@ -1,5 +1,5 @@
 /* eslint-disable import/prefer-default-export */
-import api from './api-client'
+import api, {getRpcParams} from './api-client'
 
 const DEFAULT_VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 8000
 const MAX_VALIDATION_SUBMIT_RPC_TIMEOUT_MS = 30000
@@ -115,7 +115,10 @@ async function postValidationRpc(method, params) {
         throw createRpcError(error)
       }
 
-      return result
+      // Nodes may return either the hash directly or a submission result object.
+      // Preserve successful responses even if no trackable hash was returned;
+      // a tracking problem must not turn into another answer submission.
+      return typeof result?.txHash === 'string' ? result.txHash : result
     } catch (error) {
       const normalizedError = normalizeRpcError(error)
       lastError = normalizedError
@@ -229,20 +232,60 @@ export async function submitLongAnswers(answers, nonce, epoch) {
   return postValidationRpc('flip_submitLongAnswers', [{answers, nonce, epoch}])
 }
 
+// Capability results belong to one node and epoch. A new epoch probes again so
+// upgrading a node does not leave preparation disabled for later sessions.
+let preparationState
+
 export async function prepareValidationSession(epoch, sessionId) {
-  const {data} = await api().post('/', {
-    method: 'flip_prepareValidationSession',
-    params: [{epoch, sessionId}],
-    id: 1,
-  })
-  const {result, error} = data
-  if (error) throw new Error(error.message)
-  return {
-    cleared: Boolean(result && result.cleared),
-    sessionId: String(
-      (result && (result.sessionId || result.sessionID || result.SessionId)) ||
-        sessionId ||
-        ''
-    ).trim(),
+  const {url} = getRpcParams()
+  if (preparationState?.url !== url || preparationState?.epoch !== epoch) {
+    preparationState = {url, epoch, unsupported: false, pending: new Map()}
+  }
+  const state = preparationState
+  const requestedSessionId = String(sessionId || '').trim()
+  const unsupportedResult = {
+    cleared: false,
+    sessionId: requestedSessionId,
+    supported: false,
+  }
+
+  if (state.unsupported) return unsupportedResult
+  if (state.pending.has(requestedSessionId)) {
+    return state.pending.get(requestedSessionId)
+  }
+
+  const request = (async () => {
+    const {data} = await api().post('/', {
+      method: 'flip_prepareValidationSession',
+      params: [{epoch, sessionId: requestedSessionId}],
+      id: 1,
+    })
+    const {result, error} = data
+    if (error) {
+      const methodMissing =
+        Number(error.code) === -32601 ||
+        /^(the )?method flip_prepareValidationSession (does not exist\/is not available|is not available|not found)$/i.test(
+          String(error.message || '').trim()
+        )
+      if (!methodMissing) throw createRpcError(error)
+      state.unsupported = true
+      return unsupportedResult
+    }
+    return {
+      cleared: Boolean(result && result.cleared),
+      sessionId: String(
+        (result &&
+          (result.sessionId || result.sessionID || result.SessionId)) ||
+          requestedSessionId
+      ).trim(),
+      supported: true,
+    }
+  })()
+
+  state.pending.set(requestedSessionId, request)
+  try {
+    return await request
+  } finally {
+    state.pending.delete(requestedSessionId)
   }
 }
