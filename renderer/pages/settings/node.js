@@ -1537,9 +1537,8 @@ function NodeSettings() {
               providerDailyBudgetEnabled:
                 (settings.aiSolver || {}).providerDailyBudgetEnabled !== false,
             }
-      const result = await getNodeBridge().runValidationDevnetSolverLanes(
-        payload
-      )
+      const result =
+        await getNodeBridge().runValidationDevnetSolverLanes(payload)
       const summary =
         result?.parallelSolverLanes?.summary || result?.summary || null
       const actualUsd = Number(summary?.costs?.actualUsd)

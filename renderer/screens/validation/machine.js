@@ -1598,9 +1598,12 @@ function fetchFlips(
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
   return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new Error(timeoutMessage))
-    }, Math.max(1, timeoutMs))
+    const timeoutId = setTimeout(
+      () => {
+        reject(new Error(timeoutMessage))
+      },
+      Math.max(1, timeoutMs)
+    )
 
     Promise.resolve(promise).then(
       (value) => {

@@ -597,9 +597,8 @@ export function usePublishAd({onBeforeSubmit, onMined, onError}) {
         ],
       })
 
-      const {cid: profileCid, hash: sendToIpfsHash} = await sendToIpfs(
-        encodedProfile
-      )
+      const {cid: profileCid, hash: sendToIpfsHash} =
+        await sendToIpfs(encodedProfile)
 
       const changeProfileHash = await sendTx({
         type: TxType.ChangeProfileTx,
